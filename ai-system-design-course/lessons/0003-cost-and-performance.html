@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 4: Cost and Performance - AI System Design Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SYSTEM DESIGN</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 04 &middot; Economics &middot; Chapter 4</div>
+  <h1>Cost and Performance</h1>
+  <p class="paper-meta">
+    <span class="pill">18 topics</span>
+    Where AI system design stops resembling web system design.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>In a web system the marginal request is nearly free. In an AI system it is <b>the dominant line item</b>, and that changes which designs are correct.</li>
+      <li>Generation is <b>memory-bandwidth bound and sequential</b>, so batching raises throughput while doing nothing for a single request's latency.</li>
+      <li><b>Caching is the highest-leverage lever you own</b> - prompt caching, semantic caching, and response caching attack three different costs.</li>
+      <li>Interviewers want <b>cost per query and cost per user</b>, with assumptions stated aloud. A design with no unit economics is not finished.</li>
+    </ul>
+  </div>
+
+  <h2>1. Sizing in tokens</h2>
+
+  <p>Every number in this chapter derives from one calculation. Cost per query is input tokens times input price, plus output tokens times output price, where input tokens include the system prompt, tool definitions, conversation history, and every retrieved chunk. Output tokens are usually the smaller count and frequently the more expensive rate.</p>
+
+  <div class="math">
+    cost/query = (T<sub>in</sub> &times; p<sub>in</sub>) + (T<sub>out</sub> &times; p<sub>out</sub>)
+    <span class="gloss">Read as: the tokens you send, priced at the input rate, plus the tokens the model generates, priced at the output rate. T<sub>in</sub> is where retrieval and history quietly inflate your bill; T<sub>out</sub> is where latency lives, because output is produced one token at a time.</span>
+  </div>
+
+  <div class="callout"><b>Say your assumptions aloud.</b> Public, citable cost figures for a named company's production system barely exist. Interviewers are not checking your prices. They are checking whether you know which quantities matter and whether you flag them as assumptions rather than asserting them as facts.</div>
+
+  <h3 id="token-budgeting">Token budgeting</h3>
+  <p>Allocate the context window explicitly: so many tokens for instructions, so many for retrieved evidence, so many for history, and a reserve for the answer. Enforce the budget in code with a defined eviction order, because an unbudgeted window silently grows until it hits a limit in production.</p>
+
+  <h3 id="cost-per-query">Cost per query</h3>
+  <p>The unit that makes an architecture arguable. It exposes that a rerank step, a query rewrite, and an agent loop each add real money, and it turns "should we add this step" into a decision instead of a preference.</p>
+
+  <h3 id="cost-per-user">Cost per user</h3>
+  <p>Cost per query times queries per user per period. This is the number that determines whether the product has a viable business model, and quoting it unprompted reads as seniority. Watch the distribution rather than the mean: a small number of heavy users routinely dominate spend, which is why per-tenant token quotas exist.</p>
+
+  <h2>2. Making prompts cheaper</h2>
+
+  <h3 id="prompt-compression">Prompt compression</h3>
+  <p>Shorten what you send: summarise history rather than replaying it, trim boilerplate instructions, and drop retrieved chunks that the reranker scored poorly. The cheapest token is the one you never send, and this is usually the first place to look when a bill surprises someone.</p>
+
+  <h3 id="prompt-caching">Prompt caching</h3>
+  <p>Providers can cache the processed prefix of a prompt so that repeated system instructions, tool definitions, and stable documents are not reprocessed on every request, cutting both cost and time to first token on a hit. This makes prompt <em>layout</em> an optimisation target: stable content first, volatile content last, because a cache hit requires an identical prefix. <em>Source: <a href="https://docs.anthropic.com/en/docs/build-with-claude/prompt-caching">Anthropic prompt caching</a>.</em></p>
+
+  <h3 id="semantic-caching">Semantic caching</h3>
+  <p>Cache on meaning rather than exact string: embed the query, and serve a stored answer if a previous query is close enough. Powerful for support and FAQ workloads with heavy paraphrase. The danger is a false hit returning a confidently wrong answer, so it needs a conservative similarity threshold, scoping by tenant and permissions, and an invalidation story tied to document freshness.</p>
+
+  <h3 id="response-caching">Response caching</h3>
+  <p>Exact-match caching on a normalised request. Boring, safe, and effective for hot paths. Cache key correctness is the whole game: it must include the model, the prompt version, retrieval results, and the user's permission scope, or you will serve one tenant's answer to another.</p>
+
+  <h3 id="batch-requests">Batch requests</h3>
+  <p>Group independent work into one submission and accept higher latency for a lower rate. Applies to embedding backfills, bulk classification, and evaluation runs. <em>Source: <a href="https://platform.openai.com/docs/guides/batch">OpenAI Batch API</a>.</em></p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Costs jumped after you added retrieval, though traffic is unchanged. Which measurement isolates the cause fastest?</div>
+    <button class="q-opt">Input tokens per request, split by prompt section and source</button>
+    <button class="q-opt">Requests per second measured at the API gateway boundary</button>
+    <button class="q-opt">GPU utilisation averaged across the whole inference fleet</button>
+    <button class="q-opt">Time to first token, compared against the previous release</button>
+    <div class="q-fb">Retrieval inflates input tokens, so attribute them by section: instructions, history, retrieved chunks. That immediately shows whether top-k is too high, chunks are too large, or reranking is not trimming the tail. Request rate did not change, and utilisation and latency are symptoms rather than causes.</div>
+  </div>
+
+  <h2>3. Making the model cheaper</h2>
+
+  <h3 id="model-quantization">Model quantization</h3>
+  <p>Store and compute weights at lower precision to cut memory and raise throughput. GPTQ and AWQ are the standard post-training approaches, and AWQ's insight is that a small fraction of weights are salient and should be protected rather than quantised uniformly. There is a quality cliff, and where it sits is task-dependent, so the correct interview answer is that you quantise and then re-run your evaluation set rather than trusting a published benchmark. <em>Sources: <a href="https://arxiv.org/abs/2210.17323">GPTQ</a>, <a href="https://arxiv.org/abs/2306.00978">AWQ</a>.</em></p>
+
+  <h3 id="distillation">Distillation</h3>
+  <p>Train a small student model on a large teacher's outputs, transferring behaviour on a narrow task at a fraction of the serving cost. Hinton et al. established the technique long before LLMs, and it is the mechanism behind most "small model that punches above its weight" claims. <em>Source: <a href="https://arxiv.org/abs/1503.02531">"Distilling the Knowledge in a Neural Network" (Hinton et al., 2015)</a>.</em></p>
+
+  <h3 id="model-selection">Model selection</h3>
+  <p>Pick per request, not per product. A classification step does not need your best model. Tie selection to a measured quality bar on your own evaluation set so the choice is defensible rather than aesthetic.</p>
+
+  <h2>4. Serving mechanics and latency</h2>
+
+  <h3 id="latency-budgets">Latency budgets</h3>
+  <p>Allocate the end-to-end target across the hops: gateway, retrieval, rerank, prefill, and generation. Budget at the tail, not the mean - p95 and p99 are what users feel and what interviewers ask about. State which hop you would cut first when the budget is blown.</p>
+
+  <h3 id="cold-starts">Cold starts</h3>
+  <p>Loading tens of gigabytes of weights onto an accelerator is slow, which makes scale-to-zero unattractive for interactive paths and makes autoscaling lag real traffic. The usual answers are warm pools, pre-loaded replicas, and provisioned capacity for the interactive tier.</p>
+
+  <h3 id="gpu-utilization">GPU utilization</h3>
+  <p>High utilisation does not mean efficient work. Decoding is dominated by moving weights and KV cache through memory rather than by arithmetic, which is exactly the observation behind FlashAttention's IO-aware design. A fleet can look busy while producing few tokens, so measure tokens per second per accelerator alongside utilisation. <em>Source: <a href="https://arxiv.org/abs/2205.14135">FlashAttention (Dao et al., 2022)</a>.</em></p>
+
+  <h3 id="throughput">Throughput</h3>
+  <p>Continuous batching, introduced as iteration-level scheduling in Orca, lets a new request join a running batch at the next decoding step instead of waiting for the current batch to finish, which raises throughput dramatically at high concurrency. PagedAttention then removed the memory fragmentation that limited how many sequences could share a device, by managing the KV cache in fixed-size blocks like virtual memory pages. Together these are why modern serving stacks outperform naive batching by a wide margin. <em>Sources: <a href="https://www.usenix.org/conference/osdi22/presentation/yu">Orca (OSDI 2022)</a>, <a href="https://arxiv.org/abs/2309.06180">vLLM PagedAttention</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  subgraph Static["Static batching"]
+    S1["Request A finishes"] --> S2["Slot idles until<br/>the whole batch ends"]
+  end
+  subgraph Cont["Continuous batching"]
+    C1["Request A finishes"] --> C2["Request D joins<br/>at the next step"]
+  end
+  Static --> W["Wasted accelerator time"]
+  Cont --> T["Higher throughput,<br/>same hardware"]
+  </div><figcaption>Why continuous batching matters. <b>Static batching wastes every slot that finishes early, because the batch advances only when its slowest member does.</b> Iteration-level scheduling refills the slot immediately.</figcaption></figure>
+
+  <h3 id="inference-scaling">Inference scaling</h3>
+  <p>Scale on queue depth and token throughput rather than on CPU. Accelerators are scarce and slow to acquire, so the honest answer includes capacity as a procurement constraint, not merely an autoscaling policy.</p>
+
+  <h2>5. Behaviour under overload</h2>
+
+  <h3 id="backpressure">Backpressure</h3>
+  <p>When demand exceeds capacity, push the signal upstream: bounded queues, admission control, and explicit rejection. Unbounded queues do not add capacity, they convert a fast failure into a slow one while consuming memory.</p>
+
+  <h3 id="load-shedding">Load shedding</h3>
+  <p>Drop work deliberately, by priority, so the system degrades instead of collapsing. Shed the cheap and the retryable first: background summarisation before interactive chat, free tier before paid. The Google SRE treatment transfers directly, and the AI-specific twist is that you can shed <em>quality</em> as well as requests - drop the reranker, shrink top-k, or route to a smaller model before you start rejecting users. <em>Source: <a href="https://sre.google/sre-book/handling-overload/">Google SRE Book, "Handling Overload"</a>.</em></p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">Under peak load your accelerators report ninety percent utilisation, yet tokens per second has fallen. What best explains this?</div>
+    <button class="q-opt">The tokenizer has become the bottleneck at this level of traffic</button>
+    <button class="q-opt">Cold starts are adding fixed overhead to every incoming request</button>
+    <button class="q-opt">Prompt caching is disabled, so every prefix is reprocessed again</button>
+    <button class="q-opt">Memory pressure and batching stalls, so busy time yields few tokens</button>
+    <div class="q-fb">Utilisation measures busy time, not useful work. When KV cache memory is fragmented or exhausted, concurrency drops and the device spends its time moving data rather than producing tokens. This is precisely the problem PagedAttention targets, and why tokens per second per accelerator is the metric that matters.</div>
+  </div>
+
+  <h2>6. Interview drill</h2>
+
+  <ul>
+    <li><b>"What does this cost to run at a million users?"</b> Tokens in, tokens out, queries per user, stated assumptions. Then name the two levers you would pull first: caching and prompt size.</li>
+    <li><b>"Cut latency by half."</b> Separate time to first token from generation time. Streaming, prompt caching, and a smaller model attack different halves.</li>
+    <li><b>"Traffic triples tomorrow. What breaks?"</b> Accelerator capacity, queue depth, and vendor rate limits. Then give the shedding order.</li>
+    <li><b>"Would you self-host?"</b> Volume, latency floor, data residency, and whether you have the operational appetite. Below a certain volume, self-hosting is more expensive, not less.</li>
+    <li><b>"Where would you add a cache?"</b> Three answers, not one: prompt prefix, semantic query, exact response - each with its invalidation and correctness risk.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Build the habit of quoting a cost per query with the assumptions attached, unprompted. It is the single fastest way to signal that you have operated one of these rather than only read about them. Ask me to throw a product at you and time how long it takes you to produce a defensible number.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://arxiv.org/abs/2309.06180">vLLM PagedAttention paper</a>. It explains why serving efficiency is a memory-management problem, which is the insight most candidates are missing. Follow it with <a href="https://sre.google/sre-book/handling-overload/">"Handling Overload"</a> for the behaviour-under-stress half.</p>
+
+  <div class="pager">
+    <a href="0002-ai-system-architecture.html"><span class="dir">&larr; Previous</span><span class="ttl">AI System Architecture</span></a>
+    <a class="nxt" href="0004-evaluation-and-quality.html"><span class="dir">Next &rarr;</span><span class="ttl">Evaluation and Quality</span></a>
+  </div>
+
+  <footer><p>AI System Design Course &middot; Chapter 4 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

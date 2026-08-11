@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 3: AI System Architecture - AI System Design Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SYSTEM DESIGN</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 03 &middot; Architecture &middot; Chapter 3</div>
+  <h1>AI System Architecture</h1>
+  <p class="paper-meta">
+    <span class="pill">19 topics</span>
+    The boxes you draw, and why each one earns its place.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>This is the chapter where your distributed-systems experience transfers almost intact. <b>The topology is familiar; the constraints are not.</b></li>
+      <li>The <b>model gateway</b> is the single most valuable box on the board: it is where routing, fallback, rate limiting, cost accounting, and provider independence live.</li>
+      <li>AI requests are <b>slow, expensive, and variable in duration</b>, which pushes you toward streaming, queueing, and async far earlier than a CRUD system would.</li>
+      <li>Every serious design has a <b>fallback path and a human path</b>. Draw them, or an interviewer will ask why you did not.</li>
+    </ul>
+  </div>
+
+  <h2>1. The reference architecture</h2>
+
+  <p>Start from a shape you can defend, then delete what the requirements do not justify. Sculley et al. made the durable point that the model is a small box in a large system, and that the surrounding infrastructure is where the debt accumulates. <em>Source: <a href="https://papers.nips.cc/paper_files/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html">"Hidden Technical Debt in Machine Learning Systems" (Sculley et al., 2015)</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  C["Client"] --> GW["API gateway<br/>auth, quota, rate limit"]
+  GW --> RT["Request routing"]
+  RT --> PS["Prompt service<br/>versioned templates"]
+  RT --> RS["Retrieval service"]
+  RS --> RK["Ranking service"]
+  PS --> MG["Model gateway"]
+  RK --> MG
+  MG --> IS["Inference service<br/>(hosted or vendor)"]
+  IS --> ST["Streaming response"]
+  ST --> C
+  MG -. "overflow / long jobs" .-> Q["Queue"]
+  Q --> BW["Batch worker"]
+  FS["Feature store"] --> RK
+  OP["Offline pipelines"] --> FS
+  OP --> RS
+  MG -. "on failure" .-> FB["Fallback workflow"]
+  MG -. "low confidence" .-> HL["Human in the loop"]
+  </div><figcaption>A defensible default for an AI product. <b>The model gateway is the choke point where routing, fallback, and cost control concentrate</b>, and the offline pipeline feeding the index and the feature store is the half candidates forget to draw.</figcaption></figure>
+
+  <h2>2. The entry path</h2>
+
+  <h3 id="api-gateway">API gateway</h3>
+  <p>Authentication, quota enforcement, request validation, and rate limiting, exactly as in any system you have built. The AI-specific addition is that quota is meaningfully denominated in tokens rather than requests, because a single request can legitimately cost a hundred times another.</p>
+
+  <h3 id="request-routing">Request routing</h3>
+  <p>Routing decides which pipeline serves the request: a cheap classification path, a full retrieval path, or a long-running agent path. Doing this early keeps the expensive machinery off simple requests.</p>
+
+  <h3 id="model-gateway">Model gateway</h3>
+  <p>A single internal interface in front of every model, hosted or vendor. It owns model selection and routing, retries and timeouts, provider failover, token accounting and cost attribution, prompt and response logging, and rate limiting per tenant. If you draw exactly one AI-specific box in an interview, draw this one - it is what makes provider changes, price changes, and deprecations survivable.</p>
+
+  <h3 id="prompt-service">Prompt service</h3>
+  <p>Prompts are versioned artifacts with tests and a rollback path, served by their own component rather than compiled into every caller. This is what lets you evaluate a prompt change the way you would evaluate a code change, and roll it back in seconds when the evaluation says no.</p>
+
+  <h3 id="inference-service">Inference service</h3>
+  <p>Where generation happens: a vendor API, or your own serving stack on GPUs. Self-hosting buys control over cost curve, data residency, and latency floor, and costs you capacity planning, batching, and upgrades. Chapter 4 covers the serving mechanics.</p>
+
+  <h2>3. Retrieval and features</h2>
+
+  <h3 id="retrieval-service">Retrieval service</h3>
+  <p>Retrieval is its own service with its own scaling profile, its own cache, and its own quality metrics, as developed in <a href="0001-rag-and-retrieval.html">Chapter 2</a>. Collapsing it into the application is what makes it impossible to measure later.</p>
+
+  <h3 id="ranking-service">Ranking service</h3>
+  <p>Reranking is a separate hop because its cost profile differs sharply from search: it is model inference over a candidate list, so it batches, caches, and fails differently. Separating it lets you degrade to unreranked results under load rather than failing the request.</p>
+
+  <h3 id="feature-store">Feature store</h3>
+  <p>A feature store serves the same feature values to offline training and online inference, which is what prevents training-serving skew, and it is the piece that makes personalisation and ranking features tractable. Uber's Michelangelo write-up remains the clearest public description of why the abstraction exists. <em>Source: <a href="https://www.uber.com/blog/michelangelo-machine-learning-platform/">Michelangelo (Uber Engineering)</a>.</em></p>
+
+  <h3 id="offline-pipelines">Offline pipelines</h3>
+  <p>Ingestion, chunking, embedding, index building, feature computation, and evaluation runs. This is a batch data platform with all the usual concerns: schedules, backfills, idempotency, and lineage. Interviewers notice when a candidate draws only the request path and leaves the index magically populated.</p>
+
+  <h3 id="online-serving">Online serving</h3>
+  <p>The synchronous path, bounded by a latency budget. The rule of thumb worth stating: anything that cannot meet the budget belongs on the async path, not in a slower synchronous one.</p>
+
+  <h2>4. Time, load, and shape of response</h2>
+
+  <h3 id="async-processing">Async processing</h3>
+  <p>Document ingestion, bulk summarisation, and long agent runs return a job identifier and notify on completion. Trying to keep these synchronous is the most common cause of a design collapsing under follow-up questions.</p>
+
+  <h3 id="queueing">Queueing</h3>
+  <p>Queues absorb burst, smooth expensive GPU work, and let you prioritise. They also introduce the questions an interviewer will reach for immediately: what is the maximum queue depth, what is the timeout, and what does the user see while waiting. Have answers ready.</p>
+
+  <h3 id="streaming-responses">Streaming responses</h3>
+  <p>Streaming tokens as they are generated transforms perceived latency without changing total generation time, and it is why server-sent events are the default transport for chat interfaces. Note the operational costs: long-lived connections, harder retries once bytes have been sent, and output guardrails that must now run incrementally. <em>Source: <a href="https://html.spec.whatwg.org/multipage/server-sent-events.html">Server-sent events, WHATWG HTML specification</a>.</em></p>
+
+  <h3 id="rate-limiting">Rate limiting</h3>
+  <p>Limit tokens per minute alongside requests per minute, per tenant and per user, because request counts do not bound cost. Vendor limits are themselves a dependency: your gateway must handle being throttled upstream, which is a fallback concern.</p>
+
+  <h3 id="fan-out-fan-in">Fan-out and fan-in</h3>
+  <p>Fan out across documents, sub-questions, or candidate models, then merge. This buys parallelism and quality, and it multiplies cost while making the tail latency of the slowest branch your latency. Bound the fan-out and set a per-branch deadline.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A summarisation feature over long documents intermittently times out at the gateway under normal traffic levels. What is the structural fix?</div>
+    <button class="q-opt">Raise the gateway timeout and add more retries to the caller</button>
+    <button class="q-opt">Move it to an async job with a status endpoint and notification</button>
+    <button class="q-opt">Increase temperature so the model produces shorter summaries</button>
+    <button class="q-opt">Add a larger model so that generation completes much faster</button>
+    <div class="q-fb">Work whose duration scales with input length does not belong on a synchronous path. Raising timeouts converts a fast failure into a slow one and holds connections open; retries on expensive generation multiply cost against a system already struggling.</div>
+  </div>
+
+  <h2>5. Inference modes and safety nets</h2>
+
+  <h3 id="batch-inference">Batch inference</h3>
+  <p>Offline, high-throughput processing where latency does not matter: back-filling embeddings, classifying a corpus, precomputing summaries. Providers price this lower precisely because it lets them schedule around live traffic. <em>Source: <a href="https://platform.openai.com/docs/guides/batch">OpenAI Batch API</a>.</em></p>
+
+  <h3 id="real-time-inference">Real-time inference</h3>
+  <p>The interactive path, where time to first token dominates the experience. Keep it narrow: retrieve, rank, generate, stream.</p>
+
+  <h3 id="human-in-the-loop">Human-in-the-loop systems</h3>
+  <p>For consequential actions, low confidence, or regulated decisions, a human approves or corrects. Design it as a first-class path with a queue, a reviewer interface, an SLA, and a feedback capture that flows back into evaluation. Treated as an afterthought it becomes an unstaffed backlog.</p>
+
+  <h3 id="fallback-workflows">Fallback workflows</h3>
+  <p>What happens when the model is down, throttled, too slow, or refuses. Options in descending order of quality: a different model, a smaller model, a cached response, raw search results without generation, or an honest error. The Google SRE framing of graceful degradation applies unchanged, and stating a specific degradation ladder is one of the strongest signals you can give. <em>Source: <a href="https://sre.google/sre-book/handling-overload/">Google SRE Book, "Handling Overload"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Primary
+  Primary --> Secondary: timeout or 5xx
+  Secondary --> SmallModel: still failing
+  SmallModel --> CachedOrSearch: budget exhausted
+  CachedOrSearch --> HonestError: nothing available
+  Primary --> Primary: healthy
+  CachedOrSearch --> Primary: circuit closes
+  </div><figcaption>A degradation ladder, drawn as states rather than described in prose. <b>Each step trades quality for availability, and the last step is an honest error rather than a fabricated answer.</b> Naming the rung you stop at is the judgement an interviewer is grading.</figcaption></figure>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">Which single component most reduces the blast radius when your primary model provider raises prices or deprecates a model?</div>
+    <button class="q-opt">The feature store, which serves consistent values to both paths</button>
+    <button class="q-opt">The retrieval service, which keeps the knowledge base independent</button>
+    <button class="q-opt">The model gateway, which centralises selection, routing, and cost</button>
+    <button class="q-opt">The prompt service, which keeps every template versioned and tested</button>
+    <div class="q-fb">All four are useful, but only the gateway makes the provider a swappable dependency. Without it, model identifiers, retry logic, and cost accounting are scattered across every caller, and a deprecation becomes a migration across the whole codebase.</div>
+  </div>
+
+  <h2>6. Interview drill</h2>
+
+  <ul>
+    <li><b>"Design an AI assistant over our product documentation."</b> The trap is drawing only the request path. Draw the offline pipeline too, and say how the index is built and refreshed.</li>
+    <li><b>"What happens when the provider has an outage?"</b> Give the degradation ladder, not the word "fallback".</li>
+    <li><b>"How do you roll out a prompt change safely?"</b> Prompt service, versioning, offline evaluation on a golden set, then a small online experiment, with rollback.</li>
+    <li><b>"Where does the human sit in this system?"</b> Confidence threshold, review queue, SLA, and the loop back into evaluation data.</li>
+    <li><b>"Why not put the model call directly in the application?"</b> Cost attribution, routing, failover, and logging all become per-caller problems. That is the gateway argument, and it is the same argument as any shared client library, only with money attached.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Practise drawing this architecture from memory in under three minutes, then deleting every box the stated requirements do not justify. Interviewers reward the deletion as much as the drawing - an unjustified box reads as pattern-matching rather than design. Ask me to give you a requirement set and critique what you kept.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://papers.nips.cc/paper_files/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html">"Hidden Technical Debt in Machine Learning Systems"</a>. It predates LLMs and describes your job more accurately than most current writing. Pair it with the <a href="https://sre.google/sre-book/handling-overload/">SRE chapter on handling overload</a>.</p>
+
+  <div class="pager">
+    <a href="0001-rag-and-retrieval.html"><span class="dir">&larr; Previous</span><span class="ttl">RAG and Retrieval</span></a>
+    <a class="nxt" href="0003-cost-and-performance.html"><span class="dir">Next &rarr;</span><span class="ttl">Cost and Performance</span></a>
+  </div>
+
+  <footer><p>AI System Design Course &middot; Chapter 3 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
