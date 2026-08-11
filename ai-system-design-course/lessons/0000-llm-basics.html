@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 1: LLM Basics - AI System Design Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SYSTEM DESIGN</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 01 &middot; Foundations &middot; Chapter 1</div>
+  <h1>LLM Basics</h1>
+  <p class="paper-meta">
+    <span class="pill">19 topics</span>
+    The vocabulary an interviewer assumes you already own before the design question starts.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A model does not see text. It sees <b>tokens</b>, and every cost, latency, and limit in your design is denominated in them.</li>
+      <li>The <b>context window</b> is a budget, not a container. Filling it degrades accuracy and raises cost at the same time.</li>
+      <li><b>Structured outputs</b> and <b>tool calling</b> are what turn a text generator into a system component you can put behind an API.</li>
+      <li>Every quality lever you have - prompting, routing, small models, fine-tuning - is a trade against latency and cost. Interviewers want the trade named, not the lever named.</li>
+    </ul>
+  </div>
+
+  <h2>1. The unit of everything: tokens and context</h2>
+
+  <p>A classic design round starts by sizing requests per second and bytes on disk. An AI round starts by sizing tokens. If you cannot convert a product requirement into a token count, you cannot size the system, price it, or set a latency budget for it. Everything in this chapter hangs off that.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  A["User text"] --> B["Tokenizer"]
+  B --> C["Token ids"]
+  C --> D["Prefill<br/>(process the prompt)"]
+  D --> E["Decode<br/>(one token at a time)"]
+  E --> F["Response tokens"]
+  D -. "cost scales with<br/>input length" .-> G["Cost + latency"]
+  E -. "cost scales with<br/>output length" .-> G
+  </div><figcaption>Text becomes tokens, and the request splits into two phases with very different cost profiles. <b>Prefill is parallel over the whole prompt; decode is sequential, one token at a time.</b> This asymmetry explains almost every latency question you will be asked.</figcaption></figure>
+
+  <h3 id="tokens">Tokens</h3>
+  <p>A token is a sub-word unit produced by a tokenizer such as byte-pair encoding. It is not a word and not a character, which is why "how many tokens is this document" has no clean answer without running the tokenizer. Two consequences matter at the whiteboard. First, non-English text and code often tokenize less efficiently, so the same page costs more in some languages than others. Second, you cannot truncate safely by counting characters. <em>Source: <a href="https://github.com/openai/tiktoken">tiktoken, the reference BPE tokenizer</a>.</em></p>
+
+  <h3 id="context-window">Context window</h3>
+  <p>The context window is the maximum number of tokens the model can attend to in one request, covering system prompt, conversation history, retrieved documents, tool definitions, tool results, and the answer being generated. The naive reading is that a bigger window solves retrieval. It does not. Liu et al. showed accuracy is highest when the relevant passage sits at the beginning or the end of the context and measurably worse when it sits in the middle. Treat the window as a budget you allocate deliberately, with the most important evidence placed at the edges. <em>Source: <a href="https://arxiv.org/abs/2307.03172">"Lost in the Middle" (Liu et al., 2023)</a>.</em></p>
+
+  <div class="callout"><b>Interview trap.</b> "The model has a million-token window, so we can skip retrieval and just send everything." This is the single most common mistake at Senior level. Attention cost, time to first token, price per request, and mid-context accuracy loss all move against you. Retrieval is a precision mechanism, not a workaround for a small window.</div>
+
+  <h3 id="prompt-design">Prompt design</h3>
+  <p>Prompt design is interface design. In a production system the prompt is a versioned artifact with a schema, tests, and a rollback path, not a string a developer edits in production. The design-round answer is that prompts live in a prompt service with versioning and evaluation attached, which is covered in <a href="0002-ai-system-architecture.html">Chapter 3</a>.</p>
+
+  <h3 id="system-prompts">System prompts</h3>
+  <p>The system prompt carries role, policy, and constraints, and is the highest-trust text in the request. That trust is exactly why it is a security boundary: everything else in the window, including retrieved documents and tool output, is attacker-influenceable input. Chapter 6 develops this. <em>Source: <a href="https://arxiv.org/abs/2302.12173">Greshake et al. on indirect prompt injection</a>.</em></p>
+
+  <h2>2. Controlling the output</h2>
+
+  <h3 id="temperature">Temperature</h3>
+  <p>Temperature rescales the probability distribution before sampling. Low temperature concentrates mass on the highest-probability tokens and makes output more repeatable; high temperature flattens the distribution and increases variety. Temperature zero is not literally deterministic in a distributed serving stack, because batching, hardware, and kernel non-determinism can still change results. Say "low variance", not "deterministic", and you will sound like someone who has operated one of these.</p>
+
+  <h3 id="top-p">Top-p sampling</h3>
+  <p>Top-p, or nucleus sampling, restricts sampling to the smallest set of tokens whose cumulative probability exceeds p. Holtzman et al. introduced it after showing that maximising likelihood produces bland, repetitive text, while unrestricted sampling wanders into the low-probability tail. Tuning both temperature and top-p aggressively at the same time is a common source of unreproducible behaviour. <em>Source: <a href="https://arxiv.org/abs/1904.09751">"The Curious Case of Neural Text Degeneration" (Holtzman et al., 2019)</a>.</em></p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Your summariser returns different text for identical inputs, and product wants that stopped. Which change addresses the cause most directly?</div>
+    <button class="q-opt">Enlarge the context window and resend the same request</button>
+    <button class="q-opt">Lower temperature and pin top-p to a fixed value</button>
+    <button class="q-opt">Move the workload onto a larger model of same family</button>
+    <button class="q-opt">Increase retrieval depth so more documents are supplied</button>
+    <div class="q-fb">Sampling parameters control output variance. A bigger window, a bigger model, or deeper retrieval all change the answer without addressing variability. Note the honest caveat: pinning both reduces variance sharply but does not guarantee byte-identical output in a batched serving stack.</div>
+  </div>
+
+  <h3 id="structured-outputs">Structured outputs</h3>
+  <p>Structured output means the model is constrained during decoding so that the emitted tokens must conform to a supplied JSON Schema. This is a decoding-time guarantee, categorically different from instructing the model to "reply in JSON" and hoping. In a design round, say that schema conformance is enforced by constrained decoding and that you still validate at the boundary, because a schema-valid object can still be semantically wrong. <em>Source: <a href="https://platform.openai.com/docs/guides/structured-outputs">OpenAI Structured Outputs</a>.</em></p>
+
+  <h3 id="json-mode">JSON mode</h3>
+  <p>JSON mode is the weaker predecessor: it guarantees syntactically valid JSON but not conformance to your schema. Knowing the difference between "parses" and "conforms" is a quick signal of production experience.</p>
+
+  <h2>3. Turning a model into a component</h2>
+
+  <h3 id="function-calling">Function calling</h3>
+  <p>Function calling lets you declare typed functions and have the model emit a structured request to invoke one. The model never executes anything. It returns intent; your code decides whether to honour it. That sentence is the whole security posture, and interviewers listen for it. <em>Source: <a href="https://platform.openai.com/docs/guides/function-calling">OpenAI Function Calling</a>.</em></p>
+
+  <h3 id="tool-calling">Tool calling</h3>
+  <p>Tool calling generalises this into a loop: the model requests a tool, your runtime executes it, the result is appended to the conversation, and the model continues. Each turn consumes context and adds a round trip, so a five-tool chain has five times the latency variance of a single call. <em>Source: <a href="https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/overview">Anthropic Tool Use</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant O as Orchestrator
+  participant M as Model
+  participant T as Tool / API
+  U->>O: Request
+  O->>M: Prompt + tool schemas
+  M-->>O: Tool call intent (structured)
+  O->>O: Authorise + validate arguments
+  O->>T: Execute as the USER, not as the model
+  T-->>O: Result
+  O->>M: Result appended to context
+  M-->>O: Final answer
+  O-->>U: Response
+  </div><figcaption>The orchestrator, not the model, holds authority. <b>The model proposes; your code authorises, executes under the user's own permissions, and validates.</b> Draw this boundary explicitly and most prompt-injection follow-ups answer themselves.</figcaption></figure>
+
+  <h3 id="agents">Agents</h3>
+  <p>An agent is a model running in a loop with tools, deciding its own next step. Anthropic's guidance is worth quoting in an interview: most production value comes from composable workflows, and agents should be reserved for problems where the number of steps genuinely cannot be predicted in advance. Loops mean unbounded cost, unbounded latency, and compounding error, so a step budget and a termination condition are part of the design, not an operational detail. <em>Source: <a href="https://www.anthropic.com/engineering/building-effective-agents">"Building Effective Agents" (Anthropic)</a>.</em></p>
+
+  <h3 id="memory">Memory</h3>
+  <p>Memory is not a model feature. It is a retrieval and storage design you build: short-term conversation state, summarised history, and long-term facts in a store you can inspect, correct, and delete. Treating memory as a database with a retention policy and a deletion path is also what makes it survive a privacy review.</p>
+
+  <h3 id="guardrails">Guardrails</h3>
+  <p>Guardrails are the checks around the model: input filtering, output validation, schema conformance, policy classification, and refusal handling. Two properties matter in design. They run as separate, cheap, independently monitored components, and they must fail in a defined direction. Chapter 6 covers what to do when a guardrail is unavailable.</p>
+
+  <h2>4. Failure, latency, and choice</h2>
+
+  <h3 id="hallucinations">Hallucinations</h3>
+  <p>A hallucination is fluent output unsupported by any source. The survey literature separates <em>factuality</em> failures, where output contradicts the world, from <em>faithfulness</em> failures, where output contradicts the supplied context. This distinction is worth real points: faithfulness is fixable with grounding and citation checks, while factuality needs retrieval or a knowledge boundary. <em>Source: <a href="https://arxiv.org/abs/2311.05232">hallucination survey (Zhang et al., 2023)</a>.</em></p>
+
+  <h3 id="model-latency">Model latency</h3>
+  <p>Model latency has two numbers, and quoting one marks you as a beginner. Time to first token is dominated by prefill and queueing, and it is what the user experiences as responsiveness. Inter-token latency times the output length gives total generation time. Streaming improves perceived latency without changing either. Chapter 4 turns these into budgets.</p>
+
+  <h3 id="model-routing">Model routing</h3>
+  <p>Routing sends each request to the cheapest model that can serve it, using a classifier, heuristics, or a difficulty estimate, with escalation on low confidence. The design questions are who owns the routing policy, how you evaluate a routing change, and what happens when the cheap model is confidently wrong. Answer the third one and you have answered the round.</p>
+
+  <h3 id="small-vs-large">Small versus large models</h3>
+  <p>Small models cost less, respond faster, fit on cheaper accelerators, and are easier to host yourself. Large models generalise better on unfamiliar tasks. The mature position is a portfolio: a small model for the narrow, high-volume path, a large model for the long tail, and an evaluation harness that tells you where the boundary actually sits rather than where you guessed it sits.</p>
+
+  <h3 id="fine-tuning-vs-prompting">Fine-tuning versus prompting</h3>
+  <p>Prompting changes behaviour per request with no training cost and instant rollback. Fine-tuning moves behaviour into the weights, shortens prompts, and can let a smaller model match a larger one on a narrow task, at the cost of a data pipeline, a training loop, versioning, and a much slower iteration cycle. Parameter-efficient methods such as LoRA cut the cost of that loop substantially but do not remove the operational burden. Default to prompting and retrieval; fine-tune when you have a stable task, a labelled dataset, and evidence that prompting has plateaued. <em>Source: <a href="https://arxiv.org/abs/2106.09685">LoRA (Hu et al., 2021)</a>.</em></p>
+
+  <h3 id="open-vs-closed">Open-source versus closed models</h3>
+  <p>Closed models are consumed as an API: best-in-class quality, no infrastructure, but a hard dependency on a vendor's pricing, availability, deprecation schedule, and data policy. Open-weight models give control over hosting, data residency, and cost curve, and let you fine-tune freely, but you now own GPU capacity planning, serving, and upgrades. Senior candidates answer with the deciding factors rather than a preference: data-residency obligations, cost at your actual volume, latency floor, and how badly a forced model deprecation would hurt.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">A support assistant answers correctly but occasionally cites a policy that does not appear in the retrieved documents. What is the precise name for this?</div>
+    <button class="q-opt">A factuality failure, fixed by using a much larger model</button>
+    <button class="q-opt">A retrieval recall failure, fixed by raising the top-k value</button>
+    <button class="q-opt">A faithfulness failure, fixed by grounding and citation checks</button>
+    <button class="q-opt">A tokenizer failure, fixed by normalising the input encoding</button>
+    <div class="q-fb">Output contradicting the supplied context is unfaithfulness, and it is measurable: check that each claim is supported by a retrieved span. Recall failure would mean the policy was never retrieved at all, which is a different fix. Naming the specific failure is what separates a Staff answer from a Senior one.</div>
+  </div>
+
+  <h2>5. Interview drill</h2>
+
+  <p>Questions that actually get asked on this material, and the trap inside each one.</p>
+
+  <ul>
+    <li><b>"Estimate the monthly cost of this assistant."</b> The trap is answering in requests. Convert to tokens: average input tokens including system prompt and retrieved context, average output tokens, requests per user per day, active users. State the assumptions aloud. Chapter 4 gives the arithmetic.</li>
+    <li><b>"We have a huge context window now. Do we still need RAG?"</b> The trap is agreeing. Cost, time to first token, and mid-context accuracy loss all argue for retrieval, and the freshness and permissions arguments are independent of window size.</li>
+    <li><b>"How do you stop the model returning malformed JSON?"</b> The trap is answering "prompt it better". Constrained decoding against a schema, then boundary validation, then a defined fallback.</li>
+    <li><b>"Your agent occasionally loops forever. What do you change?"</b> The trap is tuning the prompt. Step budgets, a termination condition, per-request cost ceilings, and a fallback to a deterministic workflow.</li>
+    <li><b>"Should we fine-tune?"</b> The trap is saying yes. Ask what the task is, whether it is stable, whether labelled data exists, and whether prompting has actually plateaued against a measured baseline.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The highest-leverage habit in this chapter is converting every requirement into tokens before you draw a single box. Try it on a system you already know: pick a product feature, estimate its input and output tokens, and multiply out. Ask me to check your arithmetic and challenge your assumptions - that is where interviewers push hardest.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2307.03172">Liu et al., "Lost in the Middle" (2023)</a>. It is short, empirical, and permanently changes how you think about stuffing a context window. Pair it with <a href="https://www.anthropic.com/engineering/building-effective-agents">"Building Effective Agents"</a> for the workflow-versus-agent judgement.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Syllabus</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0001-rag-and-retrieval.html"><span class="dir">Next &rarr;</span><span class="ttl">RAG and Retrieval</span></a>
+  </div>
+
+  <footer><p>AI System Design Course &middot; Chapter 1 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

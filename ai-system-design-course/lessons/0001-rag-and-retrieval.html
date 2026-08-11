@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 2: RAG and Retrieval - AI System Design Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SYSTEM DESIGN</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 02 &middot; Retrieval &middot; Chapter 2</div>
+  <h1>RAG and Retrieval</h1>
+  <p class="paper-meta">
+    <span class="pill">19 topics</span>
+    Where most AI design rounds are actually won or lost.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>RAG is a <b>search problem wearing a generation costume</b>. If retrieval returns the wrong evidence, no model and no prompt will save the answer.</li>
+      <li><b>Recall is the ceiling, precision is the cost.</b> What you never retrieve cannot be answered; what you retrieve wastefully you pay for twice, in tokens and in distraction.</li>
+      <li>A serious pipeline is <b>hybrid search, then reranking, then deliberate context packing</b> - not a single vector lookup.</li>
+      <li><b>Permission-aware retrieval and citation grounding</b> are architecture. Bolted on late, they are a rebuild.</li>
+    </ul>
+  </div>
+
+  <h2>1. The mental model</h2>
+
+  <p>Retrieval-augmented generation, introduced by Lewis et al. in 2020, pairs a parametric model with a non-parametric index so knowledge can be updated without retraining. Everything that has happened since is refinement of one question: how do you put the right evidence in front of the model, and only that evidence? <em>Source: <a href="https://arxiv.org/abs/2005.11401">"Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" (Lewis et al., 2020)</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  Q["User query"] --> RW["Query rewriting"]
+  RW --> K["Keyword search<br/>(BM25)"]
+  RW --> V["Vector search<br/>(ANN over embeddings)"]
+  K --> F["Fusion<br/>(reciprocal rank fusion)"]
+  V --> F
+  F --> P["Permission filter"]
+  P --> RR["Reranker<br/>(cross-encoder)"]
+  RR --> CP["Context packing"]
+  CP --> M["Model"]
+  M --> C["Answer + citations"]
+  C --> G["Grounding check"]
+  </div><figcaption>The production shape of retrieval. <b>Two retrievers cast a wide net, fusion merges them, permissions cut, then an expensive reranker sharpens a short list.</b> Cheap and broad first, expensive and precise last - the same funnel you would build for any search system.</figcaption></figure>
+
+  <h2>2. Representing and finding documents</h2>
+
+  <h3 id="embeddings">Embeddings</h3>
+  <p>An embedding maps text into a vector such that semantic similarity becomes geometric proximity. Sentence-BERT made this practical by training a bi-encoder that embeds each document once, offline, so query time is a nearest-neighbour lookup instead of a pairwise comparison against the corpus. The operational consequence people forget: embeddings are model-specific, so changing the embedding model means re-embedding the entire corpus and running both indexes during the migration. <em>Source: <a href="https://arxiv.org/abs/1908.10084">Sentence-BERT (Reimers &amp; Gurevych, 2019)</a>.</em></p>
+
+  <h3 id="vector-search">Vector search</h3>
+  <p>Exact nearest-neighbour search does not scale, so production systems use approximate search. HNSW builds a navigable small-world graph with a hierarchy of layers, giving logarithmic-ish search at high recall. The knob that matters in an interview is that recall is tunable and that you are always trading recall against latency and memory. "We use approximate search at roughly ninety-five percent recall, and here is how we measured it" is a Staff-level sentence. <em>Source: <a href="https://arxiv.org/abs/1603.09320">HNSW (Malkov &amp; Yashunin, 2016)</a>.</em></p>
+
+  <h3 id="vector-databases">Vector databases</h3>
+  <p>A vector database is an index plus the boring parts that make it a system: filtering, updates and deletes, persistence, replication, and multi-tenancy. Those boring parts decide your design. Ask whether metadata filters are applied before or after the ANN search, because post-filtering can silently return far fewer results than you asked for. FAISS is the reference for the index internals and the memory-versus-recall trade of quantised indexes. <em>Source: <a href="https://arxiv.org/abs/1702.08734">FAISS (Johnson et al., 2017)</a>.</em></p>
+
+  <h3 id="chunking">Chunking</h3>
+  <p>Chunking splits documents into retrievable units, and it is the highest-leverage and most under-discussed decision in the pipeline. Chunks that are too small lose the context that makes them interpretable; too large and the embedding blurs across several topics while every retrieval wastes tokens. Structure-aware splitting on headings, sections, or function boundaries beats fixed character counts almost always.</p>
+
+  <h3 id="chunk-overlap">Chunk overlap</h3>
+  <p>Overlap repeats a tail of each chunk at the head of the next so a fact spanning a boundary survives. It is a blunt instrument that inflates index size and creates near-duplicate results. Anthropic's contextual retrieval work attacks the same problem more directly by prepending a short generated description of the chunk's place in its document before embedding, reporting substantially reduced retrieval failure when combined with BM25 and reranking. <em>Source: <a href="https://www.anthropic.com/news/contextual-retrieval">"Introducing Contextual Retrieval" (Anthropic)</a>.</em></p>
+
+  <h2>3. Search quality</h2>
+
+  <h3 id="keyword-search">Keyword search</h3>
+  <p>BM25 remains a strong baseline and beats dense retrieval on exact identifiers, error codes, product SKUs, and rare proper nouns - precisely the queries enterprise users type. Dismissing lexical search is a common and costly interview error. <em>Source: <a href="https://www.staff.city.ac.uk/~sbrp622/papers/foundations_bm25_review.pdf">"The Probabilistic Relevance Framework: BM25 and Beyond" (Robertson &amp; Zaragoza)</a>.</em></p>
+
+  <h3 id="semantic-search">Semantic search</h3>
+  <p>Dense retrieval matches meaning rather than surface form, so it handles paraphrase and synonymy that BM25 misses. Its weakness is the mirror image: it is comparatively poor at exact rare tokens.</p>
+
+  <h3 id="hybrid-search">Hybrid search</h3>
+  <p>Because their failure modes are complementary, run both and merge. Reciprocal rank fusion merges ranked lists by rank position rather than by score, which sidesteps the problem that BM25 scores and cosine similarities are not on a comparable scale. It is simple, needs no tuning, and is a strong default. <em>Source: <a href="https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf">Reciprocal Rank Fusion (Cormack et al., 2009)</a>.</em></p>
+
+  <h3 id="metadata-filtering">Metadata filtering</h3>
+  <p>Filtering on tenant, source, language, document type, or date is what makes retrieval usable in a real product. Push filters into the index rather than applying them after the fact, and confirm which your store actually does.</p>
+
+  <h3 id="reranking">Reranking</h3>
+  <p>A reranker scores query and document jointly rather than independently, so it sees interactions a bi-encoder cannot. Cross-encoders are accurate and far too slow for the whole corpus, which is why they are applied to a candidate list of tens of documents. ColBERT's late interaction sits between the two, preserving token-level detail at tractable cost. Retrieve broadly, rerank narrowly. <em>Source: <a href="https://arxiv.org/abs/2004.12832">ColBERT (Khattab &amp; Zaharia, 2020)</a>.</em></p>
+
+  <h3 id="retrieval-recall">Retrieval recall</h3>
+  <p>Recall is the fraction of relevant documents that made it into the candidate set. It is the ceiling on the whole system: what retrieval misses, generation cannot recover. Measure it against a labelled set before blaming the model for a wrong answer.</p>
+
+  <h3 id="retrieval-precision">Retrieval precision</h3>
+  <p>Precision is the fraction of retrieved documents that are actually relevant. Low precision costs tokens, raises latency, and actively degrades quality by surrounding the right evidence with plausible distractors. The reranker exists to buy precision after recall has been secured.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Users search by exact error code and get nothing useful, though the docs clearly contain those codes. What is the most likely cause?</div>
+    <button class="q-opt">Vector-only retrieval, which handles rare exact tokens poorly</button>
+    <button class="q-opt">The context window is too small to fit all the documents</button>
+    <button class="q-opt">Temperature is set too high for a factual lookup workload</button>
+    <button class="q-opt">The reranker is too slow and is timing out under real load</button>
+    <div class="q-fb">Dense embeddings blur rare literal strings, which is exactly what an error code is. This is the textbook case for hybrid search: BM25 nails the exact token, vector search covers the paraphrase, and fusion merges them.</div>
+  </div>
+
+  <h2>4. Query and evidence handling</h2>
+
+  <h3 id="query-rewriting">Query rewriting</h3>
+  <p>Real queries are short, ambiguous, and full of pronouns referring to earlier turns. Rewriting expands them, resolves references against conversation history, and can decompose a multi-part question. HyDE goes further, generating a hypothetical answer and embedding that instead of the question, on the basis that answers live nearer to documents in embedding space than questions do. Every rewrite adds a model call to the critical path, so it belongs in your latency budget. <em>Source: <a href="https://arxiv.org/abs/2212.10496">HyDE (Gao et al., 2022)</a>.</em></p>
+
+  <h3 id="document-freshness">Document freshness</h3>
+  <p>An index is a cache of a corpus, and every cache has a staleness policy. Decide the acceptable lag, how updates and deletions propagate, and whether recency is a ranking signal. "How does a deleted document leave your index, and how fast" is a favourite follow-up because it exposes whether you have run one of these.</p>
+
+  <h3 id="permission-aware-retrieval">Permission-aware retrieval</h3>
+  <p>Users must only retrieve what they are allowed to read. Filtering after retrieval leaks through result counts, latency, and summaries, so authorisation belongs inside the query as a pre-filter, evaluated per request against live permissions rather than permissions baked in at index time. This is the enterprise RAG question, and the one candidates most often miss entirely.</p>
+
+  <div class="callout"><b>Interview trap.</b> "We filter out unauthorised documents before showing the answer." Too late. If an unauthorised document reached the model, it influenced the output. Authorisation is a retrieval-time constraint, not a presentation-time one.</div>
+
+  <h3 id="citation-grounding">Citation grounding</h3>
+  <p>Grounding requires each claim to be traceable to a retrieved span, with the citation produced as part of the structured output rather than reconstructed afterwards. It is the strongest available defence against unfaithfulness and it gives users something to verify, which is where trust actually comes from.</p>
+
+  <h3 id="evidence-selection">Evidence selection</h3>
+  <p>Retrieval returns candidates; evidence selection decides what survives into the prompt. Deduplicate near-identical chunks, drop low-scoring tail results, and cap per-source contributions so one verbose document cannot crowd out the rest.</p>
+
+  <h3 id="context-packing">Context packing</h3>
+  <p>Packing is the physical layout of the final prompt: order, delimiters, per-document metadata, and the token budget split between instructions, evidence, and history. Because of the lost-in-the-middle effect, place the strongest evidence first and last rather than dumping results in rank order. <em>Source: <a href="https://arxiv.org/abs/2307.03172">Liu et al., 2023</a>.</em></p>
+
+  <h3 id="missing-information">Missing information detection</h3>
+  <p>The system must be able to say it does not know. That means detecting when retrieval returned nothing sufficiently relevant and returning an explicit abstention rather than a fluent guess. Self-RAG formalises this with the model deciding when to retrieve and critiquing whether the retrieved evidence supports its own output. In a design round, an abstention path with a confidence threshold and a handoff is a strong signal of maturity. <em>Source: <a href="https://arxiv.org/abs/2310.11511">Self-RAG (Asai et al., 2023)</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  R["Retrieved candidates"] --> S{"Top score above<br/>relevance threshold?"}
+  S -- No --> A["Abstain:<br/>say we do not know"]
+  S -- Yes --> G["Generate with citations"]
+  G --> C{"Every claim<br/>supported by a span?"}
+  C -- No --> H["Escalate to human<br/>or degrade to search results"]
+  C -- Yes --> O["Return answer"]
+  </div><figcaption>Two gates turn a demo into a product. <b>The first refuses to answer without evidence; the second refuses to return an answer the evidence does not support.</b> Interviewers look for both, and most candidates draw neither.</figcaption></figure>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">Retrieval recall measured at ninety-four percent, yet answers still miss facts present in the retrieved set. Where do you look first?</div>
+    <button class="q-opt">The embedding model, which likely needs a full corpus refresh</button>
+    <button class="q-opt">The vector index, which is probably returning stale documents</button>
+    <button class="q-opt">The tokenizer, which may be truncating the incoming documents</button>
+    <button class="q-opt">Precision and packing, since distractors and ordering bury evidence</button>
+    <div class="q-fb">High recall means the evidence arrived. If the answer still misses it, the problem is downstream: too many irrelevant chunks diluting the context, or the right chunk buried mid-context. Rerank harder, pack deliberately, and put the best evidence at the edges.</div>
+  </div>
+
+  <h2>5. Interview drill</h2>
+
+  <ul>
+    <li><b>"Design search over a company's internal documents."</b> The trap is starting with a vector database. Start with the corpus, chunking, and permissions. Hybrid retrieval and reranking follow naturally.</li>
+    <li><b>"Answers are wrong. Is it the model or the retrieval?"</b> The trap is guessing. Measure recall against a labelled set first: if the evidence never arrived, no prompt change helps.</li>
+    <li><b>"How do you handle a document being deleted for legal reasons?"</b> Deletion path through the index, cache invalidation, and whether any derived artifact such as a summary or a cached answer still contains it.</li>
+    <li><b>"How do you stop the assistant leaking one team's documents to another?"</b> Pre-filter authorisation inside the retrieval query, evaluated per request against live permissions.</li>
+    <li><b>"Your index has a hundred million chunks. What breaks first?"</b> Memory for the graph index, re-embedding cost on model upgrade, and filter selectivity interacting badly with approximate search.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Practise saying "let me measure retrieval recall before I touch the prompt". It reframes an ambiguous quality complaint into a measurable subsystem, which is exactly the move interviewers are grading. Ask me to run you through a mock where the answers are wrong and you have to localise the fault.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2005.11401">Lewis et al. (2020)</a> for the origin, then <a href="https://www.anthropic.com/news/contextual-retrieval">Anthropic's contextual retrieval write-up</a> for the current production shape. Together they cover both ends of the argument.</p>
+
+  <div class="pager">
+    <a href="0000-llm-basics.html"><span class="dir">&larr; Previous</span><span class="ttl">LLM Basics</span></a>
+    <a class="nxt" href="0002-ai-system-architecture.html"><span class="dir">Next &rarr;</span><span class="ttl">AI System Architecture</span></a>
+  </div>
+
+  <footer><p>AI System Design Course &middot; Chapter 2 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

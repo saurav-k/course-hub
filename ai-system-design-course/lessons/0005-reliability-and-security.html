@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 6: Reliability and Security - AI System Design Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SYSTEM DESIGN</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 06 &middot; Operations &middot; Chapter 6</div>
+  <h1>Reliability and Security</h1>
+  <p class="paper-meta">
+    <span class="pill">18 topics</span>
+    Half of this you already know. The other half is genuinely new, and it is where trust is won.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Classic reliability patterns transfer directly, with one change: <b>retries are expensive and non-deterministic</b>, so retry policy is a cost decision.</li>
+      <li><b>Every token in the context window that you did not write is untrusted input.</b> Retrieved documents, tool results, and user text all cross a trust boundary.</li>
+      <li>Prompt injection has <b>no complete fix</b>. You contain it with least privilege and human approval, not with a cleverer system prompt.</li>
+      <li><b>Prompt logs are a privacy liability.</b> Design redaction and retention before you design the dashboard.</li>
+    </ul>
+  </div>
+
+  <h2>1. Familiar patterns, new constraints</h2>
+
+  <h3 id="timeouts">Timeouts</h3>
+  <p>Set them per hop and derive them from the latency budget, not from a default. Generation duration scales with output length, so a fixed timeout that is generous for a short answer will cut off a long one. Bound output length explicitly and the timeout becomes predictable.</p>
+
+  <h3 id="retries">Retries</h3>
+  <p>Retry on transport failures and provider errors, with exponential backoff and jitter. The AI-specific caution is that a retry re-runs a costly, non-deterministic generation: you pay twice and may get a different answer. Never retry blindly on a timeout for a request that may have already completed and been billed.</p>
+
+  <h3 id="circuit-breakers">Circuit breakers</h3>
+  <p>When a provider degrades, stop sending it traffic and fail fast to the next rung of your ladder. The pattern is unchanged from Fowler's description; what changes is that the dependency is a paid external service whose failures are often partial - slow rather than down. Trip on latency as well as on errors. <em>Source: <a href="https://martinfowler.com/bliki/CircuitBreaker.html">"Circuit Breaker" (Martin Fowler)</a>.</em></p>
+
+  <h3 id="failover">Failover</h3>
+  <p>Region and provider failover, which for AI systems means keeping at least one alternative model warm and evaluated. An untested failover model is not a failover model: its prompts behave differently, so it needs its own entry in your evaluation suite.</p>
+
+  <h3 id="model-fallbacks">Model fallbacks</h3>
+  <p>The ordered ladder from <a href="0002-ai-system-architecture.html">Chapter 3</a>: primary, secondary, smaller, cached, search-only, honest error. Each rung trades quality for availability, and knowing where you stop is the design judgement.</p>
+
+  <h3 id="graceful-degradation">Graceful degradation</h3>
+  <p>Serve something useful under stress. In AI systems you can degrade quality as well as capacity: drop the reranker, shrink top-k, disable the agent loop, or return retrieved documents without generation. The Google SRE framing applies unchanged. <em>Source: <a href="https://sre.google/sre-book/handling-overload/">Google SRE Book, "Handling Overload"</a>.</em></p>
+
+  <h3 id="error-budgets">Error budgets</h3>
+  <p>An explicit allowance for unreliability that converts the reliability-versus-velocity argument into arithmetic. The interesting extension for AI systems is defining what counts as an error: a refusal, an abstention, and a low-confidence escalation are all correct behaviours, not failures, and lumping them into the error rate will drive you to make the system worse. <em>Source: <a href="https://sre.google/sre-book/embracing-risk/">Google SRE Book, "Embracing Risk"</a>.</em></p>
+
+  <h2>2. Seeing what happened</h2>
+
+  <h3 id="observability">Observability</h3>
+  <p>You need to reconstruct any single response after the fact: which prompt version, which model and version, which documents were retrieved and at what scores, which tools ran, how many tokens, and what it cost. Without this, quality complaints are unfalsifiable.</p>
+
+  <h3 id="tracing">Tracing</h3>
+  <p>One trace per request spanning gateway, retrieval, rerank, model call, and tool calls. OpenTelemetry publishes semantic conventions for generative AI, which give standard attribute names for model, token counts, and operation type, so use them rather than inventing your own. <em>Source: <a href="https://opentelemetry.io/docs/specs/semconv/gen-ai/">OpenTelemetry GenAI semantic conventions</a>.</em></p>
+
+  <h3 id="prompt-logs">Prompt logs</h3>
+  <p>Indispensable for debugging and a serious privacy liability, because prompts contain whatever users typed and whatever documents you retrieved. Redact at capture rather than at query time, set a retention period, and control access as you would for production customer data. Treat "we log all prompts" as an unfinished sentence.</p>
+
+  <h3 id="token-metrics">Token metrics</h3>
+  <p>Input and output tokens per request, per tenant, per feature, per model, plus cache hit rate. These are simultaneously your cost, capacity, and abuse-detection signals, which is why they belong on the primary dashboard rather than in a finance report.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A customer reports a wrong answer from three weeks ago. What single capability decides whether you can investigate it?</div>
+    <button class="q-opt">Per-request traces retaining prompt version, retrieval, and model</button>
+    <button class="q-opt">A larger golden dataset covering that customer's typical queries</button>
+    <button class="q-opt">Higher sampling on the online evaluation of production traffic</button>
+    <button class="q-opt">A stricter confidence threshold applied to that tenant's requests</button>
+    <div class="q-fb">Without the recorded inputs you cannot reproduce the response, and every other control only helps prospectively. This is why observability is the first thing to design and why retention policy is a design decision rather than an operational one.</div>
+  </div>
+
+  <h2>3. Data protection</h2>
+
+  <h3 id="pii-redaction">PII redaction</h3>
+  <p>Detect and mask personal data before it reaches a model or a log. Decide explicitly whether redaction happens before the model call, which protects the vendor boundary but can degrade answer quality, or only before logging, which preserves quality but keeps sensitive data in transit. Interviewers want to hear that you know it is a trade.</p>
+
+  <h3 id="data-privacy">Data privacy</h3>
+  <p>Where does data go, who can see it, how long is it kept, is it used for training, and can a user have it deleted. For vendor models the contractual answer matters as much as the technical one, and data residency requirements are frequently the reason a team self-hosts.</p>
+
+  <h3 id="access-control">Access control</h3>
+  <p>Authorisation applies to retrieval, to tools, and to the actions an agent may take. The rule that survives every follow-up: the system acts with the user's permissions, never with its own elevated service identity. Permission-aware retrieval from <a href="0001-rag-and-retrieval.html">Chapter 2</a> is the retrieval half of this.</p>
+
+  <h2>4. Adversarial input</h2>
+
+  <h3 id="prompt-injection">Prompt injection</h3>
+  <p>Instructions hidden in content the model reads. Greshake et al. showed that the attack does not need the user at all: poison a document the system will retrieve, and the injected instruction executes when that document reaches the context. This is the defining security problem of AI systems, and it is listed first in the OWASP Top 10 for LLM applications. There is no known complete defence, so the architecture must assume injection succeeds and limit what that buys the attacker: least-privilege tools, no ambient authority, human approval for consequential actions, and output validation before any side effect. <em>Sources: <a href="https://arxiv.org/abs/2302.12173">Greshake et al., 2023</a>, <a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/">OWASP Top 10 for LLM Applications</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  A["Attacker plants text<br/>in a public document"] --> B["Ingestion + indexing"]
+  B --> C["User asks a normal question"]
+  C --> D["Retrieval pulls the<br/>poisoned document"]
+  D --> E["Injected instruction<br/>enters the context"]
+  E --> F{"Does the model hold<br/>real authority?"}
+  F -- "Yes: broad tool access" --> G["Data exfiltration<br/>or unwanted action"]
+  F -- "No: least privilege<br/>+ human approval" --> H["Blast radius contained"]
+  </div><figcaption>Indirect prompt injection crosses a trust boundary without ever touching the user. <b>The defence is not a better system prompt; it is ensuring the model never holds authority worth stealing.</b> Draw the decision diamond and you have answered the question.</figcaption></figure>
+
+  <div class="callout"><b>Interview trap.</b> "We tell the model to ignore instructions in retrieved documents." That is a mitigation, not a control, and it is defeated routinely. The control is least privilege: what can an attacker actually cause if the injection works?</div>
+
+  <h3 id="jailbreak-defense">Jailbreak defence</h3>
+  <p>Attempts to bypass safety behaviour. Zou et al. demonstrated automatically generated adversarial suffixes that transfer across models, which is why refusal training alone is not a security boundary. Layer independent input and output classifiers around the model, and accept that you are raising cost for an attacker rather than closing the hole. <em>Source: <a href="https://arxiv.org/abs/2307.15043">"Universal and Transferable Adversarial Attacks on Aligned Language Models" (Zou et al., 2023)</a>.</em></p>
+
+  <h3 id="audit-logs">Audit logs</h3>
+  <p>Tamper-evident records of consequential events: who asked, what the system did, which documents were accessed, which tools ran, and who approved. Distinct from prompt logs in purpose, retention, and access, and the thing a regulator or an incident review will actually ask for.</p>
+
+  <h3 id="compliance">Compliance</h3>
+  <p>Sector rules plus AI-specific regulation. The NIST AI Risk Management Framework gives vocabulary that senior interviewers recognise - govern, map, measure, manage - and the EU AI Act introduces obligations that scale with the risk category of the application. You are not expected to cite article numbers. You are expected to know that the obligations exist and that they influence architecture, particularly logging, human oversight, and transparency. <em>Sources: <a href="https://www.nist.gov/itl/ai-risk-management-framework">NIST AI RMF</a>, <a href="https://artificialintelligenceact.eu/">EU AI Act overview</a>.</em></p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">Your agent can read email and call an internal payments API. What most reduces the impact of a successful prompt injection?</div>
+    <button class="q-opt">A stronger system prompt instructing it to ignore injected text</button>
+    <button class="q-opt">A larger and more capable model that resists manipulation better</button>
+    <button class="q-opt">Higher sampling of prompt logs so attacks are detected sooner</button>
+    <button class="q-opt">Human approval on payments and scoped, least-privilege tokens</button>
+    <div class="q-fb">Assume the injection works and ask what it buys the attacker. Instructions and model capability do not bound the damage; authority does. Approval gates on consequential actions plus narrowly scoped credentials turn a breach into a blocked request.</div>
+  </div>
+
+  <h2>5. Interview drill</h2>
+
+  <ul>
+    <li><b>"How do you defend against prompt injection?"</b> The trap is answering with prompt wording. Lead with least privilege, human approval, and output validation, then acknowledge no complete fix exists.</li>
+    <li><b>"Your provider is returning errors for twenty minutes. Walk me through it."</b> Circuit breaker trips, ladder degrades, users see reduced quality rather than failure, and the error budget absorbs it.</li>
+    <li><b>"Can we log every prompt?"</b> Yes, with redaction at capture, a retention period, and access control - and say those three unprompted.</li>
+    <li><b>"A user asks to be forgotten. What happens?"</b> Source data, index entries, caches, prompt logs, and any derived summaries. This question is really testing whether you know how many copies you made.</li>
+    <li><b>"What is your SLO for an AI feature?"</b> Availability and latency as usual, plus an explicit position on whether refusals and abstentions count as errors. They should not.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth drilling here is answering security questions with authority rather than with instructions. When asked how you stop the model doing something, describe what the model is permitted to do. That reframing is what distinguishes a Staff-level security answer, and it works on almost every follow-up in this chapter.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/">OWASP Top 10 for LLM Applications</a> end to end - it is short, and it is the shared vocabulary interviewers use. Then read <a href="https://arxiv.org/abs/2302.12173">Greshake et al.</a> for the attack that reframes the whole architecture.</p>
+
+  <div class="pager">
+    <a href="0004-evaluation-and-quality.html"><span class="dir">&larr; Previous</span><span class="ttl">Evaluation and Quality</span></a>
+    <a class="nxt" href="../reference/glossary.html"><span class="dir">Next &rarr;</span><span class="ttl">Glossary</span></a>
+  </div>
+
+  <footer><p>AI System Design Course &middot; Chapter 6 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
