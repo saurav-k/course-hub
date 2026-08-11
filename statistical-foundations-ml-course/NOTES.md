@@ -46,6 +46,11 @@ This is the part the learner asked for loudest, so it gets the most care.
 - **Mermaid label text with parentheses, commas, or maths breaks the parser.** Wrap every node label in double quotes: `A["P(X > 2000)"]`. This bites on almost every diagram in a statistics course.
 - **Mermaid re-renders only on reload,** because the theme toggle calls `location.reload()`. That is deliberate. Do not try to re-init Mermaid in place.
 - **Charts shrink to illegibility on a phone.** `.chart` carries a `min-width` under 640px and scrolls inside its own `.diagram` box. The page itself must never scroll horizontally: check this at 360px before you ship.
+- **A Mermaid `timeline` with more than about six columns is unreadable** in a 720px reading column, because `useMaxWidth` shrinks the whole diagram rather than wrapping it. Split a long timeline into two figures rather than letting it shrink. Lecture 1's twelve-lecture plan is two timelines for exactly this reason.
+- **Mermaid's mindmap root node paints its own label near-black in every theme,** which disappears on a dark background. `course.css` overrides it under "Mermaid corrections", and the override needs `!important` because Mermaid injects an id-scoped style block inside the rendered SVG, later in the document than our stylesheet.
+- **Mermaid's stock branch ramp is pinks and magentas** that fight this course's palette. `course.js` overrides `cScale0` through `cScale7`. Note that the first rendered branch reads `cScale1`, not `cScale0`, so the first colour is repeated.
+- **`th` is uppercased,** which flattens `x - x̄` into `X - X` and drops the macron. Wrap any header carrying real notation in `<span class="exact">`.
+- **The browser caches `course.css` hard.** When a style change appears not to take effect, add a query string to the page URL before concluding the CSS is wrong.
 - **The validator only checks links, not correctness.** It will happily pass a page with a wrong exponent. Check the arithmetic yourself against the slide images.
 
 ## Honesty notes carried in Lecture 1

@@ -55,19 +55,41 @@
   // ---- mermaid ----
   function initMermaid() {
     if (!window.mermaid) return;
+    var dark = currentDark();
+
+    // Mindmap and timeline pick their branch colours from the cScale ramp,
+    // and Mermaid's stock ramp is a set of pinks and magentas that fight this
+    // course's indigo and teal. Override the first eight steps so a branch is
+    // tinted from the course palette, and pin the matching label colour so the
+    // text stays legible on the tint in both themes.
+    // The first rendered branch reads cScale1, not cScale0, so teal is repeated
+    // at both ends of the ramp to keep "statistics is teal" on the first branch.
+    var scale = dark
+      ? ['#123c3e', '#123c3e', '#241f42', '#1b3524', '#3c2517', '#2f2a12', '#152c3c', '#31203a']
+      : ['#dceeef', '#dceeef', '#e6e3f8', '#e1f2e6', '#fbe6da', '#f7f0d8', '#dfeaf5', '#efe4f5'];
+    var scaleLabel = dark
+      ? '#e8e4d8'
+      : '#1a1a1a';
+    var vars = {
+      fontFamily: 'Inter, system-ui, sans-serif',
+      fontSize: '15px',
+      primaryColor: dark ? '#1e1c14' : '#fbf9f2',
+      primaryTextColor: dark ? '#e8e4d8' : '#1a1a1a',
+      primaryBorderColor: dark ? '#4fb0b6' : '#0f6e73',
+      lineColor: dark ? '#938d80' : '#6b6b63',
+      secondaryColor: dark ? '#221d3a' : '#eeecfa',
+      tertiaryColor: dark ? '#1b1913' : '#f4f1e8'
+    };
+    scale.forEach(function (colour, i) {
+      vars['cScale' + i] = colour;
+      vars['cScaleLabel' + i] = scaleLabel;
+      vars['cScaleInv' + i] = scaleLabel;
+    });
+
     window.mermaid.initialize({
       startOnLoad: true,
-      theme: currentDark() ? 'dark' : 'neutral',
-      themeVariables: {
-        fontFamily: 'Inter, system-ui, sans-serif',
-        fontSize: '15px',
-        primaryColor: currentDark() ? '#1e1c14' : '#fbf9f2',
-        primaryTextColor: currentDark() ? '#e8e4d8' : '#1a1a1a',
-        primaryBorderColor: currentDark() ? '#4fb0b6' : '#0f6e73',
-        lineColor: currentDark() ? '#938d80' : '#6b6b63',
-        secondaryColor: currentDark() ? '#221d3a' : '#eeecfa',
-        tertiaryColor: currentDark() ? '#1b1913' : '#f4f1e8'
-      },
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: vars,
       flowchart: { curve: 'basis', htmlLabels: true, padding: 12, useMaxWidth: true },
       sequence: { useMaxWidth: true, wrap: true },
       mindmap: { useMaxWidth: true },

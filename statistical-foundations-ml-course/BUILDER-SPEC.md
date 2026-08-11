@@ -71,6 +71,12 @@ Kinds already in use, so reuse rather than reinvent: `flowchart`, `sequenceDiagr
 
 **Always wrap node labels in double quotes.** A statistics course is full of parentheses, commas, and maths, and every one of them breaks the Mermaid parser unquoted. `A["P(X > 2000)"]` is safe; `A[P(X > 2000)]` is not.
 
+**Keep a `timeline` to about six columns.** Mermaid shrinks the whole diagram to fit the reading column rather than wrapping it, so a twelve-column timeline arrives unreadable. Split it into two figures.
+
+**Keep `quadrantChart` point labels under about 26 characters,** and keep the points away from the axes and the centre lines. Mermaid centres a label under its point and does not clip or wrap it, so a long label at an extreme coordinate runs straight off the chart.
+
+The Mermaid palette and the mindmap root label are corrected in `assets/course.js` and `assets/course.css`. Do not fight those corrections; see the "Known gotchas" section of `NOTES.md` for why each exists.
+
 ### Inline SVG, for anything quantitative
 
 Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot.
