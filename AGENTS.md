@@ -23,7 +23,7 @@ The hub is published as a static website on Amazon S3. A merge into `main` deplo
    A human reviews and merges. Merging publishes the live site.
 
 3. **Never deploy directly.**
-   Do not run `deploy.sh`, `aws s3 sync`, or any other AWS mutation. Publishing belongs to `.github/workflows/deploy.yml` and to nothing else. `deploy.sh` exists as a human escape hatch only.
+   Do not run `aws s3 sync` or any other AWS command. Publishing belongs to `.github/workflows/deploy.yml` and to nothing else. This repository deliberately ships no deploy script and no bucket configuration, so there is nothing here for you to run.
 
 4. **Never touch credentials.**
    Do not read, print, copy, or modify AWS profiles, tokens, or repository secrets. Do not add credentials to any file.
@@ -38,10 +38,9 @@ The hub is published as a static website on Amazon S3. A merge into `main` deplo
 
    ```bash
    python3 scripts/validate_site.py
-   shellcheck -x deploy.sh
    ```
 
-   If either fails, fix it. Do not open a pull request you know is red.
+   If it fails, fix it. Do not open a pull request you know is red.
 
 ## Before you write anything
 
@@ -81,12 +80,12 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 
 - Do the task you were given. Do not reformat, restructure, or "improve" lessons you were not asked to touch - it buries the real change in noise.
 - Do not add a build step, a package manager, a framework, or a CSS toolchain. The zero-dependency static shape is deliberate.
-- Do not change `.github/workflows/`, `deploy.config`, or `scripts/` unless the task is explicitly about the pipeline.
+- Do not change `.github/workflows/` or `scripts/` unless the task is explicitly about the pipeline.
 - If the task needs a decision you cannot make from the repository - a course's direction, a licence question, a deployment change - stop and ask. Do not guess.
 
 ## What "done" looks like
 
-- The validator passes and `shellcheck -x deploy.sh` passes.
+- The validator passes.
 - You opened the page in a browser, clicked every link you touched, and answered every quiz you added.
 - Commits are conventional, self-describing, and free of agent co-author trailers.
 - The pull request explains what changed, why, and what you verified.

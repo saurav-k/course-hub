@@ -33,8 +33,6 @@ Or just use the live site above.
 index.html                    the hub landing page; every course is a card here
 assets/                       shared CSS and JS for the landing page only
 scripts/validate_site.py      structure and link checker that gates every pull request
-deploy.sh                     manual publish escape hatch; CI is the normal path
-deploy.config                 AWS profile, region, and bucket for the manual path
 .github/workflows/            validate on pull request, publish on merge to main
 
 <course-name>/
@@ -59,12 +57,10 @@ Courses are siblings under one bucket root, so cross-course links are relative -
 branch -> pull request -> checks pass -> review -> merge to main -> GitHub Actions syncs to S3
 ```
 
-- [`.github/workflows/validate.yml`](.github/workflows/validate.yml) runs on every pull request: the structure and link checker, plus `shellcheck`.
+- [`.github/workflows/validate.yml`](.github/workflows/validate.yml) runs on every pull request: the structure and link checker.
 - [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) runs on merge to `main`: it re-runs validation, assumes a scoped AWS role over OpenID Connect, and mirrors the hub into the bucket.
 
-There are no long-lived AWS keys in this repository. The workflow mints a short-lived token per run, and the role it assumes trusts only this repository's `main` branch.
-
-`deploy.sh` still exists for a manual re-publish, but the pipeline is the normal path.
+There are no long-lived AWS keys in this repository, and no deploy script or bucket configuration either. The destination lives in the repository's Actions settings, so contributors need no AWS access, no credentials, and no setup. The workflow mints a short-lived token per run, and the role it assumes trusts only this repository's `main` branch and can write only that one bucket.
 
 ## Contributing
 
@@ -76,7 +72,6 @@ Read [`CONTRIBUTING.md`](CONTRIBUTING.md) first. The short version:
 git checkout -b lesson/my-new-lesson
 # write the lesson, register it in the course index.html
 python3 scripts/validate_site.py
-shellcheck -x deploy.sh
 # open a pull request into main
 ```
 
@@ -88,7 +83,7 @@ By taking part you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Dual-licensed so both halves are covered properly:
 
-- **Code** - `deploy.sh`, `scripts/`, the workflows, and the course CSS and JS - is under the [MIT License](LICENSE).
+- **Code** - `scripts/`, the workflows, and the course CSS and JS - is under the [MIT License](LICENSE).
 - **Course content** - lessons, reference sheets, glossaries, and prose - is under [CC BY 4.0](LICENSE-CONTENT).
 
 Both let anyone use, modify, redistribute, and build on this work, commercially included. The content licence asks only for attribution.

@@ -29,10 +29,9 @@ So a merged pull request is a live deployment. Treat it that way.
 
    ```bash
    python3 scripts/validate_site.py   # structure and link checks
-   shellcheck -x deploy.sh            # shell lint
    ```
 
-   Both must pass. The same checks run on your pull request.
+   It must pass. The same check runs on your pull request and gates the merge.
 
 5. **Preview in a browser.**
    There is no build step. Open the file directly:
@@ -62,8 +61,6 @@ So a merged pull request is a live deployment. Treat it that way.
 index.html               the hub landing page; every course is a card here
 assets/                  shared CSS and JS for the landing page only
 scripts/validate_site.py the structure and link checker that gates every pull request
-deploy.sh                manual publish escape hatch; CI is the normal path
-deploy.config            AWS profile, region, and bucket for the manual path
 .github/workflows/       validate on pull request, publish on merge to main
 
 <course-name>/
