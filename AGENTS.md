@@ -67,6 +67,10 @@ Do not infer the house style from this file. Infer it from the lessons.
 - Cite primary sources - the paper, the RFC, the vendor docs. Add anything new to `RESOURCES.md`.
 - Use relative links only. Cross-course links look like `../../llm-papers-course/index.html`.
 
+## Adding a new course
+
+Create a top-level folder with its own `index.html`, `assets/`, and `lessons/`, write its `MISSION.md` before any lesson, and add a card for it in the hub `index.html`. Nothing else is needed: the pipeline syncs the whole hub, so merging the pull request publishes the new course on its own.
+
 ## Accuracy
 
 These are teaching materials, so a confident wrong explanation is worse than no lesson.
