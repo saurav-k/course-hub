@@ -1,0 +1,64 @@
+# Notes
+
+Working notes on how this course teaches.
+Read `MISSION.md` first for why it exists, then `BUILDER-SPEC.md` for the exact markup.
+
+## Learner profile
+
+- Software architect and tech lead. Strong engineer, comfortable with abstraction, comfortable with code.
+- Did probability and statistics at university. It has gone cold. The notation is now friction.
+- Explicit request: **as close to zero cognitive load as possible**, and **a lot of diagrams, of several different kinds**.
+- Not a beginner in thinking. A beginner again in this notation. Those are different things, and the difference sets the whole tone.
+
+## What "zero cognitive load" means here
+
+It does not mean shallow, and it does not mean short.
+It means the reader is never asked to hold more than one new thing at a time, and never asked to fill a gap the author skipped.
+
+In practice:
+
+- **Picture, then mechanism, then numbers.** Never numbers first. A formula the reader cannot picture is a formula the reader will re-read four times and still not own.
+- **Name the symbol in words the first time it appears on a page.** Not once in the whole lecture. On every page where it appears. Repetition across pages is cheap; a reader stalling on an unexplained lambda is not.
+- **Work every intermediate step.** If the deck writes `0.693 / 415 = 0.00167`, this course also says what 0.693 is, why it is there, and what the units of the answer are.
+- **One idea per page.** If a page needs two headings that both feel like the point, it is two pages.
+- **Every page ends by pointing at the next.** The reader should always know why they are about to turn the page.
+- **A number the deck states gets quoted, not recomputed.** Use the `.keynum` span so a stated figure is visually distinct from a figure this course derived.
+
+## Cadence
+
+- A content page is one sitting: roughly 8 to 12 minutes of reading, three or four diagrams, two quizzes.
+- A lecture hub page is a map, not a lesson. It states what the lecture delivers, carries the logistics, and links the parts.
+- Quizzes come after the idea has been fully worked, never as a gate before it.
+
+## Diagram policy
+
+This is the part the learner asked for loudest, so it gets the most care.
+
+- **At least three diagrams on every content page**, and use several distinct kinds across the lecture.
+- **Mermaid draws structure.** `flowchart` for block and decision diagrams, `sequenceDiagram` for pipelines with actors, `mindmap` and `timeline` for maps and roadmaps, `quadrantChart` for two-axis placement.
+- **Hand-authored inline SVG draws everything quantitative.** Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot. Write the SVG directly in the page. No chart library, no build step, no extra CDN.
+- **Every figure gets a `<figcaption>` that explains it in plain English and bolds the one takeaway.** A caption that only labels the figure is a wasted caption. If you cannot state a takeaway, the figure is decoration and should be cut.
+- **Colour is meaning, not decoration.** The palette in `assets/course.css` is fixed: teal is statistics, indigo is probability, green is signal, grey is noise, rust is the outlier or the risk tail, gold is the gold button. The same idea keeps the same colour on every page.
+- **Never hard-code a hex value in an SVG.** Use the semantic `.chart` classes. A literal colour that looks right in light theme disappears in dark theme, and the learner reads in both.
+
+## Known gotchas
+
+- **Mermaid label text with parentheses, commas, or maths breaks the parser.** Wrap every node label in double quotes: `A["P(X > 2000)"]`. This bites on almost every diagram in a statistics course.
+- **Mermaid re-renders only on reload,** because the theme toggle calls `location.reload()`. That is deliberate. Do not try to re-init Mermaid in place.
+- **Charts shrink to illegibility on a phone.** `.chart` carries a `min-width` under 640px and scrolls inside its own `.diagram` box. The page itself must never scroll horizontally: check this at 360px before you ship.
+- **The validator only checks links, not correctness.** It will happily pass a page with a wrong exponent. Check the arithmetic yourself against the slide images.
+
+## Honesty notes carried in Lecture 1
+
+The lecture is a first lecture, so it is deliberately loose in places.
+Three of those places are called out in the pages rather than smoothed over, because hiding them would teach a wrong habit:
+
+1. **Comparing two confidence intervals for overlap is a rougher test than a two-proportion test.** Non-overlapping intervals do imply a significant difference, but overlapping intervals do not imply the absence of one. Page 0005 says this plainly.
+2. **The exponential model is an assumption the slide adopts, not a fact the ten data points establish.** Ten points cannot identify a distribution family. Page 0004 says this plainly.
+3. **The correlation slide's normalising constants do not reproduce from its own table.** Page 0007 quotes the deck's stated results, then shows what the table itself gives, and notes that the qualitative conclusion survives either way. See `learning-records/0001-quoting-a-deck-that-does-not-recompute.md` for the full decision.
+
+## Open threads
+
+- Lecture 2 is not written. When it is, decide whether nine pages per lecture is the right grain.
+- No learning record on the learner's own recall yet. Add one after Lecture 1 has actually been worked through, not merely read.
+- A print-friendly formula sheet exists for Lecture 1. Keep one per lecture rather than growing a single sheet that nobody prints.
