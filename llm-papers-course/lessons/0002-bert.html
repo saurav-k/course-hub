@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BERT - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Transformer Core &middot; Lesson 02</div>
+  <h1>BERT: Deep Bidirectional Transformers</h1>
+  <p class="paper-meta">
+    <span class="pill">2018</span>
+    Devlin, Chang, Lee, Toutanova (Google AI Language).
+    &middot; <a href="https://arxiv.org/abs/1810.04805">arXiv:1810.04805</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>The Transformer from Lesson 01 had two halves. BERT keeps only the <b>encoder</b> and asks it to <b>understand</b> text rather than generate it.</li>
+      <li>Its superpower is being <b>deeply bidirectional</b>: every token sees both its left and right context at every layer, unlike a left-to-right language model.</li>
+      <li>It learns this by a clever trick called the <b>Masked Language Model</b>: hide about 15% of the tokens and train the model to fill them back in from both sides.</li>
+      <li>A second task, <b>Next Sentence Prediction</b>, teaches it whether two sentences follow each other. Pretrain once on huge text, then <b>fine-tune</b> with a tiny task head.</li>
+      <li>Result: one recipe set new state of the art on eleven understanding benchmarks (GLUE, SQuAD) and made "pretrain then fine-tune" the default for NLP.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>By 2018 people knew pretraining a language model on lots of text and then fine-tuning it was powerful. But the leading recipe, a left-to-right language model, had a built-in handicap: to predict a word it may only look at the words <em>before</em> it. That is fine for generation, where you write left to right anyway. It is a waste for <strong>understanding</strong>, where the words <em>after</em> a token are just as informative. In "the animal did not cross the street because <b>it</b> was too tired," the word after "it" tells you what "it" refers to.</p>
+
+  <p>Earlier attempts to be bidirectional cheated by training two separate models, one reading forward and one backward, then gluing their features together. That is shallow: neither direction ever conditions on the other <em>inside</em> the network. BERT's contribution is a training objective that lets a single deep stack condition on both sides at once, honestly.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph LR2["Left-to-right LM (GPT-style)"]
+    direction LR
+    g1["the"] --> g2["cat"] --> g3["sat"] --> g4["on"] --> g5["? predict next"]
+  end
+  subgraph BI["Bidirectional encoder (BERT)"]
+    direction TB
+    b1["the"] --- bm["&#91;MASK&#93;"] --- b3["sat"] --- b4["on"] --- b5["mat"]
+    bm -.sees left.-> b1
+    bm -.sees right.-> b5
+  end
+    </div>
+    <figcaption>The core shift. A left-to-right model predicts the next token using only the past, so it can never let a word attend to its future. BERT masks a word in the middle and lets it gather evidence from <b>both directions at every layer</b>, which is exactly what understanding tasks need.</figcaption>
+  </figure>
+
+  <h2>2. Encoder-only: what BERT keeps and drops</h2>
+  <p>Recall the original Transformer was an encoder-decoder. BERT is <strong>just the encoder stack</strong>: a pile of the very same blocks you built in Lesson 01 (multi-head self-attention, feed-forward, residuals, LayerNorm), with one crucial change - <strong>no causal mask</strong>. Every token attends to every other token, past and future, freely.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph FULL["Full Transformer (2017)"]
+    direction TB
+    enc["Encoder<br/>bidirectional"] -->|keys & values| dec["Decoder<br/>causal + cross-attn"]
+  end
+  FULL --> SPLIT{"which half?"}
+  SPLIT -->|keep encoder| BERT["BERT<br/>understanding"]
+  SPLIT -->|keep decoder| GPT["GPT<br/>generation"]
+    </div>
+    <figcaption>Two children of one architecture. BERT keeps the encoder and its full bidirectional attention for tasks like classification and question answering. GPT keeps the decoder and its causal attention for generating text. <b>Same building block, opposite mask, opposite job.</b></figcaption>
+  </figure>
+
+  <p>BERT came in two sizes. <strong>BERT-base</strong> has 12 layers, hidden size 768, 12 attention heads, about <strong>110M parameters</strong> - deliberately matched to GPT-1 for a fair comparison. <strong>BERT-large</strong> has 24 layers, hidden size 1024, 16 heads, about <strong>340M parameters</strong>.</p>
+
+  <h2>3. The input: WordPiece, &#91;CLS&#93;, and &#91;SEP&#93;</h2>
+  <p>Before any attention happens, text is turned into tokens by <strong>WordPiece</strong>, a subword tokenizer with a vocabulary of about 30,000 pieces. Rare words split into known chunks (for example "playing" becomes "play" + "##ing"), so the model never meets a truly unknown word. BERT then wraps the input with two special tokens:</p>
+  <ul>
+    <li><strong>&#91;CLS&#93;</strong> - a token glued to the front of every input. Its final vector is used as a summary of the whole sequence for classification.</li>
+    <li><strong>&#91;SEP&#93;</strong> - a separator placed between two sentences (and at the very end), so the model can tell sentence A from sentence B.</li>
+  </ul>
+  <p>Each token's input vector is the sum of three learned embeddings: the <strong>token</strong> itself, its <strong>position</strong>, and which <strong>segment</strong> (A or B) it belongs to.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["&#91;CLS&#93; my dog is cute &#91;SEP&#93; he likes play ##ing &#91;SEP&#93;"] --> T["token embeddings"]
+  R --> P["position embeddings"]
+  R --> S["segment embeddings<br/>A A A A A A B B B B B"]
+  T --> SUM(("+"))
+  P --> SUM
+  S --> SUM
+  SUM --> ENC["12 or 24 bidirectional encoder layers"]
+  ENC --> CLSV["&#91;CLS&#93; vector<br/>= sentence summary"]
+  ENC --> TOKV["per-token vectors<br/>= token meanings"]
+    </div>
+    <figcaption>How BERT reads a pair of sentences. Every token vector is the sum of a token, position, and segment embedding. After the encoder stack, the <b>&#91;CLS&#93; vector becomes a whole-sequence summary</b> used for classification, while each token's output vector feeds tasks that need per-word answers, like span extraction.</figcaption>
+  </figure>
+
+  <h2>4. Pretraining task 1: the Masked Language Model</h2>
+  <p>Here is the heart of the paper. If every token could see every other token, a left-to-right prediction target would be trivial - the answer is right there in the input. So BERT changes the target. It randomly picks <strong>15% of the tokens</strong> and hides them, then trains the model to predict the originals from the surrounding context. Because the hidden word could be anywhere, the model must build a representation that fuses both sides.</p>
+
+  <p>One wrinkle: the special <code>&#91;MASK&#93;</code> token appears only during pretraining, never during fine-tuning, which would create a mismatch. BERT softens this. Of the 15% chosen tokens: <strong>80%</strong> are replaced with <code>&#91;MASK&#93;</code>, <strong>10%</strong> are replaced with a random word, and <strong>10%</strong> are left unchanged. The model never knows which case it is looking at, so it must keep a good guess for every token.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  IN["my dog is hairy"] --> PICK["pick 15% of tokens<br/>(here: 'hairy')"]
+  PICK --> C1["80%: my dog is &#91;MASK&#93;"]
+  PICK --> C2["10%: my dog is apple<br/>(random word)"]
+  PICK --> C3["10%: my dog is hairy<br/>(kept as-is)"]
+  C1 --> PRED["predict original: 'hairy'"]
+  C2 --> PRED
+  C3 --> PRED
+    </div>
+    <figcaption>The Masked LM objective. Fifteen percent of tokens are selected; most become <code>&#91;MASK&#93;</code>, some become a random word, some stay put. In all three cases <b>the model must recover the original token</b>, using left and right context. The 80/10/10 split stops the model from only ever reacting to the literal <code>&#91;MASK&#93;</code> symbol.</figcaption>
+  </figure>
+
+  <h2>5. Pretraining task 2: Next Sentence Prediction</h2>
+  <p>Many tasks (question answering, natural language inference) are about the relationship <em>between</em> two sentences, which word-level prediction alone does not teach. So BERT adds a second, sentence-level objective. Build training pairs where <strong>half</strong> the time sentence B genuinely follows sentence A in the corpus (label <code>IsNext</code>) and half the time B is a random sentence from elsewhere (label <code>NotNext</code>). The <code>&#91;CLS&#93;</code> vector feeds a tiny classifier that predicts which case it is.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant C as Corpus
+    participant P as Pair builder
+    participant B as BERT
+    participant H as &#91;CLS&#93; head
+    C->>P: sentence A
+    P->>P: 50% real next / 50% random
+    P->>B: &#91;CLS&#93; A &#91;SEP&#93; B &#91;SEP&#93;
+    B->>H: &#91;CLS&#93; summary vector
+    H->>H: IsNext or NotNext?
+    Note over B,H: both objectives run at once:<br/>MLM on masked tokens +<br/>NSP on the &#91;CLS&#93; vector
+    </div>
+    <figcaption>Next Sentence Prediction runs alongside the Masked LM in the same forward pass. The pair builder feeds either a true continuation or a random sentence, and the <b>&#91;CLS&#93; vector learns to judge whether B follows A</b>. This gives BERT a sense of discourse coherence that single-sentence training misses. (Later work, such as RoBERTa, found NSP largely unnecessary, but it is core to the original recipe.)</figcaption>
+  </figure>
+
+  <h2>6. The two-phase recipe: pretrain, then fine-tune</h2>
+  <p>The whole point is reuse. You pretrain <strong>once</strong>, expensively, on a huge unlabeled corpus (BooksCorpus, 800M words, plus English Wikipedia, 2,500M words). Then for each downstream task you add <strong>one small output layer</strong> and fine-tune the entire model briefly on the labeled task data. The same pretrained weights become a sentiment classifier, a question answerer, or an entailment model, just by swapping the head.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> Pretrain
+    Pretrain: Pretrain (once, unlabeled)
+    Pretrain: MLM + NSP on Books + Wikipedia
+    Pretrain --> Checkpoint
+    Checkpoint: General language weights
+    Checkpoint --> FT_sent: + classification head
+    Checkpoint --> FT_qa: + span head
+    Checkpoint --> FT_nli: + pair head
+    FT_sent: Fine-tune -> sentiment
+    FT_qa: Fine-tune -> SQuAD QA
+    FT_nli: Fine-tune -> entailment
+    FT_sent --> [*]
+    FT_qa --> [*]
+    FT_nli --> [*]
+    </div>
+    <figcaption>One expensive pretraining, many cheap fine-tunings. The general checkpoint is the reusable asset; each task only adds a thin head and a short training run. <b>This "pretrain then fine-tune" pattern, popularised by BERT, is still how most task-specific models are built today.</b></figcaption>
+  </figure>
+
+  <h2>7. The math: the masked-LM loss</h2>
+  <p>Only the masked positions contribute to the language-model loss. For each masked position the model outputs a probability distribution over the whole vocabulary, and we penalise it by the negative log probability it gave to the true token. That is ordinary cross-entropy, summed over the masked set.</p>
+
+  <div class="math">L<sub>MLM</sub> = &minus; &sum;<sub>i &isin; M</sub> log P( x<sub>i</sub> | x<sub>&#92;M</sub> )
+    <span class="gloss"><b>M</b>: the set of masked positions (about 15% of tokens). <b>x<sub>i</sub></b>: the true token that used to be at position i. <b>x<sub>&#92;M</sub></b>: the whole sequence with the masked positions hidden - the context the model is allowed to see. <b>P( x<sub>i</sub> | ... )</b>: the probability the model assigns to the correct token there. We take the log, negate it, and add it up: guessing the right word with high confidence makes the loss small.</span>
+  </div>
+
+  <p>The full pretraining loss is simply this masked-LM term plus the next-sentence classification loss, added together and minimised at the same time.</p>
+
+  <div class="card callout key"><span class="tag">Why only the masked positions</span>
+    Because attention is bidirectional, an unmasked token can trivially see itself, so predicting it would teach nothing. By scoring the loss <b>only</b> at the hidden positions, BERT forces every prediction to come from surrounding context. This is the single design choice that makes honest deep bidirectionality possible.</div>
+
+  <h2>8. Implement it: a bidirectional encoder block + MLM head</h2>
+  <p>Below is the core of BERT in small, runnable PyTorch: one bidirectional encoder block (note there is <strong>no causal mask</strong> - compare to Lesson 01), stacked a few times, topped with a masked-LM head, plus a tiny loop showing how the 15% masking and cross-entropy loss fit together.</p>
+
+  <div class="code-cap">bert_core.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class EncoderBlock(nn.Module):
+    """A BERT encoder block: bidirectional self-attention, no causal mask."""
+    def __init__(self, d_model=256, n_heads=4, mlp_mult=4):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.ln1  = nn.LayerNorm(d_model)
+        self.mlp  = nn.Sequential(
+            nn.Linear(d_model, mlp_mult * d_model),
+            nn.GELU(),                                 # BERT uses GELU, not ReLU
+            nn.Linear(mlp_mult * d_model, d_model),
+        )
+        self.ln2  = nn.LayerNorm(d_model)
+
+    def forward(self, x, pad_mask=None):
+        # key_padding_mask hides padding only. There is NO causal mask:
+        # every token may attend to every other token, left and right.
+        a, _ = self.attn(x, x, x, key_padding_mask=pad_mask, need_weights=False)
+        x = self.ln1(x + a)                            # residual + norm
+        x = self.ln2(x + self.mlp(x))                  # residual + norm
+        return x
+
+class TinyBERT(nn.Module):
+    def __init__(self, vocab=30000, d_model=256, n_layers=4, max_len=128):
+        super().__init__()
+        self.tok = nn.Embedding(vocab, d_model)
+        self.pos = nn.Embedding(max_len, d_model)
+        self.seg = nn.Embedding(2, d_model)            # segment A / B
+        self.blocks = nn.ModuleList(EncoderBlock(d_model) for _ in range(n_layers))
+        self.mlm_head = nn.Linear(d_model, vocab)      # predict a token per position
+
+    def forward(self, ids, seg=None, pad_mask=None):
+        B, N = ids.shape
+        pos = torch.arange(N, device=ids.device).unsqueeze(0)
+        x = self.tok(ids) + self.pos(pos)
+        if seg is not None:
+            x = x + self.seg(seg)
+        for blk in self.blocks:
+            x = blk(x, pad_mask)
+        return self.mlm_head(x)                        # (B, N, vocab) logits
+
+# ---- one masked-LM training step -------------------------------------------
+MASK_ID = 103                                          # id of the &#91;MASK&#93; token
+model = TinyBERT()
+ids   = torch.randint(1000, 30000, (2, 16))            # fake batch: 2 seqs, len 16
+labels = ids.clone()
+
+# choose 15% of positions to mask, remember their true tokens as labels
+prob = torch.full(ids.shape, 0.15)
+masked = torch.bernoulli(prob).bool()
+labels[~masked] = -100                                 # -100 = ignore in the loss
+ids[masked] = MASK_ID                                  # (simplified: all -> &#91;MASK&#93;)
+
+logits = model(ids)                                    # (2, 16, vocab)
+loss = F.cross_entropy(logits.view(-1, 30000), labels.view(-1), ignore_index=-100)
+print(round(loss.item(), 3))                           # only masked spots count
+</code></pre>
+
+  <p>Read it against the diagrams. The <code>EncoderBlock</code> is Lesson 01's block with the causal mask removed. The training step picks 15% of positions, replaces them with <code>&#91;MASK&#93;</code>, and scores cross-entropy <strong>only</strong> on those positions (the <code>ignore_index=-100</code> line is how "only the masked positions" is enforced in code).</p>
+
+  <h2>9. BERT versus the GPT branch</h2>
+  <table>
+    <thead><tr><th>Property</th><th>BERT (this paper)</th><th>GPT branch</th></tr></thead>
+    <tbody>
+      <tr><td>Transformer half kept</td><td>Encoder</td><td>Decoder</td></tr>
+      <tr><td>Attention direction</td><td>Bidirectional</td><td>Left-to-right (causal)</td></tr>
+      <tr><td>Pretraining objective</td><td>Masked LM plus NSP</td><td>Next-token prediction</td></tr>
+      <tr><td>Natural strength</td><td>Understanding and tagging</td><td>Free-form generation</td></tr>
+      <tr><td>Downstream use</td><td>Fine-tune a task head</td><td>Prompt or fine-tune</td></tr>
+      <tr><td>Can write a paragraph?</td><td>No, not designed to</td><td>Yes, that is its job</td></tr>
+    </tbody>
+  </table>
+  <p>Neither branch is "better" - they answer different questions. BERT dominated the 2018-2020 era of classification and extraction leaderboards (a GLUE score of 80.5 and SQuAD v1.1 F1 of 93.2, both records at the time). The GPT branch, which you meet next, chased generation and scale, and that is the path that led to modern chat models.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What makes BERT bidirectional where a plain language model is not?</div>
+      <button class="q-opt">It runs a separate backward network and blends the two feature sets</button>
+      <button class="q-opt">It masks tokens so each one is predicted from both left and right</button>
+      <button class="q-opt">It reverses the sentence order before every single training step</button>
+      <button class="q-opt">It removes the position embeddings so word order stops mattering</button>
+      <div class="q-fb">The Masked LM hides tokens and predicts them from surrounding context on both sides, inside one deep stack - honest bidirectionality, not a glued pair of models.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why score the masked-LM loss only at the hidden positions?</div>
+      <button class="q-opt">Because scoring all tokens would make the training loop far too slow</button>
+      <button class="q-opt">Because the padding tokens must be excluded from every gradient step</button>
+      <button class="q-opt">Because an unmasked token can see itself, so predicting it teaches nothing</button>
+      <button class="q-opt">Because the vocabulary is too large to compute a full softmax per token</button>
+      <div class="q-fb">With bidirectional attention, a visible token trivially sees its own identity. Only hidden positions force a prediction from context.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is the &#91;CLS&#93; token's final vector mainly used for?</div>
+      <button class="q-opt">As a fixed-size summary of the sequence for classification tasks</button>
+      <button class="q-opt">As the random word substituted during the masking of the input</button>
+      <button class="q-opt">As the separator placed between the first and second sentences</button>
+      <button class="q-opt">As the position embedding added to every token before layer one</button>
+      <div class="q-fb">The &#91;CLS&#93; vector aggregates the whole sequence and feeds the classification head (for example, Next Sentence Prediction or sentiment).</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">How does BERT get reused across many different tasks?</div>
+      <button class="q-opt">By training a brand new model per task from scratch each time around</button>
+      <button class="q-opt">By prompting it in words with a few worked examples and no training</button>
+      <button class="q-opt">By freezing every weight and only editing the input tokenizer per task</button>
+      <button class="q-opt">By pretraining once, then fine-tuning with a thin task head per task</button>
+      <div class="q-fb">One expensive pretraining yields a general checkpoint; each task adds a small output layer and a short fine-tune.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Built on <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a></b> - BERT is that paper's encoder stack with the causal mask removed.</li>
+    <li><b>Contrast with <a href="0003-gpt-1.html">GPT-1</a></b>, the very next lesson, which keeps the decoder half and trains left-to-right generation instead.</li>
+    <li>The <b>subword tokenizer</b> idea here (WordPiece) becomes byte-level BPE in <a href="0004-gpt-2.html">GPT-2</a>.</li>
+    <li>BERT's <b>bidirectional attention</b> still pays the <a href="0001-attention-is-all-you-need.html">O(N&sup2;)</a> cost, the target of <a href="0017-flashattention.html">FlashAttention</a> and friends in Module 05.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The trickiest idea here is <em>why</em> you cannot just train a bidirectional model with a next-token target. Ask the agent to walk through what would go wrong (the token can peek at itself), then to hand-trace the 80/10/10 masking on a short sentence. Do not move on until the Masked LM feels obviously necessary.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/1810.04805">Devlin et al., "BERT: Pre-training of Deep Bidirectional Transformers for Language Understanding" (2018)</a>. Then pair it with Jay Alammar's <a href="https://jalammar.github.io/illustrated-bert/">"The Illustrated BERT"</a> for a visual walkthrough of the tokens, masking, and fine-tuning heads.</p>
+
+  <div class="pager">
+    <a href="0001-attention-is-all-you-need.html"><span class="dir">&larr; Previous</span><span class="ttl">Attention Is All You Need</span></a>
+    <a class="nxt" href="0003-gpt-1.html"><span class="dir">Next &rarr;</span><span class="ttl">GPT-1: Generative Pre-Training</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 02 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

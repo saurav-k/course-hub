@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A Token Budgeting System per User Request - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing and Budgeting &middot; Lesson 09</div>
+  <h1>A Token Budgeting System per User Request</h1>
+  <p class="paper-meta">Tokens are the unit you pay for and the unit that fills the KV cache. Without a budget, one runaway prompt or one abusive user can blow your cost and starve everyone else. This lab builds middleware that counts, caps, trims, and accounts for tokens before a request ever reaches the model.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Every request has an input and an output token count; both cost money and both consume KV-cache memory.</li>
+      <li><b>Count</b> tokens up front with a tokenizer (tiktoken), <b>cap</b> the output with <code>max_tokens</code>, and <b>trim</b> the history when it will not fit.</li>
+      <li>Enforce <b>per-user quotas</b> with a <b>token bucket</b>: each user refills tokens over time and a request must draw from the balance.</li>
+      <li>A <b>cost guard</b> rejects or degrades a request <em>before</em> it overspends, rather than discovering the bill afterward.</li>
+      <li>This lab builds budgeting middleware that counts with tiktoken, enforces a bucket, trims history, and blocks an over-budget request gracefully.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Bills and outages both come from the same place: unbounded tokens. A user pastes a 50-page document, or a loop retries with ever-growing context, or one tenant hammers the endpoint. Each of those quietly multiplies your token spend and eats KV-cache slots that other requests need. Budgeting turns "hope for the best" into an explicit contract: this user gets this many tokens per minute, this request may generate at most this many, and anything over is refused or trimmed before it costs you.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph NB["No budget"]
+    a["huge prompt +<br/>unbounded output"] --> b["surprise bill<br/>KV cache exhausted<br/>noisy-neighbour"]
+  end
+  subgraph WB["With budget"]
+    c["request"] --> d{"count + check"}
+    d -->|"fits"| e["serve, capped output"]
+    d -->|"over"| f["trim or reject<br/>before spending"]
+  end
+  NB -.->|"make the limit explicit"| WB
+    </div>
+    <figcaption>The failure mode and the fix. Without a budget, a single oversized or runaway request can blow cost and exhaust the cache for everyone. With a budget, the system counts and checks first, then serves within a cap or trims and rejects before any spend. <b>Budgeting moves the limit from an after-the-fact bill to a before-the-call decision.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    You cannot enforce what you have not measured. Counting tokens before the call is what makes every other control possible: caps, quotas, trimming, and cost guards all depend on knowing the token count up front rather than learning it from the provider's response.</div>
+
+  <h2>2. Count first: input and output tokens</h2>
+  <p>A token is not a word or a character; it is a chunk the model's tokenizer produces. You count the input by running the same tokenizer the model uses. The output you cannot count in advance, so you <em>bound</em> it with <code>max_tokens</code>. Total budget for a request is the input tokens plus that output cap, and that sum is what must fit the model's context window and your cost limit.</p>
+
+  <div class="math">tokens_request = tokens_input + max_tokens_output &le; min(context_window, budget)
+    <span class="gloss"><b>tokens_input</b>: measured now with the tokenizer. <b>max_tokens_output</b>: the cap you set on generation. Their sum must stay under both the model's <b>context_window</b> (a hard limit) and your per-request <b>budget</b> (a cost limit). If it does not, you trim the input or lower the output cap before calling.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as User request
+  participant M as Budget middleware
+  participant T as Tokenizer (tiktoken)
+  participant L as LLM
+  U->>M: messages + requested max_tokens
+  M->>T: encode(all messages)
+  T-->>M: input token count
+  Note over M: budget = input + max_tokens<br/>compare to context window + cost cap
+  alt within budget
+    M->>L: forward with capped max_tokens
+    L-->>U: response
+    M->>M: record input+output tokens for billing
+  else over budget
+    M-->>U: trim history OR reject with a clear message
+  end
+    </div>
+    <figcaption>The budget check as a gate in front of the model. The middleware tokenizes the input, adds the output cap, and compares the total to the context window and the cost limit before forwarding. <b>The model is only ever called once the request is known to fit, and every call's real token usage is recorded for billing.</b></figcaption>
+  </figure>
+
+  <h2>3. Fit the budget: trim and summarise</h2>
+  <p>When a conversation grows past the budget, you have to make room. The cheapest move is to <b>drop</b> the oldest turns while keeping the system prompt and the most recent messages, since recency usually matters most. A richer move is to <b>summarise</b> older turns into a short recap and prepend that, preserving context at a fraction of the tokens. Either way you decide the policy before the call, not after the provider rejects an oversized request.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  H["full history<br/>over budget"] --> P{"trimming policy"}
+  P -->|"drop oldest"| D["keep system + recent N turns<br/>cheap, loses old detail"]
+  P -->|"summarise"| S["recap old turns in ~100 tokens<br/>keeps gist, costs a summary call"]
+  D --> FIT["now within budget"]
+  S --> FIT
+  FIT --> CALL["send to model"]
+    </div>
+    <figcaption>Two ways to make history fit. Dropping the oldest turns is instant but forgets detail; summarising older turns keeps the gist for far fewer tokens but costs an extra call to produce the recap. <b>Choose per workload: chat that references old turns wants summarisation, stateless Q&amp;A can just drop.</b></figcaption>
+  </figure>
+
+  <h2>4. Enforce quotas: the token bucket</h2>
+  <p>Per-user fairness needs a rate limit measured in tokens, not requests, because requests vary wildly in size. The <b>token bucket</b> is the standard tool: each user has a bucket that refills at a steady rate up to a maximum capacity. A request must remove tokens equal to its budget from the bucket; if the bucket lacks enough, the request is rejected or delayed. Bursts are allowed up to the bucket size, but sustained usage is capped at the refill rate.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Refilling
+  Refilling --> Refilling: add rate*dt tokens (cap at capacity)
+  Refilling --> Check: request arrives, needs N tokens
+  Check --> Allow: balance >= N
+  Check --> Reject: balance < N
+  Allow --> Refilling: subtract N, serve request
+  Reject --> Refilling: 429 or degrade, no tokens spent
+  note right of Check
+    burst up to capacity
+    sustained = refill rate
+  end note
+    </div>
+    <figcaption>A per-user token bucket as a state machine. The bucket refills continuously up to a cap; each request draws its token budget from the balance, and a request that cannot be covered is rejected without spending. <b>This gives each user burst headroom equal to the bucket size but limits their sustained rate to the refill rate.</b></figcaption>
+  </figure>
+
+  <h2>5. Lab: build the budgeting middleware</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Count with tiktoken, enforce a per-user token bucket, trim history, and block an over-budget request gracefully</h4>
+    <p>You will write middleware that sits in front of an OpenAI-compatible call. It counts input tokens, checks a per-user bucket, trims history to fit the context budget, forwards the call with a capped output, and records usage. Then you will fire an over-budget request and watch it get refused with a clear message instead of a surprise bill.</p>
+
+    <div class="code-cap">install and count tokens</div>
+    <div class="term">
+<span class="p">$</span> pip install tiktoken openai
+<span class="p">$</span> python -c <span class="o">"import tiktoken; e=tiktoken.get_encoding('o200k_base'); print(len(e.encode('Explain KV cache in two sentences.')))"</span>
+<span class="o">8</span>
+    </div>
+
+    <div class="code-cap">budget.py &middot; token counting, bucket, trimming, and the guard</div>
+    <pre><code>import time, tiktoken
+
+ENC = tiktoken.get_encoding("o200k_base")   # GPT-4o family; use encoding_for_model to auto-pick
+
+def count_tokens(messages) -> int:
+    # ~4 tokens overhead per message for role/formatting; good enough for budgeting
+    return sum(len(ENC.encode(m["content"])) + 4 for m in messages)
+
+class TokenBucket:
+    def __init__(self, capacity: int, refill_per_sec: float):
+        self.capacity = capacity
+        self.refill = refill_per_sec
+        self.tokens = capacity
+        self.ts = time.monotonic()
+    def _refill(self):
+        now = time.monotonic()
+        self.tokens = min(self.capacity, self.tokens + (now - self.ts) * self.refill)
+        self.ts = now
+    def try_spend(self, n: int) -> bool:
+        self._refill()
+        if self.tokens >= n:
+            self.tokens -= n
+            return True
+        return False                        # not enough balance -> reject
+
+def trim_to_fit(messages, max_input_tokens):
+    """Keep the system message + most recent turns until we fit the budget."""
+    system = [m for m in messages if m["role"] == "system"]
+    rest   = [m for m in messages if m["role"] != "system"]
+    while count_tokens(system + rest) > max_input_tokens and len(rest) > 1:
+        rest.pop(0)                         # drop the oldest non-system turn
+    return system + rest
+
+BUCKETS = {}   # user_id -> TokenBucket
+
+def guarded_call(user_id, messages, max_tokens=256,
+                 context_window=8192, per_user_capacity=20000, refill=200):
+    bucket = BUCKETS.setdefault(user_id, TokenBucket(per_user_capacity, refill))
+    messages = trim_to_fit(messages, context_window - max_tokens)
+    budget = count_tokens(messages) + max_tokens
+
+    if not bucket.try_spend(budget):
+        return {"status": 429, "error": "token budget exceeded, slow down",
+                "needed": budget, "available": int(bucket.tokens)}
+
+    # within budget: forward the real call here (OpenAI client), then record usage
+    # r = client.chat.completions.create(model=..., messages=messages, max_tokens=max_tokens)
+    return {"status": 200, "input_tokens": budget - max_tokens,
+            "output_cap": max_tokens, "spent": budget}</code></pre>
+
+    <div class="code-cap">demo.py &middot; watch a normal request pass and an abusive one get blocked</div>
+    <pre><code>from budget import guarded_call
+
+msgs = [{"role": "system", "content": "You are concise."},
+        {"role": "user", "content": "Summarise the water cycle in two sentences."}]
+
+print(guarded_call("alice", msgs, max_tokens=128))
+# {'status': 200, 'input_tokens': ~20, 'output_cap': 128, 'spent': ~148}
+
+# Same user hammering huge requests drains the bucket, then gets refused:
+big = [{"role": "user", "content": "word " * 6000}]   # ~6000 tokens
+for i in range(5):
+    print(i, guarded_call("alice", big, max_tokens=1000)["status"])
+# 200, 200, 200, 429, 429   <- bucket empties, later requests blocked cleanly</code></pre>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Input count</div><div class="v">exact</div><div class="u">tiktoken, same tokenizer as the model</div></div>
+      <div class="metric"><div class="k">Output cap</div><div class="v">max_tokens</div><div class="u">bounds the part you cannot pre-count</div></div>
+      <div class="metric"><div class="k">Bucket</div><div class="v">per user</div><div class="u">burst to capacity, sustain at refill</div></div>
+      <div class="metric"><div class="k">Over budget</div><div class="v">429</div><div class="u">rejected before any model spend</div></div>
+    </div>
+    <p class="kpi">The pass criterion: a normal request returns 200 with its token accounting, an oversized history gets trimmed to fit the context window, and a user who exceeds their bucket gets a clean 429 with the numbers explaining why, not a partial charge. Note tiktoken's count is a close estimate; the provider's returned <code>usage</code> is the billing source of truth, so reconcile against it.</p>
+  </div>
+
+  <h2>6. Comparison: the controls and what they protect</h2>
+  <table>
+    <thead><tr><th>Control</th><th>Acts when</th><th>Protects against</th><th>Failure mode if missing</th></tr></thead>
+    <tbody>
+      <tr><td>max_tokens cap</td><td>Per request</td><td>Runaway generation</td><td>One reply drains a budget</td></tr>
+      <tr><td>Input token count</td><td>Before the call</td><td>Oversized prompts</td><td>Context-window rejection</td></tr>
+      <tr><td>History trimming</td><td>Before the call</td><td>Growing conversations</td><td>Cost climbs every turn</td></tr>
+      <tr><td>Token bucket</td><td>Per user, over time</td><td>Abuse, noisy neighbour</td><td>One tenant starves others</td></tr>
+      <tr><td>Cost guard</td><td>Before spend</td><td>Budget overruns</td><td>Surprise bill at month end</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why must you count input tokens before calling the model?</div>
+      <button class="q-opt">Because the tokenizer only runs correctly on the server side after the call</button>
+      <button class="q-opt">Because output tokens are always free and only the input tokens are billed</button>
+      <button class="q-opt">Because caps, quotas, trimming, and guards all depend on the count up front</button>
+      <button class="q-opt">Because the context window shrinks automatically once the prompt is sent</button>
+      <div class="q-fb">You cannot enforce what you have not measured. Counting up front is what makes caps, quotas, trimming, and cost guards possible before any spend.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does a token bucket give each user?</div>
+      <button class="q-opt">Burst headroom up to capacity, with sustained rate capped at the refill</button>
+      <button class="q-opt">A fixed number of requests per day regardless of how large each one is</button>
+      <button class="q-opt">Unlimited tokens as long as the requests arrive slower than one per second</button>
+      <button class="q-opt">A shared pool across all users that refills only at the top of each hour</button>
+      <div class="q-fb">The bucket refills at a steady rate up to a capacity, so users may burst up to the bucket size but their sustained rate is the refill rate.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why cap output with max_tokens when you already count the input?</div>
+      <button class="q-opt">Because max_tokens also shrinks the input to fit the remaining context space</button>
+      <button class="q-opt">Because the input count is only an estimate and the cap corrects its error</button>
+      <button class="q-opt">Because output tokens are cheaper and the cap raises them to match input</button>
+      <button class="q-opt">Because output length is unknown in advance, so the cap bounds that part</button>
+      <div class="q-fb">You cannot pre-count generation, so max_tokens bounds the one part of the request you cannot measure beforehand.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">When history exceeds the budget, what does summarising trade for dropping?</div>
+      <button class="q-opt">It keeps more recent turns but permanently discards the system message first</button>
+      <button class="q-opt">It preserves the gist of old turns but costs an extra call to build the recap</button>
+      <button class="q-opt">It lowers the output cap automatically so the total always fits the window</button>
+      <button class="q-opt">It doubles the token count but guarantees the provider never rejects the call</button>
+      <div class="q-fb">Summarising keeps the gist of old turns for far fewer tokens, at the cost of an extra call to produce the recap. Dropping is instant but forgets detail.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain why unbounded tokens cause both cost and cache problems</li>
+    <li>I can count input tokens with tiktoken and bound output with max_tokens</li>
+    <li>I can trim history by dropping or summarising to fit a budget</li>
+    <li>I can implement a per-user token bucket for burst and sustained limits</li>
+    <li>I built middleware that blocks an over-budget request with a clean 429</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to reconcile tiktoken estimates against the provider's returned usage, or turn the in-memory bucket into a Redis-backed one for multiple servers? Ask and we will harden the middleware for production together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://github.com/openai/tiktoken">tiktoken repository</a> for encodings and model mappings, and OpenAI's <a href="https://cookbook.openai.com/examples/how_to_count_tokens_with_tiktoken">How to count tokens with tiktoken</a> cookbook for the per-message overhead used above. For the algorithm behind quotas, see any reference on the <a href="https://en.wikipedia.org/wiki/Token_bucket">token bucket</a>.</p>
+
+  <div class="pager">
+    <a href="0008-model-router-cost-latency-quality.html"><span class="dir">&larr; Prev</span><span class="ttl">Build a Model Router by Cost, Latency, Quality</span></a>
+    <a class="nxt" href="0010-edge-onnx-tensorrt-webllm.html"><span class="dir">Next &rarr;</span><span class="ttl">Edge Deployment: ONNX, TensorRT, WebLLM</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 09 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlashAttention - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Efficient Inference &amp; Systems &middot; Lesson 17</div>
+  <h1>FlashAttention</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Tri Dao, Daniel Y. Fu, Stefano Ermon, Atri Rudra, Christopher R&eacute; (Stanford; Atri Rudra at SUNY Buffalo).
+    &middot; <a href="https://arxiv.org/abs/2205.14135">arXiv:2205.14135</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Standard attention writes the full <b>N&times;N</b> score matrix to slow GPU memory, then reads it back. On long sequences that back-and-forth traffic, not the math, is the bottleneck.</li>
+      <li>FlashAttention is <b>IO-aware</b>: it counts reads and writes between fast on-chip <b>SRAM</b> and slow <b>HBM</b>, and rewrites attention to touch HBM as little as possible.</li>
+      <li>It uses <b>tiling</b> (process attention block by block inside SRAM) plus <b>online softmax</b> (a running-max / running-sum trick) so it never materialises the whole N&times;N matrix.</li>
+      <li>The result is the <b>exact</b> same answer as normal attention, with memory <b>linear</b> in N instead of quadratic, and real wall-clock speedups: 15% on BERT-large, 3&times; on GPT-2, 2.4&times; on Long-Range Arena.</li>
+      <li>In the backward pass it <b>recomputes</b> the score matrix instead of storing it - trading cheap on-chip math for expensive memory.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>By 2022 everyone knew attention cost <code>O(N&sup2;)</code> in both compute and memory (Lesson 01). Dozens of papers tried to beat that by <em>approximating</em> attention - sparse patterns, low-rank tricks, kernels. They reduced the FLOP count on paper, yet most were <strong>no faster on an actual GPU</strong>. FlashAttention starts from a sharper diagnosis: for real sequence lengths, attention is not compute-bound, it is <strong>memory-bound</strong>. The GPU spends most of its time moving the giant N&times;N matrix between memory tiers, not multiplying numbers.</p>
+
+  <p>A GPU has a steep memory hierarchy. On-chip <strong>SRAM</strong> is tiny but blisteringly fast. Off-chip <strong>HBM</strong> (high-bandwidth memory) is large but roughly an order of magnitude slower to reach. Standard attention builds the N&times;N scores in HBM, reads them back for softmax, writes them again, reads them again to multiply by V. Every one of those round trips crawls at HBM speed.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph GPU["A single GPU"]
+    direction TB
+    SRAM["SRAM (on-chip)<br/>~20 MB total, ~19 TB/s<br/><i>tiny, extremely fast</i>"]
+    HBM["HBM (off-chip)<br/>~40-80 GB, ~1.5 TB/s<br/><i>large, ~10&times; slower</i>"]
+    SRAM -->|"cheap"| SRAM
+    HBM <-->|"expensive traffic"| SRAM
+  end
+  DRAM["CPU DRAM<br/>&gt;1 TB, ~12 GB/s<br/><i>huge, glacially slow</i>"]
+  DRAM <-->|"very expensive"| HBM
+    </div>
+    <figcaption>The GPU memory hierarchy. Each step down is bigger but slower. <b>The whole game is to do work in SRAM and touch HBM as few times as possible.</b> Standard attention loses because it parks a giant N&times;N matrix in HBM and revisits it repeatedly.</figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph OLD["Standard attention (memory-bound)"]
+    direction TB
+    o1["Q,K,V in HBM"] --> o2["write S = QK&#7488; to HBM<br/>(N&times;N)"]
+    o2 --> o3["read S, softmax, write P to HBM"]
+    o3 --> o4["read P, multiply by V, write O"]
+  end
+  subgraph NEW["FlashAttention (IO-aware)"]
+    direction TB
+    n1["load a block of Q,K,V into SRAM"] --> n2["compute block scores in SRAM"]
+    n2 --> n3["online softmax in SRAM"]
+    n3 --> n4["accumulate O, never store S"]
+  end
+    </div>
+    <figcaption>Before and after. Standard attention makes several full passes over an N&times;N matrix in slow HBM. FlashAttention keeps a small tile in fast SRAM, finishes all the work on it, and writes only the final output. <b>The N&times;N matrix is never written to HBM at all.</b></figcaption>
+  </figure>
+
+  <h2>2. The core problem with softmax: it seems to need the whole row</h2>
+  <p>Why can we not just chop attention into blocks trivially? Because of softmax. To normalise a row of scores you appear to need <em>every</em> score in that row at once: you subtract the row maximum (for numerical stability), exponentiate, then divide by the row sum. If you only have a block of the row, you do not yet know the true maximum or the true sum. Compute a "local" softmax and it will be wrong once a later block reveals a bigger score.</p>
+
+  <p>FlashAttention's key mathematical move is the <strong>online (streaming) softmax</strong>: keep a <em>running maximum</em> and a <em>running sum</em>, and correct the partial result each time a new block arrives. This lets you stream through the keys and values one block at a time and still land on the exact softmax.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  init["start: running max m = -&infin;<br/>running sum l = 0<br/>output acc = 0"] --> b1["block 1 of K,V<br/>arrives in SRAM"]
+  b1 --> u1["update m (new max),<br/>rescale acc and l,<br/>add this block's contribution"]
+  u1 --> b2["block 2 of K,V"]
+  b2 --> u2["update m again,<br/>rescale, accumulate"]
+  u2 --> bn["... last block"]
+  bn --> fin["divide acc by l<br/>&rarr; exact softmax output"]
+    </div>
+    <figcaption>Online softmax as a streaming loop. Each new block may raise the running maximum, so the accumulated output and the running sum are <b>rescaled</b> to match, then the block is added in. <b>After the final block the answer is bit-for-bit the same as a normal softmax</b> - nothing is approximated.</figcaption>
+  </figure>
+
+  <h2>3. The online softmax trick, exactly</h2>
+  <p>Say the scores for one query, split across blocks, arrive as vectors <code>s&#8321;, s&#8322;, ...</code>. After seeing blocks up to <em>j</em> we hold three running quantities: the max <code>m<sub>j</sub></code>, the sum of exponentials <code>&ell;<sub>j</sub></code>, and the weighted value accumulator <code>o<sub>j</sub></code>. When block <em>j+1</em> arrives we update them.</p>
+
+  <div class="math">m<sub>new</sub> = max( m<sub>j</sub>, rowmax(s<sub>j+1</sub>) )
+    <span class="gloss"><b>m<sub>new</sub></b>: the new running maximum. Take the larger of the old max and the biggest score in the fresh block. Subtracting this before exponentiating is what keeps the numbers from overflowing.</span>
+  </div>
+
+  <div class="math">&alpha; = exp( m<sub>j</sub> &minus; m<sub>new</sub> )&nbsp;&nbsp;&nbsp;&ell;<sub>new</sub> = &alpha; &middot; &ell;<sub>j</sub> + rowsum( exp(s<sub>j+1</sub> &minus; m<sub>new</sub>) )
+    <span class="gloss"><b>&alpha;</b>: a correction factor. Because the max moved from m<sub>j</sub> to m<sub>new</sub>, every earlier exponential was computed against the wrong baseline; multiplying by &alpha; = exp(m<sub>j</sub> &minus; m<sub>new</sub>) fixes them in one shot. <b>&ell;<sub>new</sub></b>: rescale the old sum by &alpha;, then add the fresh block's exponentials.</span>
+  </div>
+
+  <div class="math">o<sub>new</sub> = &alpha; &middot; o<sub>j</sub> + exp(s<sub>j+1</sub> &minus; m<sub>new</sub>) &middot; V<sub>j+1</sub>&nbsp;&nbsp;&nbsp;output = o<sub>final</sub> / &ell;<sub>final</sub>
+    <span class="gloss"><b>o<sub>new</sub></b>: rescale the old value accumulator by the same &alpha;, then add this block's exponential-weighted values. <b>output</b>: at the very end divide the accumulator by the running sum &ell; to complete the softmax normalisation. No full N&times;N matrix ever exists - only these three small running vectors per query block.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">The one insight</span>
+    Softmax looks like it needs the whole row, but a <b>running max plus a running sum plus one correction factor &alpha;</b> lets you fold in the row one block at a time and reach the exact answer. That is the entire reason attention can be tiled without approximation.</div>
+
+  <h2>4. Tiling: the two-loop kernel</h2>
+  <p>FlashAttention wraps that online softmax in two nested loops. The outer loop walks over blocks of queries; the inner loop streams every block of keys and values through SRAM, updating the running quantities. Because a query block and a key/value block both fit in SRAM, all the arithmetic for a tile happens on-chip. Only the final output block is written back to HBM.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant HBM as HBM (slow, large)
+  participant SRAM as SRAM (fast, tiny)
+  participant PE as Compute cores
+  Note over HBM,PE: outer loop over query blocks Qi
+  HBM->>SRAM: load Qi (one block)
+  Note over SRAM: init m=-inf, l=0, acc=0
+  loop inner loop over key/value blocks Kj,Vj
+    HBM->>SRAM: load Kj, Vj
+    SRAM->>PE: S = Qi Kj&#7488; (block scores)
+    PE->>SRAM: online-softmax update (m, l, acc)
+  end
+  SRAM->>SRAM: Oi = acc / l
+  SRAM->>HBM: write Oi (only the output)
+  Note over HBM,PE: S is never written to HBM
+    </div>
+    <figcaption>The tiled kernel as a message sequence. For each query block, the kernel streams all key/value blocks through SRAM, updating the running softmax, and writes back only the finished output block. <b>HBM sees Q, K, V once and O once - roughly N traffic, not N&sup2;.</b></figcaption>
+  </figure>
+
+  <div class="card callout"><span class="tag">Why memory becomes linear</span>
+    The full attention matrix would be <code>O(N&sup2;)</code> to store. FlashAttention keeps only per-query running statistics of size <code>O(N)</code> and reconstructs scores block by block. Memory is now <b>linear in sequence length</b>, which is what lets Transformers reach 16K and 64K token contexts in the paper's Path-X / Path-256 experiments.</div>
+
+  <h2>5. The backward pass: recompute, do not store</h2>
+  <p>Training needs gradients, which normally means keeping the N&times;N attention matrix around from the forward pass so the backward pass can use it. That would throw away the memory win. FlashAttention instead <strong>recomputes</strong> the scores block by block during the backward pass, using the tiny per-row statistics (the max and the sum) it saved. Recompute is cheap on-chip math; storing an N&times;N matrix is expensive HBM traffic. Trading the second for the first is a net win.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph FWD["Forward pass"]
+    f1["compute O block by block"] --> f2["save O and the tiny<br/>softmax stats (m, l)"]
+    f2 --> f3["discard the N&times;N scores"]
+  end
+  subgraph BWD["Backward pass"]
+    b1["reload Q,K,V blocks"] --> b2["recompute scores in SRAM<br/>using saved m, l"]
+    b2 --> b3["form gradients dQ, dK, dV"]
+  end
+  f2 -->|"m, l, O"| b1
+    </div>
+    <figcaption>Recomputation in the backward pass. Rather than store the huge score matrix, the forward pass keeps only the output and the small normalisation statistics. The backward pass regenerates the scores on the fly. <b>This is the classic activation-recomputation trade: spend a little extra compute to save a lot of memory.</b></figcaption>
+  </figure>
+
+  <h2>6. Implement it: tiled online-softmax attention</h2>
+  <p>The real FlashAttention is a fused CUDA kernel - one GPU program that does scores, softmax, and the value multiply without ever returning to HBM in between. We cannot write CUDA here, but we can write the <em>algorithm</em> in numpy so you can see that the tiled online-softmax version returns the exact same numbers as textbook attention. Run it: the two outputs match to floating-point precision.</p>
+
+  <div class="code-cap">flash_attention.py &middot; runnable with numpy</div>
+  <pre><code>import numpy as np
+
+def standard_attention(Q, K, V):
+    """Textbook attention: builds the full N x N score matrix."""
+    d = Q.shape[-1]
+    S = Q @ K.T / np.sqrt(d)                 # (N, N)  <- the big matrix
+    S = S - S.max(axis=-1, keepdims=True)    # stability: subtract row max
+    P = np.exp(S)
+    P = P / P.sum(axis=-1, keepdims=True)    # softmax
+    return P @ V                             # (N, d)
+
+def flash_attention(Q, K, V, block=16):
+    """Tiled + online softmax. Never forms the full N x N matrix."""
+    N, d = Q.shape
+    scale = 1.0 / np.sqrt(d)
+    O = np.zeros((N, d))
+    for i in range(0, N, block):                 # outer loop: query blocks
+        Qi = Q[i:i+block]                         # (b, d) - lives in "SRAM"
+        m = np.full((Qi.shape[0], 1), -np.inf)   # running max per query
+        l = np.zeros((Qi.shape[0], 1))           # running sum of exp
+        acc = np.zeros((Qi.shape[0], d))         # running weighted values
+        for j in range(0, N, block):             # inner loop: key/value blocks
+            Kj, Vj = K[j:j+block], V[j:j+block]
+            S = (Qi @ Kj.T) * scale              # (b, b) block scores only
+            m_new = np.maximum(m, S.max(axis=1, keepdims=True))
+            p = np.exp(S - m_new)                 # exponentials vs the new max
+            alpha = np.exp(m - m_new)             # correction for old totals
+            l = alpha * l + p.sum(axis=1, keepdims=True)
+            acc = alpha * acc + p @ Vj            # rescale old, add new
+            m = m_new                             # advance the running max
+        O[i:i+block] = acc / l                    # finish the softmax
+    return O
+
+np.random.seed(0)
+Q, K, V = (np.random.randn(64, 32) for _ in range(3))
+ref  = standard_attention(Q, K, V)
+flsh = flash_attention(Q, K, V, block=16)
+print("max abs difference:", np.abs(ref - flsh).max())   # ~1e-15: EXACT
+</code></pre>
+
+  <p>The two functions are numerically identical because online softmax is exact, not approximate. The difference on a GPU is <em>where</em> the work happens: <code>standard_attention</code> materialises <code>S</code> (the N&times;N matrix) in HBM; <code>flash_attention</code> only ever holds a small <code>(block, block)</code> tile plus three running vectors. A real kernel also fuses the inner loop into one launch and keeps everything in registers and shared memory.</p>
+
+  <div class="card callout"><span class="tag">In production</span>
+    You almost never call this directly. <code>torch.nn.functional.scaled_dot_product_attention(q, k, v)</code> dispatches to a fused FlashAttention kernel automatically when the shapes and dtypes qualify. Same math as Lesson 01, delivered with FlashAttention's IO discipline.</div>
+
+  <h2>7. What it bought</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Standard attention</th><th>FlashAttention</th></tr></thead>
+    <tbody>
+      <tr><td>Result</td><td>Exact softmax</td><td>Exact softmax (identical)</td></tr>
+      <tr><td>Extra memory for scores</td><td>O(N&sup2;) in HBM</td><td>O(N) running stats</td></tr>
+      <tr><td>HBM traffic</td><td>Many N&times;N passes</td><td>Roughly linear in N</td></tr>
+      <tr><td>Bottleneck</td><td>Memory movement</td><td>Actual matrix math</td></tr>
+      <tr><td>Backward pass</td><td>Stores the matrix</td><td>Recomputes the matrix</td></tr>
+    </tbody>
+  </table>
+  <p>Reported speedups: <strong>15%</strong> end-to-end on BERT-large (seq 512) over the MLPerf 1.1 record, <strong>3&times;</strong> on GPT-2 (seq 1K), and <strong>2.4&times;</strong> on Long-Range Arena (seq 1K-4K). The linear memory unlocked new context lengths, letting Transformers clear better-than-chance on Path-X (16K tokens) and Path-256 (64K tokens) for the first time.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does FlashAttention actually change about attention?</div>
+      <button class="q-opt">It approximates the softmax to cut the total number of flops</button>
+      <button class="q-opt">It replaces the softmax with a cheaper linear kernel function</button>
+      <button class="q-opt">It reorders the work to move far less data between memory tiers</button>
+      <button class="q-opt">It prunes low-scoring tokens so the matrix becomes much sparser</button>
+      <div class="q-fb">FlashAttention is exact. It is IO-aware: same math, but tiled so the N&times;N matrix never lands in slow HBM.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can attention be computed block by block despite softmax?</div>
+      <button class="q-opt">Because softmax over a block is close enough to the true value</button>
+      <button class="q-opt">Because a running max and running sum can be corrected online</button>
+      <button class="q-opt">Because the score matrix is symmetric so half the work repeats</button>
+      <button class="q-opt">Because the value vectors already sum to one before the softmax</button>
+      <div class="q-fb">Online softmax keeps a running max and sum, rescaling earlier partial results by a factor as each block arrives.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does the backward pass do instead of storing the matrix?</div>
+      <button class="q-opt">It recomputes the block scores using small saved statistics</button>
+      <button class="q-opt">It skips the gradient for attention and updates only the MLP</button>
+      <button class="q-opt">It compresses the score matrix into a low-rank approximation</button>
+      <button class="q-opt">It reads the score matrix back from the CPU main memory bank</button>
+      <div class="q-fb">Recomputation trades cheap on-chip math for expensive HBM storage, preserving the linear-memory win.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which pair correctly describes the GPU memory hierarchy here?</div>
+      <button class="q-opt">SRAM is large and slow, while HBM is small and very fast</button>
+      <button class="q-opt">SRAM and HBM are the same speed but live on different chips</button>
+      <button class="q-opt">HBM is on-chip cache, while SRAM is the off-chip main store</button>
+      <button class="q-opt">SRAM is small and fast, while HBM is large and much slower</button>
+      <div class="q-fb">On-chip SRAM is tiny but extremely fast; off-chip HBM is large but roughly ten times slower to reach.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>The <b>O(N&sup2;) grid</b> flagged in <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a> is exactly what FlashAttention refuses to store.</li>
+    <li><b>Next, <a href="0018-flashattention-2.html">FlashAttention-2</a></b> keeps the same idea but repartitions the work across the GPU for another ~2&times;.</li>
+    <li>FlashAttention shrinks the <em>attention compute</em>; <a href="0019-kv-cache-optimization.html">KV Cache Optimization</a> and <a href="0020-pagedattention-vllm.html">PagedAttention</a> shrink the <em>KV memory</em> at inference.</li>
+    <li>It pairs naturally with <a href="0015-multi-query-attention.html">MQA</a> and <a href="0016-grouped-query-attention.html">GQA</a>, which reduce how many K/V heads the kernel must stream.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The one idea to nail is online softmax. Ask the agent to trace the running max, sum, and accumulator through two blocks by hand and show they land on the same numbers as a full softmax. If the GPU memory tiers feel abstract, ask for the rough bandwidth of SRAM vs HBM and why one N&times;N write is so costly.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2205.14135">Dao et al., "FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness" (2022)</a>. Then read Tri Dao's <a href="https://github.com/Dao-AILab/flash-attention">flash-attention repository</a> and the accompanying blog notes for the kernel-level view, and revisit the online-softmax derivation in Milakov &amp; Gimelshein's "Online normalizer calculation for softmax".</p>
+
+  <div class="pager">
+    <a href="0016-grouped-query-attention.html"><span class="dir">&larr; Previous</span><span class="ttl">Grouped-Query Attention</span></a>
+    <a class="nxt" href="0018-flashattention-2.html"><span class="dir">Next &rarr;</span><span class="ttl">FlashAttention-2</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 17 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

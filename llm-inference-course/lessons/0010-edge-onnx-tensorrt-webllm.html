@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Edge Deployment: ONNX, TensorRT, WebLLM - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Edge and Deployment Targets &middot; Lesson 10</div>
+  <h1>Edge Deployment: ONNX, TensorRT, WebLLM</h1>
+  <p class="paper-meta">Not every model belongs on a central GPU server. Sometimes you compile it into a hardware-specific engine, ship it to a CPU or phone, or run it inside the user's browser. This lesson maps three edge targets and their build workflows, and the lab exports a small model to ONNX and runs it locally.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Edge means running the model off the central server: on an NVIDIA GPU appliance, on CPU/mobile, or in the browser.</li>
+      <li><b>TensorRT-LLM</b> compiles a model into a fused, hardware-specific engine for NVIDIA GPUs, with in-flight batching served via Triton.</li>
+      <li><b>ONNX Runtime</b> exports the model to a portable graph that runs cross-platform on CPU, mobile, and many accelerators.</li>
+      <li><b>WebLLM</b> runs a quantized model entirely in the browser via WebGPU, so no server or network round-trip is involved.</li>
+      <li>Each trades portability against peak speed. The lab exports to ONNX with one command and runs inference with ONNX Runtime.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Central serving is not always the answer. You may need the lowest possible latency on a fixed NVIDIA box, or you may need to run offline on a laptop CPU or a phone, or you may want to keep data on the user's device and pay nothing per token. Each of those pushes you to a different target with a different build workflow. Knowing which one fits saves you from forcing a browser model onto a datacentre GPU, or vice versa.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  M["trained model"] --> Q{"where does it run?"}
+  Q -->|"fixed NVIDIA GPU,<br/>max speed"| T["TensorRT-LLM engine<br/>compiled + fused"]
+  Q -->|"CPU / mobile,<br/>portable"| O["ONNX Runtime graph<br/>cross-platform"]
+  Q -->|"user's browser,<br/>private, no server"| W["WebLLM via WebGPU<br/>quantized in-tab"]
+  T --> S1["Triton server, in-flight batching"]
+  O --> S2["embed in app / device"]
+  W --> S3["ships as web assets"]
+    </div>
+    <figcaption>One model, three edge destinations. TensorRT-LLM compiles for a specific NVIDIA GPU and serves through Triton; ONNX Runtime produces a portable graph for CPU and mobile; WebLLM runs quantized weights in the browser. <b>The target dictates the build workflow, so pick the destination before you optimise.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    Edge targets trade portability for peak performance. A TensorRT-LLM engine is the fastest option but only on the exact GPU it was compiled for. ONNX runs almost anywhere but slower. WebLLM runs with zero infrastructure but is bounded by the user's browser and hardware. There is no universal best, only a best-for-this-constraint.</div>
+
+  <h2>2. TensorRT-LLM: compile an engine for the GPU</h2>
+  <p>TensorRT-LLM takes a model and <b>compiles</b> it into an optimized engine targeting a specific NVIDIA GPU generation. During the build it fuses kernels (merging many small operations into fewer big ones), selects the fastest implementation for each layer, and bakes in the chosen precision. The result is a serialized engine that runs faster than a general runtime but is tied to that hardware and shape. In production it is served through <b>Triton Inference Server</b>, which adds <b>in-flight batching</b> (the continuous-batching idea from Lesson 04) so many requests share the engine efficiently.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant HF as Model checkpoint
+  participant B as TensorRT-LLM build
+  participant E as Compiled engine
+  participant TR as Triton server
+  participant U as Requests
+  HF->>B: model + target GPU + precision
+  Note over B: fuse kernels, pick fastest layers,<br/>bake in FP16/FP8/INT4
+  B->>E: serialized engine (hardware-specific)
+  E->>TR: load into Triton backend
+  U->>TR: many concurrent requests
+  Note over TR: in-flight batching<br/>add/remove requests each step
+  TR-->>U: streamed tokens
+    </div>
+    <figcaption>The TensorRT-LLM workflow. You compile once against a target GPU and precision, producing a fused engine, then serve it through Triton with in-flight batching. <b>The compile step is where the speed comes from, and also why the engine is not portable: it is specialised for one GPU generation.</b></figcaption>
+  </figure>
+
+  <p>The modern path uses the TensorRT-LLM Python <b>LLM API</b> or <code>trtllm-serve</code>, which build the engine from a Hugging Face name for you. The older <code>convert_checkpoint.py</code> then <code>trtllm-build</code> then <code>run.py</code> sequence still exists but is considered legacy. Either way, the deliverable is a compiled engine plus a Triton config.</p>
+
+  <h2>3. ONNX Runtime: one portable graph, many devices</h2>
+  <p>ONNX (Open Neural Network Exchange) is a standard file format for a model's compute graph. You <b>export</b> your PyTorch model to an <code>.onnx</code> graph once, then run it with <b>ONNX Runtime</b>, which has execution providers for CPU, CUDA, DirectML, CoreML, and mobile NPUs. The same file runs on a server, a laptop, or a phone; ONNX Runtime picks the best available backend. It is slower than a hand-tuned TensorRT engine but wins on reach and simplicity.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  PT["PyTorch model"] -->|"optimum-cli export onnx"| G["model.onnx graph<br/>portable"]
+  G --> ORT["ONNX Runtime"]
+  ORT --> CPU["CPU provider"]
+  ORT --> GPU["CUDA / DirectML"]
+  ORT --> MOB["CoreML / mobile NPU"]
+    </div>
+    <figcaption>Export once, run many places. A single ONNX graph is consumed by ONNX Runtime, which routes it to whichever execution provider the device offers. <b>Portability is the point: you trade some peak speed for the ability to ship the identical model to CPU, GPU, and mobile.</b></figcaption>
+  </figure>
+
+  <h2>4. WebLLM: the model in the browser</h2>
+  <p>WebLLM runs a quantized model <b>entirely in the user's browser</b> using <b>WebGPU</b> for hardware acceleration. There is no server call and no token cost; the weights download once and inference happens in the tab. It exposes an OpenAI-style <code>chat.completions.create</code> API, so app code looks familiar. The tradeoffs are real: model size is limited by browser memory, the first load downloads hundreds of megabytes, and speed depends on the user's GPU. But for privacy-sensitive or offline-capable apps it is unbeatable, since data never leaves the device.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> FirstLoad
+  FirstLoad --> Cached: download quantized weights once
+  Cached --> Ready: compile shaders on WebGPU
+  Ready --> Inference: user types a prompt
+  Inference --> Ready: tokens generated on-device
+  Ready --> [*]: tab closed
+  note right of Inference
+    no server call, no token cost
+    data never leaves the device
+    speed bounded by user's GPU
+  end note
+    </div>
+    <figcaption>WebLLM's lifecycle in the browser. The weights download and compile once on WebGPU, then every prompt is served on-device with no network round-trip. <b>The privacy and zero-cost win is real, but the first-load download and the user's own GPU set the ceiling on model size and speed.</b></figcaption>
+  </figure>
+
+  <h2>5. Lab: export to ONNX and run it locally</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Export a small model to ONNX, run it with ONNX Runtime, and note the TensorRT-LLM and WebLLM paths</h4>
+    <p>You will export a small causal LM to ONNX with one command, load it with <code>ORTModelForCausalLM</code>, and generate text on CPU with no GPU required. Then you will see the TensorRT-LLM build flow and a WebLLM snippet so you can recognise all three when you meet them.</p>
+
+    <div class="code-cap">export a model to ONNX with optimum</div>
+    <div class="term">
+<span class="p">$</span> pip install "optimum[onnxruntime]" transformers
+<span class="c"># export a small instruct model to an ONNX graph (CPU-friendly)</span>
+<span class="p">$</span> optimum-cli export onnx \
+      --model HuggingFaceTB/SmolLM2-360M-Instruct \
+      --task text-generation \
+      onnx_smollm/
+<span class="o">Validating ONNX model onnx_smollm/model.onnx ...</span>
+<span class="o">All good, model saved at onnx_smollm/</span>
+<span class="c"># add --optimize O2 for graph fusions, or O4 for fp16 on GPU</span>
+    </div>
+
+    <div class="code-cap">run_onnx.py &middot; inference with ONNX Runtime on CPU</div>
+    <pre><code>from optimum.onnxruntime import ORTModelForCausalLM
+from transformers import AutoTokenizer
+import time
+
+model_dir = "onnx_smollm"
+tok = AutoTokenizer.from_pretrained(model_dir)
+model = ORTModelForCausalLM.from_pretrained(model_dir)   # loads the .onnx graph
+
+prompt = "Explain what an ONNX graph is, in one sentence."
+inputs = tok(prompt, return_tensors="pt")
+
+t0 = time.perf_counter()
+out = model.generate(**inputs, max_new_tokens=64)
+dt = time.perf_counter() - t0
+
+text = tok.decode(out[0], skip_special_tokens=True)
+n = out.shape[1] - inputs["input_ids"].shape[1]
+print(text)
+print(f"\n{n} tokens in {dt:.2f}s -> {n/dt:.1f} tok/s on CPU")</code></pre>
+
+    <p>Now the two paths you will not run here but should recognise. The TensorRT-LLM build compiles an engine for an NVIDIA GPU:</p>
+
+    <div class="code-cap">TensorRT-LLM: build an engine (modern LLM API path)</div>
+    <div class="term">
+<span class="p">$</span> pip install tensorrt-llm
+<span class="c"># modern path: the LLM API builds the engine from a HF name</span>
+<span class="p">$</span> python -c <span class="o">"from tensorrt_llm import LLM; \
+  llm = LLM(model='meta-llama/Llama-3.1-8B-Instruct'); \
+  print(llm.generate('Hello').outputs[0].text)"</span>
+<span class="c"># or serve it with in-flight batching:</span>
+<span class="p">$</span> trtllm-serve meta-llama/Llama-3.1-8B-Instruct
+<span class="c"># legacy path (still works): convert_checkpoint.py -> trtllm-build -> run.py</span>
+    </div>
+
+    <div class="code-cap">WebLLM: run a quantized model in the browser (WebGPU)</div>
+    <pre><code>// npm install @mlc-ai/web-llm  ; needs a WebGPU-capable browser
+import * as webllm from "@mlc-ai/web-llm";
+
+const engine = await webllm.CreateMLCEngine(
+  "Llama-3.1-8B-Instruct-q4f16_1-MLC",          // quantized, browser-ready build
+  { initProgressCallback: (p) =&gt; console.log(p.text) }   // weights download once
+);
+
+const reply = await engine.chat.completions.create({
+  messages: [{ role: "user", content: "Say hi in one sentence." }],
+});
+console.log(reply.choices[0].message.content);   // runs fully on-device, no server</code></pre>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">ONNX export</div><div class="v">1 command</div><div class="u">optimum-cli, portable graph out</div></div>
+      <div class="metric"><div class="k">ONNX run</div><div class="v">CPU ok</div><div class="u">no GPU needed for a small model</div></div>
+      <div class="metric"><div class="k">TensorRT-LLM</div><div class="v">fastest</div><div class="u">compiled per GPU, Triton batching</div></div>
+      <div class="metric"><div class="k">WebLLM</div><div class="v">on-device</div><div class="u">WebGPU, no server, no token cost</div></div>
+    </div>
+    <p class="kpi">The pass criterion: the ONNX export validates, and <code>run_onnx.py</code> generates coherent text on CPU with a printed tok/s. That number will be far below a datacentre GPU, which is exactly the portability-vs-speed tradeoff this lesson is about. If you have an NVIDIA GPU, try <code>--optimize O4</code> on export or the TensorRT-LLM path and compare.</p>
+  </div>
+
+  <h2>6. Comparison: choosing an edge target</h2>
+  <table>
+    <thead><tr><th>Target</th><th>Runs on</th><th>Build step</th><th>Speed</th><th>Best for</th></tr></thead>
+    <tbody>
+      <tr><td>TensorRT-LLM</td><td>NVIDIA GPU only</td><td>Compile an engine</td><td>Highest</td><td>Fixed GPU, lowest latency</td></tr>
+      <tr><td>ONNX Runtime</td><td>CPU, GPU, mobile</td><td>Export a graph</td><td>Moderate</td><td>Portable, offline apps</td></tr>
+      <tr><td>WebLLM</td><td>Browser (WebGPU)</td><td>Use MLC build</td><td>Device-bound</td><td>Private, zero-server apps</td></tr>
+      <tr><td>Central vLLM</td><td>Server GPU</td><td>None, just serve</td><td>High</td><td>Shared multi-user serving</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is a TensorRT-LLM engine the fastest but the least portable option?</div>
+      <button class="q-opt">It runs only in the browser, so it depends entirely on the user's WebGPU</button>
+      <button class="q-opt">It compiles fused kernels for one GPU generation, tying it to that hardware</button>
+      <button class="q-opt">It exports a standard graph that any runtime can load but only slowly</button>
+      <button class="q-opt">It keeps the model in full precision, so it needs far more memory to run</button>
+      <div class="q-fb">The build fuses kernels and picks the fastest layers for a specific NVIDIA GPU, which is where the speed comes from and why the engine is hardware-specific.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the main advantage of exporting to ONNX Runtime?</div>
+      <button class="q-opt">It always beats a compiled TensorRT engine on raw tokens per second</button>
+      <button class="q-opt">It removes the need to quantize the model before shipping it anywhere</button>
+      <button class="q-opt">It runs the model in the browser so no data ever leaves the device</button>
+      <button class="q-opt">It produces one portable graph that runs on CPU, GPU, and mobile</button>
+      <div class="q-fb">ONNX Runtime trades peak speed for reach: a single exported graph runs across CPU, GPU, and mobile execution providers.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What makes WebLLM distinctive among these targets?</div>
+      <button class="q-opt">It runs entirely in the browser via WebGPU with no server round-trip</button>
+      <button class="q-opt">It compiles a hardware-specific engine that only NVIDIA GPUs can execute</button>
+      <button class="q-opt">It exports a portable graph that CPU and mobile runtimes can both load</button>
+      <button class="q-opt">It serves many users at once through in-flight batching on a shared GPU</button>
+      <div class="q-fb">WebLLM runs a quantized model on-device in the browser using WebGPU, so there is no server, no network call, and no per-token cost.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does Triton add on top of a TensorRT-LLM engine?</div>
+      <button class="q-opt">It re-exports the compiled engine into a portable cross-platform ONNX graph</button>
+      <button class="q-opt">It quantizes the engine to four bits so it fits on smaller edge devices</button>
+      <button class="q-opt">It serves the engine with in-flight batching so many requests share it</button>
+      <button class="q-opt">It runs the engine inside the browser so users need no local install</button>
+      <div class="q-fb">Triton hosts the engine and adds in-flight (continuous) batching, letting many concurrent requests share the compiled engine efficiently.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can name three edge targets and the constraint each one fits</li>
+    <li>I can explain why a TensorRT-LLM engine is fast but hardware-specific</li>
+    <li>I can describe ONNX Runtime's export-once, run-anywhere tradeoff</li>
+    <li>I can say what WebLLM and WebGPU enable for on-device inference</li>
+    <li>I exported a model to ONNX and ran it with ONNX Runtime on CPU</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want help exporting your own model to ONNX with the right task and optimisation level, or standing up a Triton config for a TensorRT-LLM engine? Ask and we will walk the build for your target device.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://huggingface.co/docs/optimum-onnx/en/quickstart">Optimum ONNX quickstart</a> for the export and <code>ORTModelForCausalLM</code> usage above, the <a href="https://nvidia.github.io/TensorRT-LLM/quick-start-guide.html">TensorRT-LLM quick start</a> for the engine build and LLM API, and the <a href="https://webllm.mlc.ai/">WebLLM documentation</a> for the in-browser WebGPU runtime.</p>
+
+  <div class="pager">
+    <a href="0009-token-budgeting-per-request.html"><span class="dir">&larr; Prev</span><span class="ttl">A Token Budgeting System per User Request</span></a>
+    <a class="nxt" href="0011-kubernetes-for-ai-workloads.html"><span class="dir">Next &rarr;</span><span class="ttl">Kubernetes for AI Workloads: HPA and Autoscaling</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 10 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

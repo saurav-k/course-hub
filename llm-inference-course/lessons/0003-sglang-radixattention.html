@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SGLang and RadixAttention - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; High-Throughput Serving Engines &middot; Lesson 03</div>
+  <h1>SGLang and RadixAttention</h1>
+  <p class="paper-meta">SGLang is a serving engine built around one idea: automatically reuse KV cache across requests that share a prefix, using a radix tree. When your workload is full of shared system prompts, few-shot examples, agents, or multi-turn chat, that reuse is a big win over recomputing the same prefix again and again.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Launch it with <code>python -m sglang.launch_server --model-path &lt;model&gt; --port 30000</code>; it serves an OpenAI-compatible API on port <b>30000</b>.</li>
+      <li><b>RadixAttention</b> keeps every request's KV in a shared <b>radix tree</b> keyed by tokens, so any new request that starts with a cached prefix reuses that KV instead of recomputing it.</li>
+      <li>It is <b>on by default</b>; disable with <code>--disable-radix-cache</code>. Prefixes are evicted LRU when memory is tight.</li>
+      <li>SGLang shines when prefixes are heavily shared (agents, few-shot, multi-turn, batch eval). With little overlap, its edge over vLLM shrinks.</li>
+      <li>It also ships a structured-generation front end for constrained and multi-step programs.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Look at real traffic and you will see the same tokens over and over: a 1,000-token system prompt on every agent call, the same five few-shot examples on every classification, the whole conversation replayed each multi-turn step. A plain engine reprefills that shared prefix every time. RadixAttention prefills it once and lets every later request point at the cached KV, so repeated prefixes become nearly free.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph without["Without prefix reuse"]
+    w1["req 1: prefill 1000 shared + 20 new"]
+    w2["req 2: prefill 1000 shared + 20 new"]
+    w3["req 3: prefill 1000 shared + 20 new"]
+  end
+  subgraph with["With RadixAttention"]
+    x1["req 1: prefill 1000 shared + 20 new"]
+    x2["req 2: reuse 1000, prefill 20"]
+    x3["req 3: reuse 1000, prefill 20"]
+  end
+  without -->|"same GPU"| with
+    </div>
+    <figcaption>The shared-prefix tax. Without reuse, every request re-does the expensive 1,000-token prefill. <b>RadixAttention pays that cost once and reuses it, so requests 2 and 3 only prefill their short unique tails</b> - lower TTFT and more headroom for other work.</figcaption>
+  </figure>
+
+  <h2>2. RadixAttention: a radix tree of cached prefixes</h2>
+  <p>A radix tree is a compact prefix tree: shared token sequences share a path from the root, and paths branch only where requests diverge. SGLang stores KV against tree nodes, so a new request walks the tree matching its tokens and reuses the KV for the longest prefix already present, computing new KV only past the branch point.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  root["root"] --> sys["&#91;system prompt&#93;<br/>KV cached"]
+  sys --> a["...+ user Q1<br/>KV cached"]
+  sys --> b["...+ user Q2<br/>KV cached"]
+  a --> a1["+ few-shot set X"]
+  b --> b1["+ few-shot set Y"]
+    </div>
+    <figcaption>Cached prefixes as a tree. The shared system prompt is one path near the root that every branch reuses; requests split only where their tokens differ. <b>A new request reuses the deepest matching node and computes KV only for the part below it.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant R1 as Request 1
+  participant R2 as Request 2
+  participant T as Radix tree (KV)
+  R1->>T: insert &#91;system prompt&#93; + Q1
+  Note over T: full prefill, KV stored on path
+  R2->>T: lookup &#91;system prompt&#93; + Q2
+  T-->>R2: hit on &#91;system prompt&#93; KV
+  Note over R2: prefill only the Q2 tail
+    </div>
+    <figcaption>Two requests, one shared prefix. Request 1 populates the tree; request 2 matches the system-prompt path and skips straight to its own tail. <b>The second request's TTFT drops because most of its prefill was already done and cached.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Reuse vs eviction</span>
+    The tree is bounded by GPU memory. When it fills, SGLang evicts least-recently-used branches. Hot shared prefixes stay resident and keep hitting; cold one-off prefixes fall out. That is why steady, high-overlap traffic benefits most.</div>
+
+  <h2>3. When SGLang beats vLLM, and when it does not</h2>
+  <p>Both engines do paged KV and continuous batching. The differentiator is automatic cross-request prefix reuse. If your traffic reuses long prefixes, SGLang can cut prefill dramatically. If every request is unique, there is little to reuse and the two engines land close together, so you should pick on model support, features, and your own benchmarks.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  q{"Do requests share<br/>long prefixes?"}
+  q -->|"yes: agents, few-shot,<br/>multi-turn, batch eval"| s["SGLang<br/>RadixAttention reuse pays off"]
+  q -->|"no: mostly unique prompts"| v["vLLM or SGLang<br/>benchmark both, close call"]
+  s --> b["always measure on YOUR traffic"]
+  v --> b
+    </div>
+    <figcaption>A decision, not a religion. <b>Heavy prefix sharing points to SGLang; unique-prompt traffic is a toss-up you settle by benchmarking.</b> Neither engine is universally faster, so let your own workload decide.</figcaption>
+  </figure>
+
+  <h2>4. Lab: prove the prefix-cache benefit</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Launch SGLang and watch TTFT collapse on repeated shared-prefix requests</h4>
+    <p>You will serve a model, send a batch of requests that all start with the same long system prompt, and compare the first request's TTFT (cold, full prefill) against later ones (warm, prefix reused). The gap is RadixAttention working.</p>
+
+    <div class="code-cap">step 1 &middot; install and launch (needs an NVIDIA GPU)</div>
+    <div class="term">
+<span class="p">$</span> pip install "sglang[all]"
+<span class="p">$</span> python -m sglang.launch_server \
+    --model-path meta-llama/Meta-Llama-3-8B-Instruct \
+    --port 30000                    <span class="c"># RadixAttention is ON by default</span>
+<span class="o">[server] SGLang server started on http://0.0.0.0:30000</span>
+<span class="c"># to turn the cache off for an A/B: add --disable-radix-cache</span>
+    </div>
+
+    <div class="code-cap">step 2 &middot; confirm the OpenAI-compatible endpoint on :30000</div>
+    <div class="term">
+<span class="p">$</span> curl http://localhost:30000/v1/models
+<span class="o">{"object":"list","data":[{"id":"meta-llama/Meta-Llama-3-8B-Instruct",...}]}</span>
+    </div>
+
+    <div class="code-cap">step 3 &middot; measure cold vs warm TTFT on a shared prefix</div>
+    <pre><code>import time
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:30000/v1", api_key="none")
+MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
+
+SYSTEM = "You are a support agent. " * 200      # a long, SHARED prefix (~1k tokens)
+questions = ["Reset my password.", "Cancel my plan.", "Update my email.", "Add a seat."]
+
+def ttft(system, question):
+    t0 = time.perf_counter()
+    stream = client.chat.completions.create(
+        model=MODEL, stream=True,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user",   "content": question}],
+    )
+    for chunk in stream:
+        if chunk.choices[0].delta.content:
+            return (time.perf_counter() - t0) * 1000   # ms to first token
+
+for i, q in enumerate(questions):
+    tag = "cold (full prefill)" if i == 0 else "warm (prefix reused)"
+    print(f"req {i}  TTFT={ttft(SYSTEM, q):6.1f} ms   {tag}")</code></pre>
+
+    <div class="term">
+<span class="o">req 0  TTFT= 210.4 ms   cold (full prefill)</span>
+<span class="o">req 1  TTFT=  38.9 ms   warm (prefix reused)</span>
+<span class="o">req 2  TTFT=  37.2 ms   warm (prefix reused)</span>
+<span class="o">req 3  TTFT=  36.5 ms   warm (prefix reused)</span>
+    </div>
+
+    <p class="kpi">The first request pays the full shared-prefix prefill; every later request reuses that KV and its TTFT drops sharply. Rerun with <code>--disable-radix-cache</code> and every request looks like the cold one - that difference is the whole lesson.</p>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Endpoint</div><div class="v">:30000</div><div class="u">OpenAI-compatible /v1</div></div>
+      <div class="metric"><div class="k">Radix cache</div><div class="v">on</div><div class="u">default; LRU eviction</div></div>
+      <div class="metric"><div class="k">Cold TTFT</div><div class="v">~210 ms</div><div class="u">full prefix prefill</div></div>
+      <div class="metric"><div class="k">Warm TTFT</div><div class="v">~38 ms</div><div class="u">prefix reused</div></div>
+    </div>
+  </div>
+
+  <h2>5. SGLang vs vLLM at a glance</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>SGLang</th><th>vLLM</th><th>Practical read</th></tr></thead>
+    <tbody>
+      <tr><td>Cross-request prefix reuse</td><td>RadixAttention, automatic</td><td>Prefix caching, opt-in flag</td><td>SGLang leans harder into reuse</td></tr>
+      <tr><td>Paged KV + continuous batching</td><td>Yes</td><td>Yes</td><td>Table stakes on both</td></tr>
+      <tr><td>Best-fit workload</td><td>Shared prefixes, agents, multi-turn</td><td>Broad, mixed, unique prompts</td><td>Match engine to traffic shape</td></tr>
+      <tr><td>Structured generation</td><td>Built-in front-end language</td><td>Via guided decoding options</td><td>SGLang if you script programs</td></tr>
+      <tr><td>Default port</td><td>30000</td><td>8000</td><td>Both OpenAI-compatible</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does RadixAttention reuse across separate requests?</div>
+      <button class="q-opt">The sampled output tokens, so identical prompts skip decoding entirely</button>
+      <button class="q-opt">The KV cache for any shared prefix, keyed by tokens in a radix tree</button>
+      <button class="q-opt">The model weights, so a second request avoids reloading them again</button>
+      <button class="q-opt">The tokenizer vocabulary, so repeated prompts are encoded only once</button>
+      <div class="q-fb">Cached KV for shared prefixes lives in a radix tree; a matching request reuses it instead of recomputing.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which workload benefits most from SGLang's prefix reuse?</div>
+      <button class="q-opt">Single one-off prompts that never repeat any tokens between requests</button>
+      <button class="q-opt">Short prompts with very long outputs and no shared instruction text</button>
+      <button class="q-opt">Agents and multi-turn chats that repeat a long shared system prompt</button>
+      <button class="q-opt">Embedding jobs that encode documents without generating any tokens</button>
+      <div class="q-fb">Heavy prefix overlap (agents, few-shot, multi-turn) is exactly where reuse pays off most.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How is RadixAttention configured at launch in SGLang?</div>
+      <button class="q-opt">It is on by default and can be turned off with --disable-radix-cache</button>
+      <button class="q-opt">It is off by default and must be turned on with --enable-radix-cache</button>
+      <button class="q-opt">It is on only when the flag --tensor-parallel-size is set above one</button>
+      <button class="q-opt">It is off unless the client sends a special cache header on each call</button>
+      <div class="q-fb">RadixAttention is enabled by default; you disable it with --disable-radix-cache for an A/B.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What happens to cached prefixes when the radix tree runs out of memory?</div>
+      <button class="q-opt">The server rejects new requests until an operator clears the cache</button>
+      <button class="q-opt">All cached prefixes are dropped at once and every request goes cold</button>
+      <button class="q-opt">The model is requantized on the fly to free space for more prefixes</button>
+      <button class="q-opt">Least-recently-used branches are evicted while hot prefixes stay put</button>
+      <div class="q-fb">Eviction is LRU, so frequently used shared prefixes remain resident and keep hitting.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can launch SGLang with <code>sglang.launch_server</code> on port 30000</li>
+    <li>I can explain RadixAttention as a radix tree of cached KV prefixes</li>
+    <li>I can measure cold vs warm TTFT to show prefix reuse working</li>
+    <li>I can toggle the cache with <code>--disable-radix-cache</code> for an A/B</li>
+    <li>I can say when SGLang beats vLLM and when it is a toss-up</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want me to help you A/B SGLang against vLLM on your own traffic, or estimate how much prefix overlap you actually have before committing to an engine? Share a sample of your prompts and we will measure it.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.sglang.ai/">SGLang documentation</a> and the RadixAttention section of the <a href="https://arxiv.org/abs/2312.07104">SGLang paper</a> for the tree structure and eviction policy in detail.</p>
+
+  <div class="pager">
+    <a href="0002-vllm-paged-attention-serving.html"><span class="dir">&larr; Prev</span><span class="ttl">vLLM and PagedAttention Serving</span></a>
+    <a class="nxt" href="0004-continuous-batching-queueing.html"><span class="dir">Next &rarr;</span><span class="ttl">Continuous Batching and Request Queue Management</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 03 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

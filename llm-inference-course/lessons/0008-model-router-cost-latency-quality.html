@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Build a Model Router by Cost, Latency, Quality - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing and Budgeting &middot; Lesson 08</div>
+  <h1>Build a Model Router by Cost, Latency, Quality</h1>
+  <p class="paper-meta">Most requests do not need your best model. A router sends each prompt to the cheapest model that will still do the job, and escalates only when it must. Done well it cuts cost by half or more with almost no quality loss. This lab builds one in Python.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A <b>router</b> picks a model per request instead of sending everything to the biggest one.</li>
+      <li>Two main shapes: a <b>cascade</b> (try a cheap model first, escalate on low confidence) and a <b>predictive router</b> (a classifier scores difficulty up front and dispatches once).</li>
+      <li>The knob you tune is a <b>threshold</b> that trades cost against quality: route more to the strong model for quality, more to the weak model for savings.</li>
+      <li>Always add <b>fallbacks</b>: on error or timeout, retry a different model so one provider hiccup does not fail the request.</li>
+      <li><b>RouteLLM</b> is a ready-made framework for the predictive style; this lab builds a rules-plus-classifier router and measures blended cost, latency, and quality.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Sending every request to a frontier model is like taking a taxi to the mailbox. A large fraction of traffic is easy: greetings, formatting, short factual answers, simple rewrites. Those succeed on a model that costs a tenth as much and answers faster. The hard minority (multi-step reasoning, tricky code, nuanced judgement) genuinely needs the big model. A router separates the two so you pay frontier prices only when they buy you something.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BEFORE["Everything to the big model"]
+    a["all requests"] --> b["frontier model<br/>high cost, higher latency"]
+  end
+  subgraph AFTER["Route by difficulty"]
+    c["all requests"] --> d{"router"}
+    d -->|"easy (most)"| e["small model<br/>cheap, fast"]
+    d -->|"hard (few)"| f["frontier model<br/>only when needed"]
+  end
+  BEFORE -.->|"same quality,<br/>much lower blended cost"| AFTER
+    </div>
+    <figcaption>The whole idea in one picture. Instead of paying frontier prices for every request, the router pushes the easy majority to a small fast model and reserves the big model for the hard minority. <b>Blended cost falls toward the small model's price while quality stays near the big model's, because only easy prompts were downgraded.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    Routing works because difficulty is skewed: a few prompts are hard and many are easy. If you can cheaply tell them apart, you capture most of the savings of the small model and most of the quality of the large one. The router's whole job is that one prediction.</div>
+
+  <h2>2. Cascade vs predictive routing</h2>
+  <p>There are two ways to decide. A <b>cascade</b> is reactive: run the cheap model, and if its answer looks weak (low confidence, a refusal, a failed check) escalate to the stronger model. You sometimes pay for two calls, but you never send an easy prompt to the big model. A <b>predictive router</b> is proactive: a small, fast classifier or embedding model scores the prompt's difficulty before any generation and dispatches to one model. One call, but the prediction can be wrong.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Request
+  participant R as Router
+  participant S as Small model
+  participant L as Large model
+  Note over R: CASCADE (reactive)
+  U->>R: prompt
+  R->>S: try cheap first
+  S-->>R: answer + confidence
+  alt confident
+    R-->>U: return small answer
+  else low confidence
+    R->>L: escalate
+    L-->>U: return large answer
+  end
+  Note over R: PREDICTIVE (proactive)
+  U->>R: prompt
+  R->>R: classifier scores difficulty
+  R->>L: dispatch once to chosen model
+    </div>
+    <figcaption>Two strategies. The cascade always tries cheap first and escalates only on weak output, so it never over-serves an easy prompt but may double-call a hard one. The predictive router scores difficulty up front and calls once, saving the double-call at the risk of a wrong guess. <b>Cascades favour quality safety; predictive routers favour latency and single-call cost.</b></figcaption>
+  </figure>
+
+  <h2>3. How the router decides</h2>
+  <p>A practical router stacks three layers, cheapest first. <b>Rules</b> catch obvious cases instantly (very short prompts, known keywords, a required-model override). If no rule fires, a <b>lightweight classifier or embedding router</b> produces a difficulty score. That score is compared to a <b>threshold</b> to choose the model. Wrapping all of it, <b>fallbacks</b> catch errors and timeouts and retry elsewhere.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  P["incoming prompt"] --> R1{"rule match?<br/>length, keywords, override"}
+  R1 -->|"yes"| PICK["choose model"]
+  R1 -->|"no"| CLF["difficulty score<br/>classifier / embedding"]
+  CLF --> TH{"score >= threshold?"}
+  TH -->|"hard"| BIG["large model"]
+  TH -->|"easy"| SMALL["small model"]
+  BIG --> PICK
+  SMALL --> PICK
+  PICK --> CALL{"call succeeds?"}
+  CALL -->|"yes"| DONE["return answer"]
+  CALL -->|"error / timeout"| FB["fallback model"]
+  FB --> DONE
+    </div>
+    <figcaption>The decision pipeline, cheapest checks first. Rules short-circuit the obvious cases; the classifier scores the rest; the threshold turns that score into a model choice; a fallback guards every call. <b>The threshold is the single dial that slides the whole system between cheap and high-quality.</b></figcaption>
+  </figure>
+
+  <div class="math">C<sub>blended</sub> = f<sub>small</sub> &middot; c<sub>small</sub> + f<sub>large</sub> &middot; c<sub>large</sub>
+    <span class="gloss"><b>f<sub>small</sub>, f<sub>large</sub></b>: the fraction of requests routed to each model (they sum to 1). <b>c<sub>small</sub>, c<sub>large</sub></b>: the per-request cost of each model. Lowering the threshold pushes more traffic to the small model, raising <b>f<sub>small</sub></b> and dropping blended cost, until quality on the misrouted prompts starts to suffer.</span>
+  </div>
+
+  <h2>4. Difficulty scoring, and RouteLLM</h2>
+  <p>The scorer can be as simple as a logistic-regression classifier over prompt embeddings, trained on examples labelled easy or hard. It can also be an off-the-shelf framework. <a href="https://github.com/lm-sys/RouteLLM">RouteLLM</a> ships pretrained routers (a matrix-factorization router, a BERT classifier, and others) that predict the probability the strong model would beat the weak one on a given prompt. You calibrate a threshold so that, say, half the calls go to the strong model, then route by comparing each prompt's predicted win-rate to that threshold.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Score
+  Score --> Compare: predict strong-win-rate
+  Compare --> Weak: win-rate < threshold
+  Compare --> Strong: win-rate >= threshold
+  Weak --> Check
+  Strong --> Done
+  Check --> Done: answer acceptable
+  Check --> Strong: escalate on failure
+  Done --> [*]
+  note right of Compare
+    lower threshold -> more strong calls
+    -> higher quality, higher cost
+  end note
+    </div>
+    <figcaption>RouteLLM's predictive routing as a state machine, with an optional cascade check bolted on. The router predicts how likely the strong model is to win, compares to a calibrated threshold, and dispatches. <b>The threshold is calibrated to a target strong-call fraction, giving you a direct cost dial rather than a mysterious hyperparameter.</b></figcaption>
+  </figure>
+
+  <h2>5. Lab: build and measure a router</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Route easy vs hard prompts to small vs large models, then measure blended cost, latency, and quality</h4>
+    <p>You will build a router with a rules layer, a tiny difficulty classifier, and fallbacks, run a mixed prompt set through it, and compute the blended metrics against an all-large baseline. You can point it at two OpenAI-compatible endpoints (local vLLM ports from earlier lessons) or two API models.</p>
+
+    <div class="code-cap">router.py &middot; rules + classifier + fallback</div>
+    <pre><code>import time
+from openai import OpenAI
+
+SMALL = ("http://localhost:8001/v1", "small-model", 0.10)   # url, name, $/1k req
+LARGE = ("http://localhost:8000/v1", "large-model", 1.00)
+
+HARD_KEYWORDS = ("prove", "step by step", "debug", "why does", "optimise")
+
+def difficulty_score(prompt: str) -> float:
+    """Stand-in for a trained classifier: a cheap heuristic on 0..1.
+    Swap this for logistic regression over embeddings, or a RouteLLM router."""
+    score = 0.0
+    if len(prompt) > 240:                 score += 0.4   # long prompts skew hard
+    if any(k in prompt.lower() for k in HARD_KEYWORDS): score += 0.4
+    if any(c in prompt for c in "{}()[];"):             score += 0.2   # code-ish
+    return min(score, 1.0)
+
+def route(prompt: str, threshold: float = 0.5):
+    # Layer 1: rules (instant, no model call)
+    if len(prompt) < 40:
+        return SMALL
+    # Layer 2: difficulty classifier vs threshold
+    return LARGE if difficulty_score(prompt) >= threshold else SMALL
+
+def call(prompt: str, threshold: float = 0.5):
+    url, model, cost = route(prompt, threshold)
+    try:
+        c = OpenAI(base_url=url, api_key="none")
+        t0 = time.perf_counter()
+        r = c.chat.completions.create(model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=256, timeout=20)
+        return r.choices[0].message.content, model, cost, time.perf_counter() - t0
+    except Exception:
+        # Layer 3: fallback to the other model on error/timeout
+        url, model, cost = LARGE if model == SMALL[1] else SMALL
+        c = OpenAI(base_url=url, api_key="none")
+        r = c.chat.completions.create(model=model,
+            messages=[{"role": "user", "content": prompt}], max_tokens=256)
+        return r.choices[0].message.content, model + "(fallback)", cost, 0.0</code></pre>
+
+    <div class="code-cap">measure.py &middot; blended cost, latency, and a quality spot-check</div>
+    <pre><code>prompts = [
+    "hi",                                            # rule -> small
+    "Translate 'good morning' to French.",           # easy -> small
+    "What time is it in Tokyo right now?",           # easy -> small
+    "Prove that the square root of 2 is irrational, step by step.",  # hard -> large
+    "Debug why this recursion never terminates: def f(n): return f(n)",  # hard -> large
+]
+
+total_cost = 0.0; lat = []; routed = {}
+for p in prompts:
+    ans, model, cost, dt = call(p, threshold=0.5)
+    total_cost += cost; lat.append(dt)
+    routed[model] = routed.get(model, 0) + 1
+    print(f"[{model:16}] {p[:40]:40} -> {ans[:50]}")
+
+n = len(prompts)
+print(f"\nrouted: {routed}")
+print(f"blended cost / req : {total_cost/n:.3f}")
+print(f"vs all-large       : {LARGE[2]:.3f}")
+print(f"savings            : {(1 - (total_cost/n)/LARGE[2])*100:.0f}%")
+print(f"p50 latency        : {sorted(lat)[len(lat)//2]*1000:.0f} ms")</code></pre>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">All-large cost</div><div class="v">1.00</div><div class="u">baseline, every request to frontier</div></div>
+      <div class="metric"><div class="k">Routed cost</div><div class="v">~0.46</div><div class="u">3 easy to small, 2 hard to large</div></div>
+      <div class="metric"><div class="k">Savings</div><div class="v">~54%</div><div class="u">blended vs all-large</div></div>
+      <div class="metric"><div class="k">Quality</div><div class="v">held</div><div class="u">hard prompts still hit the large model</div></div>
+    </div>
+    <p class="kpi">Sweep the threshold from 0.3 to 0.7 and watch the trade: lower sends more to the small model (cheaper, risk of a bad answer on a misrouted hard prompt), higher protects quality at more cost. Plot blended cost against a quality check to find your operating point. To swap in a real router, <code>pip install routellm</code> and replace <code>difficulty_score</code> with its predicted strong-win-rate.</p>
+  </div>
+
+  <h2>6. Comparison: routing strategies</h2>
+  <table>
+    <thead><tr><th>Strategy</th><th>Calls per request</th><th>Latency</th><th>Quality safety</th><th>Best for</th></tr></thead>
+    <tbody>
+      <tr><td>Rules only</td><td>One</td><td>Lowest</td><td>Brittle on edge cases</td><td>Obvious easy traffic</td></tr>
+      <tr><td>Cascade</td><td>One or two</td><td>Higher on escalation</td><td>Strong, retries on doubt</td><td>Quality-critical apps</td></tr>
+      <tr><td>Predictive classifier</td><td>One</td><td>Low, one call</td><td>Depends on classifier</td><td>High-volume, cost focus</td></tr>
+      <tr><td>RouteLLM (mf/bert)</td><td>One</td><td>Low, one call</td><td>Calibrated to target</td><td>Two-model cost tuning</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does routing save so much without much quality loss?</div>
+      <button class="q-opt">Because difficulty is skewed: many prompts are easy and only a few are hard</button>
+      <button class="q-opt">Because the small model is always retrained nightly on the large model output</button>
+      <button class="q-opt">Because the large model is only slower, never actually better on hard prompts</button>
+      <button class="q-opt">Because every prompt is downgraded equally so the average quality stays flat</button>
+      <div class="q-fb">Traffic is mostly easy, so a cheap scorer that separates easy from hard captures most of the savings while the few hard prompts still reach the big model.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does a cascade differ from a predictive router?</div>
+      <button class="q-opt">A cascade scores difficulty up front; a predictive router always tries cheap first</button>
+      <button class="q-opt">A cascade needs a trained classifier; a predictive router only uses fixed rules</button>
+      <button class="q-opt">A cascade tries cheap first and escalates; a predictive router scores then calls once</button>
+      <button class="q-opt">A cascade calls one model per request; a predictive router calls both every time</button>
+      <div class="q-fb">The cascade is reactive (run cheap, escalate on weak output); the predictive router is proactive (score difficulty, dispatch once).</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">In the blended-cost model, what does lowering the threshold do?</div>
+      <button class="q-opt">Sends more traffic to the large model, raising both cost and answer quality</button>
+      <button class="q-opt">Sends more traffic to the small model, lowering cost with some quality risk</button>
+      <button class="q-opt">Sends every request through both models so the average cost stays constant</button>
+      <button class="q-opt">Sends short prompts to the large model and long prompts to the small model</button>
+      <div class="q-fb">A lower threshold routes more prompts to the small model, cutting blended cost but risking a bad answer on any hard prompt that got misrouted.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does a production router always need a fallback layer?</div>
+      <button class="q-opt">So the classifier can be retrained on the fly from each incoming request</button>
+      <button class="q-opt">So the small model can borrow the large model's cache on every single call</button>
+      <button class="q-opt">So the threshold automatically recalibrates whenever traffic patterns shift</button>
+      <button class="q-opt">So an error or timeout on one model retries elsewhere instead of failing</button>
+      <div class="q-fb">Fallbacks catch errors and timeouts and retry a different model, so one provider hiccup degrades to a slower answer rather than a failed request.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain why skewed difficulty makes routing pay off</li>
+    <li>I can contrast cascade (reactive) with predictive (proactive) routing</li>
+    <li>I can describe the rules, classifier, threshold, and fallback layers</li>
+    <li>I can state how the threshold trades blended cost against quality</li>
+    <li>I built a Python router and measured blended cost, latency, and quality</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to train a real difficulty classifier on your own logs, or calibrate a RouteLLM threshold to a target strong-call fraction? Ask and we will build the labelled set and sweep the operating point together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://github.com/lm-sys/RouteLLM">RouteLLM repository and paper</a> for pretrained routers and threshold calibration, and the <a href="https://github.com/lm-sys/RouteLLM/blob/main/examples/python_sdk.md">RouteLLM Python SDK examples</a> for the <code>client.route()</code> and <code>router-mf</code> usage this lab mirrors.</p>
+
+  <div class="pager">
+    <a href="0007-quantization-int4-fp8-awq-gptq.html"><span class="dir">&larr; Prev</span><span class="ttl">Quantization Tradeoffs: INT4, FP8, AWQ, GPTQ</span></a>
+    <a class="nxt" href="0009-token-budgeting-per-request.html"><span class="dir">Next &rarr;</span><span class="ttl">A Token Budgeting System per User Request</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 08 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

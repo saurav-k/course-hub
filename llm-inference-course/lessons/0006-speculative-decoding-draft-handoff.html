@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speculative Decoding and Draft Model Handoffs - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; High-Throughput Serving Engines &middot; Lesson 06</div>
+  <h1>Speculative Decoding and Draft Model Handoffs</h1>
+  <p class="paper-meta">Decode is memory-bound: the GPU spends most of a token step waiting on memory, not doing math. Speculative decoding fills that idle compute by guessing several tokens ahead with a cheap model and verifying them in a single target pass. Same output distribution, fewer expensive steps.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A small <b>draft model</b> proposes <b>K</b> tokens cheaply; the big <b>target model</b> verifies all K in <b>one</b> forward pass instead of K passes.</li>
+      <li>An <b>accept/reject</b> rule keeps only the tokens the target would have produced anyway, so the output distribution is <b>provably identical</b> to plain decoding.</li>
+      <li>Speedup is driven by the <b>acceptance rate</b>: a draft that agrees with the target often wins big; a poor draft can be slower than baseline.</li>
+      <li><b>Self-speculation</b> (Medusa, EAGLE) and <b>n-gram / prompt-lookup</b> drafting remove the separate draft model entirely.</li>
+      <li>In vLLM you turn it on with one flag: <code>--speculative-config</code>. This lab measures tokens/s and acceptance versus a baseline.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>In the decode phase, each new token requires re-reading the entire model weights from GPU memory to compute exactly one token. The arithmetic is tiny relative to the bytes moved, so the compute units sit idle waiting on memory bandwidth. That idle compute is free real estate. Speculative decoding trades a little extra math (checking K guesses at once) for far fewer of those expensive memory-bound steps. When the guesses are good, you get the same text two to three times faster.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BASE["Plain decode: K target passes for K tokens"]
+    b1["target pass 1<br/>1 token"] --> b2["target pass 2<br/>1 token"] --> b3["target pass 3<br/>1 token"] --> b4["... K passes"]
+  end
+  subgraph SPEC["Speculative: 1 cheap draft burst + 1 target verify"]
+    s1["draft proposes<br/>K tokens (cheap)"] --> s2["target verifies<br/>all K in ONE pass"] --> s3["accept a prefix,<br/>keep going"]
+  end
+  BASE -.->|"same output,<br/>fewer big passes"| SPEC
+    </div>
+    <figcaption>The core swap. Plain decoding pays one full target forward pass per token. Speculative decoding replaces a run of them with one cheap draft burst plus a single target verification pass. <b>The win comes from amortising the expensive memory-bound target pass over several tokens at once.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    Verifying K tokens costs almost the same as generating 1, because the target pass is memory-bound: reading the weights dominates, and it reads them once whether it scores 1 position or K. So if the draft is right most of the time, you get several tokens for the price of one target pass.</div>
+
+  <h2>2. Draft, verify, accept: the mechanism</h2>
+  <p>The loop has three moves. The draft model autoregressively generates K candidate tokens. The target model then runs one forward pass over the prompt plus those K candidates, producing its own probability for each position in parallel. Finally the accept/reject step walks left to right: it keeps a candidate if a random draw is under the ratio of target to draft probability, and stops at the first rejection, resampling that one token from a corrected distribution.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant D as Draft model (small)
+  participant T as Target model (large)
+  participant A as Accept/reject
+  Note over D: propose K=4 tokens autoregressively
+  D->>T: candidates [t1 t2 t3 t4]
+  Note over T: ONE forward pass<br/>scores all 4 positions in parallel
+  T->>A: target probs for each position
+  Note over A: walk left to right,<br/>accept while draw < p_target / p_draft
+  A-->>D: accepted [t1 t2], t3 rejected -> resample from corrected dist
+  Note over D,T: net: 3 tokens committed from 1 target pass, loop again
+    </div>
+    <figcaption>One speculative round. The draft proposes a short run, the target scores every position in a single pass, and the accept step commits the longest correct prefix then resamples the first wrong token. <b>Because rejection resamples from a corrected distribution, the committed text is distributed exactly as if the target had generated it alone.</b></figcaption>
+  </figure>
+
+  <p>That last property is what makes speculative decoding safe to turn on in production: it is not an approximation. The math guarantees the sampled output has the same distribution as standard decoding from the target model. You are only changing <em>how fast</em> you reach those tokens, never <em>which</em> tokens are statistically possible.</p>
+
+  <div class="math">tokens_per_round &approx; (1 &minus; &alpha;<sup>K+1</sup>) / (1 &minus; &alpha;)
+    <span class="gloss"><b>&alpha;</b>: acceptance rate, the probability the target accepts a given draft token. <b>K</b>: how many tokens the draft proposes per round. As <b>&alpha;</b> approaches 1 you commit close to K+1 tokens per single target pass; as <b>&alpha;</b> drops toward 0 you commit about 1 and gain nothing while paying the draft overhead.</span>
+  </div>
+
+  <h2>3. Acceptance rate is the whole game</h2>
+  <p>Every design choice reduces to one number: how often the target accepts the draft. A draft model that is a smaller sibling of the target (same family, same tokenizer, similar training data) agrees often, so acceptance is high. A mismatched or too-weak draft agrees rarely, and you spend real time drafting tokens that get thrown away. There is also a cost floor: the draft itself takes time, so a slow draft eats the savings even when acceptance is decent.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Verify: propose K tokens
+  Verify --> Accept: target scores all K
+  Accept --> Commit: prefix matched
+  Accept --> Resample: first mismatch
+  Resample --> Commit: fix one token
+  Commit --> Draft: high acceptance -> big speedup
+  Commit --> [*]: sequence done
+  note right of Accept
+    high alpha: commit many, big win
+    low alpha: commit ~1, draft was wasted
+  end note
+    </div>
+    <figcaption>The speculative state machine, annotated with the economics. Every path returns to Draft, but how many tokens you commit before looping depends on acceptance. <b>Tuning speculative decoding means maximising acceptance rate per unit of draft time, not just picking a bigger K.</b></figcaption>
+  </figure>
+
+  <h2>4. Four ways to produce the draft</h2>
+  <p>You do not always need a second model. The draft can come from a separate small model, from extra prediction heads bolted onto the target, or from cheap string matching over the text you already have.</p>
+
+  <div class="metric-grid">
+    <div class="metric"><div class="k">Draft model</div><div class="v">Small sibling</div><div class="u">e.g. 1B drafts for a 70B target, same family</div></div>
+    <div class="metric"><div class="k">Medusa</div><div class="v">Extra heads</div><div class="u">predict several future tokens from one model</div></div>
+    <div class="metric"><div class="k">EAGLE / EAGLE-3</div><div class="v">Feature draft</div><div class="u">drafts in feature space, high acceptance</div></div>
+    <div class="metric"><div class="k">N-gram</div><div class="v">Prompt lookup</div><div class="u">copies repeated spans, zero model weights</div></div>
+  </div>
+
+  <p><b>Self-speculation</b> (Medusa and EAGLE) is attractive because there is no second model to load, schedule, or keep in sync. Medusa adds lightweight heads that each predict a token a few steps ahead; EAGLE drafts in the target's own feature space and tends to hit higher acceptance, with EAGLE-3 pushing it further. <b>N-gram / prompt-lookup</b> decoding is the cheapest of all: when the output is likely to repeat text from the prompt (summarisation, code edits, RAG with quotation), it just proposes the next span it already saw. No weights, no training, and often a solid win on repetitive workloads.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q{"What draft source fits<br/>your workload?"}
+  Q -->|"have a small sibling model"| DM["Draft model<br/>flexible, needs matching tokenizer"]
+  Q -->|"want one model, no extra weights"| SS["Self-speculation<br/>Medusa heads / EAGLE features"]
+  Q -->|"output repeats the input a lot"| NG["N-gram / prompt-lookup<br/>free, great for summaries & code"]
+  DM --> M["measure acceptance<br/>+ tokens/s vs baseline"]
+  SS --> M
+  NG --> M
+    </div>
+    <figcaption>Choosing a draft source. A separate draft model is the most general but needs a compatible tokenizer and GPU room. Self-speculation avoids a second model. N-gram lookup is free and wins on repetitive text. <b>Whichever you pick, the only honest test is measured acceptance and tokens/s on your real traffic.</b></figcaption>
+  </figure>
+
+  <h2>5. Lab: turn it on and measure the win</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Compare tokens/s and acceptance rate: baseline vs speculative</h4>
+    <p>You will start a vLLM server twice, once plain and once with n-gram speculative decoding, and measure throughput on a repetitive prompt where lookup drafting shines. If you have no GPU, skip to the pure-Python accept/reject simulator below, which reproduces the same accounting on CPU.</p>
+
+    <div class="code-cap">install and launch a baseline vLLM server</div>
+    <div class="term">
+<span class="c"># vLLM 0.6.3+ ; a recent build uses the V1 engine where spec decode lives</span>
+<span class="p">$</span> pip install "vllm&gt;=0.6.3"
+<span class="p">$</span> vllm serve meta-llama/Llama-3.1-8B-Instruct \
+      --port 8000
+<span class="o">INFO  Started server process ; Uvicorn running on http://0.0.0.0:8000</span>
+    </div>
+
+    <p>Now stop it and relaunch with n-gram speculative decoding. The config is a single JSON blob. <code>num_speculative_tokens</code> is K; <code>prompt_lookup_min/max</code> bound the n-gram length matched against the running text.</p>
+
+    <div class="code-cap">launch with n-gram (prompt-lookup) speculative decoding</div>
+    <div class="term">
+<span class="p">$</span> vllm serve meta-llama/Llama-3.1-8B-Instruct \
+      --port 8000 \
+      --speculative-config <span class="o">'{"method":"ngram",
+        "num_speculative_tokens":4,
+        "prompt_lookup_min":2,
+        "prompt_lookup_max":5}'</span>
+<span class="c"># For a draft model instead of n-gram:</span>
+<span class="c">#   --speculative-config '{"model":"meta-llama/Llama-3.2-1B-Instruct","num_speculative_tokens":5}'</span>
+<span class="c"># For EAGLE self-speculation:</span>
+<span class="c">#   --speculative-config '{"method":"eagle","model":"yuhuili/EAGLE-LLaMA3.1-Instruct-8B","num_speculative_tokens":5}'</span>
+    </div>
+
+    <p>Hit both servers with the same summarisation-style prompt (lots of quotable text) and time the stream. Reuse the streaming timer from Lesson 00, or the minimal loop below.</p>
+
+    <div class="code-cap">bench.py &middot; measure tokens/s against an OpenAI-compatible endpoint</div>
+    <pre><code>import time
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="none")
+prompt = "Summarise this passage, quoting key phrases verbatim:\n" + open("article.txt").read()
+
+t0 = time.perf_counter(); n = 0
+stream = client.chat.completions.create(
+    model="meta-llama/Llama-3.1-8B-Instruct",
+    messages=[{"role": "user", "content": prompt}],
+    max_tokens=400, stream=True,
+)
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        n += 1
+dt = time.perf_counter() - t0
+print(f"{n} tokens in {dt:.2f}s -> {n/dt:6.1f} tok/s")</code></pre>
+
+    <p class="kpi">vLLM logs an acceptance rate for speculative runs (look for the spec-decode metrics line, or query the <code>/metrics</code> endpoint). Record tok/s for both servers and the acceptance rate for the speculative one.</p>
+
+    <div class="code-cap">spec_sim.py &middot; no-GPU accept/reject simulator (shows the accounting)</div>
+    <pre><code>import random
+
+def speculative_round(alpha, K):
+    """Return tokens committed in one round given acceptance prob alpha
+    and K drafted tokens. Mirrors the left-to-right accept/reject rule."""
+    committed = 0
+    for _ in range(K):
+        if random.random() < alpha:   # target accepts this draft token
+            committed += 1
+        else:
+            break                      # first rejection stops the round
+    return committed + 1               # +1: target always resamples one token
+
+def simulate(alpha, K, rounds=20000):
+    total = sum(speculative_round(alpha, K) for _ in range(rounds))
+    tokens_per_round = total / rounds
+    # baseline commits exactly 1 token per target pass
+    return tokens_per_round, tokens_per_round / 1.0
+
+for alpha in (0.9, 0.7, 0.5, 0.3):
+    tpr, speedup = simulate(alpha, K=4)
+    print(f"alpha={alpha:>3}  tokens/target-pass={tpr:4.2f}  ~{speedup:4.2f}x vs baseline")</code></pre>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Baseline</div><div class="v">1.00x</div><div class="u">one token per target pass</div></div>
+      <div class="metric"><div class="k">&alpha; = 0.7, K=4</div><div class="v">~2.8x</div><div class="u">tokens committed per target pass</div></div>
+      <div class="metric"><div class="k">&alpha; = 0.3, K=4</div><div class="v">~1.4x</div><div class="u">weak draft, most tokens rejected</div></div>
+      <div class="metric"><div class="k">Draft cost</div><div class="v">subtract</div><div class="u">net win = gross win minus draft time</div></div>
+    </div>
+    <p class="kpi">The simulator ignores draft-model time, so treat its numbers as the <em>gross</em> ceiling. Your measured server tok/s is the <em>net</em> win after draft overhead. If net &lt; baseline, your draft is too slow or acceptance is too low for this workload.</p>
+  </div>
+
+  <h2>6. Comparison: the drafting strategies</h2>
+  <table>
+    <thead><tr><th>Strategy</th><th>Extra weights</th><th>Setup cost</th><th>Best workload</th><th>Typical acceptance</th></tr></thead>
+    <tbody>
+      <tr><td>Separate draft model</td><td>Yes, a small model</td><td>Load + schedule 2nd model</td><td>General chat, matched family</td><td>Medium to high</td></tr>
+      <tr><td>Medusa (heads)</td><td>Trained heads</td><td>Fine-tune heads on target</td><td>General, one model in memory</td><td>Medium</td></tr>
+      <tr><td>EAGLE / EAGLE-3</td><td>Small feature draft</td><td>Use published checkpoint</td><td>General, latency-sensitive</td><td>High</td></tr>
+      <tr><td>N-gram / prompt-lookup</td><td>None</td><td>One flag, no training</td><td>Summaries, RAG, code edits</td><td>High on repetitive text</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why can the target verify K draft tokens for roughly the cost of one token?</div>
+      <button class="q-opt">Because the draft model has already computed the target's attention scores</button>
+      <button class="q-opt">Because verification skips the feed-forward layers that dominate the pass</button>
+      <button class="q-opt">Because the pass is memory-bound, so scoring K positions moves the same bytes</button>
+      <button class="q-opt">Because rejected tokens are discarded before the target ever reads the weights</button>
+      <div class="q-fb">The target pass is memory-bound: it reads the weights once whether it scores 1 or K positions, so verifying K is nearly free relative to generating 1.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does the accept/reject rule guarantee about the committed output?</div>
+      <button class="q-opt">It matches the draft model's distribution when acceptance rate is high</button>
+      <button class="q-opt">It matches the target model's distribution regardless of acceptance rate</button>
+      <button class="q-opt">It matches whichever model assigned the token the higher probability</button>
+      <button class="q-opt">It matches the target's greedy argmax output but never its sampled output</button>
+      <div class="q-fb">Rejection resamples from a corrected distribution, so the committed tokens are distributed exactly as the target alone would produce. It is exact, not approximate.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which single quantity most determines the speedup you actually get?</div>
+      <button class="q-opt">The acceptance rate, how often the target keeps the draft's tokens</button>
+      <button class="q-opt">The target model size, since larger targets always verify faster</button>
+      <button class="q-opt">The output length, since longer replies always raise the speedup</button>
+      <button class="q-opt">The batch size, since bigger batches always raise the acceptance</button>
+      <div class="q-fb">Speedup rises with acceptance rate. A draft the target rarely accepts commits about one token per round and can even lose to baseline after draft overhead.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">When is n-gram / prompt-lookup drafting an especially strong fit?</div>
+      <button class="q-opt">When the target model is far larger than any available draft sibling</button>
+      <button class="q-opt">When latency matters less than getting the maximum possible throughput</button>
+      <button class="q-opt">When the tokenizer of the draft differs from the tokenizer of the target</button>
+      <button class="q-opt">When the output repeats spans from the input, as in summaries or code</button>
+      <div class="q-fb">Prompt-lookup proposes spans it already saw in the running text, so repetitive workloads (summarisation, RAG quotation, code edits) hit high acceptance with zero extra weights.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain draft, verify, and accept/reject in one breath</li>
+    <li>I can state why verification preserves the target distribution exactly</li>
+    <li>I can name acceptance rate as the driver of speedup and why a weak draft loses</li>
+    <li>I can contrast draft models, Medusa, EAGLE, and n-gram lookup</li>
+    <li>I enabled <code>--speculative-config</code> in vLLM and measured tok/s and acceptance</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to pick a draft model that actually matches your target's tokenizer, or read the acceptance-rate line out of vLLM's metrics with you? Ask and we will wire up the A/B on your workload.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/latest/features/spec_decode.html">vLLM speculative decoding guide</a> for the current <code>--speculative-config</code> options, and the paper walk-through in this course's companion series: <a href="../../llm-papers-course/lessons/0021-speculative-decoding.html">Speculative Decoding (paper lesson 0021)</a>. For self-speculation, see the <a href="https://sites.google.com/view/medusa-llm">Medusa</a> and <a href="https://github.com/SafeAILab/EAGLE">EAGLE</a> project pages.</p>
+
+  <div class="pager">
+    <a href="0005-kv-cache-eviction-long-context.html"><span class="dir">&larr; Prev</span><span class="ttl">KV Cache Eviction for Long Contexts</span></a>
+    <a class="nxt" href="0007-quantization-int4-fp8-awq-gptq.html"><span class="dir">Next &rarr;</span><span class="ttl">Quantization Tradeoffs: INT4, FP8, AWQ, GPTQ</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 06 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

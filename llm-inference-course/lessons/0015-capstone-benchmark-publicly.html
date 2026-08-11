@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capstone: Build, Benchmark, and Share an Optimized Service - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Economics and Craft &middot; Lesson 15</div>
+  <h1>Capstone: Build, Benchmark, and Share an Optimized Service</h1>
+  <p class="paper-meta">Everything so far, in one artifact. Pick a model, serve it optimized, instrument it, load test it, price it, and publish an honest benchmark that a stranger could reproduce. This is the finale, and the skill that outlasts any single model release.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>The capstone is a full loop: <b>serve</b> (vLLM + quantization + continuous batching, speculative where it helps) &rarr; <b>instrument</b> (Prometheus + Grafana) &rarr; <b>load test</b> (find the knee) &rarr; <b>price</b> ($ per 1M tokens) &rarr; <b>publish</b>.</li>
+      <li>An honest benchmark states its <b>methodology</b>: exact hardware, model, quantization, prompt and output length distribution, load model, and the full p50/p95/p99, not one cherry-picked latency.</li>
+      <li>Reproducibility is the whole point. If a reader cannot rerun your commands and land within a few percent, it is marketing, not measurement.</li>
+      <li>To keep learning, read the <b>methods</b> in inference papers (arXiv cs.LG, cs.DC) and engine blogs, not the headline from a model-release post.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>The internet is full of LLM benchmarks that mean nothing: one prompt, one request, a suspiciously round tokens/second, no hardware named, no percentiles. They are unfalsifiable and therefore useless. The engineer who can publish a benchmark another person can reproduce, and who can read someone else's benchmark and spot the missing methodology, is the one whose numbers get trusted. That skill compounds long after today's model is obsolete.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph HYPE["Hype benchmark"]
+    a1["'blazing fast!'"] --> a2["1 prompt, 1 request,<br/>no hardware, no p99"] --> a3["cannot reproduce<br/>= worthless"]
+  end
+  subgraph HONEST["Honest benchmark"]
+    b1["methodology stated"] --> b2["hardware, quant, length dist,<br/>p50/p95/p99, $/1M"] --> b3["rerun and match<br/>= trusted"]
+  end
+  HYPE -.->|"the upgrade"| HONEST
+    </div>
+    <figcaption>Before and after. A hype number is a claim with no method behind it. <b>An honest benchmark publishes everything needed to reproduce it, which is exactly what makes it worth citing.</b> Your capstone is the second kind.</figcaption>
+  </figure>
+
+  <h2>2. The end-to-end optimized stack</h2>
+  <p>Your capstone service is the whole course wired together: a client hits a router that enforces a per-request token budget, the router forwards to a vLLM server running a quantized model with continuous batching, and every layer emits metrics into Prometheus and Grafana. Nothing here is new; the capstone is proving you can assemble it and measure it.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  cl["client"] --> rt["router<br/>(cost / latency / quality)"]
+  rt --> bg["token budget<br/>(cap prompt + output)"]
+  bg --> vs["vLLM server<br/>quantized + continuous batching<br/>+ speculative where it helps"]
+  vs --> gpu["GPU"]
+  vs -->|"/metrics"| ob["Prometheus + Grafana<br/>TTFT, tokens/s, KV%, $/1M"]
+  rt -->|"/metrics"| ob
+    </div>
+    <figcaption>The full optimized path. <b>Every box is a lesson: routing (08), budgeting (09), quantization (07), batching (04), and observability (12).</b> The capstone is standing this up end to end and reporting how it behaves under load.</figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant R as Router
+  participant B as Budget
+  participant V as vLLM (quantized)
+  participant O as Observability
+  C->>R: prompt
+  R->>B: chosen model + limits
+  B->>V: prompt (capped tokens)
+  V-->>C: stream tokens (continuous batching)
+  V->>O: TTFT, TPOT, tokens, KV%
+  R->>O: route decision, cost
+  Note over O: dashboard + $ per 1M
+    </div>
+    <figcaption>One request through the capstone stack. <b>The budget caps the work before it starts, batching keeps the GPU full, and every hop reports metrics.</b> This is the request whose p50/p95/p99 you will publish.</figcaption>
+  </figure>
+
+  <h2>3. Serve it optimized</h2>
+  <p>Continuous batching is on by default in vLLM. Add quantization to raise throughput and fit a smaller card, and turn on speculative decoding only if your workload (low concurrency, predictable text) actually benefits, since it can hurt at high batch sizes.</p>
+
+  <div class="term"><span class="c"># Quantized (FP8) vLLM server with a large batch ceiling</span>
+<span class="p">$</span> vllm serve meta-llama/Llama-3.1-8B-Instruct \
+    --quantization fp8 \
+    --max-num-seqs 256 \
+    --gpu-memory-utilization 0.90
+<span class="o">INFO ... Using FP8 KV cache
+INFO ... Started server on http://0.0.0.0:8000</span>
+
+<span class="c"># Speculative decoding syntax is version-sensitive; check your vLLM version.</span>
+<span class="c"># Recent vLLM uses a --speculative-config JSON blob:</span>
+<span class="p">$</span> vllm serve meta-llama/Llama-3.1-8B-Instruct \
+    --speculative-config '{"model": "meta-llama/Llama-3.2-1B-Instruct", "num_speculative_tokens": 5}'</div>
+
+  <div class="card callout warn"><span class="tag">Turn one dial at a time</span>
+    If you enable quantization, larger batches, and speculative decoding all at once, you cannot tell which helped. Benchmark a plain baseline first, then add one optimization, re-run the identical load test, and record the delta. That per-lever table is the most useful part of your report.</div>
+
+  <h2>4. Lab: the capstone spec, report, and publish checklist</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Produce a reproducible benchmark report for your optimized service</h4>
+    <p>Follow the spec, fill the results table, and pass the publish checklist. The deliverable is a single page (or README) that a stranger could clone and rerun.</p>
+
+    <h4>Capstone spec</h4>
+    <ul class="checklist">
+      <li>Pick one model and one GPU class you can actually rent or borrow</li>
+      <li>Serve it with vLLM: quantization + continuous batching, speculative only if it helps</li>
+      <li>Instrument it: Prometheus scrape + a Grafana panel for TTFT, tokens/s, KV%, and $/1M</li>
+      <li>Load test it: ramp concurrency with <code>vllm bench serve</code> until you find the knee</li>
+      <li>Price it: compute $ per 1M tokens at your measured throughput and utilisation</li>
+      <li>Publish: the report template below, with commands, so it reproduces</li>
+    </ul>
+
+    <div class="code-cap">benchmark-report.md &middot; the template to fill in and publish</div>
+    <pre><code># Inference Benchmark: &lt;model&gt; on &lt;GPU&gt;
+
+## Methodology (state everything)
+- Model / revision : meta-llama/Llama-3.1-8B-Instruct @ &lt;git sha or HF revision&gt;
+- Quantization     : fp8   (baseline run: none)
+- Serving engine   : vLLM &lt;exact version&gt;, continuous batching on
+- Hardware         : 1x H100 80GB, &lt;cloud + region + instance type&gt;
+- Prompt lengths   : random, mean 512 tokens (dist described)
+- Output lengths   : random, mean 128 tokens (dist described)
+- Load model       : closed-loop, --max-concurrency swept 32/128/512
+- Tool + command   : `vllm bench serve --dataset-name random ...` (exact line)
+- Runs             : 3, median reported; warm-up discarded
+
+## Results
+| Concurrency | Throughput (tok/s) | TTFT p50 | TTFT p95 | TTFT p99 | TPOT p50 |
+|-------------|--------------------|----------|----------|----------|----------|
+| 32          |  ...               |  ...     |  ...     |  ...     |  ...     |
+| 128 (knee)  |  ...               |  ...     |  ...     |  ...     |  ...     |
+| 512         |  ...               |  ...     |  ...     |  ...     |  ...     |
+
+## Economics
+- Peak throughput  : &lt;tok/s&gt; at the knee
+- Utilisation      : &lt;measured u&gt;
+- Cost             : $&lt;x&gt; per 1M output tokens  (GPU $&lt;y&gt;/hr)
+
+## Per-lever deltas
+| Config                    | tok/s | vs baseline |
+|---------------------------|-------|-------------|
+| baseline (fp16, batching) |  ...  |  1.00x      |
+| + fp8 quantization        |  ...  |  ...x       |
+| + speculative decoding    |  ...  |  ...x       |
+
+## Reproduce
+&lt;paste the exact serve command, the exact bench command, and versions&gt;</code></pre>
+
+    <div class="term"><span class="c"># Example filled results row from a real run (yours will differ by hardware)</span>
+<span class="p">$</span> cat results.txt
+<span class="o">conc=128 (knee)  throughput=5340 tok/s  TTFT p50=186ms p95=560ms p99=613ms  TPOT p50=23ms
+economics: 5340 tok/s @ 60% util, $2.50/hr GPU  ->  $0.22 per 1M tokens
+per-lever: fp16 3100 tok/s (1.00x) -> +fp8 5340 (1.72x) -> +spec 5900 (1.90x, low-conc only)</span></div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Throughput</div><div class="v">5340</div><div class="u">tok/s at the knee</div></div>
+      <div class="metric"><div class="k">TTFT p95</div><div class="v">560 ms</div><div class="u">the tail you publish</div></div>
+      <div class="metric"><div class="k">Cost</div><div class="v">$0.22</div><div class="u">per 1M tokens</div></div>
+      <div class="metric"><div class="k">fp8 gain</div><div class="v">1.72x</div><div class="u">measured, one lever</div></div>
+    </div>
+
+    <h4>Publish checklist (fail any = not reproducible)</h4>
+    <ul class="checklist">
+      <li>Exact model revision, engine version, and GPU + instance type are named</li>
+      <li>Prompt and output length distributions are described, not just a mean</li>
+      <li>Load model (open vs closed-loop) and the exact command are shown</li>
+      <li>p50, p95, and p99 are all reported, never a lone mean</li>
+      <li>Warm-up runs are discarded and the run count is stated</li>
+      <li>Cost per 1M tokens shows its GPU price and utilisation inputs</li>
+      <li>A copy-paste block lets a reader rerun the whole thing</li>
+    </ul>
+  </div>
+
+  <h2>5. Reading research instead of hype</h2>
+  <p>Model-release posts sell a headline; inference progress lives in the methods sections of papers and engine engineering blogs. When you read one, skip to how it was measured. A trustworthy result names its hardware, batch size, sequence lengths, and baseline, and reports a distribution. A dubious one shows a single latency with none of that context.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Claim: read the headline number
+  Claim --> Method: find the methodology section
+  Method --> Reject: no hardware / batch / lengths / baseline
+  Method --> Check: all stated
+  Check --> Reproduce: rerun their command
+  Reproduce --> Trust: lands within a few percent
+  Reproduce --> Reject: cannot match
+  Trust --> [*]
+  Reject --> [*]
+    </div>
+    <figcaption>How to read an inference claim. <b>A number you cannot reproduce is a number you cannot trust</b>, no matter how impressive. The same discipline you apply to your own report is the filter you apply to everyone else's.</figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>Source</th><th>Read it for</th><th>Watch out for</th></tr></thead>
+    <tbody>
+      <tr><td>arXiv cs.LG / cs.DC</td><td>New methods, ablations, baselines</td><td>Ideal-lab conditions, no serving overhead</td></tr>
+      <tr><td>vLLM / SGLang blogs</td><td>Real serving numbers, version notes</td><td>Best-case configs, their own engine favoured</td></tr>
+      <tr><td>Model-release posts</td><td>Capabilities, licensing</td><td>Cherry-picked latency, no reproducibility</td></tr>
+      <tr><td>Your own benchmark</td><td>The only numbers you fully trust</td><td>Your bugs; peer-review it before publishing</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What single property makes a published benchmark trustworthy?</div>
+      <button class="q-opt">It reports the highest tokens per second that the hardware has ever reached</button>
+      <button class="q-opt">It compares the model against every competitor released in the same quarter</button>
+      <button class="q-opt">It uses the newest serving engine version available on the day of writing</button>
+      <button class="q-opt">A stranger can rerun the stated commands and land within a few percent</button>
+      <div class="q-fb">Reproducibility is the test; a number nobody else can reproduce is marketing, not measurement.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why enable optimizations one at a time when benchmarking?</div>
+      <button class="q-opt">So each lever's real contribution is isolated instead of tangled with the others</button>
+      <button class="q-opt">Because vLLM refuses to load more than a single optimization flag per process</button>
+      <button class="q-opt">Because turning on several flags at once will always crash the serving engine</button>
+      <button class="q-opt">So the total run time stays short enough to finish inside one GPU rental hour</button>
+      <div class="q-fb">Turning one dial per run gives a per-lever delta table; all-at-once hides which change helped.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">When reading an inference paper, what do you check first?</div>
+      <button class="q-opt">The abstract's headline speedup and the total number of authors listed</button>
+      <button class="q-opt">The conclusion's future-work section and the length of the reference list</button>
+      <button class="q-opt">The methodology: hardware, batch size, sequence lengths, and the baseline used</button>
+      <button class="q-opt">The publication date and whether it appeared at a top-tier conference venue</button>
+      <div class="q-fb">Methods decide whether the number means anything; no hardware or baseline means no trust.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why report p50, p95, and p99 rather than a single mean latency?</div>
+      <button class="q-opt">The mean is far more expensive for the benchmark tool to compute than percentiles</button>
+      <button class="q-opt">The mean hides the tail, and the tail is where your unhappiest users actually live</button>
+      <button class="q-opt">Percentiles are the only statistic that Grafana is able to render on a dashboard</button>
+      <button class="q-opt">A single mean would reveal the exact prompt distribution used during the test run</button>
+      <div class="q-fb">A mean can look great while p99 is terrible; publish the distribution so the tail is visible.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I served a model optimized with vLLM, quantization, and continuous batching</li>
+    <li>I instrumented it and load tested it to find the knee</li>
+    <li>I computed cost per 1M tokens from my measured throughput and utilisation</li>
+    <li>I filled the benchmark report template with full methodology and p50/p95/p99</li>
+    <li>I can read someone else's benchmark and spot the missing methodology</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Bring me your capstone report before you publish it and I will peer-review the methodology, hunt for the number that is too good to be true, and help you write the reproduce block so it actually reproduces.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/latest/contributing/benchmarks.html">vLLM benchmarking guide</a>, the <a href="https://lmsys.org/blog/">SGLang / LMSYS engineering blog</a>, and browse <a href="https://arxiv.org/list/cs.DC/recent">arXiv cs.DC recent</a> for serving-systems papers. Read their methods sections the same way you would want yours read.</p>
+
+  <div class="pager">
+    <a href="0014-inference-unit-economics.html"><span class="dir">&larr; Prev</span><span class="ttl">How Inference Costs Break Unit Economics</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course syllabus</span></a>
+  </div>
+
+  <footer>
+    <p><b>You finished the course.</b> You can now serve a model at high throughput, quantize it, route and budget it, deploy and autoscale it on Kubernetes, observe it, load test it, and price it honestly. That is the full arc from a single request to a production service you can defend with numbers. Congratulations.</p>
+    <p>LLM Inference Optimization &middot; Lesson 15 (finale) &middot; back to the <a href="../index.html">course syllabus</a> &middot; go deeper on the theory in the <a href="../../llm-papers-course/index.html">LLM Papers course</a> &middot; <a href="../reference/glossary.html">Glossary</a></p>
+  </footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

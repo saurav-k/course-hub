@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LLaMA - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Big &amp; Open Models &middot; Lesson 12</div>
+  <h1>LLaMA</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Touvron, Lavril, Izacard, Martinet, Lachaux, Lacroix, et al. (Meta AI).
+    &middot; <a href="https://arxiv.org/abs/2302.13971">arXiv:2302.13971</a> &middot; "LLaMA: Open and Efficient Foundation Language Models"
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Take Chinchilla's lesson further: train <b>smaller models</b> on <b>far more tokens</b> than "optimal", because a model is trained once but <b>served forever</b>.</li>
+      <li>Sizes 7B, 13B, 33B, 65B, trained only on <b>publicly available data</b> (no proprietary corpora).</li>
+      <li>Three now-standard architecture tweaks: <b>RMSNorm</b> pre-normalisation, <b>SwiGLU</b> activation, <b>RoPE</b> positions.</li>
+      <li>LLaMA-13B <b>beat GPT-3 175B</b> on most benchmarks; 65B rivalled PaLM-540B. It became the open-source default that everything after builds on.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Chinchilla (<a href="0008-chinchilla.html">Lesson 08</a>) optimised for <em>training</em> compute. LLaMA changed the objective: also count the <em>inference</em> cost, which you pay on every single query for the life of the model. Under that lens, it is worth <strong>over-training a small model</strong> well past 20 tokens/param, because a smaller model is cheaper to run billions of times later. The other goal was openness: use only public data so the whole research community can build on it.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph old["Chinchilla view"]
+    o["minimise TRAINING cost<br/>-> ~20 tokens/param"]
+  end
+  subgraph new["LLaMA view"]
+    n["minimise TRAINING + lifetime INFERENCE cost<br/>-> over-train a SMALL model<br/>(7B on ~1T, 65B on 1.4T tokens)"]
+  end
+  old --> new
+  new --> R["small model,<br/>huge data,<br/>cheap to serve"]
+    </div>
+    <figcaption>The shift in objective. Once you add the cost of running the model on every future query, the best move is to <b>keep the model small and pour in far more data</b> than training-compute-optimality alone would suggest.</figcaption>
+  </figure>
+
+  <h2>2. Trained on public data only</h2>
+  <p>LLaMA deliberately used only openly available sources, mixed in fixed proportions. This is what made the weights (once leaked, then formally opened in later versions) so influential.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  CC["CommonCrawl<br/>67%"] --> MIX["Training mix<br/>~1.0-1.4T tokens"]
+  C4["C4<br/>15%"] --> MIX
+  GH["GitHub<br/>4.5%"] --> MIX
+  WK["Wikipedia<br/>4.5%"] --> MIX
+  BK["Books<br/>4.5%"] --> MIX
+  AX["arXiv<br/>2.5%"] --> MIX
+  SE["StackExchange<br/>2%"] --> MIX
+    </div>
+    <figcaption>LLaMA's data mix (approximate shares). All sources are public. Web text dominates, but code, encyclopedic, and scientific data are folded in - the same "diversity matters" thesis you met in <a href="0007-the-pile.html">The Pile</a>.</figcaption>
+  </figure>
+
+  <h2>3. The three architecture changes</h2>
+  <p>LLaMA keeps the decoder-only Transformer from <a href="0003-gpt-1.html">GPT</a> but swaps three components. Each is a small change that improves stability or quality, and together they define the modern LLM block.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  In["token + RoPE position"] --> RN1["RMSNorm<br/>(pre-norm)"]
+  RN1 --> ATT["Self-Attention<br/>with RoPE on Q,K"]
+  In -->|residual| A1(("+"))
+  ATT --> A1
+  A1 --> RN2["RMSNorm"]
+  RN2 --> FFN["SwiGLU FFN"]
+  A1 -->|residual| A2(("+"))
+  FFN --> A2
+  A2 --> Out["next block"]
+    </div>
+    <figcaption>The LLaMA block. <b>RMSNorm</b> before each sublayer (pre-norm, more stable than the original post-norm), <b>RoPE</b> rotary positions applied inside attention, and a <b>SwiGLU</b> feed-forward network. Compare this to the plain block from <a href="0001-attention-is-all-you-need.html">Lesson 01</a>.</figcaption>
+  </figure>
+
+  <h3>RMSNorm - a cheaper LayerNorm</h3>
+  <p>LayerNorm re-centres (subtract the mean) and re-scales (divide by standard deviation). RMSNorm drops the re-centring and just divides by the root-mean-square. Fewer operations, same stabilising effect in practice.</p>
+  <div class="math">RMSNorm(x) = x / sqrt( mean(x<sup>2</sup>) + &epsilon; ) &middot; g
+    <span class="gloss">Square every element, average them, take the square root: that is the vector's "typical size". Divide the vector by it so its scale is normalised, then multiply by a learned gain <b>g</b>. No mean subtraction, unlike LayerNorm.</span>
+  </div>
+
+  <h3>SwiGLU - a gated activation</h3>
+  <p>Instead of the plain <code>Linear -&gt; ReLU -&gt; Linear</code> feed-forward, SwiGLU splits into two projections and lets one <em>gate</em> the other through a smooth Swish function. It reliably improves quality per parameter.</p>
+  <div class="math">SwiGLU(x) = ( Swish(x W<sub>1</sub>) &odot; (x W<sub>3</sub>) ) W<sub>2</sub>
+    <span class="gloss">Project x two ways. Pass one through <b>Swish</b> (a smooth, slightly-negative-allowing bend), and use it to element-wise multiply (&odot;, the gate) the other projection. A third matrix projects back down. The gate lets the network modulate information more flexibly than a single ReLU.</span>
+  </div>
+
+  <h2>4. Build the LLaMA block</h2>
+  <p>Here are RMSNorm and SwiGLU in PyTorch, the two pieces you have not seen yet (RoPE gets its own lesson next module). Read them against the equations above.</p>
+
+  <div class="code-cap">llama_block.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class RMSNorm(nn.Module):
+    def __init__(self, dim, eps=1e-6):
+        super().__init__()
+        self.eps = eps
+        self.g = nn.Parameter(torch.ones(dim))     # learned gain
+    def forward(self, x):
+        rms = x.pow(2).mean(-1, keepdim=True).add(self.eps).rsqrt()
+        return x * rms * self.g                     # normalise, then scale
+
+class SwiGLU(nn.Module):
+    def __init__(self, dim, hidden):
+        super().__init__()
+        self.w1 = nn.Linear(dim, hidden, bias=False)   # gate branch
+        self.w3 = nn.Linear(dim, hidden, bias=False)   # value branch
+        self.w2 = nn.Linear(hidden, dim, bias=False)   # project back down
+    def forward(self, x):
+        return self.w2(F.silu(self.w1(x)) * self.w3(x))  # silu == Swish
+
+# smoke test
+x = torch.randn(2, 8, 512)
+h = RMSNorm(512)(x)
+y = SwiGLU(512, 1376)(h)     # LLaMA sizes the hidden dim to ~ (8/3)*dim
+print(y.shape)               # torch.Size([2, 8, 512])</code></pre>
+
+  <h2>5. The result that mattered</h2>
+  <table>
+    <thead><tr><th>Model</th><th>Params</th><th>Tokens</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>GPT-3</td><td>175B</td><td>300B</td><td>Beaten by LLaMA-13B on most tasks</td></tr>
+      <tr><td>LLaMA-13B</td><td>13B</td><td>~1T</td><td>13&times; smaller, better or comparable</td></tr>
+      <tr><td>Chinchilla-70B</td><td>70B</td><td>1.4T</td><td>Rivalled by LLaMA-65B</td></tr>
+      <tr><td>LLaMA-65B</td><td>65B</td><td>1.4T</td><td>Competitive with PaLM-540B</td></tr>
+    </tbody>
+  </table>
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  D["public data only<br/>~1 to 1.4T tokens"] --> S["small models,<br/>over-trained"]
+  S --> R1["LLaMA-13B<br/>&gt; GPT-3 175B<br/>(13x smaller)"]
+  S --> R2["LLaMA-65B<br/>&asymp; PaLM-540B<br/>(8x smaller)"]
+  R1 --> O["open-weights era:<br/>LLaMA-2/3, Mistral,<br/>most open models"]
+  R2 --> O
+    </div>
+    <figcaption>Why LLaMA reset the field. Trained only on public data, small over-trained models matched or beat far larger ones. <b>That made the frontier reproducible without secret data or giant budgets</b>, and the exact block became the base of the open ecosystem.</figcaption>
+  </figure>
+
+  <p>A 13B model on public data beating the 175B GPT-3 was a shock. It proved the frontier was reachable without secret data or thousand-billion-parameter budgets, and it kicked off the open-weights era: LLaMA-2/3, Mistral, and most open models inherit exactly this block.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does LLaMA over-train small models past compute-optimal?</div>
+      <button class="q-opt">Because small models cannot fit large token budgets at all</button>
+      <button class="q-opt">Because inference is paid on every query for the model's life</button>
+      <button class="q-opt">Because public data forces a fixed number of total tokens</button>
+      <button class="q-opt">Because RMSNorm requires a much larger training token count</button>
+      <div class="q-fb">Counting lifetime inference cost, a smaller over-trained model is cheaper to serve forever.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">How does RMSNorm differ from LayerNorm?</div>
+      <button class="q-opt">It adds a second learned bias term after the normalisation</button>
+      <button class="q-opt">It normalises across the batch rather than the feature axis</button>
+      <button class="q-opt">It applies only during inference and is skipped in training</button>
+      <button class="q-opt">It skips mean-subtraction and divides by the root-mean-square</button>
+      <div class="q-fb">RMSNorm drops re-centring, keeping only the RMS re-scaling plus a learned gain. Cheaper, equally stable.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does the gate in SwiGLU do?</div>
+      <button class="q-opt">One projection modulates another via element-wise multiply</button>
+      <button class="q-opt">One projection replaces the residual connection around it</button>
+      <button class="q-opt">One projection normalises the input before the attention</button>
+      <button class="q-opt">One projection encodes the position of each token in place</button>
+      <div class="q-fb">SwiGLU passes one branch through Swish and uses it to gate (multiply) the other branch.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What made LLaMA especially influential?</div>
+      <button class="q-opt">It was the first model to ever use the Transformer at all</button>
+      <button class="q-opt">It trained on private proprietary data for higher quality</button>
+      <button class="q-opt">A small public-data model matched or beat far larger ones</button>
+      <button class="q-opt">It removed attention entirely in favour of pure feed-forward</button>
+      <div class="q-fb">LLaMA-13B beating GPT-3 175B on public data launched the open-weights ecosystem.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Applies <a href="0008-chinchilla.html">Chinchilla</a></b> and pushes past it by weighing inference cost.</li>
+    <li><b>Uses <a href="0013-rope.html">RoPE</a></b> (next lesson) for positions, replacing sinusoidal encodings.</li>
+    <li>LLaMA-2/3 add <a href="0016-grouped-query-attention.html">Grouped-Query Attention</a> for faster serving.</li>
+    <li>Its openness makes it the base for <a href="0028-lora.html">LoRA</a> / <a href="0029-qlora.html">QLoRA</a> fine-tuning.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Curious why SwiGLU's hidden dimension is sized to about 8/3 of the model dimension, or how RMSNorm keeps training stable? Ask and I will walk through it.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2302.13971">Touvron et al., "LLaMA: Open and Efficient Foundation Language Models" (2023)</a>. Then skim Karpathy's <a href="https://github.com/karpathy/llama2.c">llama2.c</a> to see the whole architecture in a single readable C/Python file.</p>
+
+  <div class="pager">
+    <a href="0011-bloom.html"><span class="dir">&larr; Previous</span><span class="ttl">BLOOM</span></a>
+    <a class="nxt" href="0013-rope.html"><span class="dir">Next &rarr;</span><span class="ttl">RoPE: Rotary Position Embeddings</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 12 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

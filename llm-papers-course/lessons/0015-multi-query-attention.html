@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Multi-Query Attention - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Attention &amp; Position Refinements &middot; Lesson 15</div>
+  <h1>Multi-Query Attention</h1>
+  <p class="paper-meta">
+    <span class="pill">2019</span>
+    Noam Shazeer (Google).
+    &middot; <a href="https://arxiv.org/abs/1911.02150">arXiv:1911.02150</a> &middot; "Fast Transformer Decoding: One Write-Head is All You Need"
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>When a model generates text, it caches the <b>keys and values</b> of past tokens (the <b>KV cache</b>) so it does not recompute them each step.</li>
+      <li>That cache is huge and reading it from memory is the real bottleneck of generation, not the math.</li>
+      <li><b>Multi-Query Attention (MQA)</b> keeps many <b>query</b> heads but shares a <b>single key head and single value head</b> across all of them.</li>
+      <li>The KV cache shrinks by the number of heads (e.g. 32&times; smaller), decoding speeds up a lot, and quality drops only slightly.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Recall from <a href="0001-attention-is-all-you-need.html">Lesson 01</a> that each token has a Query, Key, and Value, and multi-head attention runs several of these in parallel. During generation the model produces one token at a time and must attend to <em>all previous tokens</em>. To avoid recomputing every past token's K and V at every step, they are stored in the <strong>KV cache</strong>. The problem: this cache is enormous, and modern GPUs finish the arithmetic long before they finish <em>fetching the cache from memory</em>. Generation is memory-bandwidth bound.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  S["generate token t"] --> N["need attention over<br/>tokens 1..t-1"]
+  N --> C{"K,V for the past<br/>already stored?"}
+  C -->|yes: KV cache| F["just read them<br/>(fast, no recompute)"]
+  C -->|no| R["recompute all past K,V<br/>(wasteful)"]
+  F --> B["bottleneck: reading the<br/>big KV cache from memory"]
+    </div>
+    <figcaption>Why the KV cache exists, and why it hurts. Caching past keys and values avoids recomputation, but the cache grows with every token and every head, and <b>reading it from memory becomes the speed limit</b> of autoregressive decoding.</figcaption>
+  </figure>
+
+  <h2>2. The size of the problem</h2>
+  <p>The KV cache stores, for every layer, every head, and every past token, both a key vector and a value vector. Multiply it out and it is easy to reach many gigabytes.</p>
+
+  <div class="math">cache_bytes = 2 &middot; L &middot; H &middot; d<sub>head</sub> &middot; S &middot; B &middot; bytes
+    <span class="gloss"><b>2</b>: keys and values. <b>L</b>: number of layers. <b>H</b>: number of heads. <b>d<sub>head</sub></b>: size of each head. <b>S</b>: sequence length so far. <b>B</b>: batch size. <b>bytes</b>: 2 for fp16. The term that MQA attacks is <b>H</b> - the number of heads.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  L["layers L"] --> X["cache size"]
+  H["heads H"] --> X
+  D["d_head"] --> X
+  S["seq len S"] --> X
+  B["batch B"] --> X
+  X --> big["can reach many GB<br/>for long contexts"]
+  H -.MQA attacks this.-> H2["H &rarr; 1<br/>for K and V"]
+    </div>
+    <figcaption>What drives the cache, and what MQA touches. Every factor multiplies the cache, but only the <b>head count H</b> is safe to shrink for keys and values. MQA sets that factor to 1 while leaving layers, sequence length, and batch untouched.</figcaption>
+  </figure>
+
+  <h2>3. The MQA idea: one key, one value, many queries</h2>
+  <p>Standard multi-head attention gives each head its own Q, K, and V projection. MQA keeps a separate Query for each head - queries are what make heads look at different things - but collapses <em>all</em> the Key projections into one and <em>all</em> the Value projections into one. Every query head now attends using the same shared K and V.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph MHA["Multi-Head Attention"]
+    q1["Q1"]-->o1["head1"]; k1["K1"]-->o1; v1["V1"]-->o1
+    q2["Q2"]-->o2["head2"]; k2["K2"]-->o2; v2["V2"]-->o2
+    q3["Q3"]-->o3["head3"]; k3["K3"]-->o3; v3["V3"]-->o3
+  end
+  subgraph MQA["Multi-Query Attention"]
+    Q1["Q1"]-->O1["head1"]; Q2["Q2"]-->O2["head2"]; Q3["Q3"]-->O3["head3"]
+    Ks["shared K"]-->O1; Ks-->O2; Ks-->O3
+    Vs["shared V"]-->O1; Vs-->O2; Vs-->O3
+  end
+    </div>
+    <figcaption>The difference in one picture. Multi-head attention has a full K and V per head (left). MQA keeps the many query heads but gives them <b>one shared key and one shared value</b> (right). The KV cache now stores a single head's worth of K/V instead of H heads' worth.</figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Why it barely hurts quality</span>
+    Most of a head's specialisation comes from its <em>query</em> - what it looks for. The keys and values are more like a shared library that all heads read from. Sharing that library costs a little expressiveness but saves an enormous amount of memory traffic.</div>
+
+  <h2>4. See the savings in code</h2>
+  <p>This module implements both, switching between them with one flag, and a calculator for the cache size. Note how MQA projects K and V to a single head width (<code>d_head</code>) rather than the full <code>H &middot; d_head</code>.</p>
+
+  <div class="code-cap">mqa.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class Attention(nn.Module):
+    def __init__(self, d_model=512, n_heads=8, multi_query=False):
+        super().__init__()
+        self.h, self.dk, self.mq = n_heads, d_model // n_heads, multi_query
+        self.wq = nn.Linear(d_model, d_model, bias=False)          # H query heads
+        kv_out = self.dk if multi_query else d_model               # 1 head vs H heads
+        self.wk = nn.Linear(d_model, kv_out, bias=False)
+        self.wv = nn.Linear(d_model, kv_out, bias=False)
+        self.wo = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x):
+        B, N, _ = x.shape
+        q = self.wq(x).view(B, N, self.h, self.dk).transpose(1, 2)   # (B,H,N,dk)
+        if self.mq:
+            k = self.wk(x).view(B, N, 1, self.dk).transpose(1, 2)     # (B,1,N,dk)
+            v = self.wv(x).view(B, N, 1, self.dk).transpose(1, 2)
+            k, v = k.expand(-1, self.h, -1, -1), v.expand(-1, self.h, -1, -1)
+        else:
+            k = self.wk(x).view(B, N, self.h, self.dk).transpose(1, 2)
+            v = self.wv(x).view(B, N, self.h, self.dk).transpose(1, 2)
+        o = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        return self.wo(o.transpose(1, 2).reshape(B, N, -1))
+
+def kv_cache_mb(layers, heads, d_head, seq, batch=1, fp=2):
+    return 2 * layers * heads * d_head * seq * batch * fp / 1e6
+
+# 32-layer, 32-head model, 4096 tokens
+mha = kv_cache_mb(32, 32, 128, 4096)
+mqa = kv_cache_mb(32,  1, 128, 4096)     # heads collapses to 1
+print(f"MHA cache: {mha:8.0f} MB")
+print(f"MQA cache: {mqa:8.0f} MB   ({mha/mqa:.0f}x smaller)")</code></pre>
+
+  <p>The calculator shows the whole point: collapsing 32 KV heads to 1 makes the cache 32&times; smaller, which directly translates into longer contexts, bigger batches, and faster tokens per second.</p>
+
+  <h2>5. The trade-off</h2>
+  <table>
+    <thead><tr><th>Scheme</th><th>KV heads</th><th>Cache size</th><th>Quality</th></tr></thead>
+    <tbody>
+      <tr><td>Multi-Head (MHA)</td><td>H (all)</td><td>Largest</td><td>Best</td></tr>
+      <tr><td>Multi-Query (MQA)</td><td>1</td><td>Smallest</td><td>Slightly lower</td></tr>
+    </tbody>
+  </table>
+  <p>MQA sits at one extreme: maximum memory savings, small quality cost. The next lesson, <a href="0016-grouped-query-attention.html">Grouped-Query Attention</a>, finds the sweet spot between these two rows.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  MHA["Multi-Head<br/>H KV heads<br/>best quality, biggest cache"] --> GQA["Grouped-Query<br/>G KV heads (1&lt;G&lt;H)<br/>the modern default"]
+  GQA --> MQA["Multi-Query<br/>1 KV head<br/>smallest cache"]
+  MHA -.->|"one dial:<br/>how many KV heads"| MQA
+    </div>
+    <figcaption>The spectrum this lesson sits on. Multi-head keeps one key/value per head; multi-query keeps just one for all heads. <b>Grouped-query (next lesson) is the dial in between</b>, and it is what most current models actually ship.</figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What exactly does Multi-Query Attention share across heads?</div>
+      <button class="q-opt">The query projection is shared while keys stay separate</button>
+      <button class="q-opt">The output projection is shared while values stay apart</button>
+      <button class="q-opt">A single key and value are shared by all the query heads</button>
+      <button class="q-opt">The residual connection is shared across the whole layer</button>
+      <div class="q-fb">MQA keeps per-head queries but collapses keys and values into one shared head.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is autoregressive decoding memory-bandwidth bound?</div>
+      <button class="q-opt">The big KV cache must be read from memory every single step</button>
+      <button class="q-opt">The softmax over the vocabulary dominates the total runtime</button>
+      <button class="q-opt">The token embeddings are recomputed fully at each new step</button>
+      <button class="q-opt">The gradient of the loss is evaluated once per token output</button>
+      <div class="q-fb">The arithmetic finishes fast; fetching the large KV cache from memory is the real limit.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">In the cache-size formula, which factor does MQA cut?</div>
+      <button class="q-opt">The sequence length term is reduced down toward a value of one</button>
+      <button class="q-opt">The number of layers term is reduced down toward a value of one</button>
+      <button class="q-opt">The batch size term is reduced down toward a value of just one</button>
+      <button class="q-opt">The number of heads term is reduced down toward a value of one</button>
+      <div class="q-fb">MQA drives the head count H to 1 for the K/V storage, shrinking the cache by roughly H.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does sharing K and V cost little quality?</div>
+      <button class="q-opt">Because keys and values are never used during generation at all</button>
+      <button class="q-opt">Because most head specialisation lives in the query projection</button>
+      <button class="q-opt">Because the model retrains the shared value on every new token</button>
+      <button class="q-opt">Because quality depends only on the number of layers, not heads</button>
+      <div class="q-fb">Queries define what each head looks for; K/V act as a shared library, so sharing them is cheap.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Builds on <a href="0001-attention-is-all-you-need.html">Attention</a></b> - it modifies multi-head attention's K/V projections.</li>
+    <li><b>Generalised by <a href="0016-grouped-query-attention.html">GQA</a></b> - the next lesson interpolates between MHA and MQA.</li>
+    <li>Complements <a href="0019-kv-cache-optimization.html">KV cache compression</a> and <a href="0020-pagedattention-vllm.html">PagedAttention</a> as ways to tame cache memory.</li>
+    <li>Used in <a href="0009-palm.html">PaLM</a> and many production decoders.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to benchmark tokens-per-second for MHA vs MQA, or see why the shared K/V still lets heads differ? Ask and I will set it up.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/1911.02150">Shazeer, "Fast Transformer Decoding: One Write-Head is All You Need" (2019)</a>. It is short and unusually direct.</p>
+
+  <div class="pager">
+    <a href="0014-alibi.html"><span class="dir">&larr; Previous</span><span class="ttl">ALiBi</span></a>
+    <a class="nxt" href="0016-grouped-query-attention.html"><span class="dir">Next &rarr;</span><span class="ttl">Grouped-Query Attention</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 15 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

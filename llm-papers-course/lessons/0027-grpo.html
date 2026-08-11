@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GRPO - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Alignment &amp; Post-Training &middot; Lesson 27</div>
+  <h1>GRPO</h1>
+  <p class="paper-meta">
+    <span class="pill">2024</span>
+    Shao, Wang, Zhu, Xu, Song, Bi, Zhang, Zhang, Li, Wu, Guo (DeepSeek-AI). "DeepSeekMath" - introduces Group Relative Policy Optimization.
+    &middot; <a href="https://arxiv.org/abs/2402.03300">arXiv:2402.03300</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>DPO and ORPO removed reinforcement learning entirely. But for <b>reasoning</b> tasks - maths, code - you often want real RL against a checkable reward (was the final answer correct?).</li>
+      <li>Classic PPO (Lesson 23) needs a <b>value network</b> - a second model the size of the policy - to estimate a baseline for each token. That doubles memory and is hard to train.</li>
+      <li>GRPO <b>drops the value network</b>. For each prompt it samples a <b>group</b> of answers, scores them all, and uses the <b>group's own average</b> as the baseline.</li>
+      <li>The advantage of an answer is <b>(its reward &minus; group mean) / group std</b> - literally how far above or below its peers it scored, standardised.</li>
+      <li>Then a normal clipped PPO update plus a KL term. Cheaper than PPO, and it is the RL engine behind DeepSeek's maths and reasoning models.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>The last two lessons made alignment cheap by deleting reinforcement learning. But some goals resist the preference-pair format. For a maths problem there is a <em>correct answer</em>: you can run the model's solution and check it. That gives a clean, automatic reward, and to fully exploit it you want to explore - generate solutions, see which get the reward, and reinforce those. That is reinforcement learning, and it is how reasoning models are trained.</p>
+  <p>The trouble is PPO's cost. PPO estimates, for every token, how much better the outcome was than expected - the <strong>advantage</strong> - and to get the "expected" part it trains a <strong>value network</strong> (a critic) that is typically as large as the policy itself. That is a second full model to hold in memory and train, and value networks are notoriously finicky. GRPO removes it with a simple idea: if you sample several answers to the same prompt, the <em>group average reward</em> is already a fine baseline. No critic needed.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph PPO["PPO (Lesson 23)"]
+    direction TB
+    p1["policy model"] --> p3["advantage"]
+    p2["value network<br/>(critic, ~policy size)"] --> p3
+    p3 --> p4["clipped update"]
+  end
+  subgraph GRPO["GRPO"]
+    direction TB
+    g1["policy model"] --> g2["sample a GROUP<br/>of answers"]
+    g2 --> g3["advantage = reward vs<br/>group mean / group std"]
+    g3 --> g4["clipped update"]
+  end
+    </div>
+    <figcaption>What GRPO removes. PPO learns a whole value network just to produce a baseline for the advantage. GRPO gets the baseline for free from the mean reward of a group of sampled answers. <b>No critic model means roughly half the memory and one fewer thing to train.</b></figcaption>
+  </figure>
+
+  <h2>2. The group idea</h2>
+  <p>Here is the whole trick in a sentence: to know whether an answer is good, compare it to <em>other answers to the same prompt</em>. For each question, sample a group of <code>G</code> outputs from the current policy. Score each one with the reward (for maths, 1 if the final answer is correct, 0 otherwise, plus format checks). An answer that beats the group average gets a positive advantage; one below average gets a negative advantage. The group is its own yardstick.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  q["question q"] --> pol["current policy"]
+  pol --> o1["answer 1 &rarr; reward r1"]
+  pol --> o2["answer 2 &rarr; reward r2"]
+  pol --> o3["answer 3 &rarr; reward r3"]
+  pol --> og["... answer G &rarr; reward rG"]
+  o1 --> stat["group mean and std<br/>of {r1..rG}"]
+  o2 --> stat
+  o3 --> stat
+  og --> stat
+  stat --> adv["advantage_i =<br/>(r_i &minus; mean) / std"]
+    </div>
+    <figcaption>Group-relative scoring. One question, many sampled answers, each scored by the reward. The group's mean and standard deviation turn raw rewards into advantages: above-average answers are reinforced, below-average ones are discouraged. <b>The baseline the critic used to provide is now just the mean of the group.</b></figcaption>
+  </figure>
+
+  <h2>3. The group-relative advantage, exactly</h2>
+  <p>For outcome-supervised training, the advantage assigned to <em>every token</em> of answer <code>i</code> is the standardised reward - subtract the group mean, divide by the group standard deviation.</p>
+
+  <div class="math">A&#770;<sub>i,t</sub> = r&#771;<sub>i</sub> = ( r<sub>i</sub> &minus; mean( { r<sub>1</sub>, ..., r<sub>G</sub> } ) ) / std( { r<sub>1</sub>, ..., r<sub>G</sub> } )
+    <span class="gloss"><b>r<sub>i</sub></b>: the reward for answer <i>i</i> in the group (for maths, correctness of the final answer). <b>mean({r<sub>1</sub>..r<sub>G</sub>})</b>: the average reward across the group of G sampled answers - the baseline. <b>std({r<sub>1</sub>..r<sub>G</sub>})</b>: the spread of rewards, used to standardise. <b>A&#770;<sub>i,t</sub></b>: the advantage, the same value given to every token <i>t</i> of answer <i>i</i>. Positive means this answer beat its peers; negative means it lagged. No value network appears - the baseline is purely the group statistics.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why standardise</span>
+    Subtracting the mean centres the signal so only <em>relative</em> quality matters - if every answer in a group scores 1, none is reinforced over the others. Dividing by the std keeps the update size stable whether a group is tightly clustered or spread out. It is the same z-score you would compute in statistics, applied per group.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph MIX["Group with mixed rewards"]
+    direction TB
+    m1["rewards: 1, 0, 1, 0"] --> m2["mean = 0.5"]
+    m2 --> m3["correct: +adv<br/>wrong: &minus;adv"]
+  end
+  subgraph ALL["Group all correct"]
+    direction TB
+    a1["rewards: 1, 1, 1, 1"] --> a2["mean = 1.0"]
+    a2 --> a3["every advantage = 0<br/>no update"]
+  end
+    </div>
+    <figcaption>What standardising does to two groups. A mixed group reinforces the correct answers and discourages the wrong ones. A group where every answer already scored the reward produces zero advantage across the board, so nothing is pushed. <b>Only relative standing within the group drives learning - solved prompts stop contributing once the model reliably nails them.</b></figcaption>
+  </figure>
+
+  <h2>4. The GRPO objective, exactly</h2>
+  <p>With advantages in hand, the update is standard clipped PPO, averaged over the group and over tokens, minus a KL term to a reference model. The clip keeps each step small so training stays stable.</p>
+
+  <div class="math">J<sub>GRPO</sub>(&theta;) = E [ (1/G) &sum;<sub>i=1</sub><sup>G</sup> (1/|o<sub>i</sub>|) &sum;<sub>t=1</sub><sup>|o<sub>i</sub>|</sup> { min( r<sub>i,t</sub> A&#770;<sub>i,t</sub>, clip(r<sub>i,t</sub>, 1&minus;&epsilon;, 1+&epsilon;) A&#770;<sub>i,t</sub> ) &minus; &beta; D<sub>KL</sub>[&pi;<sub>&theta;</sub> &Vert; &pi;<sub>ref</sub>] } ]
+    <span class="gloss"><b>r<sub>i,t</sub> = &pi;<sub>&theta;</sub>(o<sub>i,t</sub>|...) / &pi;<sub>&theta;<sub>old</sub></sub>(o<sub>i,t</sub>|...)</b>: the probability ratio - how much more likely the updated policy makes this token than the policy that generated it. <b>A&#770;<sub>i,t</sub></b>: the group-relative advantage from above. <b>min(&middot;, clip(&middot;))</b>: PPO's clipped surrogate - allow the ratio to help only within [1&minus;&epsilon;, 1+&epsilon;], so no single step lurches too far. <b>(1/G) &sum;<sub>i</sub></b>: average over the group of answers. <b>(1/|o<sub>i</sub>|) &sum;<sub>t</sub></b>: average over the tokens of each answer. <b>&beta; D<sub>KL</sub>[&pi;<sub>&theta;</sub> &Vert; &pi;<sub>ref</sub>]</b>: a KL leash to the reference model, added directly to the loss (not folded into the reward as PPO does).</span>
+  </div>
+
+  <p>One more detail worth its own note: GRPO estimates that KL with an <strong>unbiased, always-positive</strong> estimator, added straight to the loss.</p>
+
+  <div class="math">D<sub>KL</sub>[&pi;<sub>&theta;</sub> &Vert; &pi;<sub>ref</sub>] = ( &pi;<sub>ref</sub>(o<sub>i,t</sub>|...) / &pi;<sub>&theta;</sub>(o<sub>i,t</sub>|...) ) &minus; log( &pi;<sub>ref</sub>(o<sub>i,t</sub>|...) / &pi;<sub>&theta;</sub>(o<sub>i,t</sub>|...) ) &minus; 1
+    <span class="gloss"><b>&pi;<sub>ref</sub> / &pi;<sub>&theta;</sub></b>: the ratio of the reference model's probability to the trained policy's for this token. <b>ratio &minus; log(ratio) &minus; 1</b>: a standard estimator of KL divergence that is always &ge; 0 and unbiased, so it never accidentally rewards drift. Keeping this term in the loss (rather than in the reward) keeps the advantage calculation clean.</span>
+  </div>
+
+  <h2>5. Implement it: group advantages plus the clipped update</h2>
+  <p>The two pieces - group-relative advantage and the clipped objective - are short in PyTorch. This is a teaching sketch; a full trainer adds generation, tokenisation, and the KL term, but the core signals are exactly these.</p>
+
+  <div class="code-cap">grpo_core.py &middot; group advantage + clipped PPO-style objective</div>
+  <pre><code>import torch
+import torch.nn.functional as F
+
+def group_advantages(rewards):
+    """
+    rewards: (G,) reward for each of the G sampled answers to ONE prompt.
+    Returns (G,) standardized advantage: (r - mean) / std.  No value network.
+    """
+    mean = rewards.mean()
+    std  = rewards.std() + 1e-8          # guard against a zero-variance group
+    return (rewards - mean) / std        # z-score within the group
+
+def grpo_objective(logp_new, logp_old, advantages, eps=0.2):
+    """
+    logp_new  : (G, T) log-prob of each token under the CURRENT policy
+    logp_old  : (G, T) log-prob of the SAME tokens under the sampling policy
+    advantages: (G,)   one advantage per answer, broadcast to its tokens
+    eps       : PPO clip range (illustrative; the paper leaves eps symbolic)
+    Returns a scalar to MAXIMIZE (KL term omitted for clarity).
+    """
+    A = advantages.unsqueeze(1)          # (G, 1) -> broadcasts over tokens
+    ratio = torch.exp(logp_new - logp_old)   # pi_new / pi_old, per token
+
+    unclipped = ratio * A
+    clipped   = torch.clamp(ratio, 1 - eps, 1 + eps) * A
+    surrogate = torch.min(unclipped, clipped)    # PPO's pessimistic bound
+
+    # average over tokens within each answer, then over the group
+    per_answer = surrogate.mean(dim=1)   # (G,)
+    return per_answer.mean()             # scalar
+
+# --- smoke test: 4 answers to one maths prompt, rewards are correctness ---
+rewards = torch.tensor([1.0, 0.0, 1.0, 0.0])   # 2 right, 2 wrong
+adv = group_advantages(rewards)
+print(adv)            # correct answers get +, wrong answers get - (mean 0)
+
+G, T = 4, 6
+logp_old = torch.log(torch.rand(G, T))
+logp_new = logp_old + 0.05 * torch.randn(G, T)   # slightly updated policy
+print(float(grpo_objective(logp_new, logp_old, adv)))</code></pre>
+
+  <p>Look at the smoke test. Two answers were correct and two were wrong, so the group mean is 0.5; after standardising, the correct answers get a positive advantage and the wrong ones negative - all without ever training a critic. The clipped objective then nudges the policy to make the good answers more likely, in small, safe steps. That is GRPO.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Q as Question q
+  participant P as Policy (old)
+  participant Rw as Reward (checkable)
+  participant U as Update
+  loop each training step
+    Q->>P: sample a group of G answers
+    P->>Rw: score each answer
+    Rw->>U: advantage_i = (r_i - mean) / std
+    U->>U: clipped PPO objective + KL to reference
+    U->>P: update policy, then old = new
+  end
+    </div>
+    <figcaption>The GRPO training loop as a sequence. Sample a group, score each answer with the automatic reward, standardise into advantages, apply the clipped update with a KL leash, and repeat. <b>Every box that a PPO diagram would spend on the value network is simply gone - the group statistics stand in for the critic.</b></figcaption>
+  </figure>
+
+  <h2>6. Why it mattered</h2>
+  <table>
+    <thead><tr><th>Property</th><th>PPO (Lesson 23)</th><th>GRPO</th></tr></thead>
+    <tbody>
+      <tr><td>Value / critic network</td><td>Required, about policy size</td><td>None</td></tr>
+      <tr><td>Baseline for advantage</td><td>Learned value estimate</td><td>Group mean reward</td></tr>
+      <tr><td>Advantage per answer</td><td>From value net per token</td><td>(reward &minus; mean) / std</td></tr>
+      <tr><td>KL penalty placement</td><td>Inside the reward</td><td>Added directly to the loss</td></tr>
+      <tr><td>Memory &amp; compute</td><td>Higher (two big models)</td><td>Lower (policy only)</td></tr>
+    </tbody>
+  </table>
+  <p>GRPO made RL fine-tuning cheap enough to scale on reasoning. DeepSeekMath used it (with a group size of 64 and a KL coefficient of 0.04) to push open-model maths performance sharply upward, and the same algorithm later powered DeepSeek's reasoning models trained largely by RL against checkable rewards. It closes this module by showing the other way to cut RLHF's cost: not by removing RL, as DPO and ORPO did, but by removing the most expensive piece <em>inside</em> it.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does GRPO remove compared with standard PPO?</div>
+      <button class="q-opt">The clipped surrogate objective that keeps each update step small</button>
+      <button class="q-opt">The KL penalty that anchors the policy near the reference model</button>
+      <button class="q-opt">The value network, replacing its baseline with the group mean reward</button>
+      <button class="q-opt">The reward signal, learning purely from the group ordering of answers</button>
+      <div class="q-fb">GRPO drops the critic. It samples a group and uses the group's mean reward as the baseline, so no separate value network is trained.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How is an answer's advantage computed in GRPO?</div>
+      <button class="q-opt">Its reward minus the group mean, all divided by the group standard deviation</button>
+      <button class="q-opt">Its reward minus the reference model score, scaled by the clip parameter eps</button>
+      <button class="q-opt">The log-ratio of the policy to the reference summed across the whole answer</button>
+      <button class="q-opt">The value network estimate subtracted from the observed reward per token</button>
+      <div class="q-fb">Advantage = (r_i - mean) / std over the group. It is a z-score: how far above or below its peers the answer scored, standardised.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why sample a whole group of answers per prompt?</div>
+      <button class="q-opt">So the reward model can be trained on many pairwise comparison labels</button>
+      <button class="q-opt">So the reference model can be updated once for every sampled answer</button>
+      <button class="q-opt">So each token receives a different clip range tuned to its own answer</button>
+      <button class="q-opt">So the group average can serve as the baseline instead of a value net</button>
+      <div class="q-fb">The group's mean reward is the baseline. Comparing each answer to its peers is what lets GRPO skip the critic entirely.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">On what kind of task does GRPO's checkable reward shine?</div>
+      <button class="q-opt">Open-ended chat where only human taste can judge the better reply</button>
+      <button class="q-opt">Maths and code where a final answer can be verified as right or wrong</button>
+      <button class="q-opt">Translation where fluency must be rated across many possible phrasings</button>
+      <button class="q-opt">Summarisation where the reward comes from a learned preference model</button>
+      <div class="q-fb">Reasoning tasks give an automatic, verifiable reward (is the answer correct?), which is ideal for RL and powers DeepSeek's maths and reasoning models.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0026-orpo.html">ORPO</a></b> cut RLHF's cost by removing reinforcement learning; GRPO takes the opposite route, keeping RL but removing its value network.</li>
+    <li><b>GRPO is a variant of PPO</b> from <a href="0023-instructgpt-rlhf.html">InstructGPT (RLHF)</a> - same clipped objective and KL leash, minus the critic.</li>
+    <li>The checkable rewards it thrives on connect to <a href="0030-chain-of-thought.html">Chain-of-Thought</a> and <a href="0034-test-time-scaling.html">Test-Time Scaling</a> in Module 08, where models reason step by step.</li>
+    <li><b>Next, <a href="0028-lora.html">LoRA</a></b> opens Module 07 on parameter-efficient fine-tuning - a different lever for making all this training cheaper.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The insight to internalise is that a baseline just needs to answer "better than what?" PPO answers with a learned value; GRPO answers with the group average. Ask the agent to run <code>group_advantages</code> on a group where all rewards are equal and explain why every advantage is zero, or to show how the clip prevents a single lucky answer from dominating. Do not move on until "the group is its own baseline" feels obvious.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2402.03300">Shao et al., "DeepSeekMath: Pushing the Limits of Mathematical Reasoning in Open Language Models" (2024)</a>, which introduces GRPO in Section 4. Pair it with the <a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1 paper</a> to see GRPO scaled up for reasoning, and Hugging Face's <a href="https://huggingface.co/docs/trl/grpo_trainer">TRL GRPOTrainer docs</a> to run it.</p>
+
+  <div class="pager">
+    <a href="0026-orpo.html"><span class="dir">&larr; Previous</span><span class="ttl">ORPO</span></a>
+    <a class="nxt" href="0028-lora.html"><span class="dir">Next &rarr;</span><span class="ttl">LoRA</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 27 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

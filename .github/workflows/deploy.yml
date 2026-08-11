@@ -1,0 +1,80 @@
+name: Publish to S3
+
+# Publishing happens here and only here. Nobody deploys from a laptop.
+# A merge into main is the single trigger; workflow_dispatch is the manual
+# re-publish escape hatch when the bucket and the branch have drifted apart.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: publish-to-s3
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  id-token: write # required to mint the OIDC token that assumes the AWS role
+
+jobs:
+  validate:
+    name: Validate site
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Check course structure and links
+        run: python3 scripts/validate_site.py
+
+  publish:
+    name: Sync to S3
+    needs: validate
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ steps.site.outputs.url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assume the deploy role
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+          role-session-name: course-hub-deploy-${{ github.run_id }}
+
+      - name: Sync the hub to the bucket
+        run: |
+          aws s3 sync . "s3://${S3_BUCKET}" \
+            --delete \
+            --cache-control "public, max-age=300" \
+            --exclude "*.md" \
+            --exclude ".git/*" \
+            --exclude ".github/*" \
+            --exclude "scripts/*" \
+            --exclude ".editorconfig" \
+            --exclude ".gitignore" \
+            --exclude "LICENSE" \
+            --exclude "LICENSE-CONTENT" \
+            --exclude "deploy.sh" \
+            --exclude "deploy.config" \
+            --exclude ".DS_Store" \
+            --exclude "*/learning-records/*"
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+
+      - name: Publish the site URL
+        id: site
+        run: |
+          url="http://${S3_BUCKET}.s3-website.${AWS_REGION}.amazonaws.com/"
+          echo "url=${url}" >> "$GITHUB_OUTPUT"
+          echo "### Course Hub published" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "${url}" >> "$GITHUB_STEP_SUMMARY"
+        env:
+          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          AWS_REGION: ${{ vars.AWS_REGION }}

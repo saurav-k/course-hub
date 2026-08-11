@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FlashAttention-2 - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Efficient Inference &amp; Systems &middot; Lesson 18</div>
+  <h1>FlashAttention-2</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Tri Dao (Princeton University &amp; Together AI).
+    &middot; <a href="https://arxiv.org/abs/2307.08691">arXiv:2307.08691</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>FlashAttention (Lesson 17) already fixed the memory traffic. But it was still only reaching <b>25-40%</b> of a GPU's peak math throughput, while a plain matrix multiply hits 80-90%.</li>
+      <li>FlashAttention-2 keeps the exact same tiling and online softmax, and squeezes out the remaining inefficiency in <b>three</b> ways.</li>
+      <li><b>Fewer non-matmul FLOPs:</b> GPU tensor cores are built for matrix multiplies, so the paper minimises the slow "other" operations (rescaling divides) around them.</li>
+      <li><b>Parallelise over sequence length:</b> v1 split work across batch and heads only; v2 also splits across the <b>sequence dimension</b>, keeping the GPU busy even with a small batch or long context.</li>
+      <li><b>Better work partitioning between warps:</b> reorganising which threads own which sub-block cuts shared-memory traffic. Net effect: about <b>2&times;</b> faster than v1, reaching <b>50-73%</b> of A100 peak and up to <b>225 TFLOPs/s</b>.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>FlashAttention solved the right problem - memory movement - and the field adopted it fast. But Tri Dao noticed the kernel still left performance on the table. A well-tuned matrix multiply (GEMM) on an A100 runs near the hardware's theoretical peak. FlashAttention-1, doing morally the same amount of math, was reaching only a quarter to two-fifths of that peak. The gap was not the algorithm; it was <em>how the work was scheduled onto the GPU's parallel units.</em></p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph V1["FlashAttention-1"]
+    direction TB
+    a1["IO-aware tiling ✓"] --> a2["online softmax ✓"]
+    a2 --> a3["25-40% of A100 peak<br/><i>scheduling leaves flops idle</i>"]
+  end
+  subgraph V2["FlashAttention-2"]
+    direction TB
+    b1["same tiling + softmax"] --> b2["fewer non-matmul ops"]
+    b2 --> b3["parallelise over sequence"]
+    b3 --> b4["better warp partitioning"]
+    b4 --> b5["50-73% of A100 peak<br/><i>~2&times; faster</i>"]
+  end
+  V1 -->|"same math, better scheduling"| V2
+    </div>
+    <figcaption>What changed between versions. The <b>algorithm and its exact result are unchanged</b>. FlashAttention-2 is a re-engineering of how the identical computation is mapped onto the GPU's cores, so a far larger fraction of the hardware's peak throughput is actually used.</figcaption>
+  </figure>
+
+  <h2>2. Background: how a GPU runs a kernel</h2>
+  <p>To see the three improvements you need three words. A GPU runs many <strong>thread blocks</strong>, each pinned to one physical unit (an SM, or streaming multiprocessor). Inside a block, threads march in lockstep groups of 32 called <strong>warps</strong>. And the fast scratchpad a block shares is <strong>shared memory</strong> (SRAM). Performance depends on keeping every SM busy (enough parallel work) and keeping warps from stepping on each other in shared memory.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  GPU["GPU: many SMs (e.g. 108 on A100)"] --> SM1["SM"]
+  GPU --> SM2["SM"]
+  GPU --> SMn["... SM"]
+  SM1 --> TB["thread block<br/>(assigned to one SM)"]
+  TB --> W1["warp (32 threads)"]
+  TB --> W2["warp (32 threads)"]
+  TB --> W3["... more warps"]
+  TB --> SH["shared memory (SRAM)<br/><i>warps read/write here</i>"]
+    </div>
+    <figcaption>The unit map. A GPU has many SMs; each runs thread blocks; each block runs warps of 32 threads that cooperate through shared memory. <b>Idle SMs waste the chip, and warps clashing in shared memory waste time</b> - FlashAttention-2 attacks both.</figcaption>
+  </figure>
+
+  <h2>3. Improvement one: fewer non-matmul FLOPs</h2>
+  <p>Tensor cores multiply matrices absurdly fast, but they only accelerate <em>matrix multiply</em>. Everything else - the exponentials, the divides that rescale the running softmax - runs on the ordinary, much slower path. On an A100 a non-matmul FLOP can be roughly an order of magnitude more expensive than a matmul FLOP. So even though softmax is a tiny share of the FLOP count, it can eat a large share of the <em>time</em>.</p>
+
+  <p>FlashAttention-2 rewrites the online-softmax bookkeeping so the per-block <strong>division</strong> is deferred. Instead of dividing the accumulator by the running sum on every block, it accumulates un-normalised and divides <strong>once at the very end</strong>. Same answer, far fewer of the expensive non-matmul operations in the hot loop.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph V1b["v1 inner loop"]
+    direction TB
+    x1["compute block scores<br/>(matmul, fast)"] --> x2["exp + rescale<br/>(non-matmul, slow)"]
+    x2 --> x3["divide acc by l<br/>every block (slow)"]
+  end
+  subgraph V2b["v2 inner loop"]
+    direction TB
+    y1["compute block scores<br/>(matmul, fast)"] --> y2["exp + rescale<br/>(minimised)"]
+    y2 --> y3["accumulate un-normalised"]
+    y3 --> y4["divide once at the end"]
+  end
+    </div>
+    <figcaption>Cutting the slow operations. The costly per-block divide is pushed out of the loop and done a single time at the end. <b>Because non-matmul ops are disproportionately expensive on tensor-core GPUs, removing them from the inner loop is a big win even though the FLOP count barely moves.</b></figcaption>
+  </figure>
+
+  <h2>4. Improvement two: parallelise over the sequence dimension</h2>
+  <p>FlashAttention-1 handed one attention head of one batch element to each thread block. That gives <code>batch &times; heads</code> parallel jobs. Fine when the batch is large. But inference and long-context training often have a <strong>small batch and a very long sequence</strong> - so there were fewer jobs than the GPU has SMs, and some SMs sat idle.</p>
+
+  <p>FlashAttention-2 adds a third axis of parallelism: it splits each head's work across <strong>blocks of the query sequence</strong> too. Now the number of parallel jobs is <code>batch &times; heads &times; query-blocks</code>, which stays large even when the batch is one. Different query blocks are independent - each computes its own output rows - so they map cleanly onto separate SMs with no coordination.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph P1["v1 parallelism: batch &times; heads"]
+    direction LR
+    j1["job = (batch b, head h)"]
+    note1["small batch &rarr; few jobs &rarr; idle SMs"]
+  end
+  subgraph P2["v2 parallelism: batch &times; heads &times; query blocks"]
+    direction LR
+    q1["Q block 1 &rarr; SM A"]
+    q2["Q block 2 &rarr; SM B"]
+    q3["Q block 3 &rarr; SM C"]
+    q4["... &rarr; more SMs"]
+  end
+  P1 -->|"add sequence axis"| P2
+    </div>
+    <figcaption>Adding a parallel axis. By also splitting over query blocks, even a batch of one long sequence produces enough independent jobs to fill every SM. <b>This is the improvement that most helps long-context and single-request inference</b>, where v1 ran out of parallel work.</figcaption>
+  </figure>
+
+  <h2>5. Improvement three: better work partitioning between warps</h2>
+  <p>Within a thread block, FlashAttention-1 split the key/value tile across warps (a "split-K" scheme). Each warp computed a partial result that then had to be combined through shared memory, so warps kept writing and reading intermediate sums - traffic and synchronisation. FlashAttention-2 flips it: it splits the <strong>query</strong> tile across warps instead. Now each warp owns a full slice of the output and needs no cross-warp reduction, cutting shared-memory round trips.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph W1["v1: split keys across warps"]
+    direction TB
+    kv["each warp gets part of K,V"] --> partial["warps make partial sums"]
+    partial --> reduce["combine via shared memory<br/><i>extra traffic + sync</i>"]
+  end
+  subgraph W2["v2: split queries across warps"]
+    direction TB
+    qq["each warp gets part of Q"] --> own["each warp owns full output rows"]
+    own --> none["no cross-warp reduction<br/><i>less shared-memory traffic</i>"]
+  end
+    </div>
+    <figcaption>Repartitioning inside the block. Splitting queries instead of keys means each warp produces complete output rows on its own, so warps stop shuffling partial sums through shared memory. <b>Less coordination equals more time spent on useful math.</b></figcaption>
+  </figure>
+
+  <h2>6. Putting the numbers in context</h2>
+  <p>How fast is "fast"? A GPU has a peak FLOPs rating - the most floating-point math it could ever do per second. Real kernels reach a fraction of that. The metric is <strong>utilisation</strong>: achieved FLOPs / peak FLOPs. Matrix multiply hits ~80-90%. FlashAttention-1 hit 25-40%. FlashAttention-2 hits <strong>50-73%</strong>, and up to <strong>225 TFLOPs/s per A100</strong> at 72% model-FLOPs-utilisation when training GPT-style models end to end.</p>
+
+  <div class="math">utilisation = achieved_FLOPs_per_second / peak_FLOPs_per_second
+    <span class="gloss"><b>achieved</b>: how much math the kernel actually did per second, measured. <b>peak</b>: the chip's advertised maximum. The ratio tells you how much of the silicon you are really using. FlashAttention-2 roughly doubled this ratio over v1 without changing the answer - pure engineering, no accuracy trade.</span>
+  </div>
+
+  <h2>7. Implement it: a benchmark harness</h2>
+  <p>You cannot feel a kernel speedup by reading about it, so measure one. This harness times naive attention against PyTorch's fused FlashAttention path (<code>scaled_dot_product_attention</code>, which uses a FlashAttention-2 kernel on supported hardware) and reports both time and peak memory. On a GPU the fused path is dramatically faster and uses far less memory as the sequence grows; on CPU you still see the memory gap.</p>
+
+  <div class="code-cap">bench_attention.py &middot; runnable with torch (best on a CUDA GPU)</div>
+  <pre><code>import torch, torch.nn.functional as F, time
+
+def naive_attention(q, k, v):
+    # materialises the full N x N score matrix - the thing FlashAttention avoids
+    d = q.shape[-1]
+    scores = (q @ k.transpose(-2, -1)) / d ** 0.5   # (B, H, N, N)
+    weights = scores.softmax(dim=-1)
+    return weights @ v
+
+def bench(fn, q, k, v, iters=20):
+    dev = q.device
+    if dev.type == "cuda":
+        torch.cuda.synchronize(); torch.cuda.reset_peak_memory_stats()
+    t0 = time.perf_counter()
+    for _ in range(iters):
+        out = fn(q, k, v)
+    if dev.type == "cuda":
+        torch.cuda.synchronize()
+    dt = (time.perf_counter() - t0) / iters * 1e3       # ms per call
+    mem = (torch.cuda.max_memory_allocated() / 1e6      # MB
+           if dev.type == "cuda" else float("nan"))
+    return out, dt, mem
+
+dev = "cuda" if torch.cuda.is_available() else "cpu"
+B, H, N, D = 4, 8, 2048, 64                              # long sequence
+q, k, v = (torch.randn(B, H, N, D, device=dev, dtype=torch.float16
+                       if dev == "cuda" else torch.float32) for _ in range(3))
+
+_, t_naive, m_naive = bench(naive_attention, q, k, v)
+# fused path -> FlashAttention-2 kernel on supported GPUs:
+_, t_flash, m_flash = bench(lambda a,b,c: F.scaled_dot_product_attention(a,b,c),
+                            q, k, v)
+
+print(f"naive : {t_naive:6.2f} ms   peak {m_naive:8.1f} MB")
+print(f"flash : {t_flash:6.2f} ms   peak {m_flash:8.1f} MB")
+print(f"speedup x{t_naive / t_flash:.1f}")
+</code></pre>
+
+  <p>The naive version's peak memory climbs with <code>N&sup2;</code> because of the score matrix; the fused version's does not. That memory curve is the whole point of the FlashAttention line of work, and FlashAttention-2 is the version that also makes the <em>compute</em> reach a large fraction of the hardware's ceiling.</p>
+
+  <div class="card callout key"><span class="tag">The through-line</span>
+    FlashAttention made attention <b>memory-efficient</b>. FlashAttention-2 made that same memory-efficient kernel <b>compute-efficient</b> too, by scheduling its work to match how GPUs are actually built: keep tensor cores fed, keep every SM busy, keep warps out of each other's way.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What did FlashAttention-2 change relative to version one?</div>
+      <button class="q-opt">It approximated the softmax to reduce the total flop count</button>
+      <button class="q-opt">It moved the whole score matrix into fast on-chip memory</button>
+      <button class="q-opt">It added a new positional encoding to extend the context</button>
+      <button class="q-opt">It rescheduled the same exact work to use the GPU better</button>
+      <div class="q-fb">The algorithm and result are unchanged. v2 improves how the identical computation maps onto GPU cores.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why minimise non-matmul operations like the rescaling divide?</div>
+      <button class="q-opt">They run off the tensor cores and cost far more per flop</button>
+      <button class="q-opt">They change the numerical answer and hurt model accuracy</button>
+      <button class="q-opt">They cannot be expressed in half precision on the hardware</button>
+      <button class="q-opt">They force the kernel to fall back to the slow CPU device</button>
+      <div class="q-fb">Tensor cores only speed up matrix multiplies; other ops use the slow path, so they dominate time even when few.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What extra axis of parallelism did version two add?</div>
+      <button class="q-opt">Splitting the model width across several cooperating devices</button>
+      <button class="q-opt">Splitting the batch dimension into many tiny micro batches</button>
+      <button class="q-opt">Splitting each head across blocks of the query sequence</button>
+      <button class="q-opt">Splitting the value vectors across the attention head count</button>
+      <div class="q-fb">v1 parallelised over batch and heads; v2 also splits over query-sequence blocks, filling idle SMs on long sequences.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Roughly what A100 peak utilisation did FlashAttention-2 reach?</div>
+      <button class="q-opt">About 10-20 percent, similar to a poorly tuned kernel</button>
+      <button class="q-opt">About 50-73 percent, roughly double the first version</button>
+      <button class="q-opt">About 90-99 percent, matching a pure matrix multiply</button>
+      <button class="q-opt">About 25-40 percent, the same as the first version did</button>
+      <div class="q-fb">v2 reaches 50-73% of A100 peak (up to 225 TFLOPs/s), roughly 2&times; the 25-40% of v1.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>Builds directly on <a href="0017-flashattention.html">FlashAttention</a> - same tiling and online softmax, better GPU scheduling.</li>
+    <li>Both target the attention math flagged as <b>O(N&sup2;)</b> in <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a>.</li>
+    <li>Complementary to <a href="0016-grouped-query-attention.html">GQA</a>: fewer K/V heads to stream means each FlashAttention-2 job does less work.</li>
+    <li>Next, <a href="0019-kv-cache-optimization.html">KV Cache Optimization</a> shifts from attention compute to the memory the KV cache itself consumes at inference.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If "warps" and "SMs" feel hazy, ask the agent to draw one A100 SM and walk a single query block through it. Then run the benchmark at N = 512, 1024, 2048, 4096 and ask why the naive memory curve bends upward while the fused one stays flat.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2307.08691">Tri Dao, "FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning" (2023)</a>. Pair it with the <a href="https://tridao.me/publications/flash2/flash2.pdf">author's tech report</a> and the <a href="https://github.com/Dao-AILab/flash-attention">flash-attention repo</a> to read the CUDA kernels the paper describes.</p>
+
+  <div class="pager">
+    <a href="0017-flashattention.html"><span class="dir">&larr; Previous</span><span class="ttl">FlashAttention</span></a>
+    <a class="nxt" href="0019-kv-cache-optimization.html"><span class="dir">Next &rarr;</span><span class="ttl">KV Cache Compression &amp; Optimization</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 18 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

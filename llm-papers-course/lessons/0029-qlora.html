@@ -1,0 +1,311 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QLoRA - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Parameter-Efficient Fine-Tuning &middot; Lesson 29</div>
+  <h1>QLoRA: Efficient Finetuning of Quantized LLMs</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Dettmers, Pagnoni, Holtzman, Zettlemoyer (University of Washington).
+    &middot; <a href="https://arxiv.org/abs/2305.14314">arXiv:2305.14314</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><a href="0028-lora.html">LoRA</a> made the <b>trainable</b> part of fine-tuning tiny. QLoRA attacks the part LoRA left alone: the <b>frozen base model</b>, which still had to sit in memory in 16-bit.</li>
+      <li>QLoRA stores the frozen base weights in a new <b>4-bit</b> format called <b>NormalFloat (NF4)</b>, shaped for the bell-curve spread of neural-net weights, then trains 16-bit LoRA adapters on top.</li>
+      <li><b>Double quantization</b> compresses the little scaling constants that quantization itself creates, and <b>paged optimizers</b> use unified CPU-GPU memory to survive sudden memory spikes.</li>
+      <li>Result: finetune a <b>65B</b> model on <b>one 48GB GPU</b> in 24 hours, with no quality loss versus 16-bit finetuning. The Guanaco models it produced reached <b>99.3%</b> of ChatGPT on one benchmark.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>LoRA solved the <em>gradient</em> side of fine-tuning. You freeze the giant base model and train two skinny adapter matrices, so you update maybe 0.1% of the parameters. That slashes the optimizer state and the gradients. But there is a stubborn cost LoRA does not touch: the frozen base weights themselves. A 65-billion-parameter model in 16-bit is about <strong>130 GB</strong> just to hold still in memory. No single consumer or workstation GPU has that. The adapters are cheap; the tenant they live with is not.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph FULL["Full 16-bit finetuning"]
+    direction TB
+    fw["base weights 16-bit<br/>~130 GB"] --> fg["gradients + optimizer<br/>hundreds of GB"]
+  end
+  subgraph LORA["LoRA"]
+    direction TB
+    lw["base weights 16-bit<br/>~130 GB (still huge)"] --> la["tiny adapter grads<br/>small"]
+  end
+  subgraph QLORA["QLoRA"]
+    direction TB
+    qw["base weights 4-bit NF4<br/>~35 GB"] --> qa["tiny adapter grads 16-bit<br/>small"]
+  end
+    </div>
+    <figcaption>Where the memory goes. Full finetuning pays for base weights, gradients, and optimizer state. LoRA removes the gradient and optimizer cost but <b>still loads the base model in 16-bit</b>. QLoRA squeezes the frozen base to 4-bit, which is the last big block of memory standing between you and a single-GPU 65B finetune.</figcaption>
+  </figure>
+
+  <p>QLoRA's insight is that the base model is <strong>frozen</strong> - it is never updated, only read during the forward pass. Anything you never train, you can afford to store in a lossy, compressed form, as long as you decompress it accurately enough to compute a good forward pass. That is exactly what quantization does.</p>
+
+  <h2>2. Quantization in one picture</h2>
+  <p><strong>Quantization</strong> means mapping a wide range of real numbers onto a small set of buckets, then storing only the bucket index. A 16-bit weight uses 16 bits per number; a 4-bit weight uses 4. That is a 4x saving, but only if the 16 available buckets are placed where the weights actually are. Placing buckets badly wastes precision on values that never occur.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["16-bit weight<br/>e.g. 0.0137"] --> Q["quantize<br/>find nearest bucket"]
+  Q --> I["store 4-bit index<br/>0..15"]
+  I --> D["dequantize<br/>index &rarr; bucket value"]
+  D --> U["approx weight<br/>e.g. 0.0141 (used in forward pass)"]
+    </div>
+    <figcaption>The store-then-restore cycle. A full-precision weight is snapped to the nearest of 16 buckets and only its 4-bit index is kept, cutting memory 4x. At compute time the index is expanded back to an approximate real number. QLoRA's whole game is <b>choosing bucket positions so the restored weight is almost identical to the original</b>.</figcaption>
+  </figure>
+
+  <h2>3. Part one: 4-bit NormalFloat (NF4)</h2>
+  <p>Here is the observation NF4 is built on. Trained neural-net weights are not spread evenly; they cluster in a <strong>bell curve</strong> (a zero-centered normal distribution). Most weights are small, near zero; extreme values are rare. So a good 4-bit format should place <em>many</em> buckets near zero, where the weights are dense, and <em>few</em> buckets out in the tails, where weights are scarce.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph INT4["Plain INT4: evenly spaced buckets"]
+    direction LR
+    i1["|"] --- i2["|"] --- i3["|"] --- i4["|"] --- i5["|"] --- i6["|"] --- i7["|"]
+  end
+  subgraph NF4["NF4: buckets dense near zero"]
+    direction LR
+    n1["|"] --- n2[" | "] --- n3["||"] --- n4["|||"] --- n5["||"] --- n6[" | "] --- n7["|"]
+  end
+    </div>
+    <figcaption>Why NF4 beats plain 4-bit integers. Evenly spaced INT4 buckets waste half their resolution on tail values that almost never occur. NF4 puts its buckets on the <b>quantiles of a normal distribution</b>, so most buckets sit near zero where the weights actually live. Same 16 buckets, far less error, because the buckets follow the data.</figcaption>
+  </figure>
+
+  <p>NF4 is an <strong>information-theoretically optimal</strong> data type for normally distributed data: its 16 levels are the quantiles of a standard normal, so each bucket is expected to hold the same number of weights. Weights are first normalized into the range the buckets cover (by dividing each block of 64 weights by that block's largest absolute value, called the <em>quantization constant</em>), then snapped to the nearest NF4 level. Because the format is matched to the shape of the data, a 4-bit NF4 weight loses far less information than a 4-bit integer would.</p>
+
+  <div class="card callout key"><span class="tag">Block-wise, not model-wide</span>
+    Quantization is done per <b>block</b> of 64 weights, each with its own scaling constant. One outlier weight would otherwise stretch the scale for the whole tensor and crush precision everywhere. Blocking contains the damage: a single big value only affects its own block of 64.</div>
+
+  <h2>4. Part two: double quantization</h2>
+  <p>Blocking creates a new, smaller cost. Every block of 64 weights needs its own scaling constant, and those constants are stored in 32-bit floats. Across a 65B model that is a lot of little numbers - about 0.5 bits of overhead <em>per weight</em>, which partly undoes the saving. QLoRA's fix is delightfully recursive: <strong>quantize the quantization constants too</strong>.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  W["weights"] --> B["group into blocks of 64"]
+  B --> Q1["first quantization &rarr; NF4 weights<br/>+ one 32-bit constant per block"]
+  Q1 --> C["collect the 32-bit constants"]
+  C --> B2["group constants into blocks of 256"]
+  B2 --> Q2["second quantization &rarr; 8-bit constants<br/>+ one constant per super-block"]
+  Q2 --> S["stored: NF4 weights + 8-bit constants + few 32-bit constants"]
+    </div>
+    <figcaption>Double quantization. The first pass turns weights into 4-bit codes, leaving one 32-bit scale per 64-weight block. Those scales are themselves a big pile of numbers, so a <b>second pass quantizes them to 8-bit</b>, grouped into super-blocks. This trims the per-weight overhead from about 0.5 bits down to roughly 0.13 bits - free memory, at no measurable quality cost.</figcaption>
+  </figure>
+
+  <h2>5. Part three: paged optimizers</h2>
+  <p>The third piece is not about steady-state memory but about <strong>spikes</strong>. During training, a long sequence or a big mini-batch can momentarily balloon memory for a single step - long enough to trigger an out-of-memory crash even when the average usage is fine. QLoRA uses NVIDIA <strong>unified memory</strong> to give the optimizer state <em>paging</em>, just like an operating system pages RAM to disk.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant GPU as GPU memory
+  participant UM as Unified memory driver
+  participant CPU as CPU RAM
+  Note over GPU: memory spike during a big step
+  GPU->>UM: about to run out of room
+  UM->>CPU: page optimizer state out to CPU RAM
+  Note over GPU: step completes without OOM crash
+  CPU->>UM: state needed again
+  UM->>GPU: page it back in on demand
+    </div>
+    <figcaption>Paged optimizers. When a training step threatens to overflow GPU memory, the optimizer's state is automatically evicted to CPU RAM and pulled back when needed, exactly like OS virtual memory. This <b>turns fatal out-of-memory crashes into brief slowdowns</b>, which is what lets a 65B finetune fit on a single 48GB card without hand-tuning batch sizes.</figcaption>
+  </figure>
+
+  <h2>6. Putting it together: frozen 4-bit base, 16-bit adapters</h2>
+  <p>Now the full picture. The base model is stored once in 4-bit NF4 and never changes. On top of the layers you want to adapt, you attach LoRA adapters, which stay in 16-bit because they are the only thing being trained. In the forward pass, each 4-bit weight block is dequantized back to 16-bit <em>on the fly</em>, used in the matrix multiply, and thrown away. Gradients flow only into the tiny adapters.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  X["input x (16-bit)"] --> DQ["dequantize NF4 base<br/>4-bit &rarr; 16-bit on the fly"]
+  DQ --> BW["frozen base W<br/>(no gradient)"]
+  X --> A["LoRA A (16-bit, trained)"]
+  A --> Bd["LoRA B (16-bit, trained)"]
+  BW --> S(("+"))
+  Bd --> S
+  S --> Y["output h = Wx + BAx"]
+    </div>
+    <figcaption>The QLoRA forward pass. The frozen base weight is stored in 4-bit and momentarily expanded to 16-bit only for the multiply, so it costs almost nothing to keep resident. The <b>only trainable parameters are the 16-bit LoRA matrices A and B</b>; gradients never touch the quantized base. Storage is 4-bit, but the arithmetic that matters is still 16-bit.</figcaption>
+  </figure>
+
+  <h2>7. The math, read in plain English</h2>
+  <p>Dequantizing an NF4 weight is just an index-and-scale lookup. For a single weight stored as NF4 code <code>c</code> in a block with scaling constant <code>s</code>:</p>
+
+  <div class="math">W&#770; = s &middot; NF4_level[c]
+    <span class="gloss"><b>c</b>: the 4-bit code (0 to 15) actually stored for this weight. <b>NF4_level[c]</b>: look that code up in the fixed 16-entry table of normal-distribution quantiles, a value in roughly [-1, 1]. <b>s</b>: the block's scaling constant, which rescales the [-1, 1] level back to the weight's true magnitude. <b>W&#770;</b>: the reconstructed 16-bit weight used in the forward pass. Under double quantization, <b>s</b> is itself reconstructed from an 8-bit code times a super-block constant.</span>
+  </div>
+
+  <p>And the layer output is the LoRA equation from Lesson 28, with the frozen term now coming from a quantized weight:</p>
+
+  <div class="math">h = W&#770; x + (&alpha; / r) &middot; B A x
+    <span class="gloss"><b>W&#770; x</b>: the frozen base path, using the dequantized 4-bit weights. <b>B A x</b>: the low-rank adapter path, where <b>A</b> is r&times;d and <b>B</b> is d&times;r, so only <b>r</b> (say 8 or 64) new dimensions are learned. <b>&alpha; / r</b>: a fixed scaling that keeps the adapter's contribution stable as you change the rank <b>r</b>. Only <b>A</b> and <b>B</b> receive gradients; <b>W&#770;</b> is read-only.</span>
+  </div>
+
+  <h2>8. Implement it: NF4 quantize / dequantize, then a QLoRA layer</h2>
+  <p>The snippet below builds a small NF4-style codebook from normal quantiles, shows the store-and-restore round trip block by block, and wires a frozen 4-bit base to a trainable 16-bit LoRA adapter. It is a teaching illustration of the mechanism, not the optimized CUDA kernel from the <code>bitsandbytes</code> library, but the arithmetic is the same.</p>
+
+  <div class="code-cap">qlora_illustration.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn
+
+# --- build a 16-level NF4-style codebook from the normal distribution ---
+# 16 quantile points of a standard normal, normalized into [-1, 1].
+def make_nf4_levels():
+    from statistics import NormalDist
+    nd = NormalDist()
+    # 16 evenly spaced quantiles, avoiding the infinite tails at 0 and 1
+    qs = [(i + 0.5) / 16 for i in range(16)]
+    levels = torch.tensor([nd.inv_cdf(q) for q in qs])
+    return levels / levels.abs().max()            # scale into [-1, 1]
+
+NF4 = make_nf4_levels()                            # the fixed lookup table
+
+def quantize_nf4(w, block=64):
+    """Store weights as 4-bit codes + one scale per block."""
+    w = w.reshape(-1, block)
+    scale = w.abs().amax(dim=1, keepdim=True)      # per-block quantization constant
+    normed = w / scale                             # bring block into [-1, 1]
+    # snap each value to the nearest NF4 level -> a code in 0..15
+    codes = (normed.unsqueeze(-1) - NF4).abs().argmin(dim=-1)
+    return codes.to(torch.uint8), scale            # codes are the 4-bit payload
+
+def dequantize_nf4(codes, scale, block=64):
+    """Restore approximate 16-bit weights: level lookup times scale."""
+    vals = NF4[codes.long()]                        # index the codebook
+    return (vals * scale).reshape(-1)               # undo the per-block scaling
+
+# round-trip check: quantize then dequantize a random weight matrix
+w = torch.randn(256, 256)
+codes, scale = quantize_nf4(w.flatten())
+w_hat = dequantize_nf4(codes, scale).reshape(256, 256)
+err = (w - w_hat).abs().mean().item()
+print(f"mean abs error after 4-bit round trip: {err:.4f}")   # small
+
+# --- a QLoRA linear layer: frozen NF4 base + trainable 16-bit LoRA ---
+class QLoRALinear(nn.Module):
+    def __init__(self, d_in, d_out, r=8, alpha=16):
+        super().__init__()
+        base = torch.randn(d_out, d_in) * 0.02
+        codes, scale = quantize_nf4(base.flatten())
+        # store ONLY the 4-bit codes + scales; the frozen base is never trained
+        self.register_buffer("codes", codes)
+        self.register_buffer("scale", scale)
+        self.shape = (d_out, d_in)
+        # LoRA adapters stay in 16-bit float and ARE trained
+        self.A = nn.Parameter(torch.randn(r, d_in) * 0.01)
+        self.B = nn.Parameter(torch.zeros(d_out, r))   # start as no-op
+        self.s = alpha / r
+
+    def forward(self, x):
+        # dequantize the frozen base on the fly, use it, then let it go
+        W = dequantize_nf4(self.codes, self.scale).reshape(self.shape)
+        base_out = x @ W.t()                           # frozen path (no grad)
+        lora_out = (x @ self.A.t()) @ self.B.t() * self.s   # trained path
+        return base_out + lora_out
+
+layer = QLoRALinear(256, 256)
+# only A and B carry gradients; the base buffers do not
+trainable = sum(p.numel() for p in layer.parameters() if p.requires_grad)
+print(f"trainable params: {trainable}  (base weights are frozen 4-bit)")
+print(layer(torch.randn(4, 256)).shape)              # torch.Size([4, 256])</code></pre>
+
+  <p>Read it against the diagrams. <code>quantize_nf4</code> is the store step: normalize each block, snap to the codebook, keep 4-bit codes plus a scale. <code>dequantize_nf4</code> is the restore step used inside the forward pass. And <code>QLoRALinear</code> holds the base as read-only buffers while only <code>A</code> and <code>B</code> are <code>nn.Parameter</code>s that receive gradients. That is QLoRA in miniature.</p>
+
+  <div class="card callout"><span class="tag">In production</span>
+    You would not hand-roll this. You load a model with <code>bitsandbytes</code> in 4-bit (<code>load_in_4bit=True</code>, <code>bnb_4bit_quant_type="nf4"</code>, <code>bnb_4bit_use_double_quant=True</code>) and attach adapters with the <code>peft</code> library. The paper's real contribution is the NF4 kernel, double quantization, and paged optimizers baked into those libraries.</div>
+
+  <h2>9. What it bought</h2>
+  <table>
+    <thead><tr><th>Approach</th><th>Base model storage</th><th>Trainable params</th><th>65B fits on</th></tr></thead>
+    <tbody>
+      <tr><td>Full 16-bit finetuning</td><td>16-bit (~130 GB)</td><td>All 65B</td><td>Many A100s</td></tr>
+      <tr><td>LoRA</td><td>16-bit (~130 GB)</td><td>Small adapters</td><td>Several A100s</td></tr>
+      <tr><td>QLoRA</td><td>4-bit NF4 (~35 GB)</td><td>Small adapters</td><td>One 48GB GPU</td></tr>
+    </tbody>
+  </table>
+  <p>The headline claim, verified in the paper: QLoRA matches full 16-bit finetuning quality while dropping the memory enough to train a 65B model on a single 48GB GPU in 24 hours. Using it, the authors finetuned the <strong>Guanaco</strong> family on a curated dataset; the best Guanaco reached <strong>99.3%</strong> of ChatGPT's score on the Vicuna benchmark. Quantize the frozen weight, keep the trained weight sharp - that is the whole trick, and it democratized finetuning of large models overnight.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is the NF4 data type a good fit for storing neural-net weights?</div>
+      <button class="q-opt">It rounds every single weight value up to the next whole integer</button>
+      <button class="q-opt">Its buckets follow the bell curve, dense where weights cluster</button>
+      <button class="q-opt">It stores each weight using a full sixteen bits of raw precision</button>
+      <button class="q-opt">It removes every weight whose value is close to exactly zero out</button>
+      <div class="q-fb">Trained weights are normally distributed, so NF4 places its 16 levels on normal quantiles - most buckets near zero, where the weights actually are.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What exactly does double quantization compress a second time?</div>
+      <button class="q-opt">The input tokens flowing forward through the frozen base network</button>
+      <button class="q-opt">The gradients that the LoRA adapter matrices collect each step</button>
+      <button class="q-opt">The per-block scaling constants left over from the first pass</button>
+      <button class="q-opt">The output logits produced at the very last layer of the model</button>
+      <div class="q-fb">Each block of 64 weights needs a scale; those scales are a big pile of numbers, so a second pass quantizes them from 32-bit to 8-bit.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What problem do paged optimizers specifically solve?</div>
+      <button class="q-opt">Sudden memory spikes that would otherwise crash training with an OOM</button>
+      <button class="q-opt">Slow token generation speed during inference on a single small GPU</button>
+      <button class="q-opt">Poor accuracy caused by storing the base model weights in four bits</button>
+      <button class="q-opt">Loss of word order because attention treats its input as a plain set</button>
+      <div class="q-fb">Paged optimizers use unified CPU-GPU memory to evict optimizer state during a spike and page it back, turning fatal OOM crashes into brief slowdowns.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">In QLoRA, which parameters actually receive gradient updates?</div>
+      <button class="q-opt">Every weight in the frozen four-bit base model gets fully retrained</button>
+      <button class="q-opt">Both the base weights and the adapters are updated together jointly</button>
+      <button class="q-opt">Only the per-block quantization scaling constants are learned online</button>
+      <button class="q-opt">Only the small sixteen-bit LoRA adapter matrices A and B are trained</button>
+      <div class="q-fb">The 4-bit base is read-only and only dequantized for the forward pass; gradients flow solely into the 16-bit LoRA adapters.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Builds directly on <a href="0028-lora.html">LoRA</a></b>: QLoRA keeps LoRA's low-rank adapters and adds 4-bit storage of the frozen base underneath them.</li>
+    <li>The quantization mindset here echoes the efficiency work in Module 05, like <a href="0019-kv-cache-optimization.html">KV cache compression</a> - trade a little precision for a lot of memory.</li>
+    <li>QLoRA made instruction-tuning of big models cheap, which powers the alignment recipes in Module 06 such as <a href="0025-dpo.html">DPO</a> and <a href="0023-instructgpt-rlhf.html">InstructGPT</a>.</li>
+    <li>Next we leave fine-tuning and turn to <b>prompting-time</b> reasoning with <a href="0030-chain-of-thought.html">Chain-of-Thought</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the quantize/dequantize round trip feels abstract, ask the agent to run the code with a tiny 2x2 matrix and print every intermediate: the block scale, the codes, and the reconstructed weights. Watching one real weight go 16-bit &rarr; 4-bit &rarr; 16-bit makes NF4 click. Then ask why the error stays small even though you threw away 12 of 16 bits.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/2305.14314">Dettmers et al., "QLoRA: Efficient Finetuning of Quantized LLMs" (2023)</a>. Then explore the <a href="https://github.com/artidoro/qlora">official QLoRA code</a> and the <a href="https://huggingface.co/blog/4bit-transformers-bitsandbytes">Hugging Face 4-bit + QLoRA blog post</a> to run a real finetune yourself.</p>
+
+  <div class="pager">
+    <a href="0028-lora.html"><span class="dir">&larr; Previous</span><span class="ttl">LoRA</span></a>
+    <a class="nxt" href="0030-chain-of-thought.html"><span class="dir">Next &rarr;</span><span class="ttl">Chain-of-Thought Prompting</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 29 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

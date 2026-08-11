@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ORPO - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Alignment &amp; Post-Training &middot; Lesson 26</div>
+  <h1>ORPO</h1>
+  <p class="paper-meta">
+    <span class="pill">2024</span>
+    Hong, Lee, Thorne (KAIST AI). "ORPO: Monolithic Preference Optimization without Reference Model."
+    &middot; <a href="https://arxiv.org/abs/2403.07691">arXiv:2403.07691</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>DPO (Lesson 25) removed the reward model and RL, but still needs two stages - SFT first, then preference tuning - and a frozen <b>reference model</b> in memory.</li>
+      <li>ORPO folds everything into <b>one stage</b> with <b>no reference model at all</b>: it does SFT and preference alignment at the same time.</li>
+      <li>The loss adds a small <b>odds-ratio penalty</b> to the ordinary language-modeling loss. The penalty raises the <b>odds</b> of the preferred answer over the dispreferred one.</li>
+      <li>Odds, not probability: <b>odds(y) = P(y) / (1 &minus; P(y))</b>. Using the odds ratio gives a milder, more stable push than a raw probability ratio, which would over-suppress the rejected answer and risk degeneration.</li>
+      <li>Loss: <b>L<sub>SFT</sub> + &lambda; &middot; L<sub>OR</sub></b>. One model, one pass, no reference, no reward model - the simplest alignment recipe yet.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Follow the trend of this module. InstructGPT needed a reward model plus a full RL loop. DPO deleted both, but still ran in two phases - first supervised fine-tuning to teach the format, then a separate preference phase - and it kept a frozen reference model around to compute log-ratios. That reference doubles the model memory during training and adds a stage to the pipeline.</p>
+  <p>ORPO asks whether the SFT stage and the preference stage can be the same stage, with no reference at all. Its answer starts from an observation about plain fine-tuning: cross-entropy training pushes up the probability of the target answer, but it does nothing to push <em>down</em> plausible wrong answers. A tiny extra term can add exactly that missing contrast, and it turns out you can bolt it onto SFT for free.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph RLHF["RLHF"]
+    direction TB
+    a1["SFT"] --> a2["reward model"] --> a3["PPO (RL)"]
+  end
+  subgraph DPO["DPO"]
+    direction TB
+    b1["SFT"] --> b2["preference tuning<br/>+ frozen reference"]
+  end
+  subgraph ORPO["ORPO"]
+    direction TB
+    c1["SFT + preference<br/>in one loss, no reference"]
+  end
+    </div>
+    <figcaption>The collapsing pipeline across this module. RLHF has three components, DPO has two stages plus a reference model, and ORPO has a single stage with none. <b>ORPO is the endpoint of the simplification trend: one model, one loss, one pass.</b></figcaption>
+  </figure>
+
+  <h2>2. The gap in plain fine-tuning</h2>
+  <p>Standard supervised fine-tuning maximises the likelihood of the good answer. That raises its probability, but the gradient is blind to the bad answers - it never explicitly lowers the odds of a dispreferred response that the model also finds plausible. ORPO's claim is that a small penalty which <em>contrasts</em> chosen against rejected, added right into SFT, closes that gap without a second stage.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph SFT["Plain SFT"]
+    direction TB
+    s1["push UP P(chosen)"] --> s2["rejected answer<br/>left untouched"]
+  end
+  subgraph ORPOx["ORPO"]
+    direction TB
+    o1["push UP P(chosen)"] --> o2["AND push DOWN<br/>odds of rejected"]
+  end
+    </div>
+    <figcaption>What the odds-ratio term adds. Plain SFT only lifts the correct answer and ignores tempting wrong ones. ORPO's extra penalty simultaneously suppresses the rejected answer's odds. <b>One loss now does both jobs that used to need two separate training stages.</b></figcaption>
+  </figure>
+
+  <h2>3. Odds, and the odds ratio</h2>
+  <p>First, the vocabulary. The <strong>odds</strong> of an answer is its probability divided by the probability of not producing it. If the model would generate <code>y</code> 75% of the time, its odds are <code>0.75 / 0.25 = 3</code> - three to one in favour. The <strong>odds ratio</strong> between chosen and rejected is just how many times higher the chosen answer's odds are.</p>
+
+  <div class="math">odds<sub>&theta;</sub>(y | x) = P<sub>&theta;</sub>(y | x) / ( 1 &minus; P<sub>&theta;</sub>(y | x) )
+    <span class="gloss"><b>P<sub>&theta;</sub>(y | x)</b>: the model's probability of producing answer <i>y</i> for prompt <i>x</i>, computed as a length-normalized (per-token geometric-mean) probability so long and short answers compare fairly. <b>1 &minus; P<sub>&theta;</sub></b>: the probability of not producing it. <b>odds</b>: their ratio - how strongly the model favours generating <i>y</i> versus not. Odds of 3 means three-to-one in favour.</span>
+  </div>
+
+  <p>Why odds instead of the raw probability ratio DPO-style methods use? Because the probability ratio produces a very sharp margin between chosen and rejected. When alignment is folded into SFT, that sharp push over-suppresses the rejected answer's token logits and can cause <strong>degeneration</strong> - the model collapsing into repetitive or broken text. The odds ratio applies a gentler, more stable pressure, which is what makes single-stage training work.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph PR["Probability ratio (too sharp)"]
+    direction TB
+    p1["push chosen over rejected"] --> p2["margin explodes"]
+    p2 --> p3["rejected logits crushed"]
+    p3 --> p4["degeneration risk"]
+  end
+  subgraph OR["Odds ratio (mild, stable)"]
+    direction TB
+    o1["push chosen over rejected"] --> o2["margin grows slowly"]
+    o2 --> o3["rejected logits nudged"]
+    o3 --> o4["stable single-stage training"]
+  end
+    </div>
+    <figcaption>Why the odds ratio, not the probability ratio. The probability ratio can grow without bound and crush the rejected answer's logits, destabilising training that shares the SFT objective. The odds ratio grows gently, discriminating chosen from rejected without the excessive margin. <b>The milder penalty is exactly what lets preference alignment ride safely on top of SFT.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Odds ratio vs probability ratio</span>
+    A probability ratio can shoot to extreme values and crush the rejected answer's logits, destabilising the shared SFT training. The odds ratio grows more slowly, so it discriminates chosen from rejected <b>without</b> the excessive margin that leads to degeneration. Milder penalty, stabler training.</div>
+
+  <h2>4. The ORPO loss, exactly</h2>
+  <p>The full objective is the ordinary fine-tuning loss plus a weighted odds-ratio penalty, averaged over preference triples.</p>
+
+  <div class="math">L<sub>ORPO</sub> = E<sub>(x, y<sub>w</sub>, y<sub>l</sub>)</sub> [ L<sub>SFT</sub> + &lambda; &middot; L<sub>OR</sub> ]
+    <span class="gloss"><b>L<sub>SFT</sub></b>: the standard next-token negative-log-likelihood (cross-entropy) loss on the chosen answer y<sub>w</sub> - the usual "learn to produce the good answer." <b>&lambda;</b>: a small weight (the paper uses roughly 0.1 to 0.25) balancing the two terms. <b>L<sub>OR</sub></b>: the odds-ratio penalty defined below. <b>E<sub>(x, y<sub>w</sub>, y<sub>l</sub>)</sub></b>: average over prompts with a chosen answer y<sub>w</sub> and a rejected one y<sub>l</sub>.</span>
+  </div>
+
+  <p>The SFT term is the cross-entropy you already know. The new piece is the odds-ratio penalty:</p>
+
+  <div class="math">L<sub>OR</sub> = &minus; log &sigma;( log[ odds<sub>&theta;</sub>(y<sub>w</sub> | x) / odds<sub>&theta;</sub>(y<sub>l</sub> | x) ] )
+    <span class="gloss"><b>odds<sub>&theta;</sub>(y<sub>w</sub>) / odds<sub>&theta;</sub>(y<sub>l</sub>)</b>: how many times higher the chosen answer's odds are than the rejected answer's - we want this large. <b>log[&middot;]</b>: take its logarithm so the ratio lives on an additive scale. <b>&sigma;</b>: the sigmoid, turning the log-odds-ratio into a number between 0 and 1. <b>&minus; log &sigma;(&middot;)</b>: the loss is small when the chosen odds dominate the rejected odds, and large when they do not - so minimizing it raises the odds of the preferred answer over the dispreferred one. Note: no &pi;<sub>ref</sub> appears anywhere - the penalty is computed from the single trained model.</span>
+  </div>
+
+  <div class="card callout"><span class="tag">Compare with DPO</span>
+    DPO's loss is <code>&minus;log &sigma;(&beta;(log&#8202;&pi;<sub>&theta;</sub>(y<sub>w</sub>)/&pi;<sub>ref</sub>(y<sub>w</sub>) &minus; log&#8202;&pi;<sub>&theta;</sub>(y<sub>l</sub>)/&pi;<sub>ref</sub>(y<sub>l</sub>)))</code> - a log-sigmoid of a ratio to a <b>reference</b> model. ORPO's is <code>&minus;log &sigma;(log&#8202;odds(y<sub>w</sub>)/odds(y<sub>l</sub>))</code> - a log-sigmoid of a ratio of <b>odds within the same model</b>. Same log-sigmoid shape, but ORPO needs no reference and rides alongside SFT.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  x["prompt x with<br/>chosen y_w and rejected y_l"] --> fwd["single forward pass<br/>through one model"]
+  fwd --> pw["length-norm log P(y_w|x)"]
+  fwd --> pl["length-norm log P(y_l|x)"]
+  pw --> sft["L_SFT = &minus;log P(y_w|x)<br/><i>learn the good answer</i>"]
+  pw --> or["L_OR = &minus;log sigma(<br/>log odds(y_w)/odds(y_l))<br/><i>widen the odds gap</i>"]
+  pl --> or
+  sft --> tot["total = L_SFT + lambda&middot;L_OR"]
+  or --> tot
+    </div>
+    <figcaption>One ORPO training step. Both the chosen and rejected answers are scored in a single forward pass through one model. The chosen answer's log-prob feeds the ordinary SFT loss; both answers feed the odds-ratio penalty. Their weighted sum is the total loss. <b>There is no second model and no second stage - alignment is one extra term on top of fine-tuning.</b></figcaption>
+  </figure>
+
+  <h2>5. Implement it: the combined ORPO loss</h2>
+  <p>Both terms come from the same forward pass over the chosen and rejected answers. You need the per-token log-probs of each answer; the rest is arithmetic. Read it against the two formulas above.</p>
+
+  <div class="code-cap">orpo_loss.py &middot; SFT loss plus odds-ratio penalty, no reference model</div>
+  <pre><code>import torch
+import torch.nn.functional as F
+
+def orpo_loss(logp_chosen, logp_rejected, lam=0.1):
+    """
+    logp_chosen  : (B,) length-normalized log P_theta(y_w | x)  (mean per-token log-prob)
+    logp_rejected: (B,) length-normalized log P_theta(y_l | x)
+    lam          : weight on the odds-ratio term (paper: ~0.1 to 0.25)
+
+    Combined loss = L_SFT + lam * L_OR, all from ONE model. No reference.
+    """
+    # --- L_SFT: standard causal-LM loss = negative log-likelihood of the chosen answer
+    # (here logp_chosen is already the mean per-token log-prob of y_w)
+    L_sft = -logp_chosen.mean()
+
+    # --- L_OR: odds-ratio penalty
+    # odds(y) = P(y) / (1 - P(y)); log-odds = log P(y) - log(1 - P(y))
+    # with P = exp(logp) (length-normalized), use log1p for a stable (1 - P) term.
+    logodds_chosen   = logp_chosen   - torch.log1p(-torch.exp(logp_chosen))
+    logodds_rejected = logp_rejected - torch.log1p(-torch.exp(logp_rejected))
+
+    # log ratio of odds, then -log sigmoid: reward chosen odds &gt; rejected odds
+    log_odds_ratio = logodds_chosen - logodds_rejected
+    L_or = -F.logsigmoid(log_odds_ratio).mean()
+
+    return L_sft + lam * L_or, L_sft, L_or
+
+# --- smoke test (length-normalized log-probs, so each in (-inf, 0)) ---
+B = 4
+logp_w = torch.tensor([-0.20, -0.50, -0.15, -0.30])   # chosen: fairly likely
+logp_l = torch.tensor([-0.80, -0.60, -1.20, -0.90])   # rejected: less likely
+total, l_sft, l_or = orpo_loss(logp_w, logp_l, lam=0.1)
+print(float(total), float(l_sft), float(l_or))
+# L_SFT teaches the chosen answer; L_OR widens the odds gap to the rejected one</code></pre>
+
+  <p>The whole method is those two terms. <code>L_sft</code> is exactly the loss you would use to fine-tune on the good answers alone; <code>L_or</code> is the single extra line that turns fine-tuning into preference alignment. No reward model, no reference model, no RL, no second stage - and because both answers share one forward pass, it costs little more than plain SFT.</p>
+
+  <h2>6. Why it mattered</h2>
+  <table>
+    <thead><tr><th>Property</th><th>RLHF</th><th>DPO</th><th>ORPO</th></tr></thead>
+    <tbody>
+      <tr><td>Reward model</td><td>Yes</td><td>No</td><td>No</td></tr>
+      <tr><td>Reinforcement learning</td><td>Yes</td><td>No</td><td>No</td></tr>
+      <tr><td>Reference model in memory</td><td>Yes</td><td>Yes</td><td>No</td></tr>
+      <tr><td>Training stages</td><td>Three</td><td>Two (SFT + DPO)</td><td>One (combined)</td></tr>
+      <tr><td>Contrast signal</td><td>Reward gap</td><td>Log-prob ratio</td><td>Odds ratio</td></tr>
+    </tbody>
+  </table>
+  <p>ORPO showed that alignment need not be a bolt-on phase at all. By adding one odds-ratio term to the standard fine-tuning loss, it aligns a model in a single reference-free pass, cutting both memory and pipeline complexity while matching or beating multi-stage methods on preference benchmarks. It is the natural conclusion of a module that started with a three-part RL pipeline and ended with a one-line addition to cross-entropy.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does ORPO remove that DPO still requires?</div>
+      <button class="q-opt">The chosen and rejected answer pairs used as its training signal</button>
+      <button class="q-opt">The frozen reference model and the separate preference-tuning stage</button>
+      <button class="q-opt">The sigmoid function that maps the contrast onto a bounded score</button>
+      <button class="q-opt">The cross-entropy term that teaches the model the chosen answers</button>
+      <div class="q-fb">DPO keeps a frozen reference and runs preference tuning after SFT. ORPO needs no reference and folds preference alignment into a single SFT pass.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">How is the odds of an answer defined in ORPO?</div>
+      <button class="q-opt">The log-ratio of the policy probability to the reference probability</button>
+      <button class="q-opt">The softmax weight of that answer among all candidate continuations</button>
+      <button class="q-opt">The reward the model assigns divided by the total group mean reward</button>
+      <button class="q-opt">The answer probability divided by one minus that answer probability</button>
+      <div class="q-fb">odds(y) = P(y) / (1 - P(y)) - how strongly the model favours producing the answer versus not, using length-normalized probability.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why use the odds ratio instead of a raw probability ratio?</div>
+      <button class="q-opt">The odds ratio pushes more gently and avoids collapsing into degeneration</button>
+      <button class="q-opt">The odds ratio needs a reference model whereas probability ratios do not</button>
+      <button class="q-opt">The odds ratio is faster to compute than any probability ratio would be</button>
+      <button class="q-opt">The odds ratio removes the need for the cross-entropy term during training</button>
+      <div class="q-fb">A probability ratio gives too sharp a margin and over-suppresses the rejected logits, risking degeneration. The odds ratio is milder and more stable.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What are the two terms in the ORPO loss?</div>
+      <button class="q-opt">A reward-model score plus a KL penalty toward the reference policy</button>
+      <button class="q-opt">A value-network baseline plus a clipped policy-gradient surrogate term</button>
+      <button class="q-opt">A standard cross-entropy term plus a weighted odds-ratio penalty term</button>
+      <button class="q-opt">A log-ratio to the reference plus a group-normalized advantage estimate</button>
+      <div class="q-fb">L_ORPO = L_SFT + lambda * L_OR: the ordinary next-token loss on the chosen answer, plus lambda times the odds-ratio penalty.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0025-dpo.html">DPO</a></b> removed the reward model and RL but kept a reference model and a separate preference stage; ORPO drops both.</li>
+    <li><b>The odds-ratio penalty</b> plays the same contrastive role as DPO's log-ratio and <a href="0023-instructgpt-rlhf.html">InstructGPT</a>'s reward gap - push chosen above rejected.</li>
+    <li>ORPO trains on the same preference pairs that <a href="0024-constitutional-ai.html">Constitutional AI</a> can generate with AI feedback.</li>
+    <li><b>Next, <a href="0027-grpo.html">GRPO</a></b> takes the other branch: keep reinforcement learning for reasoning tasks, but strip out the value network to cut cost.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The concept to nail is odds versus probability. Ask the agent to compute odds for a few probabilities (0.5, 0.9, 0.99) and show how the odds ratio between two answers behaves versus their probability ratio. Then ask it to set &lambda; = 0 in the code and confirm the loss reduces to plain SFT. Do not move on until you see why one extra term buys you preference alignment.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2403.07691">Hong, Lee, Thorne, "ORPO: Monolithic Preference Optimization without Reference Model" (2024)</a>. Pair it with Hugging Face's <a href="https://huggingface.co/docs/trl/orpo_trainer">TRL ORPOTrainer docs</a> to run it, and compare its loss side by side with the <a href="0025-dpo.html">DPO</a> code from the previous lesson.</p>
+
+  <div class="pager">
+    <a href="0025-dpo.html"><span class="dir">&larr; Previous</span><span class="ttl">Direct Preference Optimization</span></a>
+    <a class="nxt" href="0027-grpo.html"><span class="dir">Next &rarr;</span><span class="ttl">GRPO</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 26 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

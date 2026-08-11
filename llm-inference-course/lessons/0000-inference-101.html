@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inference 101 - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 00 &middot; Inference Foundations &middot; Lesson 00</div>
+  <h1>Inference 101: Prefill, Decode, and the Metrics That Matter</h1>
+  <p class="paper-meta">The mental model the whole course rests on. Before you touch vLLM, you need to know what actually happens when a model answers, and which numbers you are optimising.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Serving an LLM has two phases: <b>prefill</b> (read the whole prompt at once, compute-bound) and <b>decode</b> (emit one token at a time, memory-bound).</li>
+      <li>The two phases have opposite bottlenecks, so almost every optimisation targets one of them specifically.</li>
+      <li>Latency splits into <b>TTFT</b> (time to first token) and <b>TPOT</b> (time per output token). Users feel both.</li>
+      <li>There is a permanent tug-of-war between <b>latency</b> (fast for one user) and <b>throughput</b> (many users at once). Batching trades one for the other.</li>
+    </ul>
+  </div>
+
+  <h2>1. What happens when a model answers</h2>
+  <p>Send a prompt and the model does two very different jobs. First it reads your entire prompt in a single parallel pass and fills the KV cache: this is <strong>prefill</strong>. Then it generates the reply one token at a time, each new token attending to everything before it: this is <strong>decode</strong>. Understanding that these are separate phases with separate bottlenecks is the foundation of every trick in this course.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant S as Server
+  U->>S: prompt (500 tokens)
+  Note over S: PREFILL<br/>process all 500 tokens in ONE pass<br/>build KV cache. Compute-bound.
+  S-->>U: first token  (this delay = TTFT)
+  loop DECODE, one token at a time
+    Note over S: read whole KV cache,<br/>compute 1 token. Memory-bound.
+    S-->>U: next token  (gap between tokens = TPOT)
+  end
+    </div>
+    <figcaption>The two phases of a single request. <b>Prefill</b> crunches the entire prompt in one parallel pass (heavy math, keeps the GPU busy). <b>Decode</b> then dribbles out tokens one by one, each pass dominated by re-reading the KV cache from memory. TTFT is the wait for the first token; TPOT is the gap between later tokens.</figcaption>
+  </figure>
+
+  <h2>2. Why the two phases have opposite bottlenecks</h2>
+  <p>In <strong>prefill</strong>, hundreds of prompt tokens are processed together, so the GPU does big matrix multiplies and its compute units stay saturated. It is <em>compute-bound</em>. In <strong>decode</strong>, each step processes just one new token but must read the entire model weights and the growing KV cache from memory. There is very little math per byte moved, so the GPU sits waiting on memory. It is <em>memory-bandwidth-bound</em>.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph P["PREFILL"]
+    p1["many tokens at once"] --> p2["large matmuls"] --> p3["GPU compute saturated<br/><b>compute-bound</b>"]
+  end
+  subgraph D["DECODE"]
+    d1["one token at a time"] --> d2["read all weights + KV cache"] --> d3["little math per byte<br/><b>memory-bound</b>"]
+  end
+    </div>
+    <figcaption>Opposite limits. Because prefill is compute-bound and decode is memory-bound, an optimisation that helps one may do nothing for the other. This is why the course keeps asking: <b>are we speeding up prefill or decode?</b> KV-cache tricks and batching mostly help decode; better kernels and quantized math help both.</figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The roofline idea</span>
+    Every kernel is limited either by how fast the GPU can compute (FLOPs) or by how fast it can move data (bytes). Decode moves a lot of bytes (weights + KV cache) for very few FLOPs, so it lives under the memory roof. That single fact explains MQA, GQA, KV quantization, and continuous batching all at once.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph roof["The two ceilings a GPU has"]
+    C["compute ceiling<br/>(FLOPs / sec)"]
+    M["memory ceiling<br/>(bytes / sec)"]
+  end
+  P["prefill:<br/>lots of math per byte"] --> C
+  D["decode:<br/>little math per byte<br/>(reads weights + KV cache)"] --> M
+  M --> Why["so shrinking bytes moved<br/>= MQA, GQA, KV quant, eviction"]
+    </div>
+    <figcaption>The roofline, concretely. A kernel bumps into either the compute ceiling or the memory ceiling first. Prefill does enough math to approach the compute roof; decode moves so many bytes per token that it hits the memory roof. <b>That is why nearly every decode optimisation is about moving fewer bytes.</b></figcaption>
+  </figure>
+
+  <h2>3. The metrics you will optimise</h2>
+  <div class="metric-grid">
+    <div class="metric"><div class="k">TTFT</div><div class="v">Time&nbsp;to First&nbsp;Token</div><div class="u">prefill latency - the initial wait</div></div>
+    <div class="metric"><div class="k">TPOT</div><div class="v">Time&nbsp;per Out&nbsp;Token</div><div class="u">decode latency - the streaming speed</div></div>
+    <div class="metric"><div class="k">Throughput</div><div class="v">tokens / sec</div><div class="u">total across all users</div></div>
+    <div class="metric"><div class="k">Goodput</div><div class="v">useful req / sec</div><div class="u">requests that met their SLO</div></div>
+  </div>
+  <p>Total latency for a request is roughly <code>TTFT + (output_tokens &times; TPOT)</code>. A chatbot lives or dies on low TTFT (the reply must start fast) and a smooth TPOT (tokens must stream faster than the user reads, about 5-10 per second minimum). A batch summarisation job cares only about total throughput.</p>
+
+  <div class="math">request_latency &approx; TTFT + N<sub>out</sub> &middot; TPOT
+    <span class="gloss"><b>TTFT</b>: the one-time prefill wait before streaming starts. <b>N<sub>out</sub></b>: how many tokens you generate. <b>TPOT</b>: the steady per-token gap during decode. Long outputs are dominated by the TPOT term, which is exactly the memory-bound phase.</span>
+  </div>
+
+  <h2>4. The latency vs throughput tug-of-war</h2>
+  <p>Here is the tension that shapes every serving decision. Running one request alone gives the lowest latency but wastes the GPU. Packing many requests into a batch keeps the GPU full and multiplies throughput, but each individual request waits a little longer. Batching converts spare compute into more served users at the cost of per-user speed.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph B1["batch size 1"]
+    a["1 request<br/>lowest latency<br/>GPU mostly idle<br/>low throughput"]
+  end
+  subgraph BN["batch size many"]
+    b["N requests together<br/>GPU saturated<br/>high throughput<br/>slightly higher per-request latency"]
+  end
+  B1 -->|"continuous batching<br/>(Lesson 04)"| BN
+    </div>
+    <figcaption>The core trade. Larger batches raise throughput and GPU utilisation but add queuing delay per request. <b>Continuous batching</b> (Lesson 04) is the technique that gets most of the throughput of big batches without most of the latency penalty, by adding and removing requests every decode step.</figcaption>
+  </figure>
+
+  <h2>5. Lab: measure it yourself</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Send one request and separate TTFT from TPOT</h4>
+    <p>You will hit any OpenAI-compatible endpoint (a local Ollama or vLLM server, set up in Lessons 01-02) with streaming on, and time the first token versus the rest. This is the measurement you will repeat all course long.</p>
+
+    <div class="code-cap">measure_latency.py &middot; runnable with the openai client</div>
+    <pre><code>import time
+from openai import OpenAI
+
+client = OpenAI(base_url="http://localhost:8000/v1", api_key="none")
+
+t0 = time.perf_counter()
+first_token_time = None
+n_out = 0
+
+stream = client.chat.completions.create(
+    model="local-model",
+    messages=[{"role": "user", "content": "Explain KV cache in two sentences."}],
+    stream=True,                          # stream so we can time the first token
+)
+for chunk in stream:
+    delta = chunk.choices[0].delta.content
+    if not delta:
+        continue
+    now = time.perf_counter()
+    if first_token_time is None:
+        first_token_time = now            # the moment the first token arrives
+    n_out += 1
+last = time.perf_counter()
+
+ttft = first_token_time - t0
+tpot = (last - first_token_time) / max(n_out - 1, 1)
+print(f"TTFT      : {ttft*1000:7.1f} ms")
+print(f"TPOT      : {tpot*1000:7.1f} ms/token  ({1/tpot:5.1f} tok/s)")
+print(f"total     : {(last - t0)*1000:7.1f} ms for {n_out} tokens")</code></pre>
+
+    <p class="kpi">Run it a few times. Watch how TTFT grows with a longer prompt (more prefill work) while TPOT stays roughly flat (decode is per-token). That difference is the whole point of this lesson.</p>
+  </div>
+
+  <h2>6. The map of this course</h2>
+  <table>
+    <thead><tr><th>You want to improve</th><th>Because it is limited by</th><th>Lessons</th></tr></thead>
+    <tbody>
+      <tr><td>TPOT / decode speed</td><td>Memory bandwidth, KV cache size</td><td>MQA/GQA, KV eviction (05), quantization (07)</td></tr>
+      <tr><td>Throughput</td><td>GPU utilisation</td><td>vLLM (02), batching (04), SGLang (03)</td></tr>
+      <tr><td>TTFT</td><td>Prefill compute, queueing</td><td>prefix caching (02-03), routing (08)</td></tr>
+      <tr><td>Cost per token</td><td>All of the above + utilisation</td><td>quantization (07), economics (14)</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which phase is memory-bandwidth-bound rather than compute-bound?</div>
+      <button class="q-opt">Prefill, because it reads the full prompt in one parallel pass</button>
+      <button class="q-opt">Decode, because each step re-reads weights and the KV cache</button>
+      <button class="q-opt">Prefill, because it must build the entire KV cache up front</button>
+      <button class="q-opt">Decode, because it performs the largest matrix multiplies of all</button>
+      <div class="q-fb">Decode moves lots of bytes for little math per token, so it waits on memory, not compute.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does TTFT measure?</div>
+      <button class="q-opt">The steady gap in milliseconds between two streamed output tokens</button>
+      <button class="q-opt">The total tokens per second summed across every active request</button>
+      <button class="q-opt">The initial wait a user feels before the very first token arrives</button>
+      <button class="q-opt">The number of requests per second that met their latency target</button>
+      <div class="q-fb">TTFT is time to first token, dominated by prefill; TPOT is the per-token decode gap.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does larger batching mainly trade away?</div>
+      <button class="q-opt">Some per-request latency in exchange for much higher throughput</button>
+      <button class="q-opt">Some total throughput in exchange for much lower memory usage</button>
+      <button class="q-opt">Some model accuracy in exchange for much faster prefill compute</button>
+      <button class="q-opt">Some prefill speed in exchange for a much smaller cache footprint</button>
+      <div class="q-fb">Bigger batches saturate the GPU for higher throughput but add queuing delay per request.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Roughly how is total request latency composed?</div>
+      <button class="q-opt">Throughput divided by the number of concurrent active requests</button>
+      <button class="q-opt">TPOT alone, since the first token wait is always negligible</button>
+      <button class="q-opt">TTFT alone, since streaming later tokens costs no extra time</button>
+      <button class="q-opt">TTFT plus the number of output tokens multiplied by TPOT</button>
+      <div class="q-fb">latency &approx; TTFT + N_out &times; TPOT; long outputs are dominated by the TPOT term.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain prefill vs decode and name each one's bottleneck</li>
+    <li>I can define TTFT, TPOT, throughput, and goodput without notes</li>
+    <li>I measured TTFT and TPOT against a real endpoint</li>
+    <li>I can say which phase a given optimisation targets</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want the roofline model drawn out with real A100 numbers, or help pointing the lab script at a working server? Ask and I will set it up with you.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/latest/">vLLM documentation intro</a> and the classic explainer <a href="https://kipp.ly/transformer-inference-arithmetic/">"Transformer Inference Arithmetic" by Kipply</a> - the best single page on where the time and memory actually go.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Back</span><span class="ttl">Course syllabus</span></a>
+    <a class="nxt" href="0001-local-testing-ollama-lmstudio-litellm.html"><span class="dir">Next &rarr;</span><span class="ttl">Local Testing: Ollama, LM Studio, LiteLLM</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 00 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ReAct - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Reasoning, Retrieval &amp; Agents &middot; Lesson 32</div>
+  <h1>ReAct: Synergizing Reasoning and Acting</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Yao, Zhao, Yu, Du, Shafran, Narasimhan, Cao (Princeton University / Google Research).
+    &middot; <a href="https://arxiv.org/abs/2210.03629">arXiv:2210.03629</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Pure <a href="0030-chain-of-thought.html">Chain-of-Thought</a> reasons in a closed room: it cannot check a fact, so a wrong intermediate step snowballs into a confident wrong answer.</li>
+      <li>ReAct interleaves two things the model already can do: <b>Thought</b> (reasoning in words) and <b>Action</b> (calling a tool like a search API), then feeds the tool's <b>Observation</b> back in.</li>
+      <li>The loop is <b>Thought &rarr; Action &rarr; Observation &rarr; Thought &rarr; ...</b>, repeating until the model emits a Finish action with the answer.</li>
+      <li>Grounding each reasoning step in real observations <b>reduces hallucination</b> and produces interpretable trajectories. This simple loop is the blueprint for essentially every LLM <b>agent</b> built since.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Chain-of-Thought gave models a way to reason across steps, but the reasoning is entirely internal. If step two asserts a false fact, there is no mechanism to catch it - the model has no way to look anything up. Meanwhile a separate line of work had models take <em>actions</em> in environments (click, search, move) but without explicit reasoning, so they flailed on tasks that needed planning. Each half was missing the other.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph COT["Chain-of-Thought only"]
+    direction TB
+    c1["reason step 1"] --> c2["reason step 2 (wrong fact)"]
+    c2 --> c3["reason step 3 builds on error"]
+    c3 --> c4["confident wrong answer"]
+  end
+  subgraph ACT["Acting only"]
+    direction TB
+    a1["action"] --> a2["action"]
+    a2 --> a3["no plan, no reasoning"]
+    a3 --> a4["gets lost on hard tasks"]
+  end
+    </div>
+    <figcaption>The two failure modes ReAct fixes. Reasoning alone cannot verify itself, so one bad fact propagates into a wrong answer. Acting alone has no plan, so it wanders. ReAct's bet is that <b>reasoning and acting help each other</b>: reasoning decides which action to take, and the action's result corrects the reasoning.</figcaption>
+  </figure>
+
+  <p>ReAct's contribution is not a new architecture or new training. It is a <strong>prompting format</strong> that lets one model do both, taking turns: think about what to do, do it, observe the result, think again.</p>
+
+  <h2>2. The mechanism: a Thought-Action-Observation loop</h2>
+  <p>ReAct structures the model's output into labelled lines. A <strong>Thought</strong> line is free-form reasoning. An <strong>Action</strong> line is a structured call the runtime can execute, like <code>Search[Eiffel Tower height]</code>. The runtime runs it and appends an <strong>Observation</strong> line with the result. That observation goes back into the prompt, and the model produces its next Thought. The cycle repeats until the model outputs <code>Finish[answer]</code>.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant M as Model
+  participant P as Prompt / transcript
+  participant T as Tool (e.g. Search)
+  M->>P: Thought: I need the tower's height
+  M->>P: Action: Search[Eiffel Tower height]
+  P->>T: execute the action
+  T-->>P: Observation: about 330 metres
+  P->>M: transcript so far (with observation)
+  M->>P: Thought: I have the height, done
+  M->>P: Action: Finish[about 330 metres]
+    </div>
+    <figcaption>The ReAct loop as a conversation between the model and its tools. The model writes a Thought and an Action; the runtime executes the Action and writes back an Observation; the whole growing transcript is fed to the model for its next turn. <b>The observation is real data from the world</b>, so the model's next thought is anchored to fact, not memory.</figcaption>
+  </figure>
+
+  <p>Crucially, everything the model emits and everything the tools return lives in the same growing <strong>transcript</strong>, which is re-fed to the model each turn. The model's "memory" of the task is just this text. That is why the pattern is so general: any tool that takes a string and returns a string can be an action.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Thought
+  Thought --> Action: decide what to do
+  Action --> Observation: runtime executes tool
+  Observation --> Thought: reason over the result
+  Thought --> Finish: enough evidence
+  Finish --> [*]
+    </div>
+    <figcaption>The state machine. The agent cycles Thought &rarr; Action &rarr; Observation for as many rounds as the task needs, and exits only when a Thought concludes there is enough evidence and emits a Finish action. This <b>bounded loop with an explicit exit</b> is the skeleton every later agent framework fills in.</figcaption>
+  </figure>
+
+  <h2>3. Why interleaving beats either half alone</h2>
+  <p>The synergy runs both directions. <strong>Reasoning guides acting</strong>: a Thought decides which search to run, or notices the last result was useless and plans a different query. <strong>Acting grounds reasoning</strong>: an Observation injects a real fact that the model could not have reliably recalled, so the next Thought is built on evidence rather than a guess.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  R["Thought (reasoning)"] -->|chooses & refines| A["Action (tool call)"]
+  A -->|returns fact| O["Observation"]
+  O -->|corrects & informs| R
+    </div>
+    <figcaption>The two-way synergy. Reasoning picks and refines the next action, and the resulting observation feeds back to correct the reasoning. Because a false intermediate belief now gets contradicted by a real observation, ReAct <b>catches and repairs errors that pure Chain-of-Thought would carry to the end</b>.</figcaption>
+  </figure>
+
+  <p>The paper shows this concretely. On <strong>HotpotQA</strong> (multi-hop question answering) and <strong>FEVER</strong> (fact verification), ReAct with a Wikipedia search tool hallucinates less than CoT because it checks claims against retrieved text. On interactive benchmarks it is dramatic: <strong>+34%</strong> absolute success on <strong>ALFWorld</strong> (text-based household tasks) and <strong>+10%</strong> on <strong>WebShop</strong> (online shopping), versus imitation or reinforcement-learning baselines, because reasoning lets the agent plan through long action sequences.</p>
+
+  <h2>4. The math, read in plain English</h2>
+  <p>ReAct widens the model's action space. A plain policy maps context to an action in the environment. ReAct adds "thinking" as a special action that changes only the internal context, not the world.</p>
+
+  <div class="math">a<sub>t</sub> &nbsp;~&nbsp; &pi;( &middot; &divide; c<sub>t</sub> ), &nbsp;&nbsp; c<sub>t+1</sub> = c<sub>t</sub> + (a<sub>t</sub>, o<sub>t</sub>), &nbsp;&nbsp; a<sub>t</sub> &isin; { thoughts } &cup; { tool actions }
+    <span class="gloss"><b>c<sub>t</sub></b>: the context at step t - the whole transcript of prior thoughts, actions, and observations. <b>&pi;</b>: the model, acting as a policy that samples the next line. <b>a<sub>t</sub></b>: that next line, which may be a <i>thought</i> (updates the context only) or a <i>tool action</i> (also produces an observation from the world). <b>o<sub>t</sub></b>: the observation the runtime returns for a tool action (empty for a pure thought). <b>c<sub>t+1</sub></b>: the new context, grown by appending what just happened. The loop runs until the action is Finish.</span>
+  </div>
+
+  <p>The key line is the union: the action set includes both language "thoughts" and real "actions." A thought is a free action that reorganizes the model's own context; a tool action reaches out and pulls a fact back in. Alternating them is the whole method.</p>
+
+  <h2>5. Implement it: a ReAct agent loop with a mock tool</h2>
+  <p>The code below is a complete, runnable ReAct loop. It maintains a transcript, calls a (stubbed) model to get the next Thought and Action, parses the Action line, executes a mock search tool, appends the Observation, and repeats until <code>Finish</code>. Swap the stub for a real model and the mock tool for a real API and you have a working agent.</p>
+
+  <div class="code-cap">react_agent.py &middot; runnable (model call stubbed)</div>
+  <pre><code>import re
+
+# --- a mock search tool: string in, string out ---
+KB = {
+    "eiffel tower height": "The Eiffel Tower is about 330 metres tall.",
+    "eiffel tower city":   "The Eiffel Tower is located in Paris, France.",
+}
+def search(query):
+    q = query.lower().strip()
+    for key, val in KB.items():
+        if key in q or q in key:
+            return val
+    return "No results found."
+
+TOOLS = {"Search": search}   # register available actions by name
+
+# --- parse an 'Action: Name[argument]' line out of model output ---
+ACTION_RE = re.compile(r"Action:\s*(\w+)\[(.*?)\]")
+def parse_action(text):
+    m = ACTION_RE.search(text)
+    return (m.group(1), m.group(2)) if m else (None, None)
+
+# --- the ReAct control loop ---
+def react(question, call_model, max_steps=5):
+    transcript = f"Question: {question}\n"
+    for step in range(max_steps):
+        out = call_model(transcript)      # model writes a Thought + Action
+        transcript += out + "\n"
+        name, arg = parse_action(out)
+        if name == "Finish":
+            return arg, transcript        # agent decided it is done
+        if name in TOOLS:
+            obs = TOOLS[name](arg)        # execute the tool
+        else:
+            obs = "Invalid action."
+        transcript += f"Observation: {obs}\n"   # feed the result back in
+    return None, transcript               # ran out of steps
+
+# --- stub model: returns scripted Thought/Action lines per turn ---
+_script = [
+    "Thought: I need the tower's height.\nAction: Search[eiffel tower height]",
+    "Thought: I have the height now.\nAction: Finish[about 330 metres]",
+]
+def call_model(transcript):
+    # a real model would read the transcript; the stub just steps a script
+    return _script[call_model.i] if call_model.i < len(_script) else \
+           "Action: Finish[unknown]"
+call_model.i = -1
+def stepped(transcript):
+    call_model.i += 1
+    return call_model(transcript)
+
+answer, log = react("How tall is the Eiffel Tower?", stepped)
+print(log)
+print("FINAL ANSWER:", answer)      # about 330 metres</code></pre>
+
+  <p>Read it against the state machine. The <code>transcript</code> is the context <code>c<sub>t</sub></code>. <code>parse_action</code> turns the model's <code>Action:</code> line into a real call. The tool's return becomes the <code>Observation:</code> line appended to the transcript. And <code>Finish</code> is the exit edge. That is the entire agent - a text loop with a parser and a tool table.</p>
+
+  <div class="card callout key"><span class="tag">This is what an "agent" is</span>
+    Strip away the branding and a modern tool-using agent is exactly this loop: reason, pick a tool, run it, read the result, repeat. Function-calling APIs, ReAct-style frameworks, and browser agents all descend from these two pages. Understanding this loop is understanding agents.</div>
+
+  <h2>6. Strengths and honest limits</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Chain-of-Thought</th><th>Acting only</th><th>ReAct</th></tr></thead>
+    <tbody>
+      <tr><td>External facts</td><td>No access</td><td>Yes, but blind</td><td>Yes, reasoned about</td></tr>
+      <tr><td>Hallucination</td><td>High</td><td>Medium</td><td>Lower - grounded</td></tr>
+      <tr><td>Planning long tasks</td><td>Limited</td><td>Poor</td><td>Strong</td></tr>
+      <tr><td>Interpretability</td><td>Chain visible</td><td>Actions only</td><td>Thoughts + actions</td></tr>
+    </tbody>
+  </table>
+  <p>ReAct is not magic. If the search tool returns junk, a bad Observation can still mislead the model, and a loop can get stuck repeating a useless query - which is why real systems add step limits, retries, and reflection. But the core lesson stands: <strong>let the model think and act in turns, and ground its thoughts in what its actions return</strong>. That single idea is the foundation of the agent era.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What are the three repeating elements of the ReAct loop?</div>
+      <button class="q-opt">Encoder, decoder, and the cross-attention bridge that joins them</button>
+      <button class="q-opt">Retriever, generator, and a dense vector index of the passages</button>
+      <button class="q-opt">Thought, Action, and Observation fed back into the transcript</button>
+      <button class="q-opt">Query, Key, and Value projected from every input token embedding</button>
+      <div class="q-fb">ReAct alternates a Thought (reasoning), an Action (tool call), and an Observation (the tool's returned result), repeating until Finish.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does acting reduce hallucination compared to plain reasoning?</div>
+      <button class="q-opt">Observations inject real facts that ground the next reasoning step</button>
+      <button class="q-opt">Actions delete any reasoning step that contains a false statement out</button>
+      <button class="q-opt">The model is retrained after each action on the observation it saw</button>
+      <button class="q-opt">The tools rewrite the final answer so it always matches the sources</button>
+      <div class="q-fb">A tool observation is real data from the world, so the model's next thought is anchored to fact rather than to fuzzy memory.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">In the ReAct formulation, what makes a Thought special as an action?</div>
+      <button class="q-opt">It permanently changes the weights of the underlying language model</button>
+      <button class="q-opt">It returns a document retrieved from the external Wikipedia index</button>
+      <button class="q-opt">It is the only action allowed to appear on the very first loop step</button>
+      <button class="q-opt">It updates only the internal context and does not touch the world</button>
+      <div class="q-fb">A thought is a free action that reorganizes the model's own context; only tool actions reach out and return an observation from the environment.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What signals that a ReAct agent should stop looping?</div>
+      <button class="q-opt">The transcript grows past the model's maximum context window size</button>
+      <button class="q-opt">The model emits a Finish action carrying the final answer string</button>
+      <button class="q-opt">The retriever runs out of passages left to return from the index</button>
+      <button class="q-opt">The softmax over the next token collapses to a single one-hot spike</button>
+      <div class="q-fb">The loop exits when a Thought concludes there is enough evidence and the model emits Finish[answer]; runtimes also add a step cap as a backstop.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>ReAct fuses <a href="0030-chain-of-thought.html">Chain-of-Thought</a> reasoning with tool use, curing CoT's inability to check itself.</li>
+    <li>Its search action is often <a href="0031-rag.html">retrieval</a>, but ReAct makes retrieval a <b>choice the model plans</b>, not a fixed first step.</li>
+    <li><a href="0033-tree-of-thoughts.html">Tree of Thoughts</a> adds search and backtracking <b>over</b> reasoning states, complementing ReAct's search over the world.</li>
+    <li>Running many reasoning-action rollouts at inference is exactly the compute trade of <a href="0034-test-time-scaling.html">Test-Time Scaling</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask the agent to run the loop with a broken tool that returns "No results found," and watch how the transcript evolves - does it retry, or loop uselessly? Then ask it to add a second tool (say a calculator) to the <code>TOOLS</code> table and a task that needs both. Building the two-tool version yourself is the moment agents stop feeling mysterious.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/2210.03629">Yao et al., "ReAct: Synergizing Reasoning and Acting in Language Models" (2022)</a>. Then explore the <a href="https://react-lm.github.io/">ReAct project page</a> for interactive trajectory examples on HotpotQA and ALFWorld.</p>
+
+  <div class="pager">
+    <a href="0031-rag.html"><span class="dir">&larr; Previous</span><span class="ttl">Retrieval-Augmented Generation</span></a>
+    <a class="nxt" href="0033-tree-of-thoughts.html"><span class="dir">Next &rarr;</span><span class="ttl">Tree of Thoughts</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 32 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

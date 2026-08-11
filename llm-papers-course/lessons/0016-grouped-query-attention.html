@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grouped-Query Attention - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Attention &amp; Position Refinements &middot; Lesson 16</div>
+  <h1>Grouped-Query Attention</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Ainslie, Lee-Thorp, de Jong, Zemlyanskiy, Lebr&oacute;n, Sanghai (Google Research).
+    &middot; <a href="https://arxiv.org/abs/2305.13245">arXiv:2305.13245</a> &middot; "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints"
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><a href="0015-multi-query-attention.html">Multi-Query Attention</a> shrinks the KV cache to one shared key/value head, which is fast but loses a little quality. Full <a href="0001-attention-is-all-you-need.html">Multi-Head Attention</a> keeps quality but keeps the big cache.</li>
+      <li><b>Grouped-Query Attention (GQA)</b> sits between them: it uses <b>G</b> key/value heads where <b>1 &lt; G &lt; n_heads</b>. Each KV head is shared by a small <b>group</b> of query heads.</li>
+      <li>This one knob interpolates the whole spectrum. With a handful of groups you recover <b>almost all</b> of MHA's quality while keeping <b>almost all</b> of MQA's speed.</li>
+      <li>You do not retrain from scratch. You <b>uptrain</b> an existing MHA checkpoint: <b>mean-pool</b> its KV heads into G groups and fine-tune with about <b>5%</b> of the original pre-training compute. GQA is now the default in LLaMA-2 and LLaMA-3.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>The previous lesson left us with two extremes. Standard multi-head attention gives every query head its own key and value head - best quality, biggest KV cache. Multi-query attention collapses all key/value heads into one - smallest cache, fastest decoding, but a measurable dip in quality and sometimes training instability. The obvious question: is there something in the middle?</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  MHA["MHA<br/>n KV heads<br/><i>best quality, biggest cache</i>"]
+  GQA["GQA<br/>G KV heads<br/><i>near-MHA quality, near-MQA speed</i>"]
+  MQA["MQA<br/>1 KV head<br/><i>smallest cache, lowest quality</i>"]
+  MHA -->|"share more"| GQA -->|"share more"| MQA
+    </div>
+    <figcaption>The whole point in one line. MHA and MQA are the two ends of a single dial - how many key/value heads you keep. GQA is <b>everything in between</b>, and the paper shows the middle of the dial is where you want to be: almost all the quality for almost all the speed.</figcaption>
+  </figure>
+
+  <p>GQA fills that gap, and it does it without paying the enormous cost of pre-training a fresh model. That second contribution - a cheap conversion recipe - is why the technique spread so fast.</p>
+
+  <h2>2. The idea: groups of query heads share a KV head</h2>
+  <p>Recall that a query head is "what am I looking for", while a key/value head is "the library everyone reads from". MHA gives each query head its own private library. MQA forces all query heads to share one library. GQA takes the middle road: split the query heads into <strong>G groups</strong>, and give <strong>each group its own shared key/value head</strong>.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph MHA["MHA: 8 query heads, 8 KV heads"]
+    direction LR
+    qa1["Q1"]---ka1["K1V1"]; qa2["Q2"]---ka2["K2V2"]; qa3["Q3"]---ka3["K3V3"]; qa4["Q4"]---ka4["K4V4"]
+  end
+  subgraph GQA["GQA: 8 query heads, 2 KV heads (G=2)"]
+    direction LR
+    qb1["Q1"]-->g1["KV group A"]; qb2["Q2"]-->g1; qb3["Q3"]-->g1; qb4["Q4"]-->g1
+    qb5["Q5"]-->g2["KV group B"]; qb6["Q6"]-->g2; qb7["Q7"]-->g2; qb8["Q8"]-->g2
+  end
+  subgraph MQA["MQA: 8 query heads, 1 KV head (G=1)"]
+    direction LR
+    qc1["Q1"]-->s["one shared KV"]; qc2["Q2"]-->s; qc3["Q3"]-->s; qc4["Q4"]-->s
+  end
+    </div>
+    <figcaption>Three schemes, one picture. In MHA every query head owns a key/value head. In MQA all query heads share a single key/value head. GQA groups the query heads and gives <b>each group one shared key/value head</b>. Choosing G = n_heads recovers MHA exactly; choosing G = 1 recovers MQA exactly.</figcaption>
+  </figure>
+
+  <p>Notice the beautiful property: GQA is a strict generalisation. Set G equal to the number of heads and every group has one query head, which is plain MHA. Set G to 1 and every query head shares the single library, which is plain MQA. One equation, both extremes, and every useful point between.</p>
+
+  <div class="card callout key"><span class="tag">Why the middle wins</span>
+    Going from n heads down to a few groups removes almost all of the KV cache, because cache size is proportional to the number of KV heads, not query heads. But keeping more than one group preserves most of the expressive variety that MQA throws away. The quality loss is roughly flat until you drop toward one group, so a small G captures the whole bargain.</div>
+
+  <h2>3. How big is the cache, exactly</h2>
+  <p>The KV cache formula from the last lesson had a factor for the number of heads. GQA simply replaces the query-head count <code>H</code> with the group count <code>G</code> in the key/value storage term.</p>
+
+  <div class="math">cache_bytes = 2 &middot; L &middot; G &middot; d<sub>head</sub> &middot; S &middot; B &middot; bytes
+    <span class="gloss"><b>2</b>: one key and one value. <b>L</b>: number of layers. <b>G</b>: number of KV groups (this is the term GQA controls; MHA uses G = n_heads, MQA uses G = 1). <b>d<sub>head</sub></b>: width of one head. <b>S</b>: tokens seen so far. <b>B</b>: batch size. <b>bytes</b>: 2 for fp16. Query heads still number n_heads - only the stored keys and values shrink.</span>
+  </div>
+
+  <p>So a 64-head model that adopts 8 groups shrinks its KV cache <strong>8&times;</strong> (not 64&times; like MQA), and in exchange keeps quality that the paper shows is essentially indistinguishable from full MHA. That 8&times; is enough to matter for long contexts and large batches, which is why production models land here.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph HBM["KV cache footprint in GPU memory"]
+    direction TB
+    m1["MHA: 64 KV heads<br/>================================ full"]
+    m2["GQA: 8 KV heads<br/>==== small"]
+    m3["MQA: 1 KV head<br/>= tiny"]
+  end
+    </div>
+    <figcaption>The stored cache, drawn to scale. Going from 64 KV heads to 8 groups removes most of the memory bar, and going all the way to 1 head barely removes more. <b>The big saving happens in the first few steps down, which is exactly why a modest G captures nearly all of MQA's benefit without its quality cost.</b></figcaption>
+  </figure>
+
+  <h2>4. The conversion trick: uptraining by mean-pooling</h2>
+  <p>Here is the second, quieter contribution, and arguably the more practical one. You already have an expensive MHA checkpoint. You do not want to pre-train a new GQA model from zero. So the paper <strong>converts</strong> the existing weights: take the <code>H</code> trained key heads, split them into G groups, and <strong>average (mean-pool)</strong> each group's key projections into one. Do the same for values. Then fine-tune briefly.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph CKPT["Trained MHA checkpoint"]
+    k1["K head 1"]; k2["K head 2"]; k3["K head 3"]; k4["K head 4"]
+  end
+  k1 --> P1["mean-pool<br/>heads 1-2"]
+  k2 --> P1
+  k3 --> P2["mean-pool<br/>heads 3-4"]
+  k4 --> P2
+  P1 --> G1["KV group A"]
+  P2 --> G2["KV group B"]
+  G1 --> UT["short uptrain<br/>~5% of pretrain compute"]
+  G2 --> UT
+  UT --> OUT["GQA model"]
+    </div>
+    <figcaption>Uptraining, step by step. Rather than a random new key/value projection, GQA <b>averages the already-trained heads within each group</b>. Averaging keeps the useful signal the heads had learned, so the model starts near a good solution and only needs a brief fine-tune - roughly 5% of the original pre-training budget - to settle in.</figcaption>
+  </figure>
+
+  <p>Why average, rather than just pick one head or start random? Because mean-pooling keeps information from every head in the group. The paper found this initialises the shared head far better than a fresh random projection, so the short uptrain recovers quality quickly. It is a cheap, boring, extremely effective trick.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Eng as Engineer
+  participant CK as MHA checkpoint
+  participant Conv as Conversion
+  participant Train as Uptrain loop
+  Eng->>CK: load pretrained weights
+  Eng->>Conv: choose G groups
+  Conv->>CK: read the H key/value heads
+  Conv->>Conv: mean-pool each group -> G KV heads
+  Conv->>Train: hand over converted weights
+  Train->>Train: fine-tune ~5% of pretrain steps
+  Train-->>Eng: GQA model, near-MHA quality
+    </div>
+    <figcaption>The end-to-end recipe as a sequence. No new pre-training run is needed. You convert an existing checkpoint by pooling its heads, then spend a small fine-tuning budget to adapt. <b>The expensive pre-training compute is reused, not repeated</b> - that is what made GQA cheap enough to adopt everywhere.</figcaption>
+  </figure>
+
+  <h2>5. Implement it: GQA with a mean-pool converter</h2>
+  <p>This module runs attention with any number of KV groups, and includes the exact conversion that turns MHA weights into GQA weights by averaging. Read the <code>expand</code> step: each KV group is repeated to cover every query head in its group, so the attention math is unchanged - only the storage differs.</p>
+
+  <div class="code-cap">gqa.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class GroupedQueryAttention(nn.Module):
+    def __init__(self, d_model=512, n_heads=8, n_kv_heads=2):
+        super().__init__()
+        assert n_heads % n_kv_heads == 0          # groups must divide heads evenly
+        self.h, self.g = n_heads, n_kv_heads
+        self.dk = d_model // n_heads
+        self.rep = n_heads // n_kv_heads          # query heads per KV group
+        self.wq = nn.Linear(d_model, n_heads   * self.dk, bias=False)
+        self.wk = nn.Linear(d_model, n_kv_heads * self.dk, bias=False)   # only G heads
+        self.wv = nn.Linear(d_model, n_kv_heads * self.dk, bias=False)
+        self.wo = nn.Linear(d_model, d_model, bias=False)
+
+    def forward(self, x):
+        B, N, _ = x.shape
+        q = self.wq(x).view(B, N, self.h, self.dk).transpose(1, 2)     # (B, H, N, dk)
+        k = self.wk(x).view(B, N, self.g, self.dk).transpose(1, 2)     # (B, G, N, dk)
+        v = self.wv(x).view(B, N, self.g, self.dk).transpose(1, 2)
+        # repeat each KV group to cover its query heads -> (B, H, N, dk)
+        k = k.repeat_interleave(self.rep, dim=1)
+        v = v.repeat_interleave(self.rep, dim=1)
+        o = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        return self.wo(o.transpose(1, 2).reshape(B, N, -1))
+
+def convert_mha_to_gqa(wk_mha, n_heads, n_kv_heads, dk):
+    """Mean-pool the trained MHA key (or value) weight into G grouped heads."""
+    rep = n_heads // n_kv_heads
+    W = wk_mha.view(n_heads, dk, -1)                 # split into per-head slabs
+    W = W.view(n_kv_heads, rep, dk, -1).mean(dim=1)  # average within each group
+    return W.reshape(n_kv_heads * dk, -1)            # (G*dk, d_model)
+
+# cache size scales with the KV-head count, not the query-head count
+def kv_cache_mb(layers, kv_heads, d_head, seq, batch=1, fp=2):
+    return 2 * layers * kv_heads * d_head * seq * batch * fp / 1e6
+
+mha = kv_cache_mb(32, 32, 128, 4096)   # 32 KV heads
+gqa = kv_cache_mb(32,  8, 128, 4096)   # 8 KV groups
+mqa = kv_cache_mb(32,  1, 128, 4096)   # 1 KV head
+print(f"MHA {mha:6.0f} MB | GQA {gqa:6.0f} MB ({mha/gqa:.0f}x) | MQA {mqa:6.0f} MB ({mha/mqa:.0f}x)")</code></pre>
+
+  <p>The <code>convert_mha_to_gqa</code> function is the whole paper in six lines: reshape the trained weight into per-head slabs, average the slabs inside each group, and stack the results. Run it on the key and value projections of any MHA checkpoint and you have GQA weights ready for a short uptrain.</p>
+
+  <h2>6. The trade-off, filled in</h2>
+  <table>
+    <thead><tr><th>Scheme</th><th>KV heads</th><th>Cache size</th><th>Quality</th></tr></thead>
+    <tbody>
+      <tr><td>Multi-Head (MHA)</td><td>n_heads</td><td>Largest</td><td>Best</td></tr>
+      <tr><td>Grouped-Query (GQA)</td><td>G (a few)</td><td>Small</td><td>Near best</td></tr>
+      <tr><td>Multi-Query (MQA)</td><td>1</td><td>Smallest</td><td>Slightly lower</td></tr>
+    </tbody>
+  </table>
+  <p>GQA is the middle row the last lesson promised. It is not a compromise so much as a free lunch: the quality curve stays flat as you cut heads, right up until you approach a single group. Pick a modest G (LLaMA-2 70B uses 8 KV heads), pool an existing checkpoint into it, uptrain briefly, and ship.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does Grouped-Query Attention share, and among whom?</div>
+      <button class="q-opt">Every query head keeps a private key head and value head</button>
+      <button class="q-opt">Every layer shares one query head across the whole network</button>
+      <button class="q-opt">Each group of query heads shares one key head and value head</button>
+      <button class="q-opt">Each output projection is shared across the batch dimension</button>
+      <div class="q-fb">GQA splits the query heads into G groups; each group reads from one shared key/value head.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What do the extreme settings of G recover exactly?</div>
+      <button class="q-opt">G equal to n_heads is MHA, and G equal to one is MQA</button>
+      <button class="q-opt">G equal to one is the MHA, and G equal to zero is the MQA</button>
+      <button class="q-opt">G equal to n_layers is MHA, and G equal to two is the MQA</button>
+      <button class="q-opt">G equal to the batch is MHA, and G equal to seq is the MQA</button>
+      <div class="q-fb">One query head per group is MHA; a single group shared by all query heads is MQA.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">How is an MHA checkpoint turned into a GQA model?</div>
+      <button class="q-opt">By deleting extra key heads and training the model fully again</button>
+      <button class="q-opt">By copying one key head at random into the remaining groups</button>
+      <button class="q-opt">By freezing every weight and adding brand new adapter layers</button>
+      <button class="q-opt">By mean-pooling the key heads per group, then a short uptrain</button>
+      <div class="q-fb">Average the trained KV heads within each group, then fine-tune with about 5% of pretrain compute.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">In the cache formula, which count does GQA reduce?</div>
+      <button class="q-opt">It reduces the number of query heads used to form the scores</button>
+      <button class="q-opt">It reduces the number of key and value heads that are stored</button>
+      <button class="q-opt">It reduces the sequence length that must be held in the cache</button>
+      <button class="q-opt">It reduces the number of layers that contribute to the cache</button>
+      <div class="q-fb">Cache size scales with the KV-head count; GQA sets that to G while keeping all query heads.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Generalises <a href="0015-multi-query-attention.html">Multi-Query Attention</a></b> - GQA is MQA with more than one KV group, filling the gap to MHA.</li>
+    <li><b>Modifies <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a></b> - it changes only the key/value projections of multi-head attention.</li>
+    <li>Sits alongside <a href="0019-kv-cache-optimization.html">KV cache compression</a> and <a href="0020-pagedattention-vllm.html">PagedAttention</a> as a way to tame decode-time memory.</li>
+    <li>Adopted by <a href="0012-llama.html">LLaMA</a>-2 and LLaMA-3 as the default attention, which is why nearly every recent open model ships with it.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Curious how quality actually bends as you sweep G from n_heads down to 1, or want to run the mean-pool converter on a real small checkpoint and watch the uptrain recover? Ask and I will build the experiment with you.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2305.13245">Ainslie et al., "GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints" (2023)</a>. It is short, and the uptraining plots make the "flat until you reach one group" story obvious.</p>
+
+  <div class="pager">
+    <a href="0015-multi-query-attention.html"><span class="dir">&larr; Previous</span><span class="ttl">Multi-Query Attention</span></a>
+    <a class="nxt" href="0017-flashattention.html"><span class="dir">Next &rarr;</span><span class="ttl">FlashAttention</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 16 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

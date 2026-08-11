@@ -1,0 +1,260 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OPT - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Big &amp; Open Models &middot; Lesson 10</div>
+  <h1>OPT: Open Pre-trained Transformer Language Models</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Zhang, Roller, Goyal, Artetxe, Chen, and others (Meta AI).
+    &middot; <a href="https://arxiv.org/abs/2205.01068">arXiv:2205.01068</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>OPT is an <b>open reproduction of GPT-3</b>: a suite of decoder-only models from <b>125M to 175B</b> parameters, released with weights so researchers could finally study a GPT-3-scale model directly.</li>
+      <li>The 175B version matches GPT-3 quality while costing about <b>one-seventh the carbon</b> to develop.</li>
+      <li>Its most unusual contribution is honesty: Meta published a <b>training logbook</b> documenting the real mess of a large run - <b>loss spikes, hardware failures, and learning-rate restarts</b>.</li>
+      <li>The lasting lesson is not the model but the practice: <b>reproducibility, openness, and a candid record</b> of how large-scale training actually behaves.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>GPT-3 (Lesson 06) was a landmark, but it was a <em>closed</em> landmark. You could rent it through an API, but you could not inspect its weights, probe its failure modes, or study its biases. For a research community trying to understand large language models, that was a wall. OPT was Meta AI's answer: build a model of the same class, and <strong>give it away</strong> - weights, code, and, crucially, the diary of what went wrong.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph CLOSED["GPT-3 (closed)"]
+    direction TB
+    c1["weights hidden"] --> c2["API access only"]
+    c2 --> c3["cannot study internals"]
+  end
+  subgraph OPEN["OPT (open)"]
+    direction TB
+    o1["weights released"] --> o2["code + logbook"]
+    o2 --> o3["anyone can study,<br/>reproduce, audit"]
+  end
+  CLOSED ==>|same scale, opened up| OPEN
+    </div>
+    <figcaption>OPT's core move. GPT-3 could only be used through an API, so its internals were a black box. OPT releases a model of the same 175B class along with training code and a logbook, so the research community can <b>reproduce, audit, and build on it directly</b>.</figcaption>
+  </figure>
+
+  <h2>2. A suite, not a single model</h2>
+  <p>OPT is not one model but a <strong>family</strong> spanning three orders of magnitude: 125M, 350M, 1.3B, 2.7B, 6.7B, 13B, 30B, 66B, and 175B. This matters for science. If you only release the biggest model, researchers cannot study <em>how</em> behaviour changes with scale. A ladder of sizes lets you plot trends - where a capability first appears, how loss falls, where bias grows.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  s1["125M"] --> s2["1.3B"] --> s3["6.7B"] --> s4["13B"] --> s5["30B"] --> s6["66B"] --> s7["175B"]
+  s7 --> use["study scaling trends:<br/>capability onset, loss curves,<br/>bias, robustness"]
+    </div>
+    <figcaption>Why a ladder of sizes. Releasing models from 125M up to 175B lets researchers watch a behaviour <b>emerge as scale grows</b>, rather than only observing the final giant. The full suite, not just the flagship, is what makes OPT a research instrument.</figcaption>
+  </figure>
+
+  <h2>3. The logbook: training as it really is</h2>
+  <p>Papers usually present a clean final run. OPT did the opposite. Meta released the actual <strong>chronological logbook</strong> from training the 175B model, and it reads like a ship's log through a storm. Training a model this large over weeks on hundreds of GPUs is not a smooth curve - it is a fight against instability and failing hardware.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Training
+  Training --> LossSpike: loss suddenly jumps
+  LossSpike --> Restart: roll back to checkpoint
+  Restart --> Training: lower LR / skip data
+  Training --> HardwareFail: GPU node dies
+  HardwareFail --> Restart: swap hardware, resume
+  Training --> Done: target tokens reached
+  Done --> [*]
+    </div>
+    <figcaption>The real lifecycle of a large training run, as OPT's logbook records it. Progress is repeatedly interrupted by <b>loss spikes and dead hardware</b>, each forcing a rollback to the last checkpoint and a restart, often with an adjusted learning rate. The clean loss curve in a paper hides dozens of these interventions.</figcaption>
+  </figure>
+
+  <p>Three failure modes dominate the logbook, and they are worth naming because you will hit them yourself at any serious scale:</p>
+  <ul>
+    <li><strong>Loss spikes</strong> - the training loss suddenly shoots up, sometimes diverging. Left alone the run is ruined. The fix is usually to roll back to a checkpoint and resume past the offending data with a lower learning rate.</li>
+    <li><strong>Hardware failures</strong> - over weeks on hundreds of GPUs, nodes crash. Without frequent checkpoints you lose days of compute.</li>
+    <li><strong>Learning-rate restarts</strong> - the team repeatedly adjusted the learning rate mid-run to nurse training past unstable regions.</li>
+  </ul>
+
+  <h2>4. Anatomy of a loss spike</h2>
+  <p>A loss spike is the villain of large-scale training. The gradient of a single bad batch, or an unlucky accumulation, blows up the weights; the model's predictions collapse; loss rockets. The standard defences are <strong>gradient clipping</strong> (cap the size of the update) and <strong>checkpoint-and-restart</strong> (save often, roll back when things break).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant T as Trainer
+  participant M as Model
+  participant D as Disk
+  loop every N steps
+    T->>D: save checkpoint
+  end
+  T->>M: step (normal)
+  M-->>T: loss OK
+  T->>M: step (bad batch)
+  M-->>T: loss SPIKE, grad norm huge
+  T->>D: reload last good checkpoint
+  T->>T: lower LR, skip bad data
+  T->>M: resume training
+    </div>
+    <figcaption>Handling a spike. The trainer checkpoints periodically. When a step produces an exploding gradient norm and a loss spike, it <b>reloads the last good checkpoint</b>, lowers the learning rate, skips the offending data, and resumes. Frequent checkpoints are what make this recovery cheap instead of catastrophic.</figcaption>
+  </figure>
+
+  <h2>5. Why gradient clipping works</h2>
+  <p>Gradient clipping puts a ceiling on how far one step can move the weights. You compute the overall size (the norm) of the gradient vector; if it exceeds a threshold, you scale the whole vector down so its norm equals the threshold. Direction is preserved, magnitude is capped.</p>
+
+  <div class="math">if &Vert;g&Vert; &gt; c :&nbsp;&nbsp; g &larr; g &middot; ( c / &Vert;g&Vert; )
+    <span class="gloss"><b>g</b>: the gradient - the vector of updates for every parameter this step. <b>&Vert;g&Vert;</b>: its norm, a single number for the overall update size. <b>c</b>: the clip threshold you choose. If the update is bigger than <b>c</b>, multiply <b>g</b> by <b>c / &Vert;g&Vert;</b> so its new norm is exactly <b>c</b>. The <i>direction</i> is unchanged; only the <i>length</i> is capped, so one freak batch cannot detonate the weights.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">The core intuition</span>
+    Training is a walk downhill. A loss spike is a single giant, wrong step off a cliff. Gradient clipping is a leash on step size; checkpointing is a rope back to the last safe ledge. Neither prevents rough terrain - they let you survive it. OPT's logbook is the honest map of that terrain.</div>
+
+  <h2>6. Implement it: a training-stability toolkit</h2>
+  <p>Everything in the logbook reduces to a handful of mechanisms. Here is a compact, runnable toolkit: gradient clipping, a loss-spike detector, and checkpoint/restart logic - the exact tools that kept OPT-175B alive.</p>
+
+  <div class="code-cap">stability_toolkit.py &middot; runnable with torch</div>
+  <pre><code>import torch, os
+
+class SpikeGuard:
+    """Detects loss spikes and restores the last good checkpoint."""
+    def __init__(self, model, opt, ckpt_dir="ckpts", spike_factor=1.5):
+        self.model, self.opt = model, opt
+        self.dir = ckpt_dir; os.makedirs(ckpt_dir, exist_ok=True)
+        self.spike_factor = spike_factor      # spike = loss &gt; factor x recent avg
+        self.recent = []                      # rolling window of good losses
+        self.last_good = None
+
+    def save(self, step):
+        path = f"{self.dir}/step_{step}.pt"
+        torch.save({"model": self.model.state_dict(),
+                    "opt":   self.opt.state_dict(), "step": step}, path)
+        self.last_good = path                 # remember the newest safe point
+
+    def restore(self):
+        s = torch.load(self.last_good)
+        self.model.load_state_dict(s["model"])
+        self.opt.load_state_dict(s["opt"])
+        return s["step"]
+
+    def is_spike(self, loss):
+        if len(self.recent) &lt; 5:              # need a baseline first
+            self.recent.append(loss); return False
+        avg = sum(self.recent) / len(self.recent)
+        if loss &gt; self.spike_factor * avg:    # loss jumped too far, too fast
+            return True
+        self.recent = (self.recent + [loss])[-20:]   # keep last 20 good losses
+        return False
+
+def train_step(model, opt, batch, guard, clip=1.0, lr_backoff=0.5):
+    opt.zero_grad()
+    loss = model(batch)                       # your forward returns a scalar loss
+    loss.backward()
+    # 1) GRADIENT CLIPPING: cap the update size before it lands
+    grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip)
+    # 2) SPIKE DETECTION + 3) RESTART
+    if guard.is_spike(loss.item()) or not torch.isfinite(grad_norm):
+        step = guard.restore()                # roll back to last checkpoint
+        for g in opt.param_groups:            # nurse past the bad patch
+            g["lr"] *= lr_backoff             # lower the learning rate
+        return {"restored": True, "step": step}
+    opt.step()
+    return {"restored": False, "loss": loss.item(), "grad_norm": float(grad_norm)}</code></pre>
+
+  <p>Trace the three defences. <code>clip_grad_norm_</code> is the leash from section 5 - it caps the update and also hands back the gradient norm, so a non-finite value (a full-blown explosion) is caught too. <code>SpikeGuard.is_spike</code> flags a loss that jumps past a multiple of the recent average. And <code>restore</code> plus the learning-rate backoff is the checkpoint-and-restart dance the logbook performs again and again.</p>
+
+  <h2>7. Openness as the real contribution</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>GPT-3 (2020)</th><th>OPT (2022)</th></tr></thead>
+    <tbody>
+      <tr><td>Largest model</td><td>175B</td><td>175B</td></tr>
+      <tr><td>Weights</td><td>Not released</td><td>Released to researchers</td></tr>
+      <tr><td>Training code</td><td>Not released</td><td>Released</td></tr>
+      <tr><td>Training logbook</td><td>None public</td><td>Full candid logbook</td></tr>
+      <tr><td>Model ladder</td><td>Several sizes, closed</td><td>125M to 175B, open</td></tr>
+      <tr><td>Development carbon</td><td>Baseline</td><td>About one-seventh</td></tr>
+    </tbody>
+  </table>
+  <p>OPT's raw quality was roughly GPT-3's - the point was never to win a benchmark. The point was that a serious lab published a frontier-scale model <em>and</em> its warts. That set a norm the rest of Module 03 builds on: BLOOM and LLaMA both push openness further.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What was OPT's main goal relative to GPT-3?</div>
+      <button class="q-opt">To beat it on every language benchmark by a wide clear margin</button>
+      <button class="q-opt">To shrink it so the whole model fits on one small edge device</button>
+      <button class="q-opt">To reproduce it openly so researchers can study the model itself</button>
+      <button class="q-opt">To replace its decoder layers with a bidirectional encoder stack</button>
+      <div class="q-fb">OPT reproduced GPT-3 at the same scale and released the weights, code, and logbook so the community could study a frontier model directly.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is a loss spike during large-scale training?</div>
+      <button class="q-opt">The training loss suddenly jumps upward, often threatening divergence</button>
+      <button class="q-opt">The training loss plateaus flatly once the model has fully converged</button>
+      <button class="q-opt">The training loss is reported wrongly due to a logging precision bug</button>
+      <button class="q-opt">The training loss drops so fast that the schedule ends much earlier</button>
+      <div class="q-fb">A loss spike is a sudden upward jump in loss, usually from an exploding gradient, that can wreck the run if not handled.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does gradient clipping actually change about an update?</div>
+      <button class="q-opt">It flips the sign so the step moves uphill away from bad minima</button>
+      <button class="q-opt">It rotates the direction toward the nearest saved good checkpoint</button>
+      <button class="q-opt">It zeroes the update entirely whenever the loss happens to rise</button>
+      <button class="q-opt">It caps the length of the update while keeping its direction fixed</button>
+      <div class="q-fb">Clipping scales the gradient down only if its norm exceeds a threshold; direction is preserved, magnitude is bounded.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why release a whole ladder of model sizes, not just 175B?</div>
+      <button class="q-opt">Because smaller models always beat larger ones on the same tasks</button>
+      <button class="q-opt">Because it lets researchers see how behaviour changes with scale</button>
+      <button class="q-opt">Because the largest model alone could not be stored on any disk</button>
+      <button class="q-opt">Because licensing rules forbid releasing only one single model size</button>
+      <div class="q-fb">A ladder from 125M to 175B lets researchers plot scaling trends: when abilities emerge, how loss falls, how bias grows.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0009-palm.html">PaLM</a></b> pushed dense scale to 540B but stayed closed; OPT takes the opposite stance - same GPT-3 class, fully open.</li>
+    <li><b>OPT reproduces <a href="0006-gpt-3.html">GPT-3</a></b>, so revisit that lesson for the architecture and few-shot behaviour OPT mirrors.</li>
+    <li>The <b>openness norm</b> OPT set is carried further by <a href="0011-bloom.html">BLOOM</a> (open multilingual) and <a href="0012-llama.html">LLaMA</a> (open and efficient).</li>
+    <li>The <b>training-stability tools</b> here reappear whenever we train large models; the data side is <a href="0007-the-pile.html">The Pile</a> and scaling is <a href="0005-scaling-laws.html">Scaling Laws</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> OPT's lesson is cultural as much as technical. Ask the agent to walk through the stability toolkit and simulate a loss spike so you can watch the restore-and-backoff fire. Then ask what a real logbook entry looks like - the honesty is the whole point, and it is rare in this field.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2205.01068">Zhang et al., "OPT: Open Pre-trained Transformer Language Models" (2022)</a>. Then read the actual <a href="https://github.com/facebookresearch/metaseq/blob/main/projects/OPT/chronicles/OPT175B_Logbook.pdf">OPT-175B training logbook</a> - it is the honest field diary of a frontier run, spikes and all.</p>
+
+  <div class="pager">
+    <a href="0009-palm.html"><span class="dir">&larr; Previous</span><span class="ttl">PaLM</span></a>
+    <a class="nxt" href="0011-bloom.html"><span class="dir">Next &rarr;</span><span class="ttl">BLOOM</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 10 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

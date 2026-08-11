@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tree of Thoughts - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Reasoning, Retrieval &amp; Agents &middot; Lesson 33</div>
+  <h1>Tree of Thoughts</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Yao, Yu, Zhao, Shafran, Griffiths, Cao, Narasimhan (Princeton University / Google DeepMind).
+    &middot; <a href="https://arxiv.org/abs/2305.10601">arXiv:2305.10601</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><a href="0030-chain-of-thought.html">Chain-of-Thought</a> commits to a single line of reasoning left to right. If an early step is a dead end, there is no way back.</li>
+      <li>Tree of Thoughts (ToT) generalizes CoT into a <b>search</b>: at each step generate <b>several candidate thoughts</b>, forming a branching tree of partial solutions.</li>
+      <li>The model <b>self-evaluates</b> each candidate (rating it or voting among siblings), and a search algorithm (<b>BFS or DFS</b>) explores promising branches and <b>backtracks</b> out of bad ones.</li>
+      <li>On the Game of 24 puzzle, ToT solved <b>74%</b> of instances versus just <b>4%</b> for GPT-4 with Chain-of-Thought - a huge jump on tasks that need planning and search.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Chain-of-Thought writes one reasoning path, token after token, with no going back. That is fine when the first idea happens to be right. But many problems need exploration: you try an approach, hit a wall, and must abandon it for another. A single chain has no branch to abandon and no way to compare alternatives. It is like solving a maze by committing to the first turn at every junction and never retracing.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph COT["Chain-of-Thought: one path"]
+    direction LR
+    a["step 1"] --> b["step 2"] --> c["step 3"] --> d["answer (stuck if wrong)"]
+  end
+  subgraph TOT["Tree of Thoughts: many paths"]
+    direction TB
+    r["problem"] --> t1["thought A"]
+    r --> t2["thought B"]
+    r --> t3["thought C"]
+    t1 --> t1a["A1"]
+    t1 --> t1b["A2"]
+    t2 --> t2a["B1"]
+  end
+    </div>
+    <figcaption>The core shift. Chain-of-Thought follows one line and is stuck if an early step is wrong. Tree of Thoughts branches at every step into several candidate thoughts, so the model can <b>compare alternatives and abandon dead ends</b> instead of committing blindly to its first idea.</figcaption>
+  </figure>
+
+  <p>ToT reframes reasoning as a classic search problem. Every partial solution is a node; extending it is expanding the node; evaluating it is scoring the node. Once reasoning is a tree, decades of search algorithms - breadth-first, depth-first, with backtracking - become available.</p>
+
+  <h2>2. The four ingredients</h2>
+  <p>ToT is defined by four design choices you plug in per problem.</p>
+  <ul>
+    <li><strong>Thought decomposition</strong> - what counts as one "thought" (one step)? For Game of 24 it is one arithmetic combination of two numbers.</li>
+    <li><strong>Thought generator</strong> - given a state, propose several next thoughts (by sampling or by prompting for k distinct options).</li>
+    <li><strong>State evaluator</strong> - rate how promising each state is, using the model itself to <em>value</em> a state or to <em>vote</em> among states.</li>
+    <li><strong>Search algorithm</strong> - how to walk the tree: BFS (keep the best b states per level) or DFS (go deep, backtrack on failure).</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  S["current state<br/>(partial solution)"] --> G["thought generator<br/>propose k candidate next steps"]
+  G --> C1["candidate 1"]
+  G --> C2["candidate 2"]
+  G --> C3["candidate 3"]
+  C1 --> E["state evaluator<br/>score or vote (model rates itself)"]
+  C2 --> E
+  C3 --> E
+  E --> K["search keeps the best,<br/>prunes the rest"]
+    </div>
+    <figcaption>One expansion step in ToT. From a state the generator proposes several candidate next thoughts; the evaluator scores each one using the model itself; the search keeps the strongest and prunes the weak. Repeating this <b>turns a language model into a deliberate searcher</b> that looks before it leaps.</figcaption>
+  </figure>
+
+  <h2>3. Self-evaluation: the model as its own critic</h2>
+  <p>The engine of ToT is that the same model that <em>generates</em> thoughts can also <em>judge</em> them. Two evaluation styles are used. In <strong>value</strong> mode, you ask the model to rate a single state - for example, "given the numbers left, is 24 still reachable: sure / maybe / impossible?". In <strong>vote</strong> mode, you show the model several sibling states and ask it to pick the most promising. Either way, the model's judgment prunes the tree so search does not explode.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph VAL["Value each state"]
+    direction TB
+    v1["state -> 'sure'"]
+    v2["state -> 'maybe'"]
+    v3["state -> 'impossible' (prune)"]
+  end
+  subgraph VOTE["Vote among states"]
+    direction TB
+    o1["compare siblings"] --> o2["pick most promising"]
+  end
+    </div>
+    <figcaption>Two ways the model grades its own thoughts. <b>Value</b> scores each state independently (sure / maybe / impossible), pruning hopeless branches outright. <b>Vote</b> compares sibling states and picks the best. Both use the same model as an evaluator, which is what lets the search <b>focus compute on branches that are actually worth exploring</b>.</figcaption>
+  </figure>
+
+  <h2>4. Searching the tree with backtracking</h2>
+  <p>With a generator and an evaluator, a search algorithm ties it together. <strong>BFS</strong> expands level by level, keeping only the best <code>b</code> states at each depth (a beam). <strong>DFS</strong> dives down one promising branch until it either solves the problem or the evaluator declares the state hopeless, then <strong>backtracks</strong> to the last junction and tries the next option. Backtracking is the ability CoT never had.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Expand
+  Expand --> Evaluate: generate k thoughts
+  Evaluate --> Keep: promising states
+  Evaluate --> Prune: hopeless states
+  Keep --> Expand: go deeper
+  Prune --> Backtrack: dead end
+  Backtrack --> Expand: try another branch
+  Keep --> Solved: goal reached
+  Solved --> [*]
+    </div>
+    <figcaption>The search loop with backtracking. Promising states are expanded further; hopeless ones are pruned, triggering a backtrack to the last open junction. The agent keeps exploring until a state reaches the goal. This <b>explore-prune-backtrack cycle is exactly what lets ToT recover from a wrong early step</b> that would trap a single chain.</figcaption>
+  </figure>
+
+  <p>The headline result: on the <strong>Game of 24</strong> (use four numbers and +, -, *, / to make 24), GPT-4 with standard Chain-of-Thought solved only <strong>4%</strong> of puzzles, because one wrong first operation dooms the chain. ToT with BFS solved <strong>74%</strong>, because it could try several first operations, evaluate which keep 24 reachable, and back out of the ones that do not.</p>
+
+  <h2>5. The math, read in plain English</h2>
+  <p>ToT does a value-guided search over states. At each state it generates candidate children, scores them, and keeps the best set to expand next.</p>
+
+  <div class="math">S<sub>gen</sub> = { s + g : g ~ G(s), sampled k times }, &nbsp;&nbsp; V(s') = evaluator(s'), &nbsp;&nbsp; S<sub>next</sub> = top-b by V(s')
+    <span class="gloss"><b>s</b>: the current state (a partial solution). <b>G(s)</b>: the thought generator - sample <b>k</b> candidate next thoughts <b>g</b> and attach each to s to form a child state <b>s'</b>. <b>V(s')</b>: the evaluator's score for a child, from the model valuing or voting. <b>top-b</b>: keep the best <b>b</b> children (the beam width) to expand at the next level. Bigger k explores more per node; bigger b keeps more paths alive.</span>
+  </div>
+
+  <div class="math">answer = first s reaching the goal along argmax-value path; &nbsp; else backtrack to last open node
+    <span class="gloss">Search returns the first state that satisfies the goal test, found by preferring high-value children. If a branch dead-ends (every child scores hopeless), the search <b>backtracks</b> to the most recent node with unexplored children and continues - the recovery move a single chain cannot make.</span>
+  </div>
+
+  <h2>6. Implement it: BFS Tree-of-Thoughts on a toy problem</h2>
+  <p>The code runs a real ToT breadth-first search on Game of 24 with a stubbed model. The generator proposes ways to combine two numbers; the evaluator rules out states from which 24 is unreachable; BFS keeps a beam of the best states per level. Swap the two stubs for LLM prompts and it becomes the paper's method.</p>
+
+  <div class="code-cap">tree_of_thoughts.py &middot; runnable with Python</div>
+  <pre><code>from itertools import combinations
+
+# --- thought generator: propose next states by combining two numbers ---
+def generate(nums):
+    """Each 'thought' combines two numbers with one operation."""
+    states = []
+    for a, b in combinations(nums, 2):
+        rest = list(nums); rest.remove(a); rest.remove(b)
+        cands = {a + b, a * b, abs(a - b)}
+        if b != 0: cands.add(a / b)
+        if a != 0: cands.add(b / a)
+        for c in cands:
+            states.append(tuple(sorted(rest + [c])))   # new state
+    return set(states)
+
+# --- state evaluator: is 24 still reachable from these numbers? ---
+def reachable(nums, target=24):
+    if len(nums) == 1:
+        return abs(nums[0] - target) < 1e-6
+    return any(reachable(list(s), target) for s in generate(nums))
+
+def evaluate(state):
+    # 'value' score: sure (reachable) vs impossible (prune)
+    return 1.0 if reachable(list(state)) else 0.0
+
+# --- BFS Tree-of-Thoughts search with a beam ---
+def tot_bfs(start, beam=5, target=24):
+    frontier = [tuple(sorted(start))]           # level 0
+    while frontier:
+        # goal test: a single number equal to the target
+        for s in frontier:
+            if len(s) == 1 and abs(s[0] - target) < 1e-6:
+                return True
+        # expand every state, score children, keep the best 'beam'
+        children = set()
+        for s in frontier:
+            if len(s) > 1:
+                children |= generate(s)
+        scored = [(evaluate(c), c) for c in children]
+        scored = [(v, c) for v, c in scored if v > 0]   # prune impossible
+        scored.sort(reverse=True)
+        frontier = [c for _, c in scored[:beam]]        # beam of promising states
+    return False
+
+print("4 9 10 13 ->", tot_bfs([4, 9, 10, 13]))   # True: (13-9)*(10-4)=24
+print("1 1 1 1  ->", tot_bfs([1, 1, 1, 1]))      # False: cannot reach 24</code></pre>
+
+  <p>Trace it against the diagrams. <code>generate</code> is the thought generator (branching). <code>evaluate</code> is the state evaluator that prunes hopeless states (here using exact reachability; the paper uses the LLM's own judgment). And <code>tot_bfs</code> keeps a <strong>beam</strong> of the best states per level - breadth-first search with pruning. The dead-end pruning plus level-by-level beam is what gives ToT its recovery ability.</p>
+
+  <div class="card callout key"><span class="tag">Generate, evaluate, search</span>
+    Every ToT variant is these three knobs: how many thoughts to generate per node, how to score them, and which search walks the tree. Chain-of-Thought is the degenerate case - generate one thought, never evaluate, never branch. ToT simply turns those knobs up.</div>
+
+  <h2>7. Cost and when to use it</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Chain-of-Thought</th><th>Tree of Thoughts</th></tr></thead>
+    <tbody>
+      <tr><td>Paths explored</td><td>One</td><td>Many (a tree)</td></tr>
+      <tr><td>Recover from a dead end</td><td>No</td><td>Yes - backtracking</td></tr>
+      <tr><td>Self-evaluation</td><td>None</td><td>Value or vote per state</td></tr>
+      <tr><td>Compute per problem</td><td>Low</td><td>High - many model calls</td></tr>
+      <tr><td>Game of 24 (GPT-4)</td><td>4% solved</td><td>74% solved</td></tr>
+    </tbody>
+  </table>
+  <p>The cost is real: ToT makes many model calls per problem - to generate candidates and to evaluate them - so it is far more expensive than a single chain. It pays off precisely on problems that <strong>need search</strong>: planning, puzzles, tasks where the first idea is often wrong. On easy one-shot questions it is overkill. ToT is the moment the field started treating <strong>inference-time compute as a dial you can turn up for harder problems</strong> - the theme the next lesson makes explicit.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does Tree of Thoughts generalize Chain-of-Thought?</div>
+      <button class="q-opt">It retrains the base model on many reasoning chains it generated</button>
+      <button class="q-opt">It branches into several candidate thoughts and searches the tree</button>
+      <button class="q-opt">It retrieves supporting passages before each reasoning step is taken</button>
+      <button class="q-opt">It compresses every reasoning chain down into one single output token</button>
+      <div class="q-fb">ToT turns the single left-to-right chain into a branching tree of candidate thoughts, then searches it with evaluation and backtracking.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What role does self-evaluation play in Tree of Thoughts?</div>
+      <button class="q-opt">It permanently updates the model weights after every expansion step</button>
+      <button class="q-opt">It converts each partial thought directly into the final numeric answer</button>
+      <button class="q-opt">It retrieves external documents used to verify each candidate thought</button>
+      <button class="q-opt">It scores or votes on states so search prunes the hopeless branches</button>
+      <div class="q-fb">The model rates each state (value) or picks among siblings (vote); those scores let the search keep promising branches and prune dead ones.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which ability does backtracking give ToT that a single chain lacks?</div>
+      <button class="q-opt">Abandoning a dead-end branch and trying a different earlier choice</button>
+      <button class="q-opt">Generating the entire final answer in one single forward pass call</button>
+      <button class="q-opt">Storing all retrieved passages inside a dense searchable vector index</button>
+      <button class="q-opt">Quantizing the frozen base weights down into a four-bit number format</button>
+      <div class="q-fb">Backtracking lets ToT return to the last open junction after a dead end and try another option - the recovery move a linear chain cannot make.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is Tree of Thoughts more expensive than Chain-of-Thought?</div>
+      <button class="q-opt">It stores the whole Wikipedia index in memory for every query asked</button>
+      <button class="q-opt">It finetunes a fresh adapter on top of the base model per problem</button>
+      <button class="q-opt">It makes many model calls to generate and evaluate branching states</button>
+      <button class="q-opt">It runs the base model at a much higher numerical floating precision</button>
+      <div class="q-fb">ToT calls the model repeatedly to propose candidate thoughts and to score them, so it spends far more inference compute per problem than one chain.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>ToT directly extends <a href="0030-chain-of-thought.html">Chain-of-Thought</a>: a chain is a tree of width one with no evaluation.</li>
+    <li>It shares the search-and-evaluate spirit of <a href="0032-react.html">ReAct</a>, but searches over <b>reasoning states</b> rather than world actions.</li>
+    <li>Trading many model calls for higher accuracy is precisely the subject of <a href="0034-test-time-scaling.html">Test-Time Scaling</a>.</li>
+    <li>The self-evaluation step foreshadows the verifiers used in reasoning-model training like <a href="0027-grpo.html">GRPO</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Run the code, then change <code>beam</code> from 5 to 1 and re-run: with a beam of one, ToT collapses back toward a single chain and starts failing. That experiment shows exactly what the tree buys you. Then ask the agent to replace the exact <code>evaluate</code> with a noisy scorer and see how search degrades - a preview of why good verifiers matter next lesson.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/2305.10601">Yao et al., "Tree of Thoughts: Deliberate Problem Solving with Large Language Models" (2023)</a>. The <a href="https://github.com/princeton-nlp/tree-of-thought-llm">official Princeton NLP code</a> runs the full Game of 24 and crosswords experiments.</p>
+
+  <div class="pager">
+    <a href="0032-react.html"><span class="dir">&larr; Previous</span><span class="ttl">ReAct</span></a>
+    <a class="nxt" href="0034-test-time-scaling.html"><span class="dir">Next &rarr;</span><span class="ttl">Test-Time Scaling</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 33 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

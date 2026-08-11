@@ -1,0 +1,292 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Attention Is All You Need - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Transformer Core &middot; Lesson 01</div>
+  <h1>Attention Is All You Need</h1>
+  <p class="paper-meta">
+    <span class="pill">2017</span>
+    Vaswani, Shazeer, Parmar, Uszkoreit, Jones, Gomez, Kaiser, Polosukhin (Google Brain / Google Research).
+    &middot; <a href="https://arxiv.org/abs/1706.03762">arXiv:1706.03762</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Before this paper, sequence models (RNNs, LSTMs) read text <b>one step at a time</b>, which is slow and forgets long-range context.</li>
+      <li>The Transformer throws out recurrence entirely and uses <b>self-attention</b>: every token looks at every other token in one parallel operation.</li>
+      <li>The key trick is <b>scaled dot-product attention</b> over learned <b>Query, Key, Value</b> vectors, run in several parallel <b>heads</b>.</li>
+      <li>Because attention is order-blind, <b>positional encodings</b> add word-order information. Result: faster training, better translation, and the architecture behind every modern LLM.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>In 2017 the best translation systems were recurrent: an RNN or LSTM would read a sentence word by word, carrying a hidden "memory" vector forward. Two problems dogged them. First, <strong>they are sequential</strong> - you cannot compute step 10 until step 9 is done, so training cannot use the full parallelism of modern GPUs. Second, <strong>long-range dependencies fade</strong> - information from the start of a long sentence gets diluted by the time you reach the end.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph RNN["Old way: recurrence (sequential)"]
+    direction LR
+    r1["the"] --> r2["cat"] --> r3["sat"] --> r4["on"] --> r5["mat"]
+  end
+  subgraph ATT["New way: self-attention (parallel)"]
+    direction TB
+    a1["the"] --- a2["cat"] --- a3["sat"] --- a4["on"] --- a5["mat"]
+  end
+    </div>
+    <figcaption>The core shift. An RNN <b>must</b> process tokens in order, each waiting on the last. Self-attention lets every token interact with every other token <b>at once</b>, so the whole sequence is computed in parallel and any token can reach any other in a single step.</figcaption>
+  </figure>
+
+  <p>The paper's radical claim was in the title: you do not need recurrence or convolution at all. <em>Attention is all you need.</em></p>
+
+  <h2>2. The one idea: attention as soft lookup</h2>
+  <p>Think of attention as a <strong>soft dictionary lookup</strong>. Every token produces three vectors by multiplying its embedding by three learned matrices:</p>
+  <ul>
+    <li><strong>Query (Q)</strong> - "what am I looking for?"</li>
+    <li><strong>Key (K)</strong> - "what do I contain / advertise?"</li>
+    <li><strong>Value (V)</strong> - "what do I actually pass on if selected?"</li>
+  </ul>
+  <p>To update a token, you compare its <em>query</em> against every token's <em>key</em>. High match means high relevance. Those match scores become weights, and the token's new representation is a weighted blend of everyone's <em>values</em>. A token literally gathers information from the tokens it finds relevant.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  E["Token embedding x"] --> Q["Q = x W_Q<br/><i>what I seek</i>"]
+  E --> K["K = x W_K<br/><i>what I offer</i>"]
+  E --> V["V = x W_V<br/><i>what I pass on</i>"]
+  Q --> S["score = Q &middot; K&#7488;<br/><i>match every query to every key</i>"]
+  K --> S
+  S --> SM["softmax<br/><i>scores &rarr; weights that sum to 1</i>"]
+  SM --> O["output = weighted sum of V<br/><i>blend of relevant content</i>"]
+  V --> O
+    </div>
+    <figcaption>One attention operation for a single token. The same input <b>x</b> is projected into Q, K, V by three learned weight matrices. Queries dotted with keys give relevance scores; softmax turns them into weights; those weights blend the values into the token's new representation.</figcaption>
+  </figure>
+
+  <h2>3. Scaled dot-product attention, exactly</h2>
+  <p>Stack all tokens' queries into a matrix <code>Q</code>, all keys into <code>K</code>, all values into <code>V</code>. The entire attention layer is one compact formula:</p>
+
+  <div class="math">Attention(Q, K, V) = softmax( Q K&#7488; / &radic;d<sub>k</sub> ) V
+    <span class="gloss"><b>Q K&#7488;</b>: every query dotted with every key &rarr; an N&times;N grid of raw relevance scores. <b>&divide; &radic;d<sub>k</sub></b>: divide by the square root of the key dimension to stop the scores getting huge (which would make softmax razor-sharp and kill gradients). <b>softmax</b>: turn each row into weights that sum to 1. <b>&times; V</b>: use those weights to average the value vectors.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why divide by &radic;d<sub>k</sub></span>
+    If keys and queries have dimension <code>d<sub>k</sub></code>, their dot products grow roughly like <code>&radic;d<sub>k</sub></code>. Left unchecked, large scores push softmax into near one-hot spikes where gradients vanish. Dividing by <code>&radic;d<sub>k</sub></code> keeps the scores in a sane range. Small detail, big stability.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q2["Q<br/>(N &times; d)"] --> M["Q K&#7488;<br/>N &times; N score grid"]
+  K2["K<br/>(N &times; d)"] --> M
+  M --> Sc["&divide; &radic;d_k"]
+  Sc --> Sm["row-wise softmax"]
+  Sm --> W["attention weights<br/>N &times; N"]
+  W --> Out["&times; V &rarr; output<br/>(N &times; d)"]
+  V2["V<br/>(N &times; d)"] --> Out
+    </div>
+    <figcaption>The matrix view. For a sequence of <b>N</b> tokens you build an <b>N&times;N</b> grid where cell (i, j) is how much token i attends to token j. That grid, softmax-normalised per row, multiplies the values to produce N updated vectors. The N&times;N grid is why plain attention costs <b>O(N&sup2;)</b> - a fact half the later papers exist to fix.</figcaption>
+  </figure>
+
+  <h2>4. Multi-head attention: many views at once</h2>
+  <p>One attention operation can only learn one kind of relationship. Real language has many at once: subject-verb agreement, pronoun references, adjacent-word phrasing. So the Transformer runs attention <strong>several times in parallel</strong> with different learned Q/K/V projections. Each is a <strong>head</strong>. Their outputs are concatenated and mixed by one more matrix.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  X["input tokens"] --> H1["head 1<br/>Q&#8321;K&#8321;V&#8321;"]
+  X --> H2["head 2<br/>Q&#8322;K&#8322;V&#8322;"]
+  X --> H3["head 3<br/>Q&#8323;K&#8323;V&#8323;"]
+  X --> Hd["... head h"]
+  H1 --> C["concatenate"]
+  H2 --> C
+  H3 --> C
+  Hd --> C
+  C --> P["&times; W_O<br/>(mix heads)"]
+  P --> Y["output"]
+    </div>
+    <figcaption>Multi-head attention. Each head gets its own small Q/K/V projection and attends independently, so different heads can specialise (one tracks syntax, another long-range coreference). The concatenated results pass through an output matrix <code>W_O</code>. More heads = more relationship types learned in parallel, at the same total cost.</figcaption>
+  </figure>
+
+  <h2>5. The full Transformer block</h2>
+  <p>Attention is the star, but a working block wraps it with three supporting pieces you met in the primer: a per-token <strong>feed-forward network</strong>, <strong>residual connections</strong> (add the input back), and <strong>layer normalisation</strong> (keep activations stable). Stack this block N times and you have an encoder or a decoder.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  In["input + positional encoding"] --> MHA["Multi-Head<br/>Self-Attention"]
+  In -->|residual| Add1(("+"))
+  MHA --> Add1
+  Add1 --> LN1["LayerNorm"]
+  LN1 --> FFN["Feed-Forward<br/>Linear &rarr; ReLU &rarr; Linear"]
+  LN1 -->|residual| Add2(("+"))
+  FFN --> Add2
+  Add2 --> LN2["LayerNorm"]
+  LN2 --> Out["to next block"]
+    </div>
+    <figcaption>One Transformer block. Attention lets tokens share information; the feed-forward network then processes each token on its own. Residual connections (the <b>+</b> arrows) let gradients flow and let each block make small edits rather than rebuild the representation. LayerNorm keeps the numbers well-behaved.</figcaption>
+  </figure>
+
+  <p>The original paper is an <strong>encoder-decoder</strong> for translation: the encoder reads the source sentence with full (bidirectional) attention; the decoder generates the translation with <strong>causal</strong> attention (each output token may only see earlier ones) plus <strong>cross-attention</strong> into the encoder. Later, LLMs kept only the decoder half - but the block above is the shared building material.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph ENC["Encoder (reads source)"]
+    direction TB
+    se["source tokens"] --> eb["N&times; blocks<br/>bidirectional attention"]
+  end
+  subgraph DEC["Decoder (writes target)"]
+    direction TB
+    te["target so far"] --> db["N&times; blocks<br/>causal self-attention<br/>+ cross-attention"]
+    db --> ol["Linear + softmax"]
+    ol --> np["next token"]
+  end
+  eb -->|keys & values| db
+    </div>
+    <figcaption>The original architecture. The encoder turns the source sentence into rich vectors; the decoder generates the translation one token at a time, using causal self-attention over what it has written and <b>cross-attention</b> into the encoder's output. GPT keeps only the right half; BERT keeps only the left half.</figcaption>
+  </figure>
+
+  <h2>6. Positional encoding: putting order back</h2>
+  <p>Here is a subtlety. Attention treats its input as a <em>set</em>, not a sequence - shuffle the tokens and the math is identical. But "dog bites man" and "man bites dog" are not the same sentence. So the Transformer <strong>adds a positional encoding</strong> to each embedding: a vector that depends only on the position, built from sines and cosines of different frequencies. The model can read these patterns to recover order and even relative distance.</p>
+
+  <div class="math">PE(pos, 2i) = sin( pos / 10000<sup>2i/d</sup> )&nbsp;&nbsp;&nbsp;PE(pos, 2i+1) = cos( pos / 10000<sup>2i/d</sup> )
+    <span class="gloss">Each dimension <i>i</i> is a sine or cosine wave of a different wavelength. Low dimensions wiggle fast (encode fine position), high dimensions wiggle slowly (encode coarse position). Together they give every position a unique fingerprint, and the fixed geometry lets the model reason about <i>relative</i> distance. Lessons 13-14 (RoPE, ALiBi) improve on exactly this.</span>
+  </div>
+
+  <h2>7. Implement it: self-attention from scratch</h2>
+  <p>Everything above fits in a small, runnable PyTorch module. This is causal multi-head self-attention - the exact core inside GPT. Read it against the diagrams: you will find Q/K/V projection, scaled scores, the causal mask, softmax, the value blend, and the output projection.</p>
+
+  <div class="code-cap">self_attention.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, d_model=128, n_heads=4, causal=True):
+        super().__init__()
+        assert d_model % n_heads == 0
+        self.h, self.dk = n_heads, d_model // n_heads
+        self.qkv  = nn.Linear(d_model, 3 * d_model)   # make Q, K, V in one shot
+        self.proj = nn.Linear(d_model, d_model)       # W_O: mix the heads
+        self.causal = causal
+
+    def forward(self, x):                             # x: (B, N, d_model)
+        B, N, d = x.shape
+        q, k, v = self.qkv(x).chunk(3, dim=-1)        # each (B, N, d)
+        # split into heads -> (B, h, N, dk)
+        q = q.view(B, N, self.h, self.dk).transpose(1, 2)
+        k = k.view(B, N, self.h, self.dk).transpose(1, 2)
+        v = v.view(B, N, self.h, self.dk).transpose(1, 2)
+
+        # scaled dot-product scores: (B, h, N, N)
+        att = (q @ k.transpose(-2, -1)) / self.dk ** 0.5
+        if self.causal:                               # forbid looking at the future
+            mask = torch.triu(torch.ones(N, N, device=x.device), diagonal=1).bool()
+            att = att.masked_fill(mask, float('-inf'))
+        att = att.softmax(dim=-1)                      # weights sum to 1 per row
+
+        out = att @ v                                  # blend values: (B, h, N, dk)
+        out = out.transpose(1, 2).reshape(B, N, d)     # re-merge heads
+        return self.proj(out)
+
+# smoke test
+x = torch.randn(2, 6, 128)          # batch 2, sequence length 6, d_model 128
+y = MultiHeadSelfAttention()(x)
+print(y.shape)                       # torch.Size([2, 6, 128])</code></pre>
+
+  <p>Notice the <strong>causal mask</strong>: we set the future positions to <code>-inf</code> before softmax, so their weight becomes exactly zero. That one line is what makes a Transformer generate left to right, and it is why the same architecture can be trained on every position of a sequence at once (each position only ever sees its past). That parallel training over all positions is the efficiency the RNN could never match.</p>
+
+  <div class="card callout"><span class="tag">In production</span>
+    You would rarely write the raw <code>softmax(QK&#7488;)V</code> today. Modern code calls <code>F.scaled_dot_product_attention(q, k, v, is_causal=True)</code>, which dispatches to <b>FlashAttention</b> (Lesson 17) - same math, far less memory and time. But the module above <em>is</em> that math, unrolled, so you can see it.</div>
+
+  <h2>8. Why it mattered</h2>
+  <table>
+    <thead><tr><th>Property</th><th>RNN / LSTM</th><th>Transformer</th></tr></thead>
+    <tbody>
+      <tr><td>Training parallelism</td><td>Sequential (slow)</td><td>Fully parallel over positions</td></tr>
+      <tr><td>Path length between two tokens</td><td>Up to N steps</td><td>1 step (direct attention)</td></tr>
+      <tr><td>Long-range dependencies</td><td>Fade with distance</td><td>Any distance, equal access</td></tr>
+      <tr><td>Cost per layer</td><td>O(N &middot; d&sup2;)</td><td>O(N&sup2; &middot; d)</td></tr>
+    </tbody>
+  </table>
+  <p>The one price is that <code>N&sup2;</code> attention grid: cost grows with the square of sequence length. That single trade-off launched an entire research industry - FlashAttention, MQA/GQA, PagedAttention, KV-cache compression - all of which you will meet in Modules 04 and 05.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">In attention, what do the Query and Key vectors produce together?</div>
+      <button class="q-opt">The final blended output vector for each of the tokens</button>
+      <button class="q-opt">The positional encoding added onto each input token</button>
+      <button class="q-opt">Relevance scores saying how much each token attends</button>
+      <button class="q-opt">The feed-forward network weights used inside the block</button>
+      <div class="q-fb">Query dot Key gives the raw relevance score; softmax turns scores into weights that blend the Values.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why divide the attention scores by the square root of d_k?</div>
+      <button class="q-opt">To make the model attend only to the closest neighbour tokens</button>
+      <button class="q-opt">To keep scores small so softmax gradients do not vanish</button>
+      <button class="q-opt">To convert the scores directly into integer token id values</button>
+      <button class="q-opt">To add the missing word-order information back to the input</button>
+      <div class="q-fb">Dot products grow with dimension; scaling by &radic;d_k stops softmax from becoming a gradient-killing spike.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does the Transformer need positional encodings at all?</div>
+      <button class="q-opt">Because attention alone is order-blind, treating input as a set</button>
+      <button class="q-opt">Because softmax cannot handle sequences longer than one word</button>
+      <button class="q-opt">Because residual connections erase the token embeddings early</button>
+      <button class="q-opt">Because multi-head attention removes the value vectors entirely</button>
+      <div class="q-fb">Shuffle the tokens and self-attention gives the same result; positional encodings inject the order.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the main computational cost of self-attention?</div>
+      <button class="q-opt">Linear in sequence length because tokens are processed one by one</button>
+      <button class="q-opt">Constant regardless of length thanks to the shared value matrix</button>
+      <button class="q-opt">Cubic in the model width because of the three projections</button>
+      <button class="q-opt">Quadratic in sequence length from the N by N score grid</button>
+      <div class="q-fb">Every token attends to every token, so you build an N&times;N grid: O(N&sup2;) cost. Later papers attack exactly this.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next up, <a href="0002-bert.html">BERT</a></b> keeps only the encoder and trains it bidirectionally for understanding.</li>
+    <li><b><a href="0003-gpt-1.html">GPT</a></b> keeps only the decoder (causal attention) and trains it to generate - the shape of every LLM since.</li>
+    <li>The <b>O(N&sup2;) cost</b> flagged above is the target of <a href="0017-flashattention.html">FlashAttention</a>, <a href="0015-multi-query-attention.html">MQA</a>, and <a href="0020-pagedattention-vllm.html">PagedAttention</a>.</li>
+    <li>The <b>positional encoding</b> here is replaced by <a href="0013-rope.html">RoPE</a> and <a href="0014-alibi.html">ALiBi</a> in Module 04.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> This is the most important lesson in the course - every later paper assumes it. If any diagram is unclear, ask the agent to walk one token through the whole block with real numbers, or to explain the causal mask line by line. Do not move on until the Q/K/V story feels obvious.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/1706.03762">Vaswani et al., "Attention Is All You Need" (2017)</a>. Then pair it with Jay Alammar's <a href="https://jalammar.github.io/illustrated-transformer/">"The Illustrated Transformer"</a> for a picture-by-picture walkthrough, and Karpathy's <a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">"Let's build GPT from scratch"</a> to code it end to end.</p>
+
+  <div class="pager">
+    <a href="0000-primer-neural-nets-to-tokens.html"><span class="dir">&larr; Previous</span><span class="ttl">Primer: Neural Nets to Tokens</span></a>
+    <a class="nxt" href="0002-bert.html"><span class="dir">Next &rarr;</span><span class="ttl">BERT</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 01 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

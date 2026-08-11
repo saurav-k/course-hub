@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Load Testing 1000+ Concurrent Requests - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Scale and Operations &middot; Lesson 13</div>
+  <h1>Load Testing 1000+ Concurrent Requests</h1>
+  <p class="paper-meta">Dashboards tell you how the service behaves today. Load testing tells you where it breaks tomorrow. This lab ramps concurrency until you find the <b>knee</b>, the point where adding load stops adding throughput and only adds latency. Official tool: <a href="https://docs.vllm.ai/en/latest/contributing/benchmarks.html">vLLM benchmark suite</a> (<code>vllm bench serve</code>).</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>There are two load models. <b>Closed-loop</b> holds N clients that each wait for a reply before sending again. <b>Open-loop</b> fires at a fixed arrival rate no matter how slow the server is. They stress the system differently.</li>
+      <li>Realistic tests use realistic <b>prompt and output length distributions</b>, not one fixed prompt. Length drives prefill and decode cost.</li>
+      <li>You <b>ramp concurrency</b> and plot latency against throughput. Early on, throughput rises and latency barely moves. Past the <b>knee</b>, throughput flattens and latency explodes.</li>
+      <li>The number you ship is the concurrency just below the knee that still meets your p95 SLO. That is your capacity per replica.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Every serving stack has a saturation point. Below it, the GPU has spare batch capacity and each extra request is nearly free. Above it, the batch is full, new requests queue, and latency grows without bound while throughput stays pinned at its ceiling. If you do not find that point deliberately in a test, you will find it accidentally in production during your biggest traffic day.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph GUESS["No load test"]
+    a1["ship it"] --> a2["real spike hits"] --> a3["latency explodes,<br/>unknown ceiling"]
+  end
+  subgraph KNOWN["Load tested"]
+    b1["ramp concurrency"] --> b2["find the knee"] --> b3["set capacity + autoscale<br/>below the knee"]
+  end
+  GUESS -.->|"the upgrade"| KNOWN
+    </div>
+    <figcaption>Before and after. Without a load test the saturation point is a surprise. <b>Ramping concurrency until the knee appears turns the ceiling into a known number you can plan capacity and autoscaling around.</b></figcaption>
+  </figure>
+
+  <h2>2. Open-loop versus closed-loop</h2>
+  <p>This distinction decides what your test actually measures. In a <strong>closed-loop</strong> model you keep a fixed number of virtual users; each one sends a request, waits for the full response, then sends the next. The offered load automatically backs off when the server slows, so you can never overload it past what it can serve. In an <strong>open-loop</strong> model you send at a fixed arrival rate (say 200 requests/second) regardless of how fast replies come back, so a slow server builds an unbounded backlog, exactly like real internet traffic.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant G as Open-loop generator
+  participant S as Server (slowing down)
+  G->>S: req @ t=0.00s
+  G->>S: req @ t=0.05s
+  G->>S: req @ t=0.10s
+  Note over G: fires on the clock,<br/>does NOT wait for replies
+  S-->>G: reply to req 1 (late)
+  Note over S: backlog grows without bound<br/>= true saturation test
+    </div>
+    <figcaption>An open-loop generator fires on a fixed schedule and never slows down for the server. <b>This is the honest saturation test: a struggling server accumulates a real queue, just as it would under a live traffic spike.</b> A closed-loop test would have quietly throttled itself instead.</figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Which to use</span>
+    Use <b>closed-loop</b> (fixed concurrency) to measure peak throughput and find the knee cleanly. Use <b>open-loop</b> (fixed request rate) to test whether you survive a real arrival spike and to size queues and timeouts. Report both; they answer different questions.</div>
+
+  <h2>3. The latency-versus-throughput curve</h2>
+  <p>Plot achieved throughput on the x-axis and p95 latency on the y-axis as you raise concurrency. The curve has three regions. In the <strong>linear region</strong> the batch has room, so throughput climbs and latency is nearly flat. At the <strong>knee</strong>, the batch is full; throughput reaches its max and further load only lengthens the queue. In the <strong>saturated region</strong> throughput is pinned while latency rises steeply toward timeouts.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  c1["low concurrency<br/>throughput rising<br/>latency flat"] --> c2["approaching knee<br/>batch nearly full"]
+  c2 --> c3["THE KNEE<br/>max throughput<br/>latency starts to bend up"]
+  c3 --> c4["over the knee<br/>throughput flat<br/>latency explodes -&gt; timeouts"]
+  c3 -.->|"ship capacity just below here"| c2
+    </div>
+    <figcaption>The shape of every serving system under ramping load. <b>The knee is where the GPU batch saturates: past it you buy latency, not throughput.</b> Your target operating point is the last concurrency level before the knee that still meets your p95 SLO.</figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Underloaded: batch has spare slots
+  Underloaded --> Linear: throughput scales with load
+  Linear --> Knee: batch full, queue forms
+  Knee --> Saturated: throughput flat, latency climbs
+  Saturated --> Collapse: timeouts, retries, cascading load
+  Saturated --> Linear: shed load / autoscale out
+    </div>
+    <figcaption>The regimes a server moves through as you push it. <b>Beyond the knee, retries can turn saturation into collapse</b>, which is why capacity is set below the knee and autoscaling adds replicas before you reach it.</figcaption>
+  </figure>
+
+  <h2>4. Lab: ramp to 1000+ and find the knee</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Drive a vLLM server past 1000 concurrent requests and record p50/p95/p99 TTFT and throughput per level</h4>
+    <p>First use vLLM's own benchmark for a trusted baseline, then run a small asyncio generator that ramps concurrency and prints the curve. Both talk to the OpenAI-compatible endpoint from earlier lessons.</p>
+
+    <div class="code-cap">Baseline with the official vLLM benchmark (realistic length distribution)</div>
+    <div class="term"><span class="c"># vllm bench serve replaces the older benchmarks/benchmark_serving.py script</span>
+<span class="p">$</span> vllm bench serve \
+    --backend vllm \
+    --base-url http://localhost:8000 \
+    --model meta-llama/Llama-3.1-8B-Instruct \
+    --dataset-name random \
+    --random-input-len 512 --random-output-len 128 \
+    --num-prompts 2000 \
+    --max-concurrency 256 \
+    --request-rate inf
+<span class="o">============ Serving Benchmark Result ============
+Successful requests:            2000
+Request throughput (req/s):     41.7
+Output token throughput (tok/s): 5340
+Median TTFT (ms):               186.4
+P99 TTFT (ms):                  612.9
+Median TPOT (ms):               22.8
+==================================================</span></div>
+
+    <p>Sweep <code>--max-concurrency</code> across <code>32, 128, 512, 1024</code> and watch throughput plateau while P99 TTFT climbs. That plateau is the knee. For full control over the ramp and streaming TTFT, run your own generator:</p>
+
+    <div class="code-cap">rampload.py &middot; asyncio load generator, ramps concurrency, records percentiles</div>
+    <pre><code>import asyncio, time, statistics, aiohttp
+
+URL   = "http://localhost:8000/v1/chat/completions"
+MODEL = "meta-llama/Llama-3.1-8B-Instruct"
+LEVELS = [1, 8, 32, 128, 512, 1024]      # concurrency ramp, closed-loop
+REQS_PER_LEVEL = 2000
+
+async def one_request(session, sem):
+    """Fire one streaming request; return (ttft_s, total_s)."""
+    async with sem:                       # cap in-flight = concurrency level
+        body = {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": "Summarise the water cycle."}],
+            "max_tokens": 128,
+            "stream": True,
+        }
+        t0 = time.perf_counter()
+        ttft = None
+        async with session.post(URL, json=body) as resp:
+            async for line in resp.content:          # SSE stream
+                if line.startswith(b"data:") and ttft is None:
+                    ttft = time.perf_counter() - t0  # first token arrived
+        return ttft, time.perf_counter() - t0
+
+async def run_level(concurrency):
+    sem = asyncio.Semaphore(concurrency)
+    async with aiohttp.ClientSession() as s:
+        t0 = time.perf_counter()
+        results = await asyncio.gather(
+            *(one_request(s, sem) for _ in range(REQS_PER_LEVEL)))
+        wall = time.perf_counter() - t0
+    ttfts = sorted(r[0] * 1000 for r in results if r[0])   # ms
+    def pct(p): return ttfts[int(len(ttfts) * p) - 1]
+    print(f"conc={concurrency:>4}  "
+          f"p50={pct(.50):6.0f}  p95={pct(.95):6.0f}  p99={pct(.99):6.0f} ms  "
+          f"thr={REQS_PER_LEVEL / wall:6.1f} req/s")
+
+async def main():
+    for c in LEVELS:                      # ramp: each level is one point on the curve
+        await run_level(c)
+
+asyncio.run(main())</code></pre>
+
+    <div class="term"><span class="p">$</span> python rampload.py
+<span class="o">conc=   1  p50=    92  p95=   140  p99=   180 ms  thr=  10.6 req/s
+conc=   8  p50=   110  p95=   190  p99=   240 ms  thr=  78.0 req/s
+conc=  32  p50=   150  p95=   300  p99=   410 ms  thr= 190.0 req/s
+conc= 128  p50=   240  p95=   560  p99=   820 ms  thr= 300.0 req/s   # near knee
+conc= 512  p50=   980  p95=  2400  p99=  3900 ms  thr= 305.0 req/s   # over the knee
+conc=1024  p50=  2100  p95=  5200  p99=  8800 ms  thr= 302.0 req/s   # saturated</span>
+<span class="c"># throughput flatlines ~300 req/s past conc=128; latency keeps climbing.</span>
+<span class="c"># The knee is ~128. Ship capacity for ~100 concurrent per replica.</span></div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Knee</div><div class="v">~128</div><div class="u">concurrency at max throughput</div></div>
+      <div class="metric"><div class="k">Peak throughput</div><div class="v">~305 req/s</div><div class="u">flat beyond the knee</div></div>
+      <div class="metric"><div class="k">p95 at knee</div><div class="v">560 ms</div><div class="u">still under a 1s SLO</div></div>
+      <div class="metric"><div class="k">p95 at 512</div><div class="v">2400 ms</div><div class="u">4x worse, no throughput gain</div></div>
+    </div>
+  </div>
+
+  <h2>5. Reading the numbers honestly</h2>
+  <p>Two traps make load-test numbers lie. First, <strong>a single fixed prompt</strong> underestimates real cost; production prompts vary in length, and a mix of long and short changes batching. Always drive with a length distribution close to your traffic. Second, <strong>reporting only the mean</strong> hides the tail; p99 is where your angriest users live. Report p50, p95, and p99, and state the prompt and output length distribution you used, or the numbers are not reproducible.</p>
+
+  <table>
+    <thead><tr><th>Tool</th><th>Load model</th><th>Best for</th></tr></thead>
+    <tbody>
+      <tr><td><code>vllm bench serve</code></td><td>Closed-loop + rate cap</td><td>Trusted baseline, TTFT/TPOT built in, dataset sampling</td></tr>
+      <tr><td>Custom asyncio</td><td>Whatever you code</td><td>Exact ramp control, streaming TTFT, custom traffic shape</td></tr>
+      <tr><td>k6</td><td>Open or closed-loop</td><td>CI gates, scripted scenarios, arrival-rate executors</td></tr>
+      <tr><td>Locust</td><td>Closed-loop (users)</td><td>Distributed generators, live web UI, Python scenarios</td></tr>
+    </tbody>
+  </table>
+
+  <div class="math">operating_point = max concurrency where p95_latency &le; SLO and throughput &approx; peak
+    <span class="gloss"><b>SLO</b>: your latency target, for example p95 TTFT under 1 second. The safe operating point is the highest concurrency that still meets the SLO while sitting just below the knee, so you get near-peak throughput without the latency cliff.</span>
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What distinguishes an open-loop load model from a closed-loop one?</div>
+      <button class="q-opt">Open-loop fires at a fixed arrival rate regardless of how fast the server replies</button>
+      <button class="q-opt">Open-loop always uses exactly one virtual user that reconnects after each reply</button>
+      <button class="q-opt">Open-loop measures only throughput and never records any per-request latency</button>
+      <button class="q-opt">Open-loop requires the official benchmark tool and cannot be written by hand</button>
+      <div class="q-fb">Open-loop keeps a fixed arrival rate, so a slow server builds a real backlog, like live traffic.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is happening physically at the knee of the curve?</div>
+      <button class="q-opt">The network link between the generator and the server has reached its bandwidth cap</button>
+      <button class="q-opt">The client machine runs out of file descriptors and stops opening new connections</button>
+      <button class="q-opt">The GPU batch is full, so more load only lengthens the queue, not the throughput</button>
+      <button class="q-opt">The model finishes loading its weights and switches from prefill into decode mode</button>
+      <div class="q-fb">At the knee the batch saturates; throughput is pinned and extra concurrency just adds latency.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why drive the test with a prompt and output length distribution?</div>
+      <button class="q-opt">A distribution is the only input the official vLLM benchmark tool will accept as valid</button>
+      <button class="q-opt">A distribution lowers the total token count so the whole test finishes much faster</button>
+      <button class="q-opt">A distribution forces every request onto its own separate GPU for fair timing</button>
+      <button class="q-opt">Length drives prefill and decode cost, so a fixed prompt misestimates real capacity</button>
+      <div class="q-fb">Real traffic varies in length; a single fixed prompt gives a batching profile you will never see live.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which operating point should you actually ship?</div>
+      <button class="q-opt">The concurrency far past the knee where absolute peak throughput is finally reached</button>
+      <button class="q-opt">The highest concurrency below the knee that still meets your p95 latency target</button>
+      <button class="q-opt">The lowest concurrency of one, since it always gives the very best per-request latency</button>
+      <button class="q-opt">The concurrency where the mean latency first crosses your published p99 objective</button>
+      <div class="q-fb">Ship just below the knee: near-peak throughput while p95 still meets the SLO, then autoscale.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain open-loop vs closed-loop and say which question each answers</li>
+    <li>I ran <code>vllm bench serve</code> for a baseline with a realistic length distribution</li>
+    <li>I ramped concurrency past 1000 and recorded p50/p95/p99 TTFT and throughput</li>
+    <li>I identified the knee where throughput flattens and latency climbs</li>
+    <li>I picked a safe operating point below the knee that meets my p95 SLO</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want help wiring a k6 arrival-rate scenario for CI, or sampling a real prompt-length distribution from your logs to drive the generator? Ask and we will make the test mirror your traffic.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/latest/contributing/benchmarks.html">vLLM benchmark documentation</a> for <code>vllm bench serve</code> flags and datasets, and the classic <a href="https://www.brendangregg.com/usemethod.html">USE method by Brendan Gregg</a> for reasoning about utilisation, saturation, and errors under load.</p>
+
+  <div class="pager">
+    <a href="0012-observability-latency-tokens-cost.html"><span class="dir">&larr; Prev</span><span class="ttl">Observability: Latency, Tokens, Errors, Costs</span></a>
+    <a class="nxt" href="0014-inference-unit-economics.html"><span class="dir">Next &rarr;</span><span class="ttl">How Inference Costs Break Unit Economics</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 13 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

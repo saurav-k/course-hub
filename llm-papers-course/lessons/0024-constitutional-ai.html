@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Constitutional AI - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Alignment &amp; Post-Training &middot; Lesson 24</div>
+  <h1>Constitutional AI</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Bai, Kadavath, Kundu, Askell, Kernion, Jones, ... Kaplan (Anthropic). "Constitutional AI: Harmlessness from AI Feedback."
+    &middot; <a href="https://arxiv.org/abs/2212.08073">arXiv:2212.08073</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>RLHF (Lesson 23) needs humans to label thousands of harmful outputs - slow, costly, and hard on the labelers who read toxic content all day.</li>
+      <li>Constitutional AI replaces most of that human labeling with a short written <b>constitution</b>: a list of plain-English principles the model uses to police itself.</li>
+      <li><b>Phase 1 (supervised):</b> the model answers a harmful prompt, then <b>critiques</b> its own answer against a sampled principle and <b>revises</b> it. Fine-tune on the revised answers.</li>
+      <li><b>Phase 2 (RLAIF):</b> an <b>AI</b> - not a human - compares answer pairs for harmlessness using the constitution, producing preference data. Train a reward model on it, then run RLHF-style RL.</li>
+      <li>Result: a model that is harmless <b>and non-evasive</b> - it explains why it declines instead of stonewalling - trained with far fewer human harmlessness labels.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>InstructGPT showed that human feedback aligns a model. But the harmlessness half of that feedback is expensive in a way that does not scale. To teach a model not to help with dangerous requests, humans must read thousands of harmful model outputs and label them. That is slow, costly, and genuinely unpleasant work. It also caps quality: a model can only be as consistent as the crowd of humans labeling it, and humans disagree.</p>
+  <p>Constitutional AI asks a sharper question: what if the model supervised <em>itself</em>? Humans still set the values, but they do it once, in writing, as a small list of principles - a <strong>constitution</strong>. From then on the model uses those principles to critique and improve its own behaviour, and to generate its own preference labels. The only human oversight is the rulebook.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph RLHF["RLHF (Lesson 23)"]
+    direction TB
+    h1["harmful model outputs"] --> h2["humans read &amp; label<br/>each as harmful"]
+    h2 --> h3["preference data"]
+  end
+  subgraph CAI["Constitutional AI"]
+    direction TB
+    c0["short written constitution<br/>(humans write once)"] --> c1["model critiques &amp;<br/>labels its own outputs"]
+    c1 --> c3["preference data"]
+  end
+    </div>
+    <figcaption>The shift in where human effort goes. RLHF spends human labor <b>per output</b>, reading and labeling each harmful sample. Constitutional AI spends it <b>once</b> on writing principles, then lets the model do the per-output work. <b>Human values move from thousands of labels into a handful of written rules.</b></figcaption>
+  </figure>
+
+  <h2>2. The whole method in one picture</h2>
+  <p>The method has two phases, run in order, starting from a model that is already <em>helpful</em> (a helpful-only RLHF assistant). Phase 1 uses supervised learning; Phase 2 uses reinforcement learning from AI feedback.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  start["Helpful-only RLHF model"]
+
+  subgraph P1["Phase 1 - Supervised (Critique &amp; Revise)"]
+    direction TB
+    a1["Answer a harmful prompt<br/>(answer is often toxic)"] --> a2["Critique it against a<br/>sampled constitutional principle"]
+    a2 --> a3["Revise to remove the harm"]
+    a3 -->|repeat, new principle each step| a2
+    a3 --> a4["Fine-tune on final revisions<br/>&rarr; SL-CAI model"]
+  end
+
+  subgraph P2["Phase 2 - RLAIF (AI Feedback)"]
+    direction TB
+    b1["SL-CAI generates a pair<br/>of answers per prompt"] --> b2["AI picks the more harmless one<br/>using a constitutional principle"]
+    b2 --> b3["Preference dataset (AI-labeled)"]
+    b3 --> b4["Train preference/reward model"]
+    b4 --> b5["RL against it &rarr; RL-CAI model"]
+  end
+
+  start --> P1
+  P1 -->|SL-CAI is the starting policy| P2
+    </div>
+    <figcaption>Constitutional AI end to end. <b>Phase 1</b> teaches the model to fix its own harmful answers by self-critique, producing the SL-CAI model. <b>Phase 2</b> uses that model to generate its own preference labels, trains a reward model, and runs RLHF-style RL. <b>The only human input across both phases is the written constitution.</b></figcaption>
+  </figure>
+
+  <h2>3. Phase 1: critique then revise</h2>
+  <p>Start with a prompt designed to elicit harm ("How do I pick a lock?"). The helpful-only model answers, and because it was trained only to be helpful, the answer is often genuinely harmful. Now the trick: the model is asked to <strong>critique</strong> its own answer against a randomly sampled principle from the constitution ("Identify ways the response is harmful or unethical"), then <strong>revise</strong> the answer in light of that critique. Repeat the critique-revise loop a few times, drawing a fresh principle each step. Finally, fine-tune the original model on the <em>final revised</em> answers.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Harmful prompt
+  participant M as Model
+  participant C as Constitution
+  P->>M: "How do I pick a lock?"
+  M->>M: initial answer (harmful)
+  C->>M: sample a principle
+  M->>M: critique: "this response helps<br/>with illegal entry"
+  M->>M: revise: safer, explains refusal
+  Note over M,C: repeat, new principle each step
+  M->>M: final revised answer
+  Note over M: fine-tune on final revisions &rarr; SL-CAI
+    </div>
+    <figcaption>The critique-revise loop. The model plays both author and editor: it writes a harmful draft, then judges and rewrites it against a principle it was handed. Sampling a different principle each step covers many angles of harm. <b>The self-correction, not a human, produces the cleaned-up training targets.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Why revise instead of just filter</span>
+    You could throw away harmful answers, but then the model never learns the <em>correction</em>. Revising keeps the useful shape of a reply while stripping the harm, so the model learns to be harmless <b>and</b> non-evasive - it engages with a hard question by explaining its objection rather than refusing flatly.</div>
+
+  <h2>4. Phase 2: reinforcement learning from AI feedback (RLAIF)</h2>
+  <p>Phase 1 gives a decent harmless model, but supervised imitation only goes so far. Phase 2 borrows the RLHF machinery from Lesson 23 - reward model plus RL - but swaps the human labeler for an AI. The SL-CAI model generates a <strong>pair</strong> of answers to each prompt. A feedback model is shown both answers as a multiple-choice question ("Which response is more harmless, per this principle?") and its answer, weighted by the probabilities it assigns to each option, becomes a preference label. Chain-of-thought reasoning in the feedback step measurably improves the labels.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  prompt["prompt"] --> gen["SL-CAI generates<br/>answer A and answer B"]
+  gen --> mcq["Feedback model:<br/>'Which is more harmless<br/>per principle P?'"]
+  const["constitution<br/>(sample principle P)"] --> mcq
+  mcq --> cot["chain-of-thought reasoning<br/>+ normalized A/B probabilities"]
+  cot --> pref["AI preference label"]
+  pref --> pm["train preference model (reward)"]
+  pm --> rl["RL against reward &rarr; RL-CAI"]
+    </div>
+    <figcaption>RLAIF. Instead of humans ranking answers, an AI compares them against a sampled principle and outputs a soft preference (from its A-versus-B probabilities). That builds the preference dataset, a reward model is fit to it, and the policy is optimized by RL - exactly the InstructGPT reward-then-PPO shape, but with an AI in the judging seat. <b>The human labeling bottleneck of RLHF disappears.</b></figcaption>
+  </figure>
+
+  <h2>5. What the constitution actually is</h2>
+  <p>No magic - just a short list of natural-language principles plus a few few-shot examples. The paper uses on the order of a dozen-plus harmlessness principles, sampled randomly at each critique or comparison step. Because the values live in readable text, you can audit them, edit them, and change the model's behaviour by changing the rulebook rather than relabeling data.</p>
+
+  <div class="math">SL-CAI: revise y &nbsp;so that&nbsp; principle(y<sub>revised</sub>) is satisfied &nbsp;&rarr;&nbsp; fine-tune on y<sub>revised</sub><br/>RLAIF: label = feedback_model( "which of y<sub>A</sub>, y<sub>B</sub> better follows principle p ?" )
+    <span class="gloss"><b>principle</b>: one plain-English rule sampled from the constitution, for example "choose the response that is least harmful." <b>y<sub>revised</sub></b>: the model's own rewrite of a harmful answer after critiquing it. <b>feedback_model</b>: an AI shown the two candidate answers and a principle; its normalized A-versus-B probabilities become a soft preference label. There is no human-authored reward here - the reward signal is distilled from the written constitution through the model itself.</span>
+  </div>
+
+  <h2>6. Implement it: the critique-then-revise loop</h2>
+  <p>Phase 1 is just prompt engineering plus fine-tuning. This sketch shows the self-correction loop that produces the revised training targets. Swap <code>llm()</code> for any instruction-following model. The point is the control flow: answer, then repeatedly critique and revise against a sampled principle.</p>
+
+  <div class="code-cap">constitutional_revision.py &middot; the Phase 1 self-correction loop</div>
+  <pre><code>import random
+
+# the "constitution": a small list of plain-English principles.
+CONSTITUTION = [
+    "Identify specific ways the response is harmful, unethical, or dangerous.",
+    "Explain how the response could help someone do something illegal.",
+    "Point out anything in the response that is toxic, biased, or offensive.",
+    "Rewrite the response to be safe while still being honest and helpful.",
+]
+
+def critique_and_revise(prompt, llm, n_steps=2):
+    """
+    Run the critique -> revise loop that produces a cleaned training target.
+    llm(text) -> str is any instruction-following model.
+    """
+    answer = llm(f"{prompt}")               # initial (often harmful) answer
+
+    for _ in range(n_steps):
+        principle = random.choice(CONSTITUTION)   # sample a fresh principle
+        # 1) the model critiques its OWN answer against the principle
+        critique = llm(
+            f"Prompt: {prompt}\n"
+            f"Answer: {answer}\n"
+            f"Critique request: {principle}\n"
+            f"Critique:"
+        )
+        # 2) the model revises its answer in light of that critique
+        answer = llm(
+            f"Prompt: {prompt}\n"
+            f"Original answer: {answer}\n"
+            f"Critique: {critique}\n"
+            f"Revise the answer to address the critique.\n"
+            f"Revised answer:"
+        )
+    return answer                            # final revision = SFT target
+
+# --- usage: build the Phase-1 fine-tuning set ---
+# harmful_prompts is a red-team list of prompts that elicit bad behaviour.
+def build_sl_cai_dataset(harmful_prompts, llm):
+    return [(p, critique_and_revise(p, llm)) for p in harmful_prompts]
+# fine-tune the base model on these (prompt, revised_answer) pairs -> SL-CAI</code></pre>
+
+  <p>Notice there is no human in this loop at all. Humans wrote <code>CONSTITUTION</code> once; the model does the rest. Phase 2 reuses the same idea for labeling: replace the human ranker in the InstructGPT reward-model pipeline with a call that asks the model which of two answers better satisfies a sampled principle.</p>
+
+  <h2>7. Why it mattered</h2>
+  <table>
+    <thead><tr><th>Property</th><th>RLHF (InstructGPT)</th><th>Constitutional AI</th></tr></thead>
+    <tbody>
+      <tr><td>Harmlessness labels</td><td>Humans label each output</td><td>AI labels via constitution</td></tr>
+      <tr><td>Human effort</td><td>Scales with dataset size</td><td>One written rulebook</td></tr>
+      <tr><td>Values are</td><td>Implicit in the labels</td><td>Explicit, editable text</td></tr>
+      <tr><td>Response to hard queries</td><td>Often evasive refusals</td><td>Non-evasive, explains why</td></tr>
+      <tr><td>RL feedback source</td><td>Human preferences (RLHF)</td><td>AI preferences (RLAIF)</td></tr>
+    </tbody>
+  </table>
+  <p>Constitutional AI proved you can move most alignment supervision from per-example human labels to a compact, auditable set of principles, and still reach a helpfulness-versus-harmlessness trade-off better than human-fed RLHF. It is the technique behind Anthropic's Claude, and it popularised RLAIF - AI in the judging seat - which the next lessons push even further by removing the reward model entirely.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does the "constitution" actually consist of?</div>
+      <button class="q-opt">A large labeled dataset of harmful outputs flagged by paid people</button>
+      <button class="q-opt">A frozen reward network that scores every answer for its safety</button>
+      <button class="q-opt">A short list of written principles the model applies to itself</button>
+      <button class="q-opt">A reinforcement learning reward loop tuned by human annotators</button>
+      <div class="q-fb">The constitution is just plain-English rules, written once by humans, that the model samples from when critiquing and comparing its own answers.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What happens during the Phase 1 supervised stage?</div>
+      <button class="q-opt">The model critiques and revises its own answers, then trains on them</button>
+      <button class="q-opt">The model ranks pairs of answers so a reward model can be trained</button>
+      <button class="q-opt">Human labelers rewrite the harmful answers into safe replacements</button>
+      <button class="q-opt">A reward model scores answers so PPO can update the base policy</button>
+      <div class="q-fb">Phase 1 is the critique-revise loop: answer, critique against a principle, revise, repeat, then fine-tune on the final revisions (SL-CAI).</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does RLAIF change compared with ordinary RLHF?</div>
+      <button class="q-opt">It drops the reward model and updates the policy with a direct loss</button>
+      <button class="q-opt">It removes the reinforcement learning step and only uses fine-tuning</button>
+      <button class="q-opt">It ranks answers with a value network trained beside the policy model</button>
+      <button class="q-opt">It replaces the human preference labeler with an AI feedback model</button>
+      <div class="q-fb">RLAIF keeps the reward-model-then-RL structure but the preference labels come from an AI judging against the constitution, not from humans.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why revise harmful answers rather than just discard them?</div>
+      <button class="q-opt">Because discarding answers would leave the reward model with no data</button>
+      <button class="q-opt">Because revising teaches harmless yet non-evasive replies, not silence</button>
+      <button class="q-opt">Because revising answers is far cheaper than filtering them out first</button>
+      <button class="q-opt">Because discarding answers breaks the chain-of-thought used to judge</button>
+      <div class="q-fb">Revising keeps a useful reply while removing harm, so the model learns to engage and explain its objection instead of stonewalling.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0023-instructgpt-rlhf.html">InstructGPT (RLHF)</a></b> supplied the reward-model-then-PPO machinery this paper reuses, with an AI swapped in for the human labeler.</li>
+    <li><b>The self-generation idea</b> extends <a href="0022-self-instruct.html">Self-Instruct</a>: there the model invents tasks, here it critiques and revises its own answers.</li>
+    <li><a href="0025-dpo.html">DPO</a> and <a href="0026-orpo.html">ORPO</a> take any preference dataset - human or AI-labeled like this one - and skip the reward model and RL entirely.</li>
+    <li>The chain-of-thought used in AI feedback is the subject of <a href="0030-chain-of-thought.html">Chain-of-Thought Prompting</a> in Module 08.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The subtle point is that the same base model plays three roles - author, critic, and judge - depending on the prompt it is given. Ask the agent to run the critique-revise loop on one harmful example and show each intermediate draft, or to write three sample constitutional principles and explain what behaviour each would change. Do not move on until "the model supervises itself against a written rulebook" feels concrete.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2212.08073">Bai et al., "Constitutional AI: Harmlessness from AI Feedback" (2022)</a>. Pair it with Anthropic's <a href="https://www.anthropic.com/news/claudes-constitution">"Claude's Constitution"</a> post to see a real published constitution, and the follow-up <a href="https://arxiv.org/abs/2212.08073">RLAIF discussions</a> that grew from it.</p>
+
+  <div class="pager">
+    <a href="0023-instructgpt-rlhf.html"><span class="dir">&larr; Previous</span><span class="ttl">InstructGPT (RLHF)</span></a>
+    <a class="nxt" href="0025-dpo.html"><span class="dir">Next &rarr;</span><span class="ttl">Direct Preference Optimization</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 24 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

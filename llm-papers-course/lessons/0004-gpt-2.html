@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPT-2: Scaling + Zero-Shot - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Transformer Core &middot; Lesson 04</div>
+  <h1>GPT-2: Scaling + Zero-Shot</h1>
+  <p class="paper-meta">
+    <span class="pill">2019</span>
+    Radford, Wu, Child, Luan, Amodei, Sutskever (OpenAI).
+    &middot; <a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">"Language Models are Unsupervised Multitask Learners"</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>GPT-2 is GPT-1's recipe made <b>much bigger</b>: same decoder-only design, scaled to <b>1.5B parameters</b> (with 117M, 345M, and 762M siblings) and trained on far more, cleaner web text.</li>
+      <li>Its headline claim: a big enough language model can do tasks <b>zero-shot</b> - no task-specific fine-tuning, no labeled examples, no new head. You just <b>describe the task in the prompt</b>.</li>
+      <li>The data is <b>WebText</b>, ~40GB scraped from outbound Reddit links with at least 3 karma, a cheap quality filter. Tokens use <b>byte-level BPE</b> (~50,257 vocab) so nothing is ever out-of-vocabulary.</li>
+      <li>Two architecture tweaks matter: <b>pre-norm</b> (LayerNorm moved to the input of each sub-block) plus an extra final LayerNorm, which stabilises very deep training.</li>
+      <li>It set state of the art on 7 of 8 language-modeling datasets zero-shot and reframed NLP: stop building task models, start prompting one general model. The road to GPT-3 and ChatGPT starts here.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>GPT-1 still had a supervised second stage: pretrain, then fine-tune on labeled data per task. BERT did too. GPT-2 asks a sharper question: <strong>if we make the generator big enough and feed it enough varied text, does the fine-tuning stage become unnecessary?</strong> The intuition is that natural text already contains countless tasks in disguise. Somewhere on the web, a translation sits next to its source; a question sits next to its answer; an article sits next to its summary. A model that predicts the next token well enough must implicitly learn all of these.</p>
+
+  <p>If that is true, then a single model can be a <em>multitask</em> learner without ever being told what the tasks are - hence the paper's title, "Unsupervised Multitask Learners." You elicit a task not with a new output head but with <strong>words</strong>: a prompt that frames what you want.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph GPT1["GPT-1: pretrain then fine-tune"]
+    direction LR
+    p1["pretrain on text"] --> f1["fine-tune on labeled task"] --> o1["task model"]
+  end
+  subgraph GPT2["GPT-2: pretrain then prompt"]
+    direction LR
+    p2["pretrain on lots of text"] --> pr["write a prompt describing the task"] --> o2["answer, zero-shot"]
+  end
+    </div>
+    <figcaption>The leap GPT-2 makes. GPT-1 needed a labeled fine-tuning step per task. GPT-2 argues that a big enough pretrained model can skip it entirely: <b>you specify the task in plain-language prompt, and the model answers with no weight updates at all</b>.</figcaption>
+  </figure>
+
+  <h2>2. What "zero-shot" actually means</h2>
+  <p>Zero-shot means the model sees <strong>zero labeled examples</strong> of the task and gets no gradient updates for it. You simply arrange the input so that the natural continuation <em>is</em> the answer. The classic trick for summarization is to append <code>TL;DR:</code> after an article - a pattern the model has seen thousands of times on the web, always followed by a summary - and then let it generate.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["long article text ..."] --> P["append prompt token: 'TL;DR:'"]
+  P --> M["GPT-2 (frozen, no fine-tuning)"]
+  M --> G["generate continuation"]
+  G --> S["a short summary"]
+  Q["'Q: capital of France? A:'"] --> M
+  M --> R["'Paris'"]
+    </div>
+    <figcaption>Zero-shot by prompting. The task lives in the input text itself: <code>TL;DR:</code> reliably precedes summaries on the web, and <code>Q: ... A:</code> precedes answers. <b>The frozen model just continues the pattern</b>, so summarization and question answering fall out of next-token prediction with no task-specific training.</figcaption>
+  </figure>
+
+  <p>This works only if the model is large and well-trained enough. A key finding of the paper: zero-shot performance <strong>rises smoothly as the model gets bigger</strong>. The smallest model does the tasks poorly; the 1.5B model does them well. Scale is not a detail here - it is the mechanism.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  s1["117M<br/>weak zero-shot"] --> s2["345M<br/>better"]
+  s2 --> s3["762M<br/>better still"]
+  s3 --> s4["1.5B<br/>SOTA on 7/8 LM datasets"]
+    </div>
+    <figcaption>Four sizes, one trend. The paper trained models at 117M, 345M, 762M, and 1542M (1.5B) parameters. <b>Zero-shot ability climbs with every jump in size</b>, and the curves show no sign of flattening - the observation that motivates the Scaling Laws paper next module.</figcaption>
+  </figure>
+
+  <h2>3. The data: WebText and byte-level BPE</h2>
+  <p>Raw web crawls are full of garbage. GPT-2's authors wanted scale <em>and</em> quality, so they built <strong>WebText</strong>: they scraped all outbound links from Reddit that had received at least <strong>3 karma</strong>, treating that human upvote as a cheap signal that a page is worth reading. After de-duplication and cleaning, that is about <strong>8 million documents, ~40GB of text</strong>. Wikipedia was deliberately removed to avoid overlap with common evaluation sets.</p>
+
+  <p>For tokenization, GPT-2 uses <strong>byte-level Byte-Pair Encoding</strong>. Because it operates on raw bytes, <em>any</em> string can be encoded - emoji, code, foreign scripts - so there is never a truly unknown token. The vocabulary is <strong>50,257</strong> tokens.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["Reddit outbound links"] --> K{"karma >= 3?"}
+  K -->|no| DROP["discard"]
+  K -->|yes| SCRAPE["scrape the linked page"]
+  SCRAPE --> CLEAN["de-duplicate, clean, drop Wikipedia"]
+  CLEAN --> WT["WebText: ~8M docs, ~40GB"]
+  WT --> BPE["byte-level BPE tokenizer<br/>~50,257 tokens, nothing OOV"]
+    </div>
+    <figcaption>How WebText is built. A minimum karma threshold uses human upvotes as a rough quality filter, avoiding the noise of a raw crawl. The <b>byte-level BPE tokenizer can represent any string</b>, which is why GPT-2 never chokes on unusual characters or code.</figcaption>
+  </figure>
+
+  <h2>4. Architecture tweaks: pre-norm and a final LayerNorm</h2>
+  <p>GPT-2 is architecturally GPT-1, with a few changes that make very deep stacks train stably. The big one is moving to <strong>pre-normalization</strong>. In the original Transformer, LayerNorm sat <em>after</em> each sub-block (post-norm). GPT-2 moves LayerNorm to the <em>input</em> of each sub-block, and adds one extra LayerNorm after the final block. It also scales the residual-path weights at initialization by 1/&radic;N (with N the number of layers) to keep signal magnitudes controlled.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph POST["Post-norm (2017 / GPT-1)"]
+    direction TB
+    pi["x"] --> pa["sublayer"] --> pp(("+")) --> pn["LayerNorm"] --> po["out"]
+    pi -->|residual| pp
+  end
+  subgraph PRE["Pre-norm (GPT-2)"]
+    direction TB
+    qi["x"] --> qn["LayerNorm"] --> qa["sublayer"] --> qp(("+")) --> qo["out"]
+    qi -->|residual| qp
+  end
+    </div>
+    <figcaption>The pre-norm change. GPT-1 normalised <b>after</b> adding the residual; GPT-2 normalises the input <b>before</b> the sublayer, leaving the residual path clean. <b>This keeps gradients well-behaved as depth grows</b>, which is why nearly every large model since uses pre-norm. GPT-2 also adds one final LayerNorm after the last block.</figcaption>
+  </figure>
+
+  <h2>5. The math: still just next-token prediction</h2>
+  <p>Despite all the framing about multitask learning, the training objective has not changed at all from GPT-1. It is next-token prediction. The trick is to notice that <em>conditioning</em> on a task description turns one objective into many.</p>
+
+  <div class="math">P( output | input, task ) = &prod;<sub>i</sub> P( s<sub>i</sub> | s<sub>1</sub>, ..., s<sub>i&minus;1</sub> )
+    <span class="gloss"><b>s<sub>1</sub> ... s<sub>N</sub></b>: the tokens of one long sequence that already contains the task framing, the input, and the answer, all concatenated. <b>P( s<sub>i</sub> | ... )</b>: the model's probability for each next token given the tokens before it. <b>&prod;</b>: multiply those per-token probabilities to score the whole continuation. The point: because the prompt already encodes the task, ordinary next-token modeling <i>is</i> "do the task." No new loss is needed.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">The whole trick</span>
+    GPT-2 does not add a "task" input to the math. The task is smuggled in as <em>text</em> inside the sequence. That is why the same frozen next-token model can summarise, answer questions, and translate - the different behaviours are all just different continuations of different prompts.</div>
+
+  <h2>6. Implement it: generation and a zero-shot frame</h2>
+  <p>The GPT-2 architecture is the causal decoder from Lesson 03. What is new is how you <em>use</em> it: an autoregressive generation loop, and framing a task purely as a prompt. Below is a self-contained sampling loop (greedy and temperature/top-k sampling) plus a zero-shot summarization frame using the <code>TL;DR:</code> trick.</p>
+
+  <div class="code-cap">gpt2_generate.py &middot; runnable with torch (model = any causal LM from Lesson 03)</div>
+  <pre><code>import torch, torch.nn.functional as F
+
+@torch.no_grad()
+def generate(model, ids, max_new=40, temperature=1.0, top_k=None, greedy=False):
+    """Autoregressive generation: feed tokens back in, one at a time."""
+    for _ in range(max_new):
+        logits = model(ids)[:, -1, :]                  # logits for the next token only
+        if greedy:
+            nxt = logits.argmax(dim=-1, keepdim=True)  # pick the single likeliest token
+        else:
+            logits = logits / temperature              # &lt;1 sharper, &gt;1 more random
+            if top_k is not None:                      # keep only the k best options
+                v, _ = torch.topk(logits, top_k)
+                logits[logits &lt; v[:, [-1]]] = float('-inf')
+            probs = F.softmax(logits, dim=-1)
+            nxt = torch.multinomial(probs, num_samples=1)   # sample from the distribution
+        ids = torch.cat([ids, nxt], dim=1)             # append and continue
+        # (in practice: stop on an end-of-text token)
+    return ids
+
+# ---- zero-shot summarization: the task lives entirely in the prompt --------
+def zero_shot_summarize(model, tokenizer, article):
+    prompt = article + "\nTL;DR:"                       # the web pattern that cues a summary
+    ids = tokenizer.encode(prompt, return_tensors="pt")
+    out = generate(model, ids, max_new=50, top_k=40, temperature=0.7)
+    return tokenizer.decode(out[0])                     # model's continuation = the summary
+
+# ---- zero-shot QA: same model, different frame, no training ----------------
+def zero_shot_qa(model, tokenizer, question):
+    prompt = f"Q: {question}\nA:"
+    ids = tokenizer.encode(prompt, return_tensors="pt")
+    return tokenizer.decode(generate(model, ids, max_new=20, greedy=True)[0])
+
+# Note: with the real weights, load via Hugging Face:
+#   from transformers import GPT2LMHeadModel, GPT2Tokenizer
+#   model = GPT2LMHeadModel.from_pretrained("gpt2")          # 117M
+#   tok   = GPT2Tokenizer.from_pretrained("gpt2")
+</code></pre>
+
+  <p>Two ideas are doing all the work. First, <strong>generation is a loop</strong>: predict one token, append it, feed the longer sequence back in. Second, <strong>the prompt is the task specification</strong>: switching from <code>TL;DR:</code> to <code>Q: ... A:</code> changes the behaviour without touching a single weight. That is zero-shot prompting in nine lines.</p>
+
+  <h2>7. GPT-1 to GPT-2: what changed</h2>
+  <table>
+    <thead><tr><th>Property</th><th>GPT-1 (2018)</th><th>GPT-2 (2019)</th></tr></thead>
+    <tbody>
+      <tr><td>Largest size</td><td>~117M parameters</td><td>1.5B parameters</td></tr>
+      <tr><td>Training data</td><td>BooksCorpus (~7k books)</td><td>WebText (~40GB, 8M docs)</td></tr>
+      <tr><td>Tokenizer</td><td>BPE, ~40k merges</td><td>Byte-level BPE, 50,257</td></tr>
+      <tr><td>Context length</td><td>512 tokens</td><td>1024 tokens</td></tr>
+      <tr><td>Normalization</td><td>Post-norm</td><td>Pre-norm plus final LN</td></tr>
+      <tr><td>Task adaptation</td><td>Supervised fine-tuning</td><td>Zero-shot prompting</td></tr>
+    </tbody>
+  </table>
+  <p>The architecture barely moved. What moved was <strong>scale and ambition</strong>: more data, more parameters, a cleaner tokenizer, and the confidence to drop fine-tuning entirely. GPT-2's smooth size-versus-skill curves are the empirical hook that the next module's Scaling Laws paper turns into precise predictions, and that GPT-3 then pushes to 175B parameters and few-shot prompting.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does "zero-shot" mean in the GPT-2 paper?</div>
+      <button class="q-opt">The model is fine-tuned on a handful of labeled examples per task</button>
+      <button class="q-opt">The model is trained from scratch with none of its weights preset</button>
+      <button class="q-opt">The model attends to zero future tokens because of the causal mask</button>
+      <button class="q-opt">The model does a task with no labeled examples and no weight updates</button>
+      <div class="q-fb">Zero-shot means the task is specified only through the prompt; the frozen model gets no examples and no gradient steps.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How was the WebText training corpus filtered for quality?</div>
+      <button class="q-opt">By keeping only pages linked from Reddit posts with at least three karma</button>
+      <button class="q-opt">By keeping only pages that were also present inside English Wikipedia</button>
+      <button class="q-opt">By keeping only pages a human editor read and approved one at a time</button>
+      <button class="q-opt">By keeping only pages whose text scored highly on a grammar classifier</button>
+      <div class="q-fb">A karma threshold of 3 uses human upvotes as a cheap quality signal. Wikipedia was actually removed to avoid evaluation overlap.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why did GPT-2 move LayerNorm to the input of each sub-block?</div>
+      <button class="q-opt">To let each token attend to future tokens during the training phase</button>
+      <button class="q-opt">To keep gradients stable so that very deep stacks train reliably</button>
+      <button class="q-opt">To shrink the vocabulary so no token is ever out of vocabulary</button>
+      <button class="q-opt">To let the model do tasks without any task-specific output head</button>
+      <div class="q-fb">Pre-norm leaves the residual path clean and keeps signal magnitudes controlled, which stabilises deep training. It is now standard.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What actually changed most between GPT-1 and GPT-2?</div>
+      <button class="q-opt">A switch from a decoder-only design to a bidirectional encoder stack</button>
+      <button class="q-opt">A new training objective replacing next-token prediction with masking</button>
+      <button class="q-opt">A large jump in scale, data, and vocabulary with the same core recipe</button>
+      <button class="q-opt">A move from attention layers back to recurrent memory for long context</button>
+      <div class="q-fb">The architecture is nearly identical; GPT-2 scales parameters and data, cleans the tokenizer, and drops fine-tuning.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Built on <a href="0003-gpt-1.html">GPT-1</a></b> - same decoder-only recipe, scaled up and stripped of the fine-tuning stage.</li>
+    <li><b>Contrast with <a href="0002-bert.html">BERT</a></b>, whose bidirectional encoder is built for understanding, not the open-ended generation GPT-2 relies on.</li>
+    <li><b>Next up, <a href="0005-scaling-laws.html">Scaling Laws</a></b> turns GPT-2's "bigger is smoothly better" curves into precise, predictive relationships.</li>
+    <li>Zero-shot prompting here becomes <b>few-shot in-context learning</b> in <a href="0006-gpt-3.html">GPT-3</a>.</li>
+    <li>The 1024-token context and its O(N&sup2;) cost are what <a href="0017-flashattention.html">FlashAttention</a> and <a href="0019-kv-cache-optimization.html">KV-cache optimization</a> later attack.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The mind-bending claim here is that "predict the next token" and "do the task" become the same thing once the prompt carries the task. Ask the agent to write five different prompts that each coax a <em>different</em> task out of one frozen GPT-2, and to explain why each prompt's continuation is the answer. Then have it run the generation loop by hand for three steps.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">Radford et al., "Language Models are Unsupervised Multitask Learners" (2019)</a>. Then read Jay Alammar's <a href="https://jalammar.github.io/illustrated-gpt2/">"The Illustrated GPT-2"</a> for a component-by-component visual tour of the decoder and its generation loop.</p>
+
+  <div class="pager">
+    <a href="0003-gpt-1.html"><span class="dir">&larr; Previous</span><span class="ttl">GPT-1: Generative Pre-Training</span></a>
+    <a class="nxt" href="0005-scaling-laws.html"><span class="dir">Next &rarr;</span><span class="ttl">Scaling Laws for Neural Language Models</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 04 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

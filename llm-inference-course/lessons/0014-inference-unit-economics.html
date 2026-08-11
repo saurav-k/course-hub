@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Inference Costs Break Unit Economics - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Economics and Craft &middot; Lesson 14</div>
+  <h1>How Inference Costs Break Unit Economics</h1>
+  <p class="paper-meta">A GPU has one price: dollars per hour. A product has a different unit: dollars per 1M tokens, per request, per user. This lab is the bridge between them, and the levers (utilisation, batch size, quantization, routing) that decide whether you make money or bleed it.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Every cost number starts from one formula: <code>cost_per_token = gpu_hourly / (tokens_per_s &times; 3600 &times; utilisation)</code>. Everything else is that dial turned.</li>
+      <li><b>Utilisation is the silent killer.</b> A GPU billed 24/7 but busy 30% of the time costs three times as much per token as one kept busy 90%.</li>
+      <li>Batch size and continuous batching raise <b>tokens/s</b>; quantization raises tokens/s and lets a smaller GPU do the job; routing sends cheap requests to cheap models.</li>
+      <li>Margins die in three places: <b>idle GPUs</b>, <b>long outputs</b> (you pay per output token), and <b>retries</b> (you pay twice for one answer).</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>You can serve a model beautifully and still lose money on every request if you never translate GPU-hours into per-token cost. A rented H100 might cost a few dollars an hour whether it serves a million tokens or ten. The product charges per token or per seat. If the two numbers are not connected in a spreadsheet you control, you are pricing blind, and the first time you find out is when the cloud bill arrives.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BLIND["Priced blind"]
+    a1["GPU: $2.50/hr"] --> a2["??? "] --> a3["charge per token,<br/>hope for margin"]
+  end
+  subgraph MODEL["Modelled"]
+    b1["GPU: $2.50/hr"] --> b2["/ (tok/s x 3600 x util)"] --> b3["$ per 1M tokens,<br/>price with a known margin"]
+  end
+  BLIND -.->|"the upgrade"| MODEL
+    </div>
+    <figcaption>Before and after. The GPU price is the input; the per-token cost is what you actually sell against. <b>Without the middle step you are guessing at your own margin.</b> With it, you can price, forecast, and see which lever to pull.</figcaption>
+  </figure>
+
+  <h2>2. The one formula, and its dials</h2>
+  <p>Start from the GPU's hourly price and ask how many <em>useful</em> tokens it produces in that hour. A GPU running at throughput <code>T</code> tokens per second, busy a fraction <code>u</code> of the time, produces <code>T &times; 3600 &times; u</code> tokens per hour. Divide the hourly price by that, and you have cost per token.</p>
+
+  <div class="math">cost_per_1M_tokens = gpu_hourly / (T &times; 3600 &times; u) &times; 10<sup>6</sup>
+    <span class="gloss"><b>gpu_hourly</b>: rented GPU price per hour. <b>T</b>: sustained throughput in tokens/second at your batch size. <b>u</b>: utilisation, the fraction of paid time the GPU is actually serving. Both T and u are things you can move; the GPU price often is not.</span>
+  </div>
+
+  <p>Three dials change the answer. <strong>Utilisation (u)</strong> is how much of the time you paid for was spent serving; idle GPUs waste it linearly. <strong>Throughput (T)</strong> rises with larger effective batches (continuous batching) and with quantization, which moves more tokens per second and can fit the model on a cheaper card. <strong>Routing</strong> changes which GPU and model a request even lands on, so cheap requests never touch the expensive box.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  price["GPU $ / hour"] --> cost["$ per 1M tokens"]
+  util["utilisation u<br/>(idle time wastes $)"] --> cost
+  thr["throughput T<br/>(batching, quantization)"] --> cost
+  route["routing<br/>(cheap req -> cheap model)"] --> cost
+  cost --> margin{"price - cost<br/>= margin"}
+  margin -->|"positive"| win["profitable"]
+  margin -->|"negative"| lose["bleeding per request"]
+    </div>
+    <figcaption>The levers feeding one number. <b>Utilisation and throughput sit in the denominator, so doubling either roughly halves cost per token.</b> Routing decides which cost curve a request rides at all. Margin is just your price minus this.</figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Clock as Billing clock
+  participant GPU
+  participant Meter as Token meter
+  Note over Clock,Meter: you pay per second, you earn per token
+  Clock->>GPU: second ticks (billed either way)
+  GPU->>Meter: batch of 8 requests -> many tokens/s
+  Note over Meter: high utilisation = tokens keep pace with the clock
+  Clock->>GPU: second ticks
+  GPU->>Meter: idle, 0 tokens this second
+  Note over Meter: still billed, earned nothing = pure loss
+    </div>
+    <figcaption>The billing clock never stops, but tokens only accrue when the GPU is busy. <b>Cost per token is really a race between seconds you pay for and tokens you produce in them.</b> Every idle second is billed against zero output.</figcaption>
+  </figure>
+
+  <h2>3. Where the margin actually dies</h2>
+  <p>Three leaks account for most blown budgets, and all three are invisible in the GPU price.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Idle: GPU rented, no traffic
+  Idle --> Serving: request arrives
+  Serving --> Idle: request done, no queue
+  Serving --> LongOutput: model rambles for 2000 tokens
+  Serving --> Retry: request failed, client retries
+  Idle --> Idle: still billed, zero tokens (leak 1)
+  LongOutput --> [*]: paid per output token (leak 2)
+  Retry --> [*]: paid twice for one answer (leak 3)
+    </div>
+    <figcaption>The three places money leaks. <b>Idle time is billed but produces nothing; long outputs multiply the per-token cost by the token count; retries pay full price for a duplicate answer.</b> None of these show up until you model cost per token and per request.</figcaption>
+  </figure>
+
+  <div class="card callout warn"><span class="tag">The retry trap</span>
+    A 2% failure rate with automatic retries is not a 2% cost bump. Failed requests often fail <em>late</em>, after most tokens are generated, so you pay nearly full price for the failure and full price again for the retry. Cap output length, set hard timeouts, and count retries as real tokens in your cost model.</div>
+
+  <h2>4. Lab: build the cost calculator</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Turn GPU $/hr, tokens/s, and utilisation into $ per 1M tokens, then sweep a sensitivity table</h4>
+    <p>You will write the one-function calculator, print your base case as cost per 1M tokens and per request, then sweep utilisation against throughput so you can see which dial pays off most.</p>
+
+    <div class="code-cap">cost.py &middot; the whole model is one formula plus a sweep</div>
+    <pre><code>def cost_per_1m(gpu_hourly, tokens_per_s, utilisation):
+    """$ per 1,000,000 tokens for one GPU at a given throughput and utilisation."""
+    effective_tokens_per_hour = tokens_per_s * 3600 * utilisation
+    return gpu_hourly / effective_tokens_per_hour * 1_000_000
+
+def cost_per_request(gpu_hourly, tokens_per_s, utilisation, tokens_per_req):
+    return cost_per_1m(gpu_hourly, tokens_per_s, utilisation) / 1_000_000 * tokens_per_req
+
+GPU_HOURLY = 2.50            # rented A100/H100-class card, $/hr
+BASE_T     = 4000            # sustained tokens/s at your batch size
+BASE_U     = 0.50            # honestly measured utilisation
+
+base = cost_per_1m(GPU_HOURLY, BASE_T, BASE_U)
+print(f"base case: ${base:5.2f} per 1M tokens")
+print(f"a 700-token answer costs "
+      f"${cost_per_request(GPU_HOURLY, BASE_T, BASE_U, 700)*100:5.3f} cents")
+
+print("\n$ per 1M tokens   util-&gt;   30%     50%     70%     90%")
+for T in (2000, 4000, 6000):
+    row = "  ".join(f"${cost_per_1m(GPU_HOURLY, T, u):5.2f}"
+                    for u in (0.30, 0.50, 0.70, 0.90))
+    print(f"  T = {T:>4} tok/s        {row}")</code></pre>
+
+    <div class="term"><span class="p">$</span> python cost.py
+<span class="o">base case: $ 0.35 per 1M tokens
+a 700-token answer costs 0.024 cents
+
+$ per 1M tokens   util-&gt;   30%     50%     70%     90%
+  T = 2000 tok/s        $ 1.16  $ 0.69  $ 0.50  $ 0.39
+  T = 4000 tok/s        $ 0.58  $ 0.35  $ 0.25  $ 0.19
+  T = 6000 tok/s        $ 0.39  $ 0.23  $ 0.17  $ 0.13</span>
+<span class="c"># Same GPU, same $2.50/hr. Cost per 1M ranges from $1.16 to $0.13,</span>
+<span class="c"># a 9x spread, driven entirely by utilisation and throughput.</span></div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Base cost</div><div class="v">$0.35</div><div class="u">per 1M tokens, 4000 tok/s, 50% util</div></div>
+      <div class="metric"><div class="k">Best cell</div><div class="v">$0.13</div><div class="u">6000 tok/s, 90% util</div></div>
+      <div class="metric"><div class="k">Worst cell</div><div class="v">$1.16</div><div class="u">2000 tok/s, 30% util</div></div>
+      <div class="metric"><div class="k">Spread</div><div class="v">9x</div><div class="u">same hardware, same price</div></div>
+    </div>
+
+    <p class="kpi">Read the table by column: at any throughput, going from 30% to 90% utilisation cuts cost by about two thirds. Read it by row: doubling throughput halves the cost. The GPU price never changed. Your operations did.</p>
+  </div>
+
+  <h2>5. Which lever, in what order</h2>
+  <table>
+    <thead><tr><th>Lever</th><th>Moves</th><th>Typical effect</th><th>Cost</th></tr></thead>
+    <tbody>
+      <tr><td>Continuous batching</td><td>T and u up</td><td>2-10x tokens/s vs static batching</td><td>Config change (Lesson 04)</td></tr>
+      <tr><td>Quantization (INT4/FP8)</td><td>T up, GPU cheaper</td><td>1.5-3x tokens/s, fits smaller card</td><td>Small quality hit (Lesson 07)</td></tr>
+      <tr><td>Right-size + autoscale</td><td>u up</td><td>Kills idle-GPU waste</td><td>Ops work (Lessons 11-12)</td></tr>
+      <tr><td>Routing</td><td>Avoids the cost entirely</td><td>Cheap prompts skip the big model</td><td>Router logic (Lesson 08)</td></tr>
+      <tr><td>Output caps + timeouts</td><td>Fewer wasted tokens</td><td>Stops long-output and retry leaks</td><td>Policy change (Lesson 09)</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card callout key"><span class="tag">The order that pays</span>
+    Fix utilisation first: an idle GPU wastes money no optimisation can recover. Then raise throughput with batching and quantization. Then route and cap so you never generate a token you did not need. Utilisation and throughput are the denominator; guard the numerator (tokens generated) last.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">In the cost formula, where does utilisation sit and why does it matter?</div>
+      <button class="q-opt">In the numerator, so higher utilisation raises the cost per token you pay</button>
+      <button class="q-opt">Outside the formula entirely, since utilisation only affects the GPU rental price</button>
+      <button class="q-opt">In the denominator, so a GPU busy half the time costs twice as much per token</button>
+      <button class="q-opt">In the exponent, so utilisation changes the cost per token on a log scale</button>
+      <div class="q-fb">u multiplies effective tokens in the denominator; halving it roughly doubles cost per token.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is a 2% failure rate with retries worse than a flat 2% cost increase?</div>
+      <button class="q-opt">Failures often happen late, so you pay for most of the tokens and then pay again</button>
+      <button class="q-opt">Retries always route to a larger and more expensive model than the first attempt</button>
+      <button class="q-opt">Each retry doubles the GPU hourly rental price for the remainder of that hour</button>
+      <button class="q-opt">The failed requests are billed at a penalty multiplier by the cloud provider</button>
+      <div class="q-fb">Late failures burn nearly full tokens; the retry then pays full price again for one answer.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Two GPUs cost the same per hour. Why can their cost per token differ 9x?</div>
+      <button class="q-opt">One is billed in a cheaper region despite the identical published hourly rate</button>
+      <button class="q-opt">One serves a smaller model so each generated token is intrinsically cheaper</button>
+      <button class="q-opt">One has a longer rental commitment which lowers its effective hourly price</button>
+      <button class="q-opt">One runs at higher throughput and utilisation, so it produces far more tokens</button>
+      <div class="q-fb">Same price, different denominator: throughput and utilisation set how many tokens the hour buys.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which lever should you pull first to cut cost per token?</div>
+      <button class="q-opt">Switch the model to the most aggressive INT4 quantization you can find first</button>
+      <button class="q-opt">Fix utilisation, because idle GPU time is money no other lever can recover</button>
+      <button class="q-opt">Add a routing layer so that every request is sent to the cheapest small model</button>
+      <button class="q-opt">Cap the output length hard so no single answer can exceed a few hundred tokens</button>
+      <div class="q-fb">Idle GPUs waste money nothing else recovers; raise utilisation first, then throughput, then guard tokens.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can derive cost per 1M tokens from GPU $/hr, throughput, and utilisation</li>
+    <li>I built a calculator and printed a utilisation-by-throughput sensitivity table</li>
+    <li>I can explain why utilisation and throughput sit in the denominator</li>
+    <li>I can name the three margin leaks: idle GPUs, long outputs, retries</li>
+    <li>I can order the cost levers by payoff for my own service</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to plug your real GPU price, measured throughput, and traffic mix into this model and see your true cost per user? Ask and we will build the spreadsheet from your numbers.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://kipp.ly/transformer-inference-arithmetic/">"Transformer Inference Arithmetic" by Kipply</a> for where throughput comes from, and any current cloud GPU price sheet (for example <a href="https://aws.amazon.com/ec2/instance-types/p5/">AWS P5</a>) to anchor <code>gpu_hourly</code> to a real number before you model margin.</p>
+
+  <div class="pager">
+    <a href="0013-load-testing-1000-concurrent.html"><span class="dir">&larr; Prev</span><span class="ttl">Load Testing 1000+ Concurrent Requests</span></a>
+    <a class="nxt" href="0015-capstone-benchmark-publicly.html"><span class="dir">Next &rarr;</span><span class="ttl">Capstone: Build, Benchmark, and Share an Optimized Service</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 14 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

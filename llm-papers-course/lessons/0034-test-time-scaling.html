@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test-Time Scaling - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Reasoning, Retrieval &amp; Agents &middot; Lesson 34</div>
+  <h1>Test-Time Scaling</h1>
+  <p class="paper-meta">
+    <span class="pill">2024</span>
+    Snell, Lee, Xu, Kumar (UC Berkeley / Google DeepMind).
+    &middot; <a href="https://arxiv.org/abs/2408.03314">arXiv:2408.03314</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>For years, the way to get a smarter model was to make it <b>bigger</b> - more parameters, more training compute. That is expensive and paid once, at training time.</li>
+      <li>This paper studies the other dial: spend <b>more compute at inference</b>. Let the model think longer, sample many answers, search, and revise before committing.</li>
+      <li>Two main levers: <b>searching against a verifier</b> (generate many candidates, pick the one a scorer trusts) and <b>revising</b> the model's own answer step by step.</li>
+      <li>Allocating that compute <b>optimally per question</b> beats a naive best-of-N by over 4x, and a small model given extra test-time compute can outperform a model <b>14x larger</b> on matched FLOPs. This is the idea behind long-CoT models like OpenAI o1 and DeepSeek-R1.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>The scaling laws of Module 02 pointed one way: bigger models, trained on more data, are more capable. But that capability is <strong>frozen into the weights</strong> at training time, and training a giant model is enormously expensive. Meanwhile Chain-of-Thought and Tree of Thoughts had shown that the <em>same</em> model gets much better if you let it <em>think longer</em> at inference. That raises a sharp question: for a fixed compute budget, is it better spent on training a bigger model, or on running a smaller model harder?</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph TRAIN["Scale training compute"]
+    direction TB
+    t1["train a bigger model"] --> t2["capability baked into weights"]
+    t2 --> t3["paid once, huge upfront cost"]
+  end
+  subgraph TEST["Scale test-time compute"]
+    direction TB
+    e1["keep the model, think longer"] --> e2["sample, search, verify, revise"]
+    e2 --> e3["paid per query, adjustable per question"]
+  end
+    </div>
+    <figcaption>Two ways to buy capability. Training a bigger model bakes skill into the weights at a huge one-time cost. Test-time scaling keeps the model and spends extra compute <b>per query</b> - thinking longer on hard questions and less on easy ones. The paper asks which dial gives more accuracy per FLOP, and shows the answer depends on the problem.</figcaption>
+  </figure>
+
+  <p>The answer reframes how we think about intelligence in models: capability is not only a property of the weights, it is also a property of <strong>how much you let the model compute at answer time</strong>. Inference compute becomes a resource you can trade for accuracy.</p>
+
+  <h2>2. Lever one: search against a verifier</h2>
+  <p>The simplest way to spend more inference compute is <strong>best-of-N</strong>: sample N candidate answers, then use a <strong>verifier</strong> - a model trained to score correctness - to pick the best one. Generating is cheap and parallel; the verifier turns quantity into quality. A stronger version uses a <strong>process reward model</strong> that scores each <em>step</em> of a reasoning chain, so search can be guided step by step rather than only judging the final answer.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["question"] --> S["sample N candidate answers"]
+  S --> A1["candidate 1"]
+  S --> A2["candidate 2"]
+  S --> A3["candidate 3"]
+  A1 --> V["verifier / reward model<br/>score each candidate"]
+  A2 --> V
+  A3 --> V
+  V --> P["pick the highest-scoring answer"]
+    </div>
+    <figcaption>Best-of-N with a verifier. The model produces many independent attempts; a separate scorer judges them and the best one is returned. More samples means more chances to hit a correct answer, but only if the verifier is good enough to <b>recognize</b> the right one. The verifier is what converts raw sampling into reliable accuracy.</figcaption>
+  </figure>
+
+  <h2>3. Lever two: revise your own answer</h2>
+  <p>The second lever changes the model's <em>output distribution adaptively</em>: instead of many independent shots, the model produces an answer, then <strong>refines it</strong>, sequentially, each revision conditioned on the last. This is a chain of self-corrections rather than a spray of parallel guesses. Sequential revision helps most on problems where the model is close and just needs to fix mistakes; parallel search helps most where it needs to find a fundamentally different approach.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph PAR["Parallel: best-of-N"]
+    direction TB
+    p1["shot 1"]
+    p2["shot 2"]
+    p3["shot 3"]
+    p1 --> pv["verifier picks best"]
+    p2 --> pv
+    p3 --> pv
+  end
+  subgraph SEQ["Sequential: revise"]
+    direction LR
+    s1["answer v1"] --> s2["revise v2"] --> s3["revise v3"]
+  end
+    </div>
+    <figcaption>Two shapes of test-time compute. <b>Parallel</b> (best-of-N) explores breadth - many independent attempts, one chosen by a verifier. <b>Sequential</b> (revision) explores depth - refine a single answer over and over. The paper finds these suit different problems, so the best strategy <b>mixes them based on how hard the question is</b>.</figcaption>
+  </figure>
+
+  <h2>4. The key idea: compute-optimal allocation</h2>
+  <p>The paper's central result is that <strong>how</strong> you spend inference compute should depend on the <strong>difficulty</strong> of the question. Easy questions are solved on the first try, so extra samples are wasted; hard questions need deep search or many revisions. A fixed strategy (always best-of-N, always revise) is inefficient. A <strong>compute-optimal</strong> strategy predicts the difficulty and routes the budget accordingly - more parallel search here, more sequential revision there.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["question"] --> D["estimate difficulty"]
+  D -->|easy| E["few samples, trust first answer"]
+  D -->|medium| M["moderate best-of-N"]
+  D -->|hard| H["deep search + revision"]
+  E --> Ans["answer"]
+  M --> Ans
+  H --> Ans
+    </div>
+    <figcaption>Compute-optimal test-time scaling. Rather than one fixed recipe, the system estimates each question's difficulty and <b>allocates the inference budget where it pays off</b> - barely thinking on easy items, searching hard on tough ones. This adaptive allocation beat a naive best-of-N baseline by more than 4x for the same total compute.</figcaption>
+  </figure>
+
+  <p>With this allocation, the authors show a striking trade: in <strong>FLOPs-matched</strong> comparisons, a smaller model given extra test-time compute can <strong>outperform a model 14 times larger</strong> that just answers once. Spending compute at inference is sometimes a better deal than spending it at training - as long as the base model is capable enough to benefit and the verifier is good enough to steer.</p>
+
+  <h2>5. The math, read in plain English</h2>
+  <p>Best-of-N picks the candidate the verifier likes most. Compute-optimal scaling chooses the whole <em>strategy</em> to maximize accuracy for a given budget.</p>
+
+  <div class="math">y&#770; = argmax<sub>i &isin; 1..N</sub> &nbsp; R( y<sup>(i)</sup> &divide; x ), &nbsp;&nbsp; y<sup>(i)</sup> ~ &pi;( &middot; &divide; x )
+    <span class="gloss"><b>x</b>: the question. <b>y<sup>(i)</sup></b>: the i-th sampled candidate answer from the model &pi;. <b>R(y &divide; x)</b>: the verifier's score for how likely answer y is correct. <b>argmax<sub>i</sub></b>: return the single candidate the verifier scores highest. As <b>N</b> grows you get more shots on goal, but the payoff is capped by how well <b>R</b> can tell right from wrong.</span>
+  </div>
+
+  <div class="math">strategy* (x, C) = argmax<sub>strategy</sub> &nbsp; E[ correct &divide; x, strategy ] &nbsp; s.t. &nbsp; compute(strategy) &le; C
+    <span class="gloss"><b>C</b>: the inference compute budget for this question. <b>strategy</b>: a choice of how to spend it - how many parallel samples, how many sequential revisions, how deep to search. <b>E[correct | x, strategy]</b>: expected accuracy under that strategy. <b>argmax s.t. compute &le; C</b>: pick the strategy that maximizes accuracy without exceeding the budget. Because the best strategy depends on <b>x</b>'s difficulty, the allocation is <i>adaptive</i>, not fixed.</span>
+  </div>
+
+  <h2>6. Implement it: best-of-N with a verifier, plus a budget sweep</h2>
+  <p>The code samples N candidate answers, scores them with a verifier, and returns the best - then sweeps the budget N to show accuracy climbing with compute, and flattening once the verifier can no longer tell candidates apart. Model and verifier are stubbed so it runs offline.</p>
+
+  <div class="code-cap">test_time_scaling.py &middot; runnable with Python</div>
+  <pre><code>import random
+
+# --- a toy task: guess a hidden target; model is noisy, verifier is decent ---
+TARGET = 42
+
+def model_sample(x):
+    # the base model: right sometimes, noisy otherwise (like a real sampler)
+    if random.random() < 0.25:
+        return TARGET                       # a correct attempt
+    return random.randint(30, 55)           # a plausible wrong attempt
+
+def verifier(candidate, x):
+    # an imperfect scorer: higher when candidate is near the target.
+    # a real verifier is a trained reward model over reasoning traces.
+    noise = random.uniform(-3, 3)
+    return -abs(candidate - TARGET) + noise
+
+# --- best-of-N: sample N, keep the verifier's favourite ---
+def best_of_n(x, n):
+    cands = [model_sample(x) for _ in range(n)]      # parallel attempts
+    return max(cands, key=lambda c: verifier(c, x))  # verifier picks one
+
+# --- sweep the compute budget N and measure accuracy ---
+def sweep(trials=2000):
+    print(f"{'N (budget)':>10} | {'accuracy':>8}")
+    for n in [1, 2, 4, 8, 16, 32, 64]:
+        hits = sum(best_of_n(None, n) == TARGET for _ in range(trials))
+        acc = hits / trials
+        bar = "#" * int(acc * 40)
+        print(f"{n:>10} | {acc:>7.2%}  {bar}")
+
+random.seed(0)
+sweep()
+# accuracy rises steeply with N, then flattens: more compute helps,
+# but the verifier's ceiling caps how much best-of-N can buy.</code></pre>
+
+  <p>Two lessons fall out of the sweep. First, <strong>more inference compute buys accuracy</strong> - doubling N reliably lifts the score early on. Second, the curve <strong>flattens</strong>: once the verifier can no longer distinguish a right answer from a near-miss, extra samples stop helping. That plateau is exactly why the paper cares about a <em>better</em> verifier and <em>smarter</em> allocation, not just brute-force N.</p>
+
+  <div class="card callout key"><span class="tag">The verifier is the bottleneck</span>
+    Best-of-N can only be as good as the scorer that picks the winner. A perfect verifier turns N samples into near-perfect accuracy; a weak one wastes them. This is why so much reasoning-model work is really <b>reward-model and verifier work</b> - the generator has plenty of good answers in its N tries; the hard part is recognizing them.</div>
+
+  <h2>7. From this paper to reasoning models</h2>
+  <table>
+    <thead><tr><th>Approach</th><th>Where compute goes</th><th>Cost timing</th><th>Adjust per question?</th></tr></thead>
+    <tbody>
+      <tr><td>Bigger model</td><td>Training</td><td>Once, upfront</td><td>No - fixed weights</td></tr>
+      <tr><td>Best-of-N + verifier</td><td>Inference (parallel)</td><td>Per query</td><td>Yes - choose N</td></tr>
+      <tr><td>Sequential revision</td><td>Inference (depth)</td><td>Per query</td><td>Yes - choose steps</td></tr>
+      <tr><td>Compute-optimal mix</td><td>Inference (adaptive)</td><td>Per query</td><td>Yes - by difficulty</td></tr>
+    </tbody>
+  </table>
+  <p>This paper is the analysis behind a wave of <strong>reasoning models</strong>. <strong>OpenAI o1</strong> (2024) is trained to produce very long internal chains of thought before answering - test-time compute turned into a first-class trained behavior. <strong>DeepSeek-R1</strong> showed the same long-CoT reasoning could be elicited largely through reinforcement learning with verifiable rewards. The common thread is this lesson's claim: for hard problems, <strong>letting a model think longer at inference is a real, sometimes better, alternative to making it bigger</strong>.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does test-time scaling propose spending more compute on?</div>
+      <button class="q-opt">The pretraining run that bakes knowledge into the model weights</button>
+      <button class="q-opt">The dense vector index that stores every passage for retrieval</button>
+      <button class="q-opt">The inference step, letting the model search, verify, and revise</button>
+      <button class="q-opt">The quantization pass that shrinks the base model down to four bits</button>
+      <div class="q-fb">Test-time scaling spends extra compute at answer time - sampling, searching, verifying, and revising - rather than only on training a bigger model.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">In best-of-N, what job does the verifier do?</div>
+      <button class="q-opt">It scores the sampled candidates so the best one can be selected</button>
+      <button class="q-opt">It generates all of the N candidate answers from the base model</button>
+      <button class="q-opt">It compresses the reasoning chain into a single short output token</button>
+      <button class="q-opt">It retrains the base model weights on each candidate that it scores</button>
+      <div class="q-fb">The model samples N candidates; the verifier scores them so the highest-rated answer is returned. Its quality caps how much best-of-N can buy.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What makes an allocation of test-time compute compute-optimal?</div>
+      <button class="q-opt">It always uses the largest possible N on every single question asked</button>
+      <button class="q-opt">It spends an identical fixed budget on easy and hard questions alike</button>
+      <button class="q-opt">It moves all of the inference compute back into the training run once</button>
+      <button class="q-opt">It routes the budget by difficulty, thinking harder on tough questions</button>
+      <div class="q-fb">Compute-optimal scaling estimates each question's difficulty and allocates compute where it pays off, beating a naive best-of-N by over 4x.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What surprising trade did the FLOPs-matched comparison reveal?</div>
+      <button class="q-opt">A larger model always beats any smaller one no matter the compute spent</button>
+      <button class="q-opt">A small model with extra test-time compute can beat a 14x larger model</button>
+      <button class="q-opt">Sampling more candidates never improves accuracy beyond a single shot</button>
+      <button class="q-opt">Training compute and inference compute produce identical results always</button>
+      <div class="q-fb">On matched FLOPs, a smaller model given enough test-time compute can outperform a model 14 times larger that answers only once.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>Thinking longer began with <a href="0030-chain-of-thought.html">Chain-of-Thought</a>; this paper measures how much accuracy that extra thinking is worth.</li>
+    <li><a href="0033-tree-of-thoughts.html">Tree of Thoughts</a> is one search strategy for spending test-time compute; here it becomes one option among several to allocate.</li>
+    <li>The verifiers and reward models are close cousins of the reward signal in <a href="0027-grpo.html">GRPO</a> and reasoning-model training.</li>
+    <li>It reframes the training-side <a href="0005-scaling-laws.html">scaling laws</a> and <a href="0008-chinchilla.html">Chinchilla</a> compute-optimality with a new axis: inference.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Run the sweep, then make the verifier perfect (drop the noise) and re-run: accuracy should shoot toward 100% as N grows. Now make it near-random and watch the curve go flat. That single experiment teaches the paper's deepest point - <b>test-time compute is only as valuable as the verifier steering it</b>. Ask the agent why o1 and R1 therefore invest so heavily in reward signals.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/2408.03314">Snell et al., "Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters" (2024)</a>. Pair it with the <a href="https://openai.com/index/learning-to-reason-with-llms/">OpenAI o1 announcement</a> and the <a href="https://arxiv.org/abs/2501.12948">DeepSeek-R1 paper (2025)</a> to see the idea turned into trained reasoning models.</p>
+
+  <div class="pager">
+    <a href="0033-tree-of-thoughts.html"><span class="dir">&larr; Previous</span><span class="ttl">Tree of Thoughts</span></a>
+    <a class="nxt" href="0035-switch-transformer-moe.html"><span class="dir">Next &rarr;</span><span class="ttl">Switch Transformer (MoE)</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 34 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

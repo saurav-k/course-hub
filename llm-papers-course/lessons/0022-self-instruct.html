@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Instruct - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Alignment &amp; Post-Training &middot; Lesson 22</div>
+  <h1>Self-Instruct</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Wang, Kordi, Mishra, Liu, Smith, Khashabi, Hajishirzi (University of Washington, Allen Institute for AI, and collaborators).
+    &middot; <a href="https://arxiv.org/abs/2212.10560">arXiv:2212.10560</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Instruction tuning needs thousands of "instruction, answer" pairs, and writing them by hand is <b>slow and expensive</b>.</li>
+      <li>Self-Instruct <b>bootstraps that data from the model itself</b>: start with a tiny seed set of human tasks, then ask the model to invent more.</li>
+      <li>The loop is <b>generate new instructions, generate instances (inputs and outputs), filter for quality and diversity, add the survivors back to the pool</b>, and repeat.</li>
+      <li>The diversity filter uses <b>ROUGE-L overlap</b>: a new instruction is kept only if it is less than 0.7 similar to everything already in the pool.</li>
+      <li>Applied to vanilla GPT-3, it gave a <b>33% absolute jump</b> on Super-NaturalInstructions, landing within a few points of the human-supervised InstructGPT-001.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>A base language model predicts the next token. It is not, by default, helpful: ask it to "summarise this email" and it might continue the email instead of summarising it. <strong>Instruction tuning</strong> fixes this by fine-tuning on many examples of the form "here is an instruction, here is the correct response." The catch is where those examples come from. The strong instruction-tuned models of 2022 relied on <strong>large hand-written datasets</strong>: humans writing prompts and humans writing gold answers. That is costly, slow, and skewed toward whatever tasks the annotators happened to think of.</p>
+
+  <p>Self-Instruct asks a cheeky question: the model already knows a lot about language and tasks - can it write most of its own training data? The answer is largely yes.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph OLD["Old way: humans write the data"]
+    direction TB
+    h1["human writes<br/>instruction"] --> h2["human writes<br/>gold answer"] --> h3["thousands of pairs<br/>slow, expensive"]
+  end
+  subgraph NEW["Self-Instruct: the model writes the data"]
+    direction TB
+    s1["175 human<br/>seed tasks"] --> s2["model invents<br/>new tasks"] --> s3["filter + grow<br/>the pool"] --> s4["finetune the<br/>same model"]
+  end
+    </div>
+    <figcaption>The shift Self-Instruct makes. Instead of paying humans to author every instruction and answer, you seed a tiny human set and let the model expand it. <b>Human effort drops from thousands of examples to a couple hundred seeds.</b></figcaption>
+  </figure>
+
+  <h2>2. The bootstrap loop, diagram first</h2>
+  <p>The whole method is one loop that grows a <strong>task pool</strong>. It begins with 175 human-written seed tasks (25 classification tasks and 150 non-classification tasks). Each round, the model proposes new instructions, writes example instances for them, throws away the bad and the duplicated, and folds the good ones back into the pool - which makes the next round richer.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  seed["Task pool<br/>starts with 175 seeds"] --> gi["1. Generate instructions<br/>prompt model with 8 examples"]
+  gi --> cls["2. Classify task type<br/>is it classification?"]
+  cls --> inst["3. Generate instances<br/>input-first or output-first"]
+  inst --> filt["4. Filter<br/>ROUGE-L, validity, length"]
+  filt -->|survivors| seed
+  seed -.->|when pool is large enough| ft["Finetune base model<br/>on the generated pairs"]
+    </div>
+    <figcaption>The Self-Instruct pipeline as a growth loop. Steps 1-4 add fresh, de-duplicated tasks to the pool each iteration; once the pool is big, you fine-tune the base model on it. <b>The pool feeds itself: today's accepted tasks become tomorrow's in-context examples.</b></figcaption>
+  </figure>
+
+  <h2>3. Step by step, in plain English</h2>
+  <p><strong>Step 1 - generate instructions.</strong> Sample a handful of instructions already in the pool (the paper uses 8, mixing 6 human seeds with 2 model-generated ones) and drop them into a prompt that asks for a new, different instruction. Because the examples are diverse, the model tends to riff into new territory rather than copy.</p>
+
+  <p><strong>Step 2 - classify the task.</strong> The model is asked whether the new instruction is a classification task (a fixed set of labels) or not. This matters because the next step generates instances differently for the two.</p>
+
+  <p><strong>Step 3 - generate instances.</strong> Now turn an instruction into concrete "input, output" pairs.</p>
+  <ul>
+    <li><strong>Input-first</strong> (for most tasks): ask the model to produce an input, then the correct output for it.</li>
+    <li><strong>Output-first</strong> (for classification): ask for the label first, then an input that fits it. This stops the model from lazily generating only one class (for example, always "positive" in sentiment).</li>
+  </ul>
+
+  <p><strong>Step 4 - filter.</strong> Keep only tasks that add something. A new instruction is added to the pool <em>only if</em> its ROUGE-L overlap with every existing instruction is below 0.7. Instances are also filtered: drop ones that are identical, that have the same input but different outputs, that are too long or too short, or that contain tell-tale junk (for example, "image" or "graph" for a text-only model).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  cand["candidate instruction"] --> r{"max ROUGE-L vs pool<br/>&lt; 0.7 ?"}
+  r -->|no, too similar| drop1["discard (duplicate)"]
+  r -->|yes, novel enough| v{"passes validity<br/>heuristics?"}
+  v -->|no| drop2["discard (invalid)"]
+  v -->|yes| keep["add to task pool"]
+    </div>
+    <figcaption>The two-gate filter that keeps the pool clean. The ROUGE-L gate enforces <b>diversity</b> (no near-duplicates), and the validity gate enforces <b>quality</b> (well-formed, in-domain tasks). Only candidates passing both gates survive.</figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">What is ROUGE-L</span>
+    ROUGE-L measures overlap between two texts by the length of their <b>longest common subsequence</b> - roughly, how many words appear in the same order in both. A score near 1 means "almost the same sentence." Self-Instruct rejects a new instruction when its ROUGE-L against any pool member is 0.7 or higher, so the pool keeps spreading out instead of clustering.</div>
+
+  <h2>4. The math you actually need: the diversity gate</h2>
+  <p>There is no exotic loss here - the training objective is ordinary instruction fine-tuning (next-token cross-entropy on the response). The one formula worth pinning down is the acceptance rule for a new instruction.</p>
+
+  <div class="math">accept(t<sub>new</sub>) = 1 &nbsp;if&nbsp; max<sub>t &isin; pool</sub> ROUGE&#8209;L(t<sub>new</sub>, t) &lt; 0.7 &nbsp;else&nbsp; 0
+    <span class="gloss"><b>t<sub>new</sub></b>: the candidate instruction just generated. <b>pool</b>: every instruction already accepted. <b>ROUGE-L(a, b)</b>: similarity of two instructions by longest common subsequence, from 0 (nothing shared) to 1 (identical). <b>max over the pool</b>: find the single most similar existing instruction. <b>&lt; 0.7</b>: keep the candidate only if even its closest match is fairly different. This one rule is what prevents the self-generated pool from collapsing into a thousand rewordings of the same few tasks.</span>
+  </div>
+
+  <p>And the fine-tuning objective, for completeness, is the same maximum-likelihood loss you have seen throughout the course, applied to the generated pairs:</p>
+
+  <div class="math">L(&theta;) = &minus; &sum;<sub>(x, y)</sub> &sum;<sub>t</sub> log P<sub>&theta;</sub>( y<sub>t</sub> | x, y<sub>&lt;t</sub> )
+    <span class="gloss"><b>(x, y)</b>: a generated instruction-plus-input <b>x</b> and its target response <b>y</b>. <b>y<sub>t</sub></b>: the t-th token of the response. <b>y<sub>&lt;t</sub></b>: the tokens before it. <b>P<sub>&theta;</sub></b>: the model. We simply maximise the probability the model assigns to the correct response tokens - standard supervised fine-tuning, just on data the model authored.</span>
+  </div>
+
+  <h2>5. Implement it: the generate - filter - add loop</h2>
+  <p>Below is the core Self-Instruct loop in Python. The calls to a real model are stubbed by <code>llm()</code> so the control flow is crystal clear: sample seed examples, ask for a new instruction, gate it by ROUGE-L, generate an instance, then grow the pool. Swap <code>llm()</code> for an actual API call and this is the real algorithm.</p>
+
+  <div class="code-cap">self_instruct.py &middot; the bootstrap loop with ROUGE-L dedup</div>
+  <pre><code>import random
+from difflib import SequenceMatcher
+
+def rouge_l(a: str, b: str) -&gt; float:
+    """Cheap ROUGE-L stand-in: longest-common-subsequence ratio over words.
+    Real Self-Instruct uses the rouge library; this keeps the demo dependency-free."""
+    aw, bw = a.lower().split(), b.lower().split()
+    lcs = SequenceMatcher(None, aw, bw).find_longest_match(0, len(aw), 0, len(bw)).size
+    if not aw or not bw:
+        return 0.0
+    prec, rec = lcs / len(aw), lcs / len(bw)          # precision & recall of the LCS
+    return 0.0 if prec + rec == 0 else 2 * prec * rec / (prec + rec)   # F-measure
+
+def is_novel(candidate: str, pool: list[str], thresh: float = 0.7) -&gt; bool:
+    """Diversity gate: keep only if the closest existing task is &lt; 0.7 similar."""
+    return max((rouge_l(candidate, t) for t in pool), default=0.0) &lt; thresh
+
+def is_valid(instr: str) -&gt; bool:
+    """Quality gate: drop empty, too-long, or clearly non-text tasks."""
+    if not (3 &lt;= len(instr.split()) &lt;= 150):
+        return False
+    banned = ("image", "picture", "graph", "file", "plot")
+    return not any(w in instr.lower() for w in banned)
+
+# --- the bootstrap loop ---------------------------------------------------
+seed_tasks = [
+    "Give three tips for staying healthy.",
+    "Sort these numbers in ascending order.",
+    "Translate the sentence into French.",
+    # ... 175 of these in the real paper (25 classification, 150 not) ...
+]
+pool = list(seed_tasks)                 # the growing task pool
+generated = []                          # accepted (instruction, input, output) triples
+
+for step in range(2000):                # each step tries to add one new task
+    # 1. GENERATE: prompt the model with 8 in-context examples, ask for a new instruction
+    examples = random.sample(pool, k=min(8, len(pool)))
+    new_instr = llm(build_instruction_prompt(examples))       # model invents a task
+
+    # 2. FILTER (diversity + validity) before anything expensive happens
+    if not (is_valid(new_instr) and is_novel(new_instr, pool)):
+        continue                        # too similar or malformed -&gt; skip
+
+    # 3. INSTANCE: classification uses output-first, everything else input-first
+    if llm(is_classification_prompt(new_instr)).strip().lower().startswith("yes"):
+        inp, out = llm(output_first_prompt(new_instr))        # label first, then input
+    else:
+        inp, out = llm(input_first_prompt(new_instr))         # input first, then answer
+
+    if not instance_is_clean(new_instr, inp, out):            # drop dup / bad instances
+        continue
+
+    # 4. ADD: fold the survivor back into the pool so it can seed future prompts
+    pool.append(new_instr)
+    generated.append((new_instr, inp, out))
+
+print(f"grew pool to {len(pool)} tasks, {len(generated)} training triples")
+# finally: finetune the SAME base model on `generated` with next-token cross-entropy</code></pre>
+
+  <p>Read the loop against the diagram in section 2. The two <code>continue</code> statements are the two filter gates; the <code>pool.append</code> line is the self-feeding step that makes each round richer than the last. Notice that the diversity check runs <em>before</em> instance generation, so you never waste model calls on a task you are going to throw away.</p>
+
+  <div class="card callout"><span class="tag">Design detail</span>
+    Output-first generation for classification tasks is not a footnote - it is what stops label collapse. If you always generate the input first and then ask for a label, the model quietly prefers easy, majority-class inputs. Fixing the label first and then writing an input forces balanced coverage of every class.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  seed["~175 human<br/>seed tasks"] --> gen["model generates<br/>new instructions<br/>+ input/output"]
+  gen --> filt["filter:<br/>dedup + quality"]
+  filt --> pool["task pool grows"]
+  pool -->|"sample as few-shot<br/>examples"| gen
+  pool --> tune["instruction-tune<br/>the base model"]
+    </div>
+    <figcaption>The self-instruct flywheel. A tiny human seed set primes the model to write its own instruction data; filtering keeps only fresh, high-quality tasks; the growing pool feeds back as prompting examples and, finally, as tuning data. <b>Human effort stays fixed while the dataset compounds.</b></figcaption>
+  </figure>
+
+  <h2>6. What it bought</h2>
+  <table>
+    <thead><tr><th>Aspect</th><th>Human-written instruction data</th><th>Self-Instruct</th></tr></thead>
+    <tbody>
+      <tr><td>Human labelling cost</td><td>Thousands of authored pairs</td><td>Only 175 seed tasks by hand</td></tr>
+      <tr><td>Data source</td><td>Annotators write everything</td><td>Model generates, filters keep quality</td></tr>
+      <tr><td>Diversity control</td><td>Depends on annotator variety</td><td>ROUGE-L gate enforces spread</td></tr>
+      <tr><td>Scale ceiling</td><td>Bounded by human hours</td><td>Bounded by compute, not people</td></tr>
+      <tr><td>GPT-3 gain on SuperNI</td><td>-</td><td>Roughly a 33 point absolute jump</td></tr>
+    </tbody>
+  </table>
+  <p>Applied to the vanilla GPT-3 base model, Self-Instruct produced about 52,000 instructions and 82,000 instances, and the fine-tuned result improved by roughly 33 absolute points on Super-NaturalInstructions - close to InstructGPT-001, which used private human data. The lesson landed hard: <strong>a large fraction of instruction-tuning quality can come from the model bootstrapping itself.</strong> This idea seeded a wave of synthetic-data work (Alpaca, and many after it).</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the core loop that Self-Instruct repeats?</div>
+      <button class="q-opt">Rank two model answers, then reward the winner every round</button>
+      <button class="q-opt">Generate tasks, filter them, add survivors, then repeat</button>
+      <button class="q-opt">Critique a reply, revise it, and score the revision</button>
+      <button class="q-opt">Sample a group, average rewards, then update policy</button>
+      <div class="q-fb">Self-Instruct grows a task pool: generate instructions and instances, filter for quality and diversity, add the good ones back, iterate.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does the ROUGE-L threshold of 0.7 actually enforce?</div>
+      <button class="q-opt">That every answer is at least seventy words in length</button>
+      <button class="q-opt">That the reward gap between answers stays above zero</button>
+      <button class="q-opt">That a new instruction is different from existing ones</button>
+      <button class="q-opt">That the model always predicts the majority class label</button>
+      <div class="q-fb">A candidate is added only if its ROUGE-L against every pool member is below 0.7, keeping the pool diverse rather than full of near-duplicates.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does Self-Instruct use output-first generation for classification tasks?</div>
+      <button class="q-opt">To fix the label first so every class gets balanced coverage</button>
+      <button class="q-opt">To make the response shorter so the pool grows much faster</button>
+      <button class="q-opt">To skip the filter step entirely for classification prompts</button>
+      <button class="q-opt">To let the reward model score the label before any input</button>
+      <div class="q-fb">Generating the label first and then a matching input prevents the model from collapsing onto one easy majority class.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">How much human data does Self-Instruct require to start?</div>
+      <button class="q-opt">A ranked comparison for every single generated response pair</button>
+      <button class="q-opt">A reward model trained on tens of thousands of comparisons</button>
+      <button class="q-opt">A full corpus of gold answers written for each new task</button>
+      <button class="q-opt">A small seed set of 175 human-written example tasks</button>
+      <div class="q-fb">The whole method bootstraps from just 175 seed tasks; everything else is generated and filtered by the model.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previous, <a href="0021-speculative-decoding.html">Speculative Decoding</a></b> made generation faster; here we turn generation into a <em>data factory</em> for alignment.</li>
+    <li><b>Next, <a href="0023-instructgpt-rlhf.html">InstructGPT (RLHF)</a></b> is the human-feedback pipeline Self-Instruct was measured against - it shows the expensive path this paper tries to shortcut.</li>
+    <li>The self-generation idea reappears in <a href="0024-constitutional-ai.html">Constitutional AI</a>, where the model critiques and revises its own answers instead of just inventing tasks.</li>
+    <li>Synthetic preference and instruction data feed straight into <a href="0025-dpo.html">DPO</a> and <a href="0026-orpo.html">ORPO</a>, which need paired data to learn from.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The trickiest bit is why the pool does not just fill with garbage. Ask the agent to run the ROUGE-L filter on a few made-up instructions and show which get rejected, or to explain how output-first generation balances classes. Once the "filter, then grow" intuition clicks, the rest is easy.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2212.10560">Wang et al., "Self-Instruct: Aligning Language Models with Self-Generated Instructions" (2022)</a>. Then look at the <a href="https://github.com/yizhongw/self-instruct">official code and generated data</a> to see the real prompts, and Stanford's <a href="https://crfm.stanford.edu/2023/03/13/alpaca.html">Alpaca</a> for a famous, direct application of the same recipe.</p>
+
+  <div class="pager">
+    <a href="0021-speculative-decoding.html"><span class="dir">&larr; Previous</span><span class="ttl">Speculative Decoding</span></a>
+    <a class="nxt" href="0023-instructgpt-rlhf.html"><span class="dir">Next &rarr;</span><span class="ttl">InstructGPT (RLHF)</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 22 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

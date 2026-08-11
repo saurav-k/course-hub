@@ -1,0 +1,281 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Retrieval-Augmented Generation - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Reasoning, Retrieval &amp; Agents &middot; Lesson 31</div>
+  <h1>Retrieval-Augmented Generation</h1>
+  <p class="paper-meta">
+    <span class="pill">2020</span>
+    Lewis, Perez, Piktus, Petroni, Karpukhin, Goyal, Kuttler, Lewis, Yih, Rocktaschel, Riedel, Kiela (Facebook AI Research / UCL).
+    &middot; <a href="https://arxiv.org/abs/2005.11401">arXiv:2005.11401</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A language model stores everything it knows inside its weights - <b>parametric memory</b>. That memory is fixed at training time, hard to update, and prone to confidently making things up.</li>
+      <li>RAG bolts on a second, <b>non-parametric memory</b>: a searchable index of documents (a dense vector index of Wikipedia) that the model can look things up in.</li>
+      <li>Given a question, a <b>retriever (DPR)</b> pulls the top-k relevant passages, and a <b>generator (BART)</b> writes an answer conditioned on both the question and those passages.</li>
+      <li>Result: more <b>specific, factual</b> answers, fewer hallucinations, and knowledge you can <b>update by swapping the index</b> - no retraining. This is the blueprint behind almost every modern "chat with your documents" system.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>A pretrained model is a compression of its training corpus into weights. Ask it a fact and it reconstructs an answer from those weights. This works impressively often, but it has three deep flaws. The knowledge is <strong>frozen</strong> at the training cutoff. It is <strong>opaque</strong> - you cannot point to where an answer came from. And when the weights do not actually contain the fact, the model does not say "I don't know"; it <strong>hallucinates</strong> a plausible-sounding wrong answer.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph PARAM["Parametric only (plain LM)"]
+    direction TB
+    q1["question"] --> m1["model weights<br/>(all knowledge baked in)"]
+    m1 --> a1["answer<br/>frozen, opaque, may hallucinate"]
+  end
+  subgraph RAG["Retrieval-augmented"]
+    direction TB
+    q2["question"] --> r2["retrieve documents<br/>from an external index"]
+    r2 --> m2["model weights<br/>+ retrieved passages"]
+    m2 --> a2["answer<br/>grounded, updatable, cited"]
+  end
+    </div>
+    <figcaption>The core shift. A plain language model answers only from what is baked into its weights, so its knowledge is frozen and unverifiable. RAG adds a <b>lookup step before generation</b>, so the answer is written with real source passages in view - which makes it updatable, attributable, and far less likely to be invented.</figcaption>
+  </figure>
+
+  <p>The paper's idea is to separate <strong>knowing</strong> from <strong>saying</strong>. Keep the language model's fluency and reasoning, but let it fetch facts from an external store at query time instead of relying only on memory. Swap the store and the model instantly "knows" new things.</p>
+
+  <h2>2. Two kinds of memory</h2>
+  <p>RAG combines two memories that had usually been used alone.</p>
+  <ul>
+    <li><strong>Parametric memory</strong> - a pretrained sequence-to-sequence model, <strong>BART</strong>, whose weights hold general language ability and background knowledge. This is the generator.</li>
+    <li><strong>Non-parametric memory</strong> - a <strong>dense vector index</strong> of a Wikipedia dump, split into ~21 million 100-word passages. Each passage is stored as a vector so it can be searched by meaning, not just keywords.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph OFFLINE["Built once, offline"]
+    direction TB
+    docs["Wikipedia passages"] --> enc["passage encoder (DPR)"]
+    enc --> idx["dense vector index<br/>(one vector per passage)"]
+  end
+  subgraph ONLINE["Per query"]
+    direction TB
+    qq["question"] --> qenc["question encoder (DPR)"]
+    qenc --> qv["question vector"]
+  end
+  qv --> search["nearest-neighbour search in index"]
+  idx --> search
+  search --> topk["top-k passages"]
+    </div>
+    <figcaption>How retrieval works. Offline, every passage is turned into a vector once and stored in an index. At query time the question is turned into a vector by the same kind of encoder, and the index is searched for the <b>nearest passage vectors by meaning</b>. Because both sides are dense vectors, "car" can match "automobile" even with no shared words.</figcaption>
+  </figure>
+
+  <p>The retriever is <strong>Dense Passage Retrieval (DPR)</strong>: two BERT-based encoders, one for questions and one for passages, trained so that a question vector lands close to the vectors of passages that answer it. Closeness is measured by dot product, and finding the top matches is a fast nearest-neighbour search.</p>
+
+  <h2>3. The full retrieve-then-generate pipeline</h2>
+  <p>Put the pieces in order. A question comes in. DPR encodes it and retrieves the top-k passages (the paper uses small k like 5 or 10). Each retrieved passage is concatenated with the question and fed to BART, which generates an answer. The retrieved documents act as an evidence packet the generator reads before writing.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant R as DPR retriever
+  participant I as Wikipedia index
+  participant G as BART generator
+  U->>R: question
+  R->>I: search with question vector
+  I-->>R: top-k passages
+  R->>G: question + retrieved passages
+  G-->>U: answer grounded in passages
+    </div>
+    <figcaption>The retrieve-then-generate loop. The retriever converts the question into a vector, searches the index, and hands the best passages to the generator, which writes the final answer while reading them. The <b>generator never has to have memorized the fact</b> - it just has to read and synthesize the evidence it was given.</figcaption>
+  </figure>
+
+  <h2>4. RAG-Sequence vs RAG-Token</h2>
+  <p>There is a subtle choice: should the whole answer come from one retrieved passage, or can different parts of the answer draw on different passages? The paper defines both.</p>
+  <ul>
+    <li><strong>RAG-Sequence</strong>: pick the retrieved documents, then generate the <em>entire</em> answer conditioned on the <em>same</em> document(s). Simple and coherent.</li>
+    <li><strong>RAG-Token</strong>: for <em>each generated token</em>, the model can blend over all retrieved documents. More flexible - a single answer can stitch facts from several sources.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph SEQ["RAG-Sequence"]
+    direction TB
+    s1["choose doc(s)"] --> s2["generate whole answer<br/>from the same doc(s)"]
+  end
+  subgraph TOK["RAG-Token"]
+    direction TB
+    t1["token 1 blends all docs"] --> t2["token 2 blends all docs"]
+    t2 --> t3["token 3 blends all docs"]
+  end
+    </div>
+    <figcaption>Two ways to use the retrieved set. <b>RAG-Sequence</b> commits to a document set and writes the whole answer from it, which keeps the answer coherent. <b>RAG-Token</b> re-weights the documents at every token, so <b>one answer can draw facts from several passages at once</b> - handy when the answer needs to combine sources.</figcaption>
+  </figure>
+
+  <h2>5. The math, read in plain English</h2>
+  <p>RAG treats the retrieved document as a hidden variable and marginalizes over the top-k. The two variants differ only in <em>where</em> the sum sits.</p>
+
+  <div class="math">p<sub>RAG-Seq</sub>(y &divide; x) = &Sigma;<sub>z &isin; top-k</sub> p<sub>ret</sub>(z &divide; x) &middot; p<sub>gen</sub>(y &divide; x, z)
+    <span class="gloss"><b>x</b>: the question. <b>y</b>: the full answer sequence. <b>z</b>: a retrieved passage. <b>p<sub>ret</sub>(z &divide; x)</b>: how relevant the retriever judged passage z (its retrieval score, softmaxed over the top-k). <b>p<sub>gen</sub>(y &divide; x, z)</b>: how likely BART is to produce the whole answer y when reading question x and passage z. <b>&Sigma;</b>: average over the top-k passages, weighted by relevance - so a better-matched passage counts more.</span>
+  </div>
+
+  <div class="math">p<sub>RAG-Tok</sub>(y &divide; x) = &prod;<sub>i</sub> &Sigma;<sub>z &isin; top-k</sub> p<sub>ret</sub>(z &divide; x) &middot; p<sub>gen</sub>(y<sub>i</sub> &divide; x, z, y<sub>&lt;i</sub>)
+    <span class="gloss"><b>&prod;<sub>i</sub></b>: multiply across answer positions - the answer is generated token by token. <b>y<sub>i</sub></b>: the i-th token; <b>y<sub>&lt;i</sub></b>: the tokens already written. The document sum <b>&Sigma;<sub>z</sub></b> now sits <i>inside</i> the per-token product, so each token can lean on a different passage. That is the one difference from RAG-Sequence.</span>
+  </div>
+
+  <h2>6. Implement it: a minimal RAG in numpy</h2>
+  <p>The essence of RAG needs no heavy libraries. Below: chunk documents, embed them, embed the query, take cosine top-k, and stuff the winners into a prompt. The embedder here is a toy bag-of-words for offline running; in practice you would call a real embedding model, but the pipeline shape is identical.</p>
+
+  <div class="code-cap">minimal_rag.py &middot; runnable with numpy</div>
+  <pre><code>import numpy as np, re
+from collections import Counter
+
+# --- 1. chunk documents into small passages ---
+def chunk(text, size=12):
+    words = text.split()
+    # slide a window so each chunk is a retrievable passage
+    return [" ".join(words[i:i+size]) for i in range(0, len(words), size)]
+
+docs = [
+    "The Eiffel Tower is in Paris and was completed in 1889 for the World's Fair.",
+    "The Great Wall of China is over 13000 miles long and was built over many centuries.",
+    "Python is a programming language created by Guido van Rossum in 1991.",
+]
+passages = [c for d in docs for c in chunk(d)]
+
+# --- 2. a toy embedder: bag-of-words vector over a shared vocabulary ---
+def tokenize(s): return re.findall(r"[a-z0-9]+", s.lower())
+vocab = sorted({t for p in passages for t in tokenize(p)})
+index = {w: i for i, w in enumerate(vocab)}
+
+def embed(text):
+    v = np.zeros(len(vocab))
+    for w, c in Counter(tokenize(text)).items():
+        if w in index:
+            v[index[w]] = c
+    n = np.linalg.norm(v)
+    return v / n if n > 0 else v          # unit vectors -> dot product = cosine
+
+# --- 3. build the index once (offline) ---
+doc_vecs = np.stack([embed(p) for p in passages])
+
+# --- 4. retrieve top-k by cosine similarity ---
+def retrieve(query, k=2):
+    q = embed(query)
+    sims = doc_vecs @ q                    # cosine sim to every passage
+    top = np.argsort(-sims)[:k]            # highest similarity first
+    return [(passages[i], float(sims[i])) for i in top]
+
+# --- 5. stuff retrieved passages into a grounded prompt ---
+def build_prompt(query, k=2):
+    hits = retrieve(query, k)
+    context = "\n".join(f"- {p}" for p, _ in hits)
+    return (f"Use ONLY the context to answer.\n"
+            f"Context:\n{context}\n\nQuestion: {query}\nAnswer:")
+
+question = "When was the Eiffel Tower completed?"
+for p, s in retrieve(question):
+    print(f"{s:.2f}  {p}")
+print("\n--- prompt sent to the generator ---")
+print(build_prompt(question))
+# the generator now reads the 1889 passage and answers from it, not from memory</code></pre>
+
+  <p>Two practical points the code makes concrete. <strong>Chunking</strong> matters: passages must be small enough to be specific but large enough to be self-contained, which is why real systems tune chunk size and overlap. And <strong>embeddings</strong> are the whole magic of dense retrieval - a good embedding puts "completed in 1889" near "When was it finished?" even with no shared words. Replace the toy <code>embed</code> with a real sentence-embedding model and this becomes a usable RAG system.</p>
+
+  <div class="card callout key"><span class="tag">Why it curbs hallucination</span>
+    A plain model answers from fuzzy memory. RAG puts the actual source text in the prompt and instructs the generator to answer <b>from the context</b>. The model's job shifts from "recall the fact" to "read and summarize the passage," which is far easier and far more faithful - and you can show the user which passage the answer came from.</div>
+
+  <h2>7. What it bought</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Plain LM (parametric)</th><th>RAG (parametric + retrieval)</th></tr></thead>
+    <tbody>
+      <tr><td>Update knowledge</td><td>Retrain the whole model</td><td>Swap or edit the index</td></tr>
+      <tr><td>Source attribution</td><td>None - opaque weights</td><td>Points to retrieved passages</td></tr>
+      <tr><td>Hallucination risk</td><td>High on rare facts</td><td>Lower - answers from evidence</td></tr>
+      <tr><td>Open-domain QA</td><td>Baseline</td><td>State of the art (2020)</td></tr>
+    </tbody>
+  </table>
+  <p>RAG set the state of the art on three open-domain question-answering benchmarks and produced more specific, diverse, and factual generations than a same-size parametric-only baseline. More lasting than the numbers is the <strong>pattern</strong>: separate the knowledge store from the reasoner, and you get updatable, attributable, grounded generation. Every "chat over your PDFs" product today is a descendant of this paper.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the non-parametric memory in a RAG system?</div>
+      <button class="q-opt">The frozen weights of the BART generator model doing the writing</button>
+      <button class="q-opt">A searchable external index of passages, like a Wikipedia dump</button>
+      <button class="q-opt">The optimizer state that is saved between two training runs later</button>
+      <button class="q-opt">The positional encodings that inject word order into the prompt</button>
+      <div class="q-fb">Non-parametric memory is the external document index the model looks things up in, separate from the knowledge baked into weights.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does the DPR retriever actually compare to find passages?</div>
+      <button class="q-opt">The exact keyword spelling shared between question and each passage</button>
+      <button class="q-opt">The number of output tokens the generator plans to write in total</button>
+      <button class="q-opt">Dense vectors of the question against dense vectors of the passages</button>
+      <button class="q-opt">The gradient of the loss with respect to every passage in the index</button>
+      <div class="q-fb">DPR encodes both sides into dense vectors and finds passages whose vectors are nearest the question vector, matching by meaning not spelling.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">How does RAG-Token differ from RAG-Sequence?</div>
+      <button class="q-opt">It retrains the retriever encoder jointly with the generator weights</button>
+      <button class="q-opt">It skips retrieval entirely and answers from the weights alone now</button>
+      <button class="q-opt">It restricts the answer to come from one single retrieved passage</button>
+      <button class="q-opt">It lets each generated token draw on any of the retrieved passages</button>
+      <div class="q-fb">RAG-Token puts the document sum inside the per-token product, so different tokens of one answer can lean on different passages.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does retrieval reduce hallucination?</div>
+      <button class="q-opt">The model answers from source text placed directly in the prompt</button>
+      <button class="q-opt">The model is finetuned on every question it will ever be asked next</button>
+      <button class="q-opt">The retriever deletes any passage that contains an incorrect fact out</button>
+      <button class="q-opt">The generator is forced to output only the single most common token</button>
+      <div class="q-fb">With the real passage in context, the task becomes read-and-summarize rather than recall-from-memory, which is far more faithful.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>RAG's retriever is built from <a href="0002-bert.html">BERT</a> encoders; its generator is a sequence-to-sequence descendant of the <a href="0001-attention-is-all-you-need.html">Transformer</a>.</li>
+    <li><a href="0032-react.html">ReAct</a> makes retrieval an explicit action the model chooses mid-reasoning, rather than a fixed first step.</li>
+    <li>Grounding answers in evidence complements <a href="0030-chain-of-thought.html">Chain-of-Thought</a>: reason over facts you retrieved rather than facts you guessed.</li>
+    <li>Because it needs no retraining to add knowledge, RAG pairs naturally with cheap adapters like <a href="0029-qlora.html">QLoRA</a> for the style layer.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Swap the toy embedder for a real one in your head: ask the agent why "finished" and "completed" get similar vectors from a trained embedding model but not from the bag-of-words stub. Then ask it to break RAG on purpose by chunking too coarsely, and watch retrieval return an irrelevant passage. Feeling the failure modes is how you learn to tune a real system.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/2005.11401">Lewis et al., "Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks" (2020)</a>. Then read the <a href="https://arxiv.org/abs/2004.04906">DPR paper (Karpukhin et al., 2020)</a> to understand the dense retriever that makes it work.</p>
+
+  <div class="pager">
+    <a href="0030-chain-of-thought.html"><span class="dir">&larr; Previous</span><span class="ttl">Chain-of-Thought Prompting</span></a>
+    <a class="nxt" href="0032-react.html"><span class="dir">Next &rarr;</span><span class="ttl">ReAct</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 31 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ALiBi - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Attention &amp; Position Refinements &middot; Lesson 14</div>
+  <h1>ALiBi: Attention with Linear Biases</h1>
+  <p class="paper-meta">
+    <span class="pill">2021</span>
+    Ofir Press, Noah A. Smith, Mike Lewis (University of Washington / Allen Institute for AI / Meta AI).
+    &middot; <a href="https://arxiv.org/abs/2108.12409">arXiv:2108.12409</a> &middot; "Train Short, Test Long"
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>ALiBi uses <b>no position embeddings at all</b> - no vectors added to the input, no rotations on Q and K.</li>
+      <li>Instead it adds a fixed, non-learned <b>penalty to each attention score</b> that grows with how far apart two tokens are: the further back a token is, the more its score is docked.</li>
+      <li>The penalty is <b>&minus;m &middot; (i &minus; j)</b>, a straight line in distance, where each head gets its own slope <b>m</b> from a geometric sequence (1/2, 1/4, 1/8, ...).</li>
+      <li>Because the rule is just "distant tokens are penalized" and never memorises specific positions, a model <b>trained on length 1024 extrapolates cleanly to 2048 and beyond</b> - the paper's headline result, with 11% less time and memory than sinusoidal.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Every position method so far has a hidden weakness: they all learn or bake in something tied to <em>specific</em> positions. Sinusoidal encoding has a fixed wave shape; learned embeddings have a row per slot; even RoPE was tuned to a training length. So when you feed a model a sequence <strong>longer than anything it saw in training</strong>, the position signal wanders off the map and quality collapses. The authors asked a blunt question: can we train cheaply on short sequences and still run correctly on long ones?</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph BEFORE["Sinusoidal / learned: test longer than train"]
+    direction LR
+    t1["train on 1024"] --> t2["test on 2048"] --> t3["position signal<br/>unseen &rarr; quality falls"]
+  end
+  subgraph AFTER["ALiBi: same simple distance rule at any length"]
+    direction LR
+    a1["train on 1024"] --> a2["test on 2048"] --> a3["rule still holds<br/>&rarr; stays accurate"]
+  end
+    </div>
+    <figcaption>The problem ALiBi targets. Methods that encode absolute position have never seen slot 1500 during training, so at test time on longer inputs they degrade. ALiBi encodes only "penalize distance", a rule that is identical at any length, so the model <b>extrapolates to sequences far longer than it trained on</b>.</figcaption>
+  </figure>
+
+  <h2>2. The one idea: bias the scores by distance</h2>
+  <p>Recall the attention score for query <em>i</em> against key <em>j</em> is a dot product <code>q<sub>i</sub> &middot; k<sub>j</sub></code>. ALiBi leaves that untouched and simply <strong>adds a bias</strong> before the softmax. The bias is negative and proportional to the distance between the two tokens.</p>
+
+  <div class="math">score<sub>ij</sub> = q<sub>i</sub> &middot; k<sub>j</sub> + m &middot; ( &minus;(i &minus; j) )
+    <span class="gloss"><b>q<sub>i</sub> &middot; k<sub>j</sub></b>: the ordinary content-based attention score. <b>(i &minus; j)</b>: how many tokens back the key is from the query (0 for itself, 1 for the previous token, and so on). <b>&minus;(i &minus; j)</b>: turn that distance into a penalty - further back means a bigger negative number. <b>m</b>: a fixed positive slope for this head that sets how harshly distance is punished. No learning, no embeddings: the bias is computed from indices alone.</span>
+  </div>
+
+  <p>The nearest token gets a bias of 0 (no penalty). The token one step back gets <code>&minus;m</code>. Ten steps back gets <code>&minus;10m</code>. After softmax, that steadily growing penalty makes attention <strong>fade smoothly with distance</strong> - a built-in preference for recent context, which the paper calls an inductive bias toward recency.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q["query at position i"] --> B0["key i: bias 0"]
+  Q --> B1["key i-1: bias -m"]
+  Q --> B2["key i-2: bias -2m"]
+  Q --> B3["key i-3: bias -3m"]
+  Q --> B4["key i-4: bias -4m"]
+    </div>
+    <figcaption>The linear bias from one query's point of view. The penalty grows by a constant <b>m</b> for every extra step of distance - a straight line. Closer keys keep their raw score, far keys are pushed down before softmax, so a token naturally attends most to its recent neighbours. <b>The rule is the same whether the sequence is 100 or 100,000 tokens long.</b></figcaption>
+  </figure>
+
+  <h2>3. The bias matrix and the causal mask</h2>
+  <p>Stacked over all query-key pairs, the bias is a fixed matrix that is added onto the whole score grid. In a causal (left-to-right) model each query only sees the past, so we combine the linear bias with the usual upper-triangular mask that hides the future.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  S["raw scores<br/>Q K&#7488;  (N &times; N)"] --> ADD(("+"))
+  BIAS["ALiBi bias<br/>m &middot; distance matrix"] --> ADD
+  ADD --> MASK["mask future<br/>upper triangle &rarr; -inf"]
+  MASK --> SM["row-wise softmax"]
+  SM --> OUT["&times; V &rarr; output"]
+    </div>
+    <figcaption>Where ALiBi plugs in. The distance-penalty matrix is added straight onto the raw <b>Q K&#7488;</b> scores, then the causal mask hides future tokens, then softmax and the value blend proceed as normal. There is nothing to learn and nothing added at the input - ALiBi lives entirely as a static bias between the dot product and the softmax.</figcaption>
+  </figure>
+
+  <h2>4. Per-head slopes: a geometric ladder</h2>
+  <p>A single slope would make every head decay at the same rate. Instead each head gets a <strong>different</strong> slope so the model can look at several distance scales at once: sharp-decay heads focus tightly on the last few tokens, gentle-decay heads still reach far back. The slopes form a geometric sequence. For a model with <em>n</em> heads (a power of two), the slopes start at <code>2<sup>&minus;8/n</sup></code> and multiply by that same ratio.</p>
+
+  <div class="math">slopes = ( 2<sup>&minus;8/n</sup> )<sup>1</sup>, ( 2<sup>&minus;8/n</sup> )<sup>2</sup>, ..., ( 2<sup>&minus;8/n</sup> )<sup>n</sup>
+    <span class="gloss"><b>n</b>: the number of attention heads. <b>2<sup>&minus;8/n</sup></b>: the first slope and also the common ratio of the sequence. For <b>n = 8</b> this gives 2<sup>&minus;1</sup>, 2<sup>&minus;2</sup>, ..., 2<sup>&minus;8</sup> = 1/2, 1/4, 1/8, down to 1/256. Big slopes (steep penalty) make short-range heads; tiny slopes (mild penalty) make long-range heads. The geometric spacing spreads heads evenly across scales.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  H["8 heads, geometric slopes"] --> A["head 1  m = 1/2<br/>steep: very local"]
+  H --> B["head 2  m = 1/4"]
+  H --> C["head 4  m = 1/16<br/>medium range"]
+  H --> D["head 8  m = 1/256<br/>shallow: long range"]
+    </div>
+    <figcaption>Different heads, different reach. A steep slope of 1/2 punishes distance hard, so that head attends only to the last handful of tokens. A shallow slope of 1/256 barely penalizes distance, so that head can still attend far into the past. <b>The geometric ladder lets one layer cover local and global context simultaneously.</b></figcaption>
+  </figure>
+
+  <h2>5. Implement it: the bias matrix and slopes</h2>
+  <p>ALiBi is remarkably little code. Here we compute the per-head slopes, build the distance-penalty matrix, add it to raw scores, and mask the future.</p>
+
+  <div class="code-cap">alibi.py &middot; runnable with torch</div>
+  <pre><code>import torch, math
+
+def alibi_slopes(n_heads):
+    # geometric sequence starting at 2^(-8/n) with that same ratio
+    start = 2 ** (-8.0 / n_heads)
+    return torch.tensor([start ** (h + 1) for h in range(n_heads)])
+
+def alibi_bias(n_heads, seq_len):
+    # distance matrix: entry (i, j) = -(i - j) for j <= i, else masked later
+    idx = torch.arange(seq_len)
+    dist = idx[None, :] - idx[:, None]          # (i, j) -> j - i  = -(i - j)
+    dist = dist.clamp(max=0).float()            # keys ahead handled by mask
+    slopes = alibi_slopes(n_heads)              # (n_heads,)
+    return slopes[:, None, None] * dist         # (n_heads, seq, seq)
+
+def attention_with_alibi(q, k, v, n_heads):
+    # q, k, v: (n_heads, seq, d_head)
+    seq, d = q.shape[1], q.shape[2]
+    scores = (q @ k.transpose(-2, -1)) / math.sqrt(d)   # raw QK^T
+    scores = scores + alibi_bias(n_heads, seq)          # add linear bias
+    future = torch.triu(torch.ones(seq, seq), diagonal=1).bool()
+    scores = scores.masked_fill(future, float('-inf'))  # causal mask
+    return scores.softmax(dim=-1) @ v
+
+print(alibi_slopes(8))                          # 1/2, 1/4, ... 1/256
+h, s, d = 8, 6, 16
+out = attention_with_alibi(torch.randn(h,s,d), torch.randn(h,s,d),
+                           torch.randn(h,s,d), h)
+print(out.shape)                                # torch.Size([8, 6, 16])</code></pre>
+
+  <p>Notice what is <em>not</em> here: no embedding table, no sinusoids, no rotation. The only position input is the integer distance <code>i &minus; j</code>. That is exactly why extrapolation works - to run on a longer sequence you just build a bigger distance matrix; the slopes and the rule never change.</p>
+
+  <div class="card callout key"><span class="tag">Why it extrapolates</span>
+    A learned or sinusoidal encoding must represent position 4000 with something it may never have seen at training length 1024. ALiBi represents position only through <em>relative distance</em> fed into a fixed linear penalty. Distance 3000 is handled by the same slope as distance 30, just a bigger number, so nothing is out of distribution. Train short, test long.</div>
+
+  <h2>6. ALiBi versus sinusoidal, in one table</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Sinusoidal (Lesson 01)</th><th>RoPE (Lesson 13)</th><th>ALiBi</th></tr></thead>
+    <tbody>
+      <tr><td>Adds position where</td><td>Onto input embedding</td><td>Rotates Q and K</td><td>Onto attention scores</td></tr>
+      <tr><td>Learned parameters</td><td>None</td><td>None</td><td>None</td></tr>
+      <tr><td>Encodes</td><td>Absolute position</td><td>Relative via rotation</td><td>Relative distance penalty</td></tr>
+      <tr><td>Extrapolate past train length</td><td>Weak</td><td>Some, better with scaling</td><td>Strong out of the box</td></tr>
+      <tr><td>Extra compute at run time</td><td>Small add</td><td>Small rotate</td><td>Small bias add</td></tr>
+    </tbody>
+  </table>
+  <p>The paper's flagship demonstration: a 1.3-billion-parameter model trained on sequences of length 1024 extrapolated to length 2048 and matched a sinusoidal model trained directly on the longer length, while using about 11% less memory and training 11% faster.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does ALiBi add to the model to encode position?</div>
+      <button class="q-opt">A learned embedding vector looked up once for every position</button>
+      <button class="q-opt">A rotation applied to the query and key before the dot product</button>
+      <button class="q-opt">A sinusoidal wave vector summed onto every input token embedding</button>
+      <button class="q-opt">A fixed distance penalty added onto each raw attention score</button>
+      <div class="q-fb">ALiBi adds a non-learned bias, minus m times the distance, directly to the QK score before softmax. No embeddings.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why can an ALiBi model test on far longer sequences than it trained on?</div>
+      <button class="q-opt">Distance feeds a fixed linear rule, so long gaps are never unseen</button>
+      <button class="q-opt">The learned position table is simply reindexed to the new length</button>
+      <button class="q-opt">The sinusoidal frequencies are rescaled to cover the longer range</button>
+      <button class="q-opt">The rotation angles wrap around and repeat once the context grows</button>
+      <div class="q-fb">ALiBi only ever uses relative distance in a fixed penalty, so distance 3000 is just a bigger input to the same rule.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does each attention head get a different slope m?</div>
+      <button class="q-opt">To let every single head attend to exactly the same fixed window</button>
+      <button class="q-opt">To make the total penalty across all heads cancel out to zero</button>
+      <button class="q-opt">To cover many distance scales, from very local to very long range</button>
+      <button class="q-opt">To replace the value vectors that ALiBi otherwise leaves unused</button>
+      <div class="q-fb">Steep slopes make short-range heads, shallow slopes make long-range heads; the geometric ladder spreads them out.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What bias does the query receive for the key right next to itself?</div>
+      <button class="q-opt">A large negative bias, since adjacent tokens are penalized most</button>
+      <button class="q-opt">A bias of zero, since the distance for the nearest key is zero</button>
+      <button class="q-opt">A large positive bias, boosting the closest token above the rest</button>
+      <button class="q-opt">A random bias sampled fresh from the slope at every forward pass</button>
+      <div class="q-fb">Bias is minus m times distance; distance 0 gives bias 0, so the nearest token keeps its raw score.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Contrast with</b> the previous lesson, <a href="0013-rope.html">RoPE</a>: RoPE keeps a position encoding but makes it relative by rotation, while ALiBi throws position embeddings out entirely and biases the scores.</li>
+    <li><b>Replaces</b> the sinusoidal <a href="0001-attention-is-all-you-need.html">positional encoding</a> from the original Transformer - same goal, a much simpler and more extrapolation-friendly mechanism.</li>
+    <li><b>Shares infrastructure with</b> <a href="0015-multi-query-attention.html">Multi-Query Attention</a> and <a href="0016-grouped-query-attention.html">Grouped-Query Attention</a>: all three are surgical edits to the attention block rather than the rest of the network.</li>
+    <li><b>Feeds into</b> long-context work; both ALiBi and RoPE-with-scaling are how models reach the huge context windows you use today.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The intuition to lock in is "penalize distance with a straight line, and never learn anything position-specific". Ask the agent to print the full ALiBi bias matrix for a length-6 sequence and one head, then show how extending it to length 12 changes nothing except adding more rows and columns of the same rule. That is extrapolation made visible.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2108.12409">Press, Smith &amp; Lewis, "Train Short, Test Long: Attention with Linear Biases Enables Input Length Extrapolation" (2021)</a>. For a clean annotated implementation, see the <a href="https://nn.labml.ai/transformers/alibi/index.html">labml.ai ALiBi walkthrough</a>, which builds the slopes and bias matrix step by step in runnable PyTorch.</p>
+
+  <div class="pager">
+    <a href="0013-rope.html"><span class="dir">&larr; Previous</span><span class="ttl">RoPE: Rotary Position Embeddings</span></a>
+    <a class="nxt" href="0015-multi-query-attention.html"><span class="dir">Next &rarr;</span><span class="ttl">Multi-Query Attention</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 14 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

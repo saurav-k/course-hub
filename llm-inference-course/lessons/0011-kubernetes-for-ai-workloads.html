@@ -1,0 +1,352 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubernetes for AI Workloads: HPA and Autoscaling - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Scale and Operations &middot; Lesson 11</div>
+  <h1>Kubernetes for AI Workloads: HPA and Autoscaling</h1>
+  <p class="paper-meta">One vLLM pod is a demo. A fleet that grows and shrinks with traffic is a service. This lab wires a vLLM Deployment to a GPU node, exposes it with a Service, and scales it on <b>queue depth</b> instead of CPU. Official docs: <a href="https://docs.vllm.ai/en/stable/deployment/k8s.html">vLLM on Kubernetes</a> and <a href="https://keda.sh/docs/latest/scalers/prometheus/">KEDA Prometheus scaler</a>.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>GPUs are scheduled as <b>extended resources</b>. Install the NVIDIA device plugin, then ask for <code>nvidia.com/gpu: 1</code> in your pod. One pod owns a whole GPU by default.</li>
+      <li>A vLLM server is a normal <b>Deployment</b> plus a <b>Service</b>, with <b>readiness</b> and <b>liveness</b> probes on <code>/health</code> so traffic only arrives after the model has loaded.</li>
+      <li>The default HPA scales on CPU, which is useless for LLM serving (the CPU is idle while the GPU works). Scale on a <b>custom metric</b>: <code>vllm:num_requests_waiting</code> (queue depth), via Prometheus Adapter or KEDA.</li>
+      <li>The enemy is <b>cold start</b>: a new GPU pod needs minutes to pull the image, load weights, and capture CUDA graphs. Keep warm replicas, pre-pull images, and pre-provision GPU nodes.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Traffic to an LLM service is spiky. If you run a fixed number of GPU pods, you pay for the peak all day, or you get crushed when the peak arrives. Autoscaling is the fix, but the naive knob (CPU utilisation) does not move for an inference server, because the GPU carries the load and the CPU sits near idle. You have to scale on a signal the GPU actually produces: the request queue.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph FIXED["Fixed replicas"]
+    t1["traffic spike"] --> r1["2 pods, saturated"] --> q1["queue grows<br/>TTFT climbs<br/>requests time out"]
+  end
+  subgraph AUTO["Queue-based autoscaling"]
+    t2["traffic spike"] --> m2["queue depth rises"] --> s2["add pods"] --> q2["queue drains<br/>TTFT stays flat"]
+  end
+  FIXED -.->|"the upgrade"| AUTO
+    </div>
+    <figcaption>The before and after. With a fixed pool, a spike turns into a growing queue and rising time-to-first-token. <b>Scaling on queue depth adds capacity before latency breaks its SLO</b>, then removes it when the spike passes so you stop paying for idle GPUs.</figcaption>
+  </figure>
+
+  <h2>2. How a GPU gets scheduled</h2>
+  <p>Kubernetes does not know what a GPU is out of the box. The <strong>NVIDIA device plugin</strong>, run as a DaemonSet on every GPU node, advertises each card as an allocatable resource named <code>nvidia.com/gpu</code>. Your pod then requests it under <code>resources.limits</code>, and the scheduler only places the pod on a node that has a free card. There is no fractional sharing by default: a pod that asks for one GPU gets the whole device.</p>
+
+  <div class="term"><span class="c"># Install the NVIDIA device plugin (pin the version you tested)</span>
+<span class="p">$</span> kubectl create -f https://raw.githubusercontent.com/NVIDIA/k8s-device-plugin/v0.17.1/deployments/static/nvidia-device-plugin.yml
+<span class="o">daemonset.apps/nvidia-device-plugin-daemonset created</span>
+
+<span class="c"># Confirm the node now advertises GPUs</span>
+<span class="p">$</span> kubectl get nodes -o=jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.status.allocatable.nvidia\.com/gpu}{"\n"}{end}'
+<span class="o">gpu-node-a100-1    1</span></div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  dp["NVIDIA device plugin<br/>(DaemonSet on GPU nodes)"] -->|"advertises nvidia.com/gpu: 1"| api["kube-apiserver"]
+  pod["Pod spec<br/>resources:<br/>&nbsp;&nbsp;limits:<br/>&nbsp;&nbsp;&nbsp;&nbsp;nvidia.com/gpu: 1"] --> sched["kube-scheduler"]
+  api --> sched
+  sched -->|"only nodes with a free card"| node["GPU node<br/>1 pod = 1 whole GPU"]
+    </div>
+    <figcaption>How a GPU request is honoured. The device plugin tells the API server how many cards each node has; the scheduler matches a pod's <code>nvidia.com/gpu</code> request to a node with a free device. <b>Without the plugin, the request is unschedulable and the pod stays Pending forever.</b></figcaption>
+  </figure>
+
+  <h2>3. Deployment, Service, and probes</h2>
+  <p>A vLLM server is deployed like any other stateless HTTP app, with two differences: it asks for a GPU, and its <strong>probes</strong> must account for a slow start. vLLM exposes <code>/health</code> once the engine is ready. A <strong>readiness</strong> probe on that path keeps the pod out of the Service (no traffic) until the model is loaded. A <strong>liveness</strong> probe restarts the pod if the engine wedges. Because model load takes minutes, use a <strong>startup probe</strong> with a generous budget so the liveness probe does not kill the pod mid-load.</p>
+
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Deploy a vLLM server on a GPU, expose it, and autoscale on queue depth</h4>
+    <p>You will apply three manifests: a Deployment that requests one GPU and runs <code>vllm/vllm-openai</code>, a Service that load-balances across the pods, and an autoscaler that watches <code>vllm:num_requests_waiting</code>. Everything below is real and currently valid; pin image tags in production.</p>
+
+    <div class="code-cap">vllm-deploy.yaml &middot; Deployment + Service</div>
+    <pre><code>apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-llama
+  labels: { app: vllm-llama }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: vllm-llama } }
+  template:
+    metadata:
+      labels: { app: vllm-llama }
+    spec:
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:v0.6.6            # pin, do not use :latest
+          args:
+            - "--model"
+            - "meta-llama/Llama-3.1-8B-Instruct"
+            - "--max-model-len"
+            - "8192"
+          ports:
+            - { name: http, containerPort: 8000 }
+          env:
+            - name: HUGGING_FACE_HUB_TOKEN
+              valueFrom: { secretKeyRef: { name: hf-token, key: token } }
+          resources:
+            limits:
+              nvidia.com/gpu: 1                      # one whole GPU
+          startupProbe:                              # protects the slow model load
+            httpGet: { path: /health, port: 8000 }
+            failureThreshold: 60                     # 60 x 10s = up to 10 min to load
+            periodSeconds: 10
+          readinessProbe:                            # keeps traffic off until ready
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 5
+          livenessProbe:                             # restart if the engine wedges
+            httpGet: { path: /health, port: 8000 }
+            periodSeconds: 10
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vllm-llama
+spec:
+  selector: { app: vllm-llama }
+  ports:
+    - { name: http, port: 80, targetPort: 8000 }</code></pre>
+
+    <div class="term"><span class="p">$</span> kubectl apply -f vllm-deploy.yaml
+<span class="o">deployment.apps/vllm-llama created
+service/vllm-llama created</span>
+
+<span class="c"># Watch the pod crawl through cold start. It is NOT Ready until weights load.</span>
+<span class="p">$</span> kubectl get pods -w -l app=vllm-llama
+<span class="o">vllm-llama-6c...   0/1   ContainerCreating   0   40s
+vllm-llama-6c...   0/1   Running             0   95s    # engine still loading
+vllm-llama-6c...   1/1   Running             0   214s   # startupProbe passed, Ready</span></div>
+
+    <div class="code-cap">vllm-hpa.yaml &middot; HPA on a custom metric (via Prometheus Adapter)</div>
+    <pre><code>apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: vllm-hpa
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: vllm-llama
+  minReplicas: 1                                     # never scale to zero here
+  maxReplicas: 8
+  metrics:
+    - type: Pods
+      pods:
+        metric:
+          name: vllm_num_requests_waiting            # exposed by Prometheus Adapter
+        target:
+          type: AverageValue
+          averageValue: "5"                          # target ~5 queued req per pod
+  behavior:
+    scaleUp:   { stabilizationWindowSeconds: 30 }    # react fast to spikes
+    scaleDown: { stabilizationWindowSeconds: 300 }   # drain slowly, avoid thrash</code></pre>
+
+    <p>The HPA cannot read <code>vllm:num_requests_waiting</code> directly. A <strong>Prometheus Adapter</strong> scrapes vLLM and republishes the gauge into the Kubernetes custom-metrics API (the colon becomes an underscore, so it appears as <code>vllm_num_requests_waiting</code>). If you would rather skip the adapter, <strong>KEDA</strong> queries Prometheus itself and generates the HPA for you:</p>
+
+    <div class="code-cap">vllm-scaledobject.yaml &middot; KEDA alternative (no adapter needed)</div>
+    <pre><code>apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: vllm-scaler
+spec:
+  scaleTargetRef:
+    name: vllm-llama
+  minReplicaCount: 1
+  maxReplicaCount: 8
+  cooldownPeriod: 300
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: http://prometheus.monitoring.svc:9090
+        query: sum(vllm:num_requests_waiting)        # total queue across pods
+        threshold: "5"</code></pre>
+
+    <div class="term"><span class="p">$</span> kubectl apply -f vllm-hpa.yaml
+<span class="o">horizontalpodautoscaler.autoscaling/vllm-hpa created</span>
+
+<span class="p">$</span> kubectl get hpa vllm-hpa
+<span class="o">NAME       REFERENCE               TARGETS       MINPODS  MAXPODS  REPLICAS
+vllm-hpa   Deployment/vllm-llama   1200m/5 (avg)   1        8        1</span>
+
+<span class="c"># Under load the queue fills, the target ratio crosses 1, and pods are added</span>
+<span class="p">$</span> kubectl get hpa vllm-hpa
+<span class="o">vllm-hpa   Deployment/vllm-llama   7/5 (avg)       1        8        4</span></div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Scale signal</div><div class="v">Queue&nbsp;depth</div><div class="u">vllm:num_requests_waiting, not CPU</div></div>
+      <div class="metric"><div class="k">Target</div><div class="v">5 / pod</div><div class="u">tune to your TTFT SLO</div></div>
+      <div class="metric"><div class="k">Scale-up window</div><div class="v">30 s</div><div class="u">react fast to spikes</div></div>
+      <div class="metric"><div class="k">Scale-down window</div><div class="v">300 s</div><div class="u">drain slowly, avoid thrash</div></div>
+    </div>
+  </div>
+
+  <h2>4. The autoscaling control loop</h2>
+  <p>The HPA is a control loop. Every 15 seconds it reads the current metric, compares it to the target, and computes a desired replica count as <code>ceil(current / target &times; currentReplicas)</code>. KEDA sits in front of Prometheus and feeds that same loop. The whole request-to-scale path forms a cycle: requests hit the Service, pile into per-pod queues, the queue is scraped as a metric, the autoscaler reads it, and replicas change.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  cl["client"] --> svc["Service<br/>(load balance)"]
+  svc --> p1["vLLM pod 1"]
+  svc --> p2["vLLM pod 2"]
+  p1 -->|"/metrics"| prom["Prometheus"]
+  p2 -->|"/metrics"| prom
+  prom --> ad["Adapter / KEDA"]
+  ad --> hpa["HPA"]
+  hpa -->|"set replicas"| dep["Deployment"]
+  dep -.->|"add / remove pods"| svc
+    </div>
+    <figcaption>The request-to-scale loop. Traffic fans out through the Service to the pods, each pod publishes its queue depth on <code>/metrics</code>, Prometheus scrapes it, and the autoscaler turns that number into a replica count. <b>The Service and the metric close the loop: load changes the metric, the metric changes capacity.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant HPA
+  participant PA as Adapter / KEDA
+  participant P as Prometheus
+  participant D as Deployment
+  loop every 15s
+    HPA->>PA: current value of vllm_num_requests_waiting?
+    PA->>P: query gauge
+    P-->>PA: 7 per pod
+    PA-->>HPA: 7 (target is 5)
+    Note over HPA: desired = ceil(7/5 * 2) = 3
+    HPA->>D: scale to 3 replicas
+  end
+    </div>
+    <figcaption>One turn of the loop. The autoscaler polls the queue-depth metric, finds it above target, and computes the new replica count from the ratio. <b>Scale-up is only as fast as a new pod can become Ready, which is why cold start dominates real behaviour.</b></figcaption>
+  </figure>
+
+  <h2>5. Cold start is the real bottleneck</h2>
+  <p>The autoscaler can ask for a new pod in seconds, but that pod is not useful until it is <strong>Ready</strong>, and getting there is slow. A fresh GPU pod must pull a multi-gigabyte image, download or read model weights, load them onto the GPU, and capture CUDA graphs. On a large model this is minutes, not seconds, and if the GPU node itself has to be provisioned by the cluster autoscaler first, add several more.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Pending: scheduled, waiting for GPU node
+  Pending --> Pulling: node ready, pull image (GBs)
+  Pulling --> Loading: engine starts, load weights to GPU
+  Loading --> Warming: capture CUDA graphs
+  Warming --> Ready: /health passes, joins Service
+  Ready --> Serving: takes traffic
+  Serving --> [*]
+    </div>
+    <figcaption>A GPU pod's slow march to readiness. Each stage adds seconds to minutes, and only at <b>Ready</b> does the Service send traffic. <b>Every mitigation below attacks one of these stages so the pod is useful sooner.</b></figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>Cold-start pain</th><th>Stage it hits</th><th>Mitigation</th></tr></thead>
+    <tbody>
+      <tr><td>Multi-GB image pull</td><td>Pulling</td><td>Pre-pull to nodes (DaemonSet), bake into node image, use a registry mirror</td></tr>
+      <tr><td>Weight download from Hub</td><td>Loading</td><td>Cache weights on a PVC or hostPath, or bake them into the image</td></tr>
+      <tr><td>Weights to GPU + CUDA graphs</td><td>Loading, Warming</td><td>Keep warm replicas (minReplicas &ge; 1), over-provision headroom</td></tr>
+      <tr><td>No GPU node available</td><td>Pending</td><td>Pre-provisioned GPU node pool, pause pods, cluster autoscaler with buffer</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card callout key"><span class="tag">The warm-pool rule</span>
+    Because a new pod is minutes away, autoscaling alone cannot save you from a sharp spike. Run enough warm replicas to absorb the spike while new pods boot, and set <code>minReplicas</code> above zero so you never pay the full cold-start tax on the first request after a lull.</div>
+
+  <h2>6. Which autoscaler to reach for</h2>
+  <table>
+    <thead><tr><th>Approach</th><th>Scales on</th><th>Extra components</th><th>Best when</th></tr></thead>
+    <tbody>
+      <tr><td>HPA on CPU</td><td>CPU utilisation</td><td>None</td><td>Never for GPU inference (CPU stays idle)</td></tr>
+      <tr><td>HPA + Prometheus Adapter</td><td>Any Prometheus metric</td><td>Adapter deployment</td><td>You already run the adapter fleet-wide</td></tr>
+      <tr><td>KEDA</td><td>Any Prometheus metric</td><td>KEDA operator</td><td>Simplest queue-based scaling, scale-to-zero option</td></tr>
+      <tr><td>Cluster Autoscaler / Karpenter</td><td>Pending pods</td><td>Node provisioner</td><td>Adds the GPU nodes the pods above need</td></tr>
+    </tbody>
+  </table>
+
+  <div class="math">desired_replicas = ceil( current_replicas &times; current_metric / target_metric )
+    <span class="gloss"><b>current_metric</b>: the live per-pod queue depth. <b>target_metric</b>: your chosen setpoint (here 5). The HPA multiplies the current replica count by the ratio, so a queue at twice the target roughly doubles the pods, then rounds up.</span>
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is CPU utilisation a poor autoscaling signal for a vLLM pod?</div>
+      <button class="q-opt">The CPU metric updates far too slowly for the HPA loop to ever act on it</button>
+      <button class="q-opt">The CPU is always pinned at full load whenever the GPU is doing any work</button>
+      <button class="q-opt">The GPU carries the work while the CPU stays near idle, so it barely moves</button>
+      <button class="q-opt">The CPU value is hidden by the device plugin and cannot be read by the HPA</button>
+      <div class="q-fb">Inference load lives on the GPU; the CPU stays low, so scale on queue depth instead.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does the NVIDIA device plugin actually do?</div>
+      <button class="q-opt">It splits one physical GPU into many fractional shares for separate pods to use</button>
+      <button class="q-opt">It advertises each card as an allocatable nvidia.com/gpu resource to the scheduler</button>
+      <button class="q-opt">It preloads the model weights onto the GPU before the serving container starts up</button>
+      <button class="q-opt">It restarts any GPU pod whose liveness probe against the health endpoint fails</button>
+      <div class="q-fb">The plugin makes GPUs schedulable; without it, a GPU request stays Pending forever.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why keep the readiness probe separate from a startup probe on a GPU pod?</div>
+      <button class="q-opt">A single probe cannot target the health endpoint on the pod's container port</button>
+      <button class="q-opt">The readiness probe must run before the image has finished pulling to the node</button>
+      <button class="q-opt">The liveness probe is required to keep all traffic off the pod during model load</button>
+      <button class="q-opt">The startup probe gives model load a long budget so liveness never kills it early</button>
+      <div class="q-fb">Startup probe covers the slow load window; readiness gates traffic; liveness restarts a wedged engine.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does autoscaling alone fail to protect against a sharp traffic spike?</div>
+      <button class="q-opt">A new GPU pod needs minutes to pull, load, and warm before it can serve at all</button>
+      <button class="q-opt">The HPA can only add one single replica per hour due to its stabilisation window</button>
+      <button class="q-opt">The queue-depth metric is only scraped once every ten minutes by the Prometheus job</button>
+      <button class="q-opt">The Service refuses to route to any replica beyond the second one in the pool</button>
+      <div class="q-fb">Cold start dominates; keep warm replicas and pre-provision nodes to bridge the gap while pods boot.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can install the NVIDIA device plugin and confirm a node advertises <code>nvidia.com/gpu</code></li>
+    <li>I can write a vLLM Deployment + Service with startup, readiness, and liveness probes</li>
+    <li>I can explain why CPU is the wrong scale signal and pick queue depth instead</li>
+    <li>I applied an HPA (or KEDA ScaledObject) on <code>vllm:num_requests_waiting</code> and read <code>kubectl get hpa</code></li>
+    <li>I can name the cold-start stages and a mitigation for each</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want me to walk through wiring the Prometheus Adapter rules, or to compare KEDA scale-to-zero against a warm-pool setup for your traffic shape? Ask and we will build the manifests together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://docs.vllm.ai/en/stable/deployment/k8s.html">vLLM's official Kubernetes deployment guide</a>, the <a href="https://keda.sh/docs/latest/scalers/prometheus/">KEDA Prometheus scaler docs</a>, and NVIDIA's <a href="https://github.com/NVIDIA/k8s-device-plugin">k8s-device-plugin README</a> for the current install and GPU-sharing options (time-slicing, MPS, MIG).</p>
+
+  <div class="pager">
+    <a href="0010-edge-onnx-tensorrt-webllm.html"><span class="dir">&larr; Prev</span><span class="ttl">Edge Deployment: ONNX, TensorRT, WebLLM</span></a>
+    <a class="nxt" href="0012-observability-latency-tokens-cost.html"><span class="dir">Next &rarr;</span><span class="ttl">Observability: Latency, Tokens, Errors, Costs</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 11 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

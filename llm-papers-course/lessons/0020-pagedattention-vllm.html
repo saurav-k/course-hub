@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PagedAttention (vLLM) - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Efficient Inference &amp; Systems &middot; Lesson 20</div>
+  <h1>PagedAttention (vLLM)</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, Stoica (UC Berkeley).
+    &middot; <a href="https://arxiv.org/abs/2309.06180">arXiv:2309.06180</a> &middot; "Efficient Memory Management for Large Language Model Serving with PagedAttention"
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>The previous lesson made the KV cache <b>smaller</b>. This one manages it <b>without waste</b>. Older serving systems stored each sequence's cache in one <b>contiguous</b> block sized for the worst case, wasting <b>60-80%</b> of it to fragmentation and over-reservation.</li>
+      <li><b>PagedAttention</b> borrows the oldest trick in operating systems: <b>virtual memory paging</b>. It splits the KV cache into fixed-size <b>blocks</b> (pages) that need not be contiguous, and a <b>block table</b> maps each sequence's logical positions to scattered physical blocks.</li>
+      <li>Fragmentation nearly vanishes, so you fit far more sequences in the same GPU memory, which means bigger batches and higher throughput.</li>
+      <li>Blocks can also be <b>shared</b>. Sequences with a common prefix point at the same physical blocks (<b>copy-on-write</b> when one diverges), so parallel samples of one prompt store the prompt once. The result was a <b>2-4&times;</b> throughput gain, and the system is <b>vLLM</b>.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Before PagedAttention, a serving system had to reserve KV cache space up front. Because it could not know how long a reply would be, it reserved room for the maximum possible length, in one contiguous chunk, per sequence. Two kinds of waste followed. <strong>Internal fragmentation</strong>: the reserved-but-unused tail of each sequence's block. <strong>External fragmentation</strong>: leftover gaps between blocks too small to hold a new sequence. The paper measured that existing systems wasted <strong>60% to 80%</strong> of KV memory this way. Most of your expensive GPU memory sat empty.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph OLD["Old way: one contiguous block per sequence"]
+    direction LR
+    A["seq A: used | RESERVED WASTE"]
+    B["seq B: used | RESERVED WASTE"]
+    G["gap too small for seq C"]
+  end
+  subgraph NEW["PagedAttention: fixed-size blocks, any order"]
+    direction LR
+    b1["blk"]; b2["blk"]; b3["blk"]; b4["blk"]; b5["blk"]; b6["blk"]
+  end
+  OLD -->|"stop reserving worst case"| NEW
+    </div>
+    <figcaption>The waste, and the fix. Reserving a contiguous worst-case block per sequence leaves large reserved-but-unused tails and unusable gaps. <b>PagedAttention breaks memory into small fixed-size blocks that can sit anywhere</b>, so a sequence grows one block at a time and the leftover space is always reusable.</figcaption>
+  </figure>
+
+  <h2>2. The idea: KV cache as virtual memory</h2>
+  <p>Operating systems solved exactly this problem decades ago. A program sees a clean, contiguous <em>virtual</em> address space, but physically its memory is scattered across non-contiguous <strong>pages</strong>. A <strong>page table</strong> translates virtual addresses to physical ones. PagedAttention maps this idea onto the KV cache almost one to one.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph OS["Operating system"]
+    va["virtual address"] --> pt["page table"] --> pa["physical page (scattered)"]
+  end
+  subgraph PA["PagedAttention"]
+    lb["logical KV block<br/>(token positions)"] --> bt["block table"] --> pb["physical KV block (scattered)"]
+  end
+  OS -. "same idea" .-> PA
+    </div>
+    <figcaption>The analogy that names the paper. An OS gives each process a tidy virtual address space backed by scattered physical pages via a page table. PagedAttention gives each sequence a tidy logical sequence of KV blocks backed by scattered physical blocks via a <b>block table</b>. The decades-old paging playbook applies directly to the cache.</figcaption>
+  </figure>
+
+  <p>A "block" holds the keys and values for a fixed number of tokens (say 16). A sequence is just a list of logical blocks; the block table records which physical block each logical block currently lives in. To append a token, you write into the current block, and when it fills you grab any free physical block and add it to the table. Nothing needs to be contiguous, so there is nothing to fragment.</p>
+
+  <div class="math">blocks(seq) = ceil( S / B )&nbsp;&nbsp;&nbsp;internal_waste &le; (B &minus; 1) tokens per sequence
+    <span class="gloss"><b>S</b>: tokens in the sequence so far. <b>B</b>: block size (tokens per block, e.g. 16). <b>ceil(S / B)</b>: number of blocks the sequence needs. Only the final block can be partly empty, so wasted space is <b>at most B minus 1 tokens for the whole sequence</b> - a tiny bounded amount, versus the worst-case full reservation of the old contiguous scheme.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph SEQ["Sequence A, block size 4"]
+    L0["logical blk 0<br/>tokens 0-3"]
+    L1["logical blk 1<br/>tokens 4-7"]
+    L2["logical blk 2<br/>tokens 8-9 (partial)"]
+  end
+  subgraph TBL["Block table for A"]
+    m0["log 0 -> phys 7"]
+    m1["log 1 -> phys 2"]
+    m2["log 2 -> phys 5"]
+  end
+  subgraph POOL["Physical block pool (shared GPU memory)"]
+    p2["phys 2"]; p5["phys 5"]; p7["phys 7"]; pf["free: 0,1,3,4,6,8..."]
+  end
+  L0 --> m0 --> p7
+  L1 --> m1 --> p2
+  L2 --> m2 --> p5
+    </div>
+    <figcaption>How one sequence is laid out. Its tokens fall into logical blocks in order, but the block table sends each logical block to whatever physical block was free at the time (7, then 2, then 5). <b>Only the last block is partially filled - the single unit of internal waste - so total waste is at most one block per sequence</b> instead of a worst-case reservation.</figcaption>
+  </figure>
+
+  <h2>3. Prefix sharing and copy-on-write</h2>
+  <p>Paging unlocks a second win that contiguous allocation could never allow. If two sequences share a prefix - the same system prompt, or several samples of one user prompt - their early logical blocks hold identical keys and values. So point them at the <em>same physical blocks</em>. Store the shared prefix once. This is copy-on-write from operating systems: the blocks are shared read-only until one sequence writes a divergent token, at which point that single block is copied and the writer edits its private copy.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  P["shared prompt blocks<br/>(physical 3, 4)"]
+  P --> A["sample A block table<br/>log 0->3, log 1->4"]
+  P --> B["sample B block table<br/>log 0->3, log 1->4"]
+  A --> AD["A diverges at token 20<br/>copy blk -> phys 9, edit"]
+  B --> BD["B diverges at token 20<br/>copy blk -> phys 11, edit"]
+    </div>
+    <figcaption>Copy-on-write prefix sharing. Two samples of the same prompt point their early block-table entries at the <b>same physical blocks</b>, so the prompt's KV is stored once, not twice. When a sample writes a token that differs, only that one block is copied. <b>Parallel sampling and shared system prompts become nearly free in memory.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Sched as Scheduler
+  participant BT as Block table
+  participant Pool as Free block pool
+  participant HBM as GPU memory
+  Sched->>Pool: request block for new token
+  Pool-->>BT: hand out physical block 5
+  BT->>HBM: write K,V for the token into block 5
+  Note over Sched,HBM: sequence finishes
+  Sched->>Pool: free its blocks
+  Pool->>Pool: blocks return to pool, instantly reusable
+    </div>
+    <figcaption>Allocation over time, as a sequence. Each new token that overflows the current block pulls one physical block from a shared free pool; when the sequence ends its blocks go straight back. <b>Because allocation is per-block and pooled, memory freed by a finished request is immediately available to the next one</b> - no compaction, no stranded gaps.</figcaption>
+  </figure>
+
+  <h2>4. Implement it: a block-table KV allocator</h2>
+  <p>This is a small but faithful simulation of the mechanism: a pool of fixed-size physical blocks, per-sequence block tables, per-block reference counts for sharing, and copy-on-write on divergence. It prints the memory saved by prefix sharing.</p>
+
+  <div class="code-cap">paged_kv.py &middot; runnable, pure Python</div>
+  <pre><code>class PagedKVAllocator:
+    def __init__(self, n_blocks, block_size):
+        self.block_size = block_size
+        self.free = list(range(n_blocks))     # pool of physical block ids
+        self.refcount = {}                    # physical block -> how many seqs use it
+        self.tables = {}                      # seq id -> list of physical block ids
+
+    def _alloc(self):
+        blk = self.free.pop()                 # take any free physical block
+        self.refcount[blk] = 1
+        return blk
+
+    def new_seq(self, seq_id):
+        self.tables[seq_id] = []
+
+    def append_token(self, seq_id, pos):
+        table = self.tables[seq_id]
+        if pos % self.block_size == 0:        # current block full -> need a new one
+            table.append(self._alloc())
+        # (writing the K,V into table[-1] happens here in a real system)
+
+    def fork(self, parent, child):
+        """Share the parent's blocks with a child (prefix sharing)."""
+        self.new_seq(child)
+        self.tables[child] = list(self.tables[parent])
+        for blk in self.tables[child]:
+            self.refcount[blk] += 1           # now shared, read-only
+
+    def write_cow(self, seq_id, logical_blk):
+        """Copy-on-write: divergent write to a shared block."""
+        table = self.tables[seq_id]
+        blk = table[logical_blk]
+        if self.refcount[blk] > 1:            # shared -> must copy before editing
+            self.refcount[blk] -= 1
+            table[logical_blk] = self._alloc()
+
+    def used_blocks(self):
+        return len(self.refcount)
+
+# --- demo: one 64-token prompt, sampled 4 ways ---
+alloc = PagedKVAllocator(n_blocks=256, block_size=16)
+alloc.new_seq("prompt")
+for pos in range(64):                          # 64 tokens = 4 full blocks
+    alloc.append_token("prompt", pos)
+shared_blocks = alloc.used_blocks()
+
+for s in ["A", "B", "C", "D"]:                 # 4 samples share the prompt
+    alloc.fork("prompt", s)
+alloc.write_cow("A", logical_blk=3)            # sample A diverges in its last block
+
+naive = 4 * 4                                  # 4 samples * 4 blocks each, no sharing
+print(f"prompt blocks stored once : {shared_blocks}")
+print(f"physical blocks with sharing: {alloc.used_blocks()}")
+print(f"naive copies would need     : {naive} blocks "
+      f"({naive/alloc.used_blocks():.1f}x more)")</code></pre>
+
+  <p>The output shows the prompt stored once, four samples sharing it, and exactly one extra block spent when sample A diverges. Naive per-sample copies would need several times more memory. That saved memory is what lets vLLM pack a much larger batch onto the same GPU, which is where the throughput comes from.</p>
+
+  <h2>5. What it bought</h2>
+  <table>
+    <thead><tr><th>Concern</th><th>Contiguous allocation</th><th>PagedAttention</th></tr></thead>
+    <tbody>
+      <tr><td>Internal fragmentation</td><td>Large reserved tails</td><td>At most one partial block</td></tr>
+      <tr><td>External fragmentation</td><td>Unusable gaps form</td><td>None; blocks are uniform</td></tr>
+      <tr><td>Memory wasted</td><td>Roughly 60-80%</td><td>Near zero</td></tr>
+      <tr><td>Shared prefixes</td><td>Copied per sequence</td><td>Shared with copy-on-write</td></tr>
+    </tbody>
+  </table>
+  <p>The paper reports a <strong>2-4&times;</strong> throughput improvement at the same latency versus prior serving systems, with bigger gains on longer sequences and parallel decoding. PagedAttention did not change the model or the math at all - it changed only how the cache is stored - and it became the default memory manager for open-source LLM serving.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What classic systems idea does PagedAttention borrow?</div>
+      <button class="q-opt">Branch prediction that guesses the next instruction to run</button>
+      <button class="q-opt">Virtual memory paging with a table mapping to scattered pages</button>
+      <button class="q-opt">Garbage collection that sweeps unreachable objects away</button>
+      <button class="q-opt">Pipeline forwarding that passes results between the stages</button>
+      <div class="q-fb">It maps logical KV blocks to scattered physical blocks through a block table, exactly like OS paging.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why did contiguous allocation waste so much memory?</div>
+      <button class="q-opt">It stored the model weights once for each active sequence</button>
+      <button class="q-opt">It quantized every key and value down to a single byte</button>
+      <button class="q-opt">It reserved a worst-case contiguous block per sequence</button>
+      <button class="q-opt">It recomputed the whole cache from scratch every step</button>
+      <div class="q-fb">Reserving one contiguous max-length block per sequence left large unused tails and gaps: 60-80% waste.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How do two samples of one prompt share its KV cache?</div>
+      <button class="q-opt">Their block tables point at the same physical prompt blocks</button>
+      <button class="q-opt">Their prompt tokens are recomputed fresh on every new step</button>
+      <button class="q-opt">Their weights are merged into a single shared decoder pass</button>
+      <button class="q-opt">Their outputs are averaged before the final softmax layer</button>
+      <div class="q-fb">Prefix sharing points both block tables at the same physical blocks; the prompt is stored once.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What happens on a copy-on-write divergence?</div>
+      <button class="q-opt">The whole sequence is duplicated into fresh contiguous memory</button>
+      <button class="q-opt">The shared block is deleted and both sequences must restart</button>
+      <button class="q-opt">The block table is discarded and rebuilt from the token ids</button>
+      <button class="q-opt">Only the one divergent block is copied so the writer can edit</button>
+      <div class="q-fb">Shared blocks stay read-only until a write; then just that block is copied for the writer to modify.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Complements <a href="0019-kv-cache-optimization.html">KV cache compression</a></b> - that lesson shrinks the cache; PagedAttention stops wasting whatever cache you have.</li>
+    <li><b>Stacks with <a href="0016-grouped-query-attention.html">GQA</a> and <a href="0015-multi-query-attention.html">MQA</a></b> - fewer KV heads plus paged blocks compound into more sequences per GPU.</li>
+    <li><b>Pairs with <a href="0017-flashattention.html">FlashAttention</a></b> - Flash speeds the attention kernel; vLLM feeds it well-managed blocks.</li>
+    <li><b>Sets up <a href="0021-speculative-decoding.html">Speculative Decoding</a></b> - another serving-layer speedup that leaves the model's output unchanged.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to extend the allocator to evict and recompute blocks under memory pressure, or trace how a real vLLM batch schedules block allocation token by token? Ask and we will build it up from the toy above.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2309.06180">Kwon et al., "Efficient Memory Management for Large Language Model Serving with PagedAttention" (2023)</a>, then browse the <a href="https://github.com/vllm-project/vllm">vLLM source</a> to see the block manager in production code.</p>
+
+  <div class="pager">
+    <a href="0019-kv-cache-optimization.html"><span class="dir">&larr; Previous</span><span class="ttl">KV Cache Compression &amp; Optimization</span></a>
+    <a class="nxt" href="0021-speculative-decoding.html"><span class="dir">Next &rarr;</span><span class="ttl">Speculative Decoding</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 20 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

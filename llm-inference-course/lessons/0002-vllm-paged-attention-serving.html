@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>vLLM and PagedAttention Serving - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; High-Throughput Serving Engines &middot; Lesson 02</div>
+  <h1>vLLM and PagedAttention Serving</h1>
+  <p class="paper-meta">vLLM is the default answer to "how do I serve this model to many users at once." Its core trick, PagedAttention, treats the KV cache like virtual memory so almost no VRAM is wasted, which is what lets it batch aggressively and push throughput far past a naive loop.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>One command, <code>vllm serve &lt;model&gt;</code>, gives you an OpenAI-compatible server on port <b>8000</b>.</li>
+      <li><b>PagedAttention</b> stores the KV cache in fixed-size blocks like OS memory pages, so fragmentation is near zero and you can pack many more sequences into the same GPU.</li>
+      <li><b>Continuous batching</b> adds and removes sequences every decode step, keeping the GPU full instead of waiting for the slowest request in a fixed batch.</li>
+      <li><b>Prefix caching</b> (<code>--enable-prefix-caching</code>) reuses the KV of shared prompt prefixes so repeated system prompts are not recomputed.</li>
+      <li>You tune it with a handful of flags: <code>--gpu-memory-utilization</code>, <code>--max-num-seqs</code>, <code>--max-model-len</code>, <code>--tensor-parallel-size</code>.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>A naive server keeps one contiguous KV region per request, sized for the longest output it might produce. Most requests finish early, so that reserved space sits empty: fragmentation wastes the exact resource that limits how many users you can serve. PagedAttention removes that waste, and the freed memory turns directly into more concurrent sequences and higher throughput on the same card.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph naive["Naive contiguous KV"]
+    n1["req A: reserved slab, half empty"]
+    n2["req B: reserved slab, half empty"]
+    n3["wasted VRAM = fewer users"]
+  end
+  subgraph paged["PagedAttention"]
+    p1["shared block pool"]
+    p2["blocks handed out on demand"]
+    p3["near-zero waste = more users"]
+  end
+  naive -->|"same GPU"| paged
+    </div>
+    <figcaption>Where the memory goes. Contiguous allocation over-reserves for outputs that never arrive. <b>PagedAttention hands out small KV blocks only as tokens are generated, so almost all VRAM does useful work</b> and the same GPU holds far more simultaneous requests.</figcaption>
+  </figure>
+
+  <h2>2. PagedAttention: KV cache as paged memory</h2>
+  <p>The insight is borrowed straight from operating systems. Instead of one long contiguous array per sequence, the KV cache is chopped into fixed-size <b>blocks</b> (a handful of tokens each). A per-sequence <b>block table</b> maps logical token positions to physical blocks, which can sit anywhere in the pool. A sequence grows by grabbing a new block; when it finishes, its blocks return to the pool for the next request.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  seqA["Sequence A block table"] --> bA0["blk 7"]
+  seqA --> bA1["blk 2"]
+  seqA --> bA2["blk 9"]
+  seqB["Sequence B block table"] --> bB0["blk 4"]
+  seqB --> bB1["blk 1"]
+  pool["physical block pool (fixed-size KV blocks)"]
+  bA0 -.-> pool
+  bA1 -.-> pool
+  bA2 -.-> pool
+  bB0 -.-> pool
+  bB1 -.-> pool
+    </div>
+    <figcaption>Logical to physical mapping. Each sequence sees a tidy ordered list of tokens, but the blocks live scattered across a shared pool. <b>Because any free block fits any sequence, there is no external fragmentation and no need to pre-reserve for the worst case.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Why paging unlocks throughput</span>
+    The scarcest resource in decode is KV-cache memory, not compute. Recover the wasted memory and you can raise the number of in-flight sequences, which is the single biggest lever on tokens per second. Paging is what makes aggressive batching safe.</div>
+
+  <h2>3. Continuous batching: never wait for the slowest request</h2>
+  <p>Static batching groups N requests, runs them together, and cannot start anyone new until the whole batch finishes - so one long generation stalls everyone. vLLM instead schedules at the <b>iteration level</b>: every decode step it can retire finished sequences and admit waiting ones, keeping the batch as full as memory allows.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Q as Waiting queue
+  participant S as vLLM scheduler
+  participant G as GPU batch
+  Q->>S: reqs A, B, C, D arrive
+  S->>G: step 1: run A,B,C
+  Note over G: B finishes early
+  S->>G: step 2: retire B, admit D
+  Note over G: batch stays full
+  S->>G: step 3: run A,C,D
+    </div>
+    <figcaption>Iteration-level scheduling. The moment B is done its KV blocks free up and D takes the slot on the very next step. <b>The GPU never idles waiting for the slowest sequence, which is why continuous batching beats static batching on throughput.</b> Lesson 04 goes deep on this.</figcaption>
+  </figure>
+
+  <h2>4. Prefix caching: stop recomputing shared prompts</h2>
+  <p>Many requests share an opening: the same long system prompt, the same few-shot examples. With <code>--enable-prefix-caching</code>, vLLM hashes prompt prefixes and reuses the already-computed KV blocks for any request that starts the same way. The shared part is prefilled once; only the unique tail does new work, which cuts TTFT and prefill cost for high-overlap workloads.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  r1["req 1: &#91;system prompt&#93; + Q1"] --> c["cached KV for<br/>&#91;system prompt&#93;"]
+  r2["req 2: &#91;system prompt&#93; + Q2"] --> c
+  r3["req 3: &#91;system prompt&#93; + Q3"] --> c
+  c --> reuse["prefill the shared prefix ONCE<br/>only Q1/Q2/Q3 tails recomputed"]
+    </div>
+    <figcaption>Reuse instead of recompute. Three requests share the same system prompt, so its KV is built once and pointed to by all three. <b>Prefix caching turns a repeated expensive prefill into a cheap cache hit</b>, which matters most for agents and chat with fixed instructions.</figcaption>
+  </figure>
+
+  <h2>5. Lab: serve a model and benchmark its throughput</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Stand up vLLM, then measure tokens per second under concurrency</h4>
+    <p>You will launch an OpenAI-compatible vLLM server, confirm it answers, and benchmark it two ways: the bundled <code>vllm bench serve</code> tool, and a tiny concurrency loop so you can see throughput climb as you add parallel requests.</p>
+
+    <div class="code-cap">step 1 &middot; install and serve (needs an NVIDIA GPU)</div>
+    <div class="term">
+<span class="p">$</span> pip install vllm
+<span class="p">$</span> vllm serve meta-llama/Meta-Llama-3-8B-Instruct \
+    --gpu-memory-utilization 0.90 \  <span class="c"># fraction of VRAM for weights + KV cache</span>
+    --max-num-seqs 256 \             <span class="c"># cap on concurrent sequences in a batch</span>
+    --max-model-len 8192 \           <span class="c"># max context length per sequence</span>
+    --enable-prefix-caching          <span class="c"># reuse KV for shared prompt prefixes</span>
+<span class="o">INFO: Started server process; Uvicorn running on http://0.0.0.0:8000</span>
+<span class="c"># equivalent legacy form: python -m vllm.entrypoints.openai.api_server --model &lt;model&gt;</span>
+<span class="c"># multi-GPU: add --tensor-parallel-size 2 to shard the model across 2 GPUs</span>
+    </div>
+
+    <div class="code-cap">step 2 &middot; confirm the OpenAI-compatible endpoint on :8000</div>
+    <div class="term">
+<span class="p">$</span> curl http://localhost:8000/v1/completions \
+    -H "Content-Type: application/json" \
+    -d '{"model":"meta-llama/Meta-Llama-3-8B-Instruct","prompt":"Hello,","max_tokens":16}'
+<span class="o">{"id":"cmpl-...","choices":[{"text":" I am a language model..."}],...}</span>
+    </div>
+
+    <div class="code-cap">step 3 &middot; benchmark throughput with the bundled tool</div>
+    <div class="term">
+<span class="p">$</span> vllm bench serve \
+    --model meta-llama/Meta-Llama-3-8B-Instruct \
+    --dataset-name random \
+    --num-prompts 200 \
+    --request-rate inf              <span class="c"># fire all at once to find peak throughput</span>
+<span class="o">============ Serving Benchmark Result ============</span>
+<span class="o">Successful requests:            200</span>
+<span class="o">Request throughput (req/s):     18.4</span>
+<span class="o">Output token throughput (tok/s): 3120.5</span>
+<span class="o">Mean TTFT (ms):                 142.7</span>
+<span class="o">Mean TPOT (ms):                 12.3</span>
+    </div>
+
+    <div class="code-cap">step 4 &middot; watch throughput rise with a concurrency loop</div>
+    <pre><code>import asyncio, time
+from openai import AsyncOpenAI
+
+client = AsyncOpenAI(base_url="http://localhost:8000/v1", api_key="none")
+MODEL = "meta-llama/Meta-Llama-3-8B-Instruct"
+
+async def one_call():
+    r = await client.completions.create(model=MODEL, prompt="Explain KV cache.", max_tokens=128)
+    return r.usage.completion_tokens
+
+async def run(concurrency):
+    t0 = time.perf_counter()
+    tokens = await asyncio.gather(*[one_call() for _ in range(concurrency)])
+    dt = time.perf_counter() - t0
+    print(f"concurrency={concurrency:3d}  total_tok/s={sum(tokens)/dt:8.1f}")
+
+for c in (1, 8, 32, 128):          # same GPU, more in-flight requests
+    asyncio.run(run(c))</code></pre>
+
+    <p class="kpi">Expected shape: tokens per second climbs steeply from concurrency 1 to 32 as continuous batching fills the GPU, then flattens once you hit the KV-cache or compute ceiling. That flattening point is your practical <code>--max-num-seqs</code>.</p>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Endpoint</div><div class="v">:8000</div><div class="u">OpenAI-compatible /v1</div></div>
+      <div class="metric"><div class="k">gpu-mem-util</div><div class="v">0.90</div><div class="u">weights + KV budget</div></div>
+      <div class="metric"><div class="k">max-num-seqs</div><div class="v">256</div><div class="u">batch width ceiling</div></div>
+      <div class="metric"><div class="k">Throughput gain</div><div class="v">many&times;</div><div class="u">batch 1 to batch 32</div></div>
+    </div>
+  </div>
+
+  <h2>6. The tuning flags that actually move the needle</h2>
+  <table>
+    <thead><tr><th>Flag</th><th>What it controls</th><th>Turn it up when</th><th>Cost of turning it up</th></tr></thead>
+    <tbody>
+      <tr><td><code>--gpu-memory-utilization</code></td><td>VRAM fraction for weights + KV</td><td>You want a larger KV pool and more sequences</td><td>Too high risks out-of-memory under load</td></tr>
+      <tr><td><code>--max-num-seqs</code></td><td>Max concurrent sequences per batch</td><td>You have spare KV memory to fill</td><td>More KV pressure, possible preemption</td></tr>
+      <tr><td><code>--max-model-len</code></td><td>Max context length per request</td><td>Prompts or outputs are long</td><td>Each sequence reserves more KV blocks</td></tr>
+      <tr><td><code>--tensor-parallel-size</code></td><td>How many GPUs share the model</td><td>The model does not fit on one GPU</td><td>Adds cross-GPU communication overhead</td></tr>
+      <tr><td><code>--enable-prefix-caching</code></td><td>Reuse KV for shared prefixes</td><td>Requests share long system prompts</td><td>Small bookkeeping; little downside</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What problem does PagedAttention primarily solve?</div>
+      <button class="q-opt">It speeds up prefill by fusing the attention kernels into a single pass</button>
+      <button class="q-opt">It removes KV-cache fragmentation so more sequences fit in the same VRAM</button>
+      <button class="q-opt">It compresses model weights into four bits to shrink the memory footprint</button>
+      <button class="q-opt">It rewrites the sampler so decode emits several output tokens per step</button>
+      <div class="q-fb">Paged KV blocks cut fragmentation to near zero, and the recovered memory becomes more concurrent sequences.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does continuous batching differ from static batching?</div>
+      <button class="q-opt">It waits for every request in the batch to finish before starting more</button>
+      <button class="q-opt">It runs each request on its own GPU to avoid sharing any KV memory</button>
+      <button class="q-opt">It admits and retires sequences every decode step to keep the batch full</button>
+      <button class="q-opt">It doubles the batch size automatically whenever the queue grows large</button>
+      <div class="q-fb">Iteration-level scheduling frees a finished sequence and admits a waiting one on the next step, so the GPU never idles.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">When does <code>--enable-prefix-caching</code> help the most?</div>
+      <button class="q-opt">When many requests share a long identical system prompt or examples</button>
+      <button class="q-opt">When every request sends a totally unique prompt with no overlap at all</button>
+      <button class="q-opt">When outputs are extremely long but the prompts are only a few tokens</button>
+      <button class="q-opt">When the model is sharded across several GPUs with tensor parallelism</button>
+      <div class="q-fb">Shared prefixes are prefilled once and reused, so high-overlap workloads see lower TTFT and prefill cost.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the risk of setting <code>--gpu-memory-utilization</code> too high?</div>
+      <button class="q-opt">The server refuses to start because the value exceeds the legal range</button>
+      <button class="q-opt">The model silently drops to a lower precision to reclaim spare memory</button>
+      <button class="q-opt">Prefix caching turns itself off to make room for the larger weight copy</button>
+      <button class="q-opt">There is too little headroom, so heavy load can trigger out-of-memory</button>
+      <div class="q-fb">A higher fraction grows the KV pool but leaves less slack, so bursts of long sequences can OOM.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can launch vLLM with <code>vllm serve</code> and hit its :8000 endpoint</li>
+    <li>I can explain PagedAttention as blocks plus a per-sequence block table</li>
+    <li>I can say why continuous batching keeps the GPU busy</li>
+    <li>I can benchmark throughput with <code>vllm bench serve</code> and a concurrency loop</li>
+    <li>I can name what each core tuning flag trades off</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want me to help you read a <code>vllm bench serve</code> report line by line, or pick <code>--max-num-seqs</code> and <code>--gpu-memory-utilization</code> for a specific GPU and prompt length? Bring your numbers and we will tune it.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/latest/">vLLM documentation</a>, especially the <a href="https://docs.vllm.ai/en/latest/cli/bench/serve/">benchmark CLI reference</a> and the <a href="https://docs.vllm.ai/en/latest/configuration/optimization/">optimization guide</a> for the exact current flags.</p>
+
+  <div class="pager">
+    <a href="0001-local-testing-ollama-lmstudio-litellm.html"><span class="dir">&larr; Prev</span><span class="ttl">Local Testing: Ollama, LM Studio, LiteLLM</span></a>
+    <a class="nxt" href="0003-sglang-radixattention.html"><span class="dir">Next &rarr;</span><span class="ttl">SGLang and RadixAttention</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 02 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

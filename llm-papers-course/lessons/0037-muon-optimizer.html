@@ -1,0 +1,284 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Muon Optimizer - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Frontier Optimization &middot; Lesson 37</div>
+  <h1>Muon Optimizer</h1>
+  <p class="paper-meta">
+    <span class="pill">2024</span>
+    Keller Jordan, with Yuchen Jin, Vlado Boza, Jiacheng You, Franz Cesista, Laker Newhouse, Jeremy Bernstein.
+    &middot; <a href="https://kellerjordan.github.io/posts/muon/">kellerjordan.github.io/posts/muon</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Every optimiser you have met (SGD, Adam, AdamW) treats each weight as an independent number. But a hidden layer's weights are a <b>matrix</b>, and that shape carries information the per-number view throws away.</li>
+      <li>Muon (<b>MomentUm Orthogonalized by Newton-Schulz</b>) takes the ordinary SGD-with-momentum update for a weight matrix and <b>orthogonalises</b> it before applying: it replaces the matrix's singular values with 1s.</li>
+      <li>The orthogonalisation is done cheaply with a few <b>Newton-Schulz iterations</b>, a short polynomial recipe that runs in low precision and adds under 1% compute.</li>
+      <li>Why it helps: a raw momentum update tends to collapse into a few dominant directions. Flattening the singular values spreads the update evenly, so <b>rare but useful directions get updated too</b>. Use Muon for 2D hidden matrices and plain Adam for 1D things (embeddings, norms, biases). It has set training speed records and trains LLMs faster than AdamW.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this optimiser exists</h2>
+  <p>Training a neural network means repeatedly nudging its weights downhill on the loss. The optimiser decides how to turn a gradient into that nudge. AdamW, the workhorse behind almost every LLM, does this <strong>element by element</strong>: it keeps a running average of each weight's gradient and each weight's squared gradient, then scales every weight's step on its own. It never looks at how the weights sit together.</p>
+
+  <p>But a hidden layer is a weight <em>matrix</em> that maps one vector space to another. Its gradient is also a matrix, and matrices have structure that individual numbers do not: directions, and how much the update stretches along each. When you look at a real momentum update as a matrix, it is nearly <strong>low-rank</strong>. A handful of directions dominate, and everything else is tiny. Element-wise optimisers cannot see this, so they keep pouring the step into the same few directions the network already favours.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph ADAM["AdamW: element-wise"]
+    direction TB
+    ag["gradient matrix G"] --> ael["scale each entry on its own"]
+    ael --> aup["update keeps G's lopsided shape<br/>(a few directions dominate)"]
+  end
+  subgraph MUON["Muon: matrix-aware"]
+    direction TB
+    mg["momentum update B"] --> mor["orthogonalise:<br/>set every singular value to 1"]
+    mor --> mup["balanced update<br/>(all directions equal weight)"]
+  end
+    </div>
+    <figcaption>The core shift. AdamW rescales each weight entry independently, so the update inherits the lopsided, near low-rank shape of the raw gradient. Muon treats the update as a matrix and flattens its singular values to 1. <b>Element-wise optimisers ignore matrix structure; Muon uses it to spread the update across every direction.</b></figcaption>
+  </figure>
+
+  <h2>2. The one idea: orthogonalise the momentum update</h2>
+  <p>Muon is short. Start with the familiar SGD-with-momentum update for a weight matrix: a running average of the gradients. Then, instead of subtracting that update directly, first <strong>orthogonalise</strong> it, and subtract the orthogonalised version. That is the whole optimiser.</p>
+
+  <p>What does "orthogonalise a matrix" mean here? Any matrix <code>B</code> can be written (by the singular value decomposition) as <code>B = U S V&#7488;</code>, where <code>U</code> and <code>V</code> hold orthogonal directions and <code>S</code> is a diagonal of non-negative <strong>singular values</strong> that say how strongly <code>B</code> stretches each direction. Orthogonalising means throwing away <code>S</code> and using <code>U V&#7488;</code>: the same directions, but every one scaled equally to 1. It is the closest semi-orthogonal matrix to <code>B</code>, and also the <strong>matrix sign</strong> of the update.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  G["gradient G_t"] --> M["momentum:<br/>B = mu &middot; B + G"]
+  M --> SVD["view as B = U S V&#7488;"]
+  SVD --> O["orthogonalise:<br/>O = U V&#7488;<br/><i>drop S, all singular values &rarr; 1</i>"]
+  O --> W["update:<br/>W = W - lr &middot; O"]
+    </div>
+    <figcaption>Muon in four steps. Accumulate momentum as usual, view the result as a singular value decomposition, replace all the singular values with 1 to get the orthogonalised update <b>O</b>, and subtract it from the weights. <b>The only new step over plain momentum SGD is flattening the singular values.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Why flatten the singular values</span>
+    A big singular value means the update strongly favours one direction; a tiny one means another direction barely moves. Left alone, training keeps reinforcing the dominant directions and starves the rest. Setting every singular value to 1 gives each direction an equal say, so the small-but-important directions finally get their share of the update.</div>
+
+  <h2>3. Newton-Schulz: orthogonalising without an SVD</h2>
+  <p>Computing a real SVD every step for every matrix would be far too slow and does not run well on GPUs in low precision. Muon avoids it with a <strong>Newton-Schulz iteration</strong>: a short fixed recipe that, applied a few times to a normalised matrix, drives all its singular values toward 1 without ever computing <code>U</code>, <code>S</code>, or <code>V</code> explicitly. It is a matrix polynomial, so it is just a few matrix multiplies.</p>
+
+  <p>Each iteration applies the same quintic (degree-5) polynomial. Because it only touches singular values, you can reason about one number <code>s</code> at a time: the iteration maps <code>s &rarr; a&middot;s + b&middot;s&sup3; + c&middot;s&#8309;</code>, and the tuned coefficients make any <code>s</code> in a sensible range march toward 1. Five iterations are enough in practice, and it stays stable in bfloat16.</p>
+
+  <div class="math">X &larr; a X + b (X X&#7488;) X + c (X X&#7488;)&sup2; X,&nbsp;&nbsp; (a, b, c) = (3.4445, -4.7750, 2.0315)
+    <span class="gloss"><b>X</b>: the momentum update, first divided by its norm so its singular values start below 1. <b>X X&#7488;</b>: a symmetric matrix whose action on singular directions is <b>s&sup2;</b>, so one line of matrix multiplies applies the polynomial to every singular value at once. <b>a, b, c</b>: coefficients tuned (by Bernstein and Newhouse) so the map s &rarr; a s + b s&sup3; + c s&#8309; converges quickly to 1. Repeat about 5 times and every singular value is close to 1, i.e. X is now orthogonal.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  s0["singular values:<br/>spread out, e.g. 0.05 ... 1.0"] --> i1["iter 1"]
+  i1 --> i2["iter 2"]
+  i2 --> i3["iter 3"]
+  i3 --> i5["... iter 5"]
+  i5 --> s1["singular values:<br/>all &approx; 1.0"]
+    </div>
+    <figcaption>What the iterations do. Each Newton-Schulz step applies the same quintic to every singular value simultaneously. A messy spread of values is pulled toward 1 within about five steps, at which point the update matrix is (approximately) orthogonal. <b>No SVD is ever computed - just five rounds of matrix multiplies.</b></figcaption>
+  </figure>
+
+  <h2>4. When to use Muon, and when not to</h2>
+  <p>Muon's whole premise is that the parameter is a <em>matrix</em> with meaningful row and column directions. That is true for the 2D weight matrices in hidden layers (and flattened convolution filters). It is <strong>not</strong> true for 1D parameters: bias vectors, LayerNorm gains, and embedding tables, where the notion of orthogonalising has no useful meaning. Those keep using a standard optimiser, normally Adam.</p>
+
+  <p>So a real training run is a hybrid. Muon steps the 2D hidden weight matrices; Adam steps the embeddings, the norms, the biases, and typically the final output head. This split is not a compromise, it is empirically better than forcing Muon everywhere.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  P["all model parameters"] --> D2{"is it a 2D<br/>hidden weight matrix?"}
+  D2 -->|yes| MU["Muon:<br/>momentum + Newton-Schulz orthogonalise"]
+  D2 -->|"no (1D: embeds, norms, biases, head)"| AD["Adam:<br/>element-wise as usual"]
+  MU --> STEP["one training step"]
+  AD --> STEP
+    </div>
+    <figcaption>The hybrid rule. Route each parameter by its shape: 2D hidden weight matrices go to Muon, everything one-dimensional (embeddings, normalisation gains, biases, and usually the output head) stays on Adam. <b>Muon is for matrices; keep Adam for the rest.</b></figcaption>
+  </figure>
+
+  <h2>5. A full Muon step, in order</h2>
+  <p>Trace one update for a single 2D weight matrix. It is plain momentum until the very end, where the orthogonalisation slots in.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant G as Gradient G_t
+  participant B as Momentum buffer
+  participant NS as Newton-Schulz
+  participant W as Weight matrix
+  G->>B: buffer = mu * buffer + G_t
+  B->>NS: normalise buffer, then 5 quintic iterations
+  NS->>NS: singular values driven toward 1
+  NS->>W: O = orthogonalised update
+  W->>W: W = W - lr * scale * O
+    </div>
+    <figcaption>One Muon step for a weight matrix. Accumulate momentum, hand the buffer to Newton-Schulz for about five iterations, and subtract the orthogonalised result (with a small shape-dependent scale). <b>Everything except the Newton-Schulz block is ordinary momentum SGD.</b></figcaption>
+  </figure>
+
+  <div class="math">B<sub>t</sub> = &mu; B<sub>t-1</sub> + G<sub>t</sub>,&nbsp;&nbsp; O<sub>t</sub> = NewtonSchulz(B<sub>t</sub>) &approx; U V&#7488;,&nbsp;&nbsp; W<sub>t</sub> = W<sub>t-1</sub> - &eta; &middot; O<sub>t</sub>
+    <span class="gloss"><b>B<sub>t</sub></b>: the momentum buffer, a running average of gradients with decay <b>&mu;</b> (about 0.95). <b>G<sub>t</sub></b>: this step's gradient. <b>NewtonSchulz(B<sub>t</sub>)</b>: the five-iteration recipe that returns the orthogonalised update, approximately U V&#7488; from the SVD B<sub>t</sub> = U S V&#7488;. <b>&eta;</b>: the learning rate. A small scale factor depending on the matrix shape is also applied so the step size is consistent across layers.</span>
+  </div>
+
+  <h2>6. Implement it: Newton-Schulz and a Muon step</h2>
+  <p>Here is the core, close to the reference implementation. The first function is the orthogonaliser; the second is the optimiser that wraps momentum around it. Read them against the diagrams: normalise, iterate the quintic, subtract the result.</p>
+
+  <div class="code-cap">muon.py &middot; runnable with torch</div>
+  <pre><code>import torch
+
+def zeropower_via_newtonschulz5(G, steps=5, eps=1e-7):
+    """Orthogonalise G: drive its singular values toward 1 (approx U V^T).
+    A quintic Newton-Schulz iteration - stable even in bfloat16.
+    Coefficients tuned by Bernstein and Newhouse."""
+    assert G.ndim == 2
+    a, b, c = 3.4445, -4.7750, 2.0315
+    X = G.bfloat16()
+    X = X / (X.norm() + eps)              # normalise so singular values start &lt;= 1
+    transpose = G.size(0) &gt; G.size(1)     # iterate on the smaller dimension
+    if transpose:
+        X = X.T
+    for _ in range(steps):
+        A = X @ X.T                        # acts as s -&gt; s^2 on singular values
+        B = b * A + c * (A @ A)            # build the quintic from A and A^2
+        X = a * X + B @ X                  # apply s -&gt; a*s + b*s^3 + c*s^5
+    if transpose:
+        X = X.T
+    return X
+
+class Muon(torch.optim.Optimizer):
+    """Muon: MomentUm Orthogonalised by Newton-Schulz. For 2D weight matrices."""
+    def __init__(self, params, lr=0.02, momentum=0.95, nesterov=True, ns_steps=5):
+        super().__init__(params, dict(lr=lr, momentum=momentum,
+                                      nesterov=nesterov, ns_steps=ns_steps))
+
+    @torch.no_grad()
+    def step(self):
+        for group in self.param_groups:
+            mu = group["momentum"]
+            for p in group["params"]:
+                if p.grad is None:
+                    continue
+                g = p.grad
+                state = self.state[p]
+                if "buf" not in state:
+                    state["buf"] = torch.zeros_like(g)
+                buf = state["buf"]
+                buf.mul_(mu).add_(g)                       # momentum accumulate
+                upd = g.add(buf, alpha=mu) if group["nesterov"] else buf
+                O = zeropower_via_newtonschulz5(upd, group["ns_steps"])
+                # shape-dependent scale keeps step size consistent across layers
+                scale = max(1.0, p.size(0) / p.size(1)) ** 0.5
+                p.add_(O.to(p.dtype), alpha=-group["lr"] * scale)
+
+# demo: watch Newton-Schulz flatten the singular values toward 1
+G = torch.randn(256, 128)
+O = zeropower_via_newtonschulz5(G, steps=5).float()
+print(torch.linalg.svdvals(G)[:4])    # spread out: big and small values
+print(torch.linalg.svdvals(O)[:4])    # all near 1.0 -&gt; orthogonalised</code></pre>
+
+  <p>The demo is the point. Feed in a random matrix whose singular values are all over the place, and after five Newton-Schulz steps they are all close to 1. That is the orthogonalisation, done with nothing but matrix multiplies. In the optimiser, that orthogonalised update replaces the raw momentum before it is subtracted from the weights.</p>
+
+  <div class="card callout"><span class="tag">The cost is tiny</span>
+    Five iterations is a handful of matrix multiplies per weight matrix, and it runs in bfloat16. For real LLM training the overhead is well under 1% of total FLOPs. You pay almost nothing and get a better-shaped update.</div>
+
+  <h2>7. Does it actually help?</h2>
+  <p>Muon came out of the world of training speed records, where the whole game is reaching a target loss in as little compute as possible. The reported gains are consistent rather than marginal. On the widely used NanoGPT speedrun it cut time-to-target by roughly a third versus a strong AdamW baseline. Scaled up, a 1.5B-parameter model reached GPT-2 XL quality in about 10 H100-hours where AdamW needed around 13. It also set image-classification speed records on CIFAR-10.</p>
+
+  <p>Two honest caveats. Muon is <strong>new</strong> (late 2024) and still being studied, so treat exact speedups as setup-dependent rather than universal laws. And it is <strong>not</strong> a drop-in for every parameter: the hybrid with Adam for 1D tensors is part of why it works. What is solid is the core idea - using the matrix structure of the update, not just its per-element magnitude.</p>
+
+  <table>
+    <thead><tr><th>Property</th><th>SGD + momentum</th><th>AdamW</th><th>Muon</th></tr></thead>
+    <tbody>
+      <tr><td>View of the weights</td><td>Element-wise</td><td>Element-wise</td><td>Matrix-aware</td></tr>
+      <tr><td>Extra state per weight</td><td>Momentum only</td><td>Momentum plus variance</td><td>Momentum only</td></tr>
+      <tr><td>Update shaping</td><td>None</td><td>Per-element rescale</td><td>Singular values to 1</td></tr>
+      <tr><td>Best for</td><td>General training</td><td>General training</td><td>2D hidden matrices</td></tr>
+      <tr><td>Reported LLM speed</td><td>Slower baseline</td><td>Strong baseline</td><td>Faster than AdamW</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is the one new thing Muon does over momentum SGD?</div>
+      <button class="q-opt">It orthogonalises the momentum update with Newton-Schulz steps</button>
+      <button class="q-opt">It rescales each weight element by its own running squared value</button>
+      <button class="q-opt">It routes each weight matrix to a chosen expert before it updates</button>
+      <button class="q-opt">It clips the raw gradient to a fixed norm before momentum runs</button>
+      <div class="q-fb">Muon keeps ordinary momentum, then orthogonalises that update (via Newton-Schulz) before subtracting it from the weights.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which parameters should use Muon, and which should use Adam?</div>
+      <button class="q-opt">Muon on embeddings and biases, Adam on the 2D hidden matrices</button>
+      <button class="q-opt">Muon on 2D hidden matrices, Adam on embeddings, norms, biases</button>
+      <button class="q-opt">Muon on every single parameter, Adam only on the output layer</button>
+      <button class="q-opt">Muon on the router weights, Adam on all of the other tensors</button>
+      <div class="q-fb">Orthogonalising needs a matrix, so Muon takes the 2D hidden weights; 1D tensors (embeddings, norms, biases) stay on Adam.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What do the Newton-Schulz iterations do to the update matrix?</div>
+      <button class="q-opt">They set the update's smallest singular values to exactly zero out</button>
+      <button class="q-opt">They convert the update into a diagonal of the raw gradient sums</button>
+      <button class="q-opt">They push all of the update's singular values toward the value one</button>
+      <button class="q-opt">They scale the update by the inverse of its largest eigenvalue only</button>
+      <div class="q-fb">The quintic iteration drives every singular value toward 1, approximating U V^T from the SVD without computing a real SVD.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does orthogonalising the update help training?</div>
+      <button class="q-opt">It stops the update collapsing into a few dominant directions</button>
+      <button class="q-opt">It removes the need to keep any momentum buffer while training</button>
+      <button class="q-opt">It shrinks the model so far fewer parameters need updating now</button>
+      <button class="q-opt">It swaps the attention layer for a cheaper linear projection step</button>
+      <div class="q-fb">Raw updates are nearly low-rank; flattening singular values gives every direction equal weight, so rare useful directions get updated too.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>The <b>weight matrices</b> Muon updates are the ones inside every <a href="0001-attention-is-all-you-need.html">Transformer</a> block: the attention projections and the feed-forward layers.</li>
+    <li>Muon is about training <b>efficiency</b>, the same goal as the systems work in <a href="0017-flashattention.html">FlashAttention</a> and <a href="0008-chinchilla.html">Chinchilla</a>, but it acts on the <b>optimiser</b> rather than the kernels or the data budget.</li>
+    <li>It composes with sparse architectures like <a href="0036-deepseekmoe.html">DeepSeekMoE</a>: the expert weight matrices are exactly the 2D tensors Muon is built for.</li>
+    <li>It leaves the <b>alignment</b> and <b>fine-tuning</b> stages (Modules 06 and 07) untouched; it changes how the base weights are learned, not what they are aligned to.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The singular-value story is the crux. Ask the agent to run the demo and print the singular values before and after Newton-Schulz, then to plot the quintic map s &rarr; a s + b s&sup3; + c s&#8309; and see how it pulls values toward 1. If "orthogonal" still feels abstract, ask it to compare the update matrix before and after with a real <code>torch.linalg.svd</code>.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original writeup: <a href="https://kellerjordan.github.io/posts/muon/">Keller Jordan, "Muon: An optimizer for hidden layers in neural networks" (2024)</a>. It includes the full derivation, the coefficient tuning, and the training-speed benchmarks, with a reference PyTorch implementation you can run directly.</p>
+
+  <div class="pager">
+    <a href="0036-deepseekmoe.html"><span class="dir">&larr; Previous</span><span class="ttl">DeepSeekMoE</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course syllabus</span></a>
+  </div>
+
+  <div class="card callout key"><span class="tag">You made it</span>
+    That is the finale. You have gone from a single neuron all the way to frontier Mixture-of-Experts models and the optimiser training the newest systems - all 38 lessons. Every paper here now sits on a foundation you can actually reason about. Head back to the <a href="../index.html">course syllabus</a> to revisit any lesson, and keep asking your agent the "why" questions. Congratulations.</div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 37 &middot; Final lesson &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

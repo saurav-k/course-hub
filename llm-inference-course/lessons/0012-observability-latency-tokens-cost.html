@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Observability: Latency, Tokens, Errors, Costs - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Scale and Operations &middot; Lesson 12</div>
+  <h1>Observability: Latency, Tokens, Errors, Costs</h1>
+  <p class="paper-meta">You already autoscale on a vLLM metric. This lab wires the whole picture: scrape vLLM's built-in <code>/metrics</code> with Prometheus, dashboard it in Grafana, and turn raw counters into the four golden signals plus tokens and dollars. Official docs: <a href="https://docs.vllm.ai/en/stable/design/metrics/">vLLM metrics</a> and <a href="https://prometheus.io/docs/prometheus/latest/getting_started/">Prometheus getting started</a>.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>vLLM (and SGLang) already expose a Prometheus <code>/metrics</code> endpoint. You do not instrument the model; you <b>scrape what it emits</b>.</li>
+      <li>The signals you want are histograms and counters: <code>vllm:time_to_first_token_seconds</code>, <code>vllm:time_per_output_token_seconds</code>, <code>vllm:num_requests_waiting</code>, <code>vllm:kv_cache_usage_perc</code>, <code>vllm:generation_tokens_total</code>.</li>
+      <li>Track the <b>four golden signals</b> (latency, traffic, errors, saturation), then add the two that pay the bills: <b>tokens/s</b> and <b>$ per 1M tokens</b>.</li>
+      <li>The pipeline is boring and reliable: exporter &rarr; Prometheus &rarr; Grafana &rarr; alerts. A recording rule converts tokens/s straight into a cost number.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>You cannot optimise or defend a service you cannot see. When a customer says "it got slow," you need to answer in seconds: was it TTFT or TPOT, was the queue full, was the KV cache saturated, were we dropping requests, and what did that hour cost. vLLM hands you all of that for free through Prometheus-format metrics. The work is not instrumentation, it is <strong>plumbing the numbers into a place you can query and alert on</strong>.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BLIND["No observability"]
+    a1["it's slow"] --> a2["ssh in, tail logs,<br/>guess"] --> a3["hours to diagnose"]
+  end
+  subgraph SEEN["Instrumented"]
+    b1["it's slow"] --> b2["open dashboard:<br/>TTFT p95, queue, KV%"] --> b3["root cause in a minute"]
+  end
+  BLIND -.->|"the upgrade"| SEEN
+    </div>
+    <figcaption>Before and after. Without metrics, a latency complaint is a guessing game over logs. <b>With the golden signals on a dashboard, the same complaint is a thirty-second read of TTFT, queue depth, and cache saturation.</b></figcaption>
+  </figure>
+
+  <h2>2. The metrics pipeline</h2>
+  <p>The stack has four moving parts. vLLM is the <strong>exporter</strong>: it publishes counters and histograms on <code>/metrics</code>. <strong>Prometheus</strong> scrapes that endpoint every few seconds and stores time series. <strong>Grafana</strong> queries Prometheus with PromQL and draws panels. An <strong>alerting</strong> path (Alertmanager or Grafana alerts) fires when a query crosses a threshold. Nothing here is LLM-specific except the metric names.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  v["vLLM /metrics<br/>(exporter)"] -->|"scrape 5s"| p["Prometheus<br/>(TSDB)"]
+  p --> g["Grafana<br/>(dashboards)"]
+  p --> am["Alertmanager<br/>(rules fire)"]
+  am --> pg["PagerDuty / Slack"]
+  p -->|"recording rules"| p2["derived series<br/>tokens/s, $ per 1M"]
+    </div>
+    <figcaption>The pipeline, end to end. vLLM emits, Prometheus stores, Grafana shows, Alertmanager pages. <b>Recording rules pre-compute expensive or derived series (like cost) so dashboards and alerts stay fast.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Prometheus
+  participant V as vLLM /metrics
+  participant G as Grafana
+  loop every 5s
+    P->>V: GET /metrics
+    V-->>P: counters + histogram buckets
+    Note over P: append samples to TSDB
+  end
+  G->>P: PromQL: p95 TTFT over 5m
+  P-->>G: 0.42 s
+  Note over G: render panel, evaluate alert rule
+    </div>
+    <figcaption>One scrape and one query. Prometheus pulls the raw buckets on a fixed interval; Grafana asks a question in PromQL when someone opens the dashboard or an alert rule evaluates. <b>Histograms are stored as bucket counters, so quantiles are computed at query time, not at emit time.</b></figcaption>
+  </figure>
+
+  <h2>3. The signals that matter</h2>
+  <p>Google's four golden signals map cleanly onto vLLM's metrics, and two extra rows capture the economics.</p>
+  <table>
+    <thead><tr><th>Signal</th><th>vLLM metric</th><th>What it tells you</th></tr></thead>
+    <tbody>
+      <tr><td>Latency</td><td><code>vllm:time_to_first_token_seconds</code>, <code>vllm:time_per_output_token_seconds</code></td><td>TTFT and TPOT, the two waits users feel</td></tr>
+      <tr><td>Traffic</td><td><code>vllm:num_requests_running</code>, request rate</td><td>How much load is arriving</td></tr>
+      <tr><td>Errors</td><td><code>vllm:request_success_total</code> by finished_reason, gateway 5xx</td><td>Aborts, timeouts, failed completions</td></tr>
+      <tr><td>Saturation</td><td><code>vllm:num_requests_waiting</code>, <code>vllm:kv_cache_usage_perc</code></td><td>Queue depth and KV cache fill, your capacity ceiling</td></tr>
+      <tr><td>Tokens</td><td><code>vllm:generation_tokens_total</code>, <code>vllm:prompt_tokens_total</code></td><td>Output tok/s, the unit of work</td></tr>
+      <tr><td>Cost</td><td>derived from tokens/s + GPU price</td><td>$ per 1M tokens, the unit of money</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card callout warn"><span class="tag">Version drift</span>
+    Metric names change between vLLM releases. Recent builds expose KV cache fill as <code>vllm:kv_cache_usage_perc</code> (older builds used <code>vllm:gpu_cache_usage_perc</code>), and TPOT may appear as <code>vllm:request_time_per_output_token_seconds</code>. Always <code>curl localhost:8000/metrics | grep vllm:</code> against your exact version before wiring dashboards.</div>
+
+  <h2>4. Lab: scrape, query, dashboard</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Point Prometheus at vLLM, write the golden-signal queries, and drop one panel into Grafana</h4>
+    <p>You will confirm the endpoint emits metrics, add a scrape job, run the four PromQL queries that matter, add a recording rule that computes cost, and paste a Grafana panel that renders p95 TTFT.</p>
+
+    <div class="term"><span class="c"># 1. Confirm vLLM is emitting Prometheus metrics</span>
+<span class="p">$</span> curl -s http://localhost:8000/metrics | grep -E '^vllm:(time_to_first|num_requests|kv_cache|generation)' | head
+<span class="o">vllm:time_to_first_token_seconds_bucket{le="0.1",model_name="..."} 812
+vllm:num_requests_running{model_name="..."} 6
+vllm:num_requests_waiting{model_name="..."} 3
+vllm:kv_cache_usage_perc{model_name="..."} 0.74
+vllm:generation_tokens_total{model_name="..."} 4.82e+06</span></div>
+
+    <div class="code-cap">prometheus.yml &middot; scrape config for a vLLM target</div>
+    <pre><code>global:
+  scrape_interval: 5s              # frequent enough to catch spikes
+  evaluation_interval: 15s
+
+rule_files:
+  - "vllm_rules.yml"               # recording + alerting rules below
+
+scrape_configs:
+  - job_name: "vllm"
+    metrics_path: /metrics         # vLLM default
+    static_configs:
+      - targets: ["localhost:8000"]
+        labels: { service: "llama-8b" }
+    # In Kubernetes, replace static_configs with kubernetes_sd_configs
+    # and keep only pods labelled app=vllm-llama.</code></pre>
+
+    <div class="code-cap">The four PromQL queries that answer "is it healthy?"</div>
+    <pre><code># p95 TTFT over 5 minutes (latency signal)
+histogram_quantile(0.95,
+  sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))
+
+# output tokens per second (throughput / traffic)
+sum(rate(vllm:generation_tokens_total[1m]))
+
+# KV cache utilisation, 0 to 1 (saturation)
+avg(vllm:kv_cache_usage_perc)
+
+# queue depth right now (saturation, the early warning)
+sum(vllm:num_requests_waiting)</code></pre>
+
+    <div class="code-cap">vllm_rules.yml &middot; a recording rule turns tokens/s into dollars</div>
+    <pre><code>groups:
+  - name: vllm-cost
+    rules:
+      # $ per 1M output tokens, given a $2.50/hr GPU.
+      # cost/1M = (gpu $/hr / 3600 s) / (tokens/s) * 1e6
+      - record: vllm:cost_per_million_output_tokens
+        expr: |
+          (2.50 / 3600)
+          / clamp_min(sum(rate(vllm:generation_tokens_total[5m])), 1)
+          * 1e6
+
+  - name: vllm-alerts
+    rules:
+      - alert: TTFT_p95_SLO_breach
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m]))) > 1.5
+        for: 5m
+        labels: { severity: page }
+        annotations: { summary: "p95 TTFT above 1.5s for 5m" }</code></pre>
+
+    <div class="code-cap">grafana-panel.json &middot; a p95 TTFT timeseries panel</div>
+    <pre><code>{
+  "type": "timeseries",
+  "title": "TTFT p95 (s)",
+  "fieldConfig": { "defaults": { "unit": "s" } },
+  "targets": [
+    {
+      "expr": "histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))",
+      "legendFormat": "p95 TTFT",
+      "refId": "A"
+    }
+  ],
+  "thresholds": { "steps": [ { "value": 1.5, "color": "red" } ] }
+}</code></pre>
+
+    <div class="term"><span class="p">$</span> curl -s 'http://localhost:9090/api/v1/query' --data-urlencode \
+    'query=histogram_quantile(0.95, sum by (le) (rate(vllm:time_to_first_token_seconds_bucket[5m])))'
+<span class="o">{"status":"success","data":{"result":[{"value":[1721980000,"0.42"]}]}}</span>
+<span class="c"># p95 TTFT is 0.42s, comfortably under the 1.5s SLO</span></div>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">TTFT p95</div><div class="v">0.42 s</div><div class="u">latency, SLO 1.5s</div></div>
+      <div class="metric"><div class="k">Output</div><div class="v">1.9k tok/s</div><div class="u">traffic / throughput</div></div>
+      <div class="metric"><div class="k">KV cache</div><div class="v">74 %</div><div class="u">saturation, watch &gt;90%</div></div>
+      <div class="metric"><div class="k">Cost</div><div class="v">$0.37</div><div class="u">per 1M output tokens</div></div>
+    </div>
+  </div>
+
+  <h2>5. From metric to alert</h2>
+  <p>An alert is a query plus a threshold plus a <code>for</code> duration. Prometheus evaluates the rule on a schedule; when the expression stays true for the whole <code>for</code> window, the alert moves from Pending to Firing and Alertmanager routes it. The <code>for</code> window is what stops a single slow scrape from paging you at 3am.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Inactive: query below threshold
+  Inactive --> Pending: query crosses threshold
+  Pending --> Inactive: recovers before 'for' elapses
+  Pending --> Firing: stays true for full 'for' window
+  Firing --> Inactive: query drops back under threshold
+  Firing --> Notified: Alertmanager pages / posts to Slack
+    </div>
+    <figcaption>An alert's life. The <code>for</code> duration is the buffer between Pending and Firing. <b>It absorbs brief blips so you only get paged for sustained SLO breaches, not one noisy scrape.</b></figcaption>
+  </figure>
+
+  <div class="math">$ per 1M tokens = (gpu_hourly / 3600) / tokens_per_second &times; 10<sup>6</sup>
+    <span class="gloss"><b>gpu_hourly</b>: your GPU price per hour. Divide by 3600 for cost per second, divide by tokens/s for cost per token, scale to a million. This is the exact expression the recording rule above computes, so cost sits on the same dashboard as latency.</span>
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does vLLM expose its serving metrics to Prometheus?</div>
+      <button class="q-opt">It pushes samples to a Prometheus gateway on a fixed timer set by the operator</button>
+      <button class="q-opt">It serves a /metrics endpoint that Prometheus scrapes on its own interval</button>
+      <button class="q-opt">It writes the counters into a log file that a sidecar exporter then tails</button>
+      <button class="q-opt">It emits an OTLP stream that a collector converts into Prometheus series</button>
+      <div class="q-fb">vLLM is a pull-based exporter; Prometheus scrapes /metrics. You wire the plumbing, not the model.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is TTFT stored as histogram buckets rather than a single latency number?</div>
+      <button class="q-opt">Buckets let any quantile, like p95, be computed at query time across all requests</button>
+      <button class="q-opt">Buckets take far less storage than one gauge holding the latest latency value</button>
+      <button class="q-opt">Buckets are the only metric type that Grafana is able to draw on a timeseries</button>
+      <button class="q-opt">Buckets avoid the scrape entirely by sending each request latency as an event</button>
+      <div class="q-fb">Histograms keep per-bucket counts, so histogram_quantile derives p50/p95/p99 at query time.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which pair of metrics best represents the saturation golden signal?</div>
+      <button class="q-opt">Prompt tokens total together with the running generation tokens total counter</button>
+      <button class="q-opt">Time to first token together with the per output token latency histogram</button>
+      <button class="q-opt">Requests waiting in the queue together with the KV cache usage percentage</button>
+      <button class="q-opt">Request success total together with the count of requests currently running</button>
+      <div class="q-fb">Queue depth and KV cache fill are your capacity ceiling; both are pure saturation signals.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the point of the 'for' duration on an alerting rule?</div>
+      <button class="q-opt">It sets how often Grafana redraws the panel that shows the alert's current state</button>
+      <button class="q-opt">It controls the scrape interval Prometheus uses when collecting the metric</button>
+      <button class="q-opt">It caps how many times Alertmanager may page a single on-call engineer</button>
+      <button class="q-opt">It requires the breach to persist so brief blips do not fire a real page</button>
+      <div class="q-fb">The 'for' window is the Pending-to-Firing buffer; it filters out one-off noisy scrapes.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can curl <code>/metrics</code> and read vLLM's TTFT, queue, KV cache, and token counters</li>
+    <li>I wrote a Prometheus scrape job targeting a vLLM server</li>
+    <li>I can write PromQL for p95 TTFT, output tokens/s, and KV cache utilisation</li>
+    <li>I added a recording rule that turns tokens/s into $ per 1M tokens</li>
+    <li>I can map each golden signal (latency, traffic, errors, saturation) to a vLLM metric</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want the full Grafana dashboard JSON for a vLLM fleet, or help writing Alertmanager routes that page on TTFT but only Slack on cost drift? Ask and we will assemble it panel by panel.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/stable/design/metrics/">vLLM metrics design doc</a> for the current metric list, the <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE book chapter on the four golden signals</a>, and <a href="https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile">Prometheus histogram_quantile</a> for how quantiles are computed from buckets.</p>
+
+  <div class="pager">
+    <a href="0011-kubernetes-for-ai-workloads.html"><span class="dir">&larr; Prev</span><span class="ttl">Kubernetes for AI Workloads: HPA and Autoscaling</span></a>
+    <a class="nxt" href="0013-load-testing-1000-concurrent.html"><span class="dir">Next &rarr;</span><span class="ttl">Load Testing 1000+ Concurrent Requests</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 12 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

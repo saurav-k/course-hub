@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RoPE: Rotary Position Embeddings - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Attention &amp; Position Refinements &middot; Lesson 13</div>
+  <h1>RoPE: Rotary Position Embeddings</h1>
+  <p class="paper-meta">
+    <span class="pill">2021</span>
+    Su, Lu, Pan, Murtadha, Wen, Liu (Zhuiyi Technology).
+    &middot; <a href="https://arxiv.org/abs/2104.09864">arXiv:2104.09864</a> &middot; "RoFormer: Enhanced Transformer with Rotary Position Embedding"
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>The original Transformer <b>adds</b> a position vector onto each token embedding. RoPE instead <b>rotates</b> the query and key vectors by an angle proportional to their position.</li>
+      <li>Rotations compose: rotate by <i>m</i>, then compare with something rotated by <i>n</i>, and the dot product only depends on the <b>difference m &minus; n</b>. So absolute rotations produce <b>relative</b> position awareness for free.</li>
+      <li>Each 2D sub-pair of the head dimension gets its own rotation speed, with frequencies <b>&theta;<sub>i</sub> = 10000<sup>&minus;2i/d</sup></b> - fast wheels for fine position, slow wheels for coarse position.</li>
+      <li>It needs no extra parameters, plugs straight into attention, gives some length extrapolation, and is now the default in <b>LLaMA, PaLM, GPT-NeoX</b> and most modern LLMs.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Lesson 01 gave every token a <strong>position vector</strong> built from sines and cosines, then <em>added</em> it onto the token embedding before attention. That works, but it is a little clumsy. The position signal is bolted onto the <em>content</em>, so the model has to disentangle "what this token means" from "where this token sits". And what attention actually cares about is usually <strong>relative</strong> distance: is the verb three words after its subject? Absolute added encodings only hint at relative distance indirectly.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph OLD["Sinusoidal (Lesson 01): ADD position to content"]
+    direction LR
+    e1["token embedding"] --> p1(("+"))
+    pe1["position vector"] --> p1
+    p1 --> a1["mixed vector<br/>content + position tangled"]
+  end
+  subgraph NEW["RoPE: ROTATE the Q and K vectors by position"]
+    direction LR
+    e2["Q or K vector"] --> r2["rotate by angle m&theta;"]
+    r2 --> a2["same length,<br/>angle carries position"]
+  end
+    </div>
+    <figcaption>The core shift. Sinusoidal encoding <b>adds</b> a position vector to the token, mixing position into content. RoPE leaves content alone and instead <b>rotates</b> the query and key by an angle set by position. Because a rotation only turns a vector without changing its length, position rides in the <b>angle</b>, not the magnitude.</figcaption>
+  </figure>
+
+  <p>RoPE's promise: encode absolute position by rotation, but arrange the geometry so that when a query at position <em>m</em> meets a key at position <em>n</em>, the score they produce depends only on <strong>m &minus; n</strong>. Absolute in, relative out.</p>
+
+  <h2>2. The one idea: position is a rotation</h2>
+  <p>Take the simplest case: a 2-dimensional vector. To "encode position <em>m</em>" into it, spin it counter-clockwise by an angle <em>m&theta;</em>. That is a standard rotation matrix.</p>
+
+  <div class="math">R<sub>m</sub> = [ cos m&theta; &nbsp; &minus;sin m&theta; ; &nbsp; sin m&theta; &nbsp; cos m&theta; ]
+    <span class="gloss"><b>R<sub>m</sub></b>: a 2&times;2 rotation matrix. <b>m</b>: the token's position (0, 1, 2, ...). <b>&theta;</b>: a fixed frequency for this 2D pair. Multiplying a vector by R<sub>m</sub> turns it by angle <b>m&theta;</b> without changing its length. Position 0 turns nothing; position 5 turns five times as far.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  v0["vector at pos 0<br/>angle 0"] --> v1["pos 1<br/>angle &theta;"]
+  v1 --> v2["pos 2<br/>angle 2&theta;"]
+  v2 --> v3["pos 3<br/>angle 3&theta;"]
+  v3 --> v4["pos 4<br/>angle 4&theta;"]
+    </div>
+    <figcaption>Each position is the same vector turned a little further around the circle. Moving one token to the right always adds the <b>same angle &theta;</b>. That constant step is the whole trick: the gap between two tokens becomes a fixed angular gap, so the geometry knows about <b>relative</b> distance.</figcaption>
+  </figure>
+
+  <h2>3. Why absolute rotation gives relative scores</h2>
+  <p>Attention scores a query against a key with a dot product. Rotate the query by its position <em>m</em> and the key by its position <em>n</em>, then dot them:</p>
+
+  <div class="math">(R<sub>m</sub> q) &middot; (R<sub>n</sub> k) = q<sup>T</sup> R<sub>m</sub><sup>T</sup> R<sub>n</sub> k = q<sup>T</sup> R<sub>n&minus;m</sub> k
+    <span class="gloss"><b>R<sub>m</sub> q</b>: query rotated by its position m. <b>R<sub>n</sub> k</b>: key rotated by its position n. <b>R<sub>m</sub><sup>T</sup></b>: transpose of a rotation is the reverse rotation, R<sub>&minus;m</sub>. <b>R<sub>&minus;m</sub> R<sub>n</sub> = R<sub>n&minus;m</sub></b>: rotations compose by adding angles, so the two absolute positions collapse into a single <b>relative</b> rotation by n&minus;m. The score depends only on the query, the key, and their <b>distance</b> - never on where they sit absolutely.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">The magic line</span>
+    A rotation's transpose is its inverse: <code>R<sub>m</sub><sup>T</sup> = R<sub>&minus;m</sub></code>. And rotations add: <code>R<sub>&minus;m</sub>R<sub>n</sub> = R<sub>n&minus;m</sub></code>. Put those together and the two absolute positions <b>m</b> and <b>n</b> cancel into one relative term <b>n&minus;m</b>. That is why rotating by absolute position yields a purely relative score.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Q as Query at pos m
+  participant K as Key at pos n
+  participant S as Score
+  Q->>Q: rotate by m&theta;
+  K->>K: rotate by n&theta;
+  Q->>S: dot product
+  K->>S: dot product
+  Note over S: angles subtract:<br/>depends only on (n - m)&theta;
+    </div>
+    <figcaption>Following one query-key comparison. Both vectors are rotated by their own absolute positions, but the dot product only sees the <b>angular gap</b> between them. Shift the whole sentence 100 tokens to the right and every score stays identical, because every gap is unchanged. <b>Absolute rotation in, relative attention out.</b></figcaption>
+  </figure>
+
+  <h2>4. Many wheels: frequencies across the head dimension</h2>
+  <p>A head vector is not 2D, it is <code>d</code>-dimensional (say 64 or 128). RoPE slices it into <code>d/2</code> pairs and gives each pair its <strong>own rotation speed</strong>. Pair 0 spins fast, the last pair spins glacially slow. The speeds follow a geometric ladder, exactly like the sinusoidal wavelengths in Lesson 01:</p>
+
+  <div class="math">&theta;<sub>i</sub> = 10000<sup>&minus;2i/d</sup>, &nbsp; i = 0, 1, ..., d/2 &minus; 1
+    <span class="gloss"><b>&theta;<sub>i</sub></b>: the rotation frequency for the i-th 2D pair. <b>i = 0</b> gives &theta; = 1 (fast wheel, turns a lot per token). <b>i</b> near d/2 gives a tiny &theta; close to 10000<sup>&minus;1</sup> (slow wheel, barely turns). <b>10000</b>: the base wavelength constant, inherited from the original Transformer. Fast wheels resolve nearby positions crisply; slow wheels stay coherent across very long distances.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  V["head vector d = 8"] --> P0["pair 0<br/>&theta;&#8320; = 1 (fast)"]
+  V --> P1["pair 1<br/>&theta;&#8321; smaller"]
+  V --> P2["pair 2<br/>&theta;&#8322; smaller"]
+  V --> P3["pair 3<br/>&theta;&#8323; slowest"]
+  P0 --> R["each pair rotated by<br/>pos &times; its own &theta;"]
+  P1 --> R
+  P2 --> R
+  P3 --> R
+    </div>
+    <figcaption>How RoPE fills a whole head. The d-dimensional vector is cut into d/2 independent 2D pairs, each spun at its own frequency. Fast pairs give sharp local position sense; slow pairs give a stable coarse sense that survives across long contexts. <b>Together the wheels give every position a unique, distance-aware fingerprint.</b></figcaption>
+  </figure>
+
+  <h2>5. Where RoPE sits in the attention block</h2>
+  <p>Crucially, RoPE is applied to <strong>Q and K only</strong>, after their linear projection and right before the score. Values are left untouched, and there is no added position embedding at the input. Every layer re-rotates, so position information is refreshed all the way up the stack.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  X["token x"] --> Q["Q = x W_Q"]
+  X --> K["K = x W_K"]
+  X --> V["V = x W_V"]
+  Q --> RQ["RoPE rotate Q<br/>by position"]
+  K --> RK["RoPE rotate K<br/>by position"]
+  RQ --> S["score = rotate(Q) &middot; rotate(K)&#7488;<br/>depends on m &minus; n"]
+  RK --> S
+  S --> SM["softmax"]
+  SM --> O["&times; V &rarr; output"]
+  V --> O
+    </div>
+    <figcaption>RoPE inside one attention head. Only the query and key are rotated; the value passes through as-is because it carries content to be blended, not position to be compared. The rotation happens on every layer, so unlike an added input encoding, position is <b>continuously reinjected</b> as the network gets deeper.</figcaption>
+  </figure>
+
+  <h2>6. Implement it and prove the relative property</h2>
+  <p>Here is <code>apply_rotary_emb</code> in PyTorch, then a numerical check of the paper's central claim: shift a query and key by the same amount and the score does not move; it only tracks the <em>gap</em> between them.</p>
+
+  <div class="code-cap">rope.py &middot; runnable with torch</div>
+  <pre><code>import torch
+
+def rope_angles(seq_len, d, base=10000.0):
+    # one frequency per 2D pair:  theta_i = base^(-2i/d)
+    i = torch.arange(0, d, 2).float()          # 0,2,4,... -> d/2 values
+    freqs = base ** (-i / d)                    # (d/2,)  fast -> slow
+    pos = torch.arange(seq_len).float()         # positions 0..seq-1
+    angles = torch.outer(pos, freqs)            # (seq, d/2)  pos * theta
+    return angles.cos(), angles.sin()           # each (seq, d/2)
+
+def apply_rotary_emb(x, cos, sin):
+    # x: (seq, d).  Rotate each adjacent 2D pair (x_even, x_odd) by its angle.
+    x1, x2 = x[..., 0::2], x[..., 1::2]         # even and odd lanes
+    xr1 = x1 * cos - x2 * sin                    # standard 2D rotation
+    xr2 = x1 * sin + x2 * cos
+    out = torch.empty_like(x)
+    out[..., 0::2], out[..., 1::2] = xr1, xr2    # re-interleave
+    return out
+
+# ---- verify: score depends only on (m - n), not absolute position ----
+torch.manual_seed(0)
+d, seq = 8, 64
+cos, sin = rope_angles(seq, d)
+q = torch.randn(d); k = torch.randn(d)          # one query, one key
+
+def score(m, n):                                # rotate q by m, k by n, dot
+    qm = apply_rotary_emb(q.unsqueeze(0), cos[m:m+1], sin[m:m+1])
+    kn = apply_rotary_emb(k.unsqueeze(0), cos[n:n+1], sin[n:n+1])
+    return (qm * kn).sum().item()
+
+print(score(5, 3))    # gap = 2
+print(score(9, 7))    # gap = 2, shifted by +4  ->  same score
+print(score(20, 18))  # gap = 2, shifted again  ->  same score
+print(score(5, 4))    # gap = 1  ->  different score</code></pre>
+
+  <p>Run it and the first three numbers match to floating-point precision while the fourth differs. The score is a function of the distance <code>m &minus; n</code> alone. That is the paper's theorem, reproduced in ten lines. No lookup table of relative-position biases, no learned parameters - just rotation geometry.</p>
+
+  <div class="card callout"><span class="tag">In production</span>
+    Real code precomputes <code>cos</code> and <code>sin</code> once per sequence length and caches them, and fuses the rotation into the attention kernel. LLaMA, Mistral, Qwen and most 2023+ models ship RoPE by default. Long-context tricks like <b>position interpolation</b> and <b>NTK / YaRN scaling</b> just stretch or reshape these same &theta; frequencies to reach context lengths far beyond training.</div>
+
+  <h2>7. RoPE versus the alternatives</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Sinusoidal (added)</th><th>Learned absolute</th><th>RoPE (rotary)</th></tr></thead>
+    <tbody>
+      <tr><td>Extra parameters</td><td>None</td><td>One vector per position</td><td>None</td></tr>
+      <tr><td>Encodes relative distance</td><td>Only indirectly</td><td>Not directly</td><td>Yes, exactly in the dot product</td></tr>
+      <tr><td>Applied to</td><td>Input embedding</td><td>Input embedding</td><td>Q and K, every layer</td></tr>
+      <tr><td>Length extrapolation</td><td>Weak</td><td>Fails past trained length</td><td>Some, and strong with scaling</td></tr>
+      <tr><td>Used by modern LLMs</td><td>Rarely now</td><td>Rarely now</td><td>LLaMA, PaLM, GPT-NeoX, Qwen</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does RoPE inject position into a token representation?</div>
+      <button class="q-opt">By adding a fixed sinusoidal position vector onto the token</button>
+      <button class="q-opt">By learning one position vector per slot in the sequence</button>
+      <button class="q-opt">By rotating the query and key vectors by an angle from position</button>
+      <button class="q-opt">By scaling the value vectors up in proportion to position</button>
+      <div class="q-fb">RoPE turns Q and K by an angle proportional to position; length is unchanged, and position rides in the angle.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does rotating by absolute position give a relative score?</div>
+      <button class="q-opt">Because softmax cancels any constant offset shared by all rows</button>
+      <button class="q-opt">Because rotations compose, so the two angles subtract to m minus n</button>
+      <button class="q-opt">Because the value vectors are rotated by the same fixed amount</button>
+      <button class="q-opt">Because the residual stream removes the absolute part each layer</button>
+      <div class="q-fb">R_m^T R_n equals R_(n minus m): the absolute positions cancel and only the distance survives in the dot product.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What do the frequencies theta_i control across the head dimension?</div>
+      <button class="q-opt">How fast each 2D pair rotates, from fine to coarse position</button>
+      <button class="q-opt">How many attention heads the whole layer is allowed to use</button>
+      <button class="q-opt">How large the learned position table has to grow per token</button>
+      <button class="q-opt">How strongly the value vectors get mixed into the output sum</button>
+      <div class="q-fb">Each pair spins at its own theta_i = 10000^(-2i/d): fast wheels resolve nearby positions, slow wheels span long range.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which vectors does RoPE actually rotate inside attention?</div>
+      <button class="q-opt">Only the value vectors, once at the input before any layers run</button>
+      <button class="q-opt">Every vector including values, done a single time at the input</button>
+      <button class="q-opt">Only the output projection weights shared across all the heads</button>
+      <button class="q-opt">Only the query and key vectors, refreshed on each attention layer</button>
+      <div class="q-fb">RoPE rotates Q and K only, every layer; values carry content to blend, so they are left untouched.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Builds directly on</b> the sinusoidal <a href="0001-attention-is-all-you-need.html">positional encoding</a> from the original Transformer - same 10000 frequency ladder, but rotating instead of adding.</li>
+    <li><b>Powers</b> <a href="0012-llama.html">LLaMA</a> and PaLM; if you studied those, RoPE is the position mechanism they quietly rely on.</li>
+    <li><b>Contrast with</b> the next lesson, <a href="0014-alibi.html">ALiBi</a>, which drops position embeddings entirely and biases the attention scores by distance instead.</li>
+    <li><b>Interacts with</b> KV-cache methods like <a href="0015-multi-query-attention.html">Multi-Query Attention</a>: RoPE is applied to K before it is cached, so the cache stores already-rotated keys.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The one thing to nail is the cancellation <code>R<sub>m</sub><sup>T</sup>R<sub>n</sub> = R<sub>n&minus;m</sub></code>. Ask the agent to draw two 2D arrows on a clock face, rotate them by m and n, and show that the angle between them only depends on n&minus;m. Then run the code above and watch the three equal-gap scores line up. Once that clicks, RoPE is obvious.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2104.09864">Su et al., "RoFormer: Enhanced Transformer with Rotary Position Embedding" (2021)</a>. For an intuitive picture, pair it with Jianlin Su's own blog and EleutherAI's <a href="https://blog.eleuther.ai/rotary-embeddings/">"Rotary Embeddings: A Relative Revolution"</a>, which walks the geometry with clear diagrams and the reference implementation.</p>
+
+  <div class="pager">
+    <a href="0012-llama.html"><span class="dir">&larr; Previous</span><span class="ttl">LLaMA</span></a>
+    <a class="nxt" href="0014-alibi.html"><span class="dir">Next &rarr;</span><span class="ttl">ALiBi</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 13 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

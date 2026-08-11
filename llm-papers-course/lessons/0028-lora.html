@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRA: Low-Rank Adaptation - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Parameter-Efficient Fine-Tuning &middot; Lesson 28</div>
+  <h1>LoRA: Low-Rank Adaptation of Large Language Models</h1>
+  <p class="paper-meta">
+    <span class="pill">2021</span>
+    Hu, Shen, Wallis, Allen-Zhu, Li, Wang, Wang, Chen (Microsoft).
+    &middot; <a href="https://arxiv.org/abs/2106.09685">arXiv:2106.09685</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Fully fine-tuning a big model means updating <b>every</b> weight and storing a whole new copy per task. That is expensive and does not scale to many tasks.</li>
+      <li>LoRA <b>freezes</b> the pretrained weight matrix <b>W</b> and learns a small <b>low-rank</b> update instead: <b>&Delta;W = B A</b>, where B and A are skinny matrices with an inner rank <b>r</b> much smaller than the layer size.</li>
+      <li>You train roughly <b>0.01 to 1%</b> of the parameters. The paper reports up to a <b>10,000&times;</b> cut in trainable parameters and a <b>3&times;</b> cut in GPU memory versus full fine-tuning.</li>
+      <li>Because the update is just a matrix, you can <b>merge</b> B A back into W after training, so there is <b>no extra inference latency</b>. Swap a different tiny adapter per task on the same frozen base.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>By 2021 the winning recipe was: pretrain one huge model, then fine-tune it on your task. But full fine-tuning has a brutal cost. GPT-3 has 175 billion parameters. Fine-tuning it updates all 175 billion, needs optimizer state for all of them, and produces a fresh 175-billion-parameter checkpoint <em>for every task you care about</em>. Ten tasks means ten full copies. That is a storage and serving nightmare.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph FULL["Full fine-tuning: one giant copy per task"]
+    direction TB
+    b0["Pretrained W (175B)"] --> t1["Task A checkpoint (175B)"]
+    b0 --> t2["Task B checkpoint (175B)"]
+    b0 --> t3["Task C checkpoint (175B)"]
+  end
+  subgraph LORA["LoRA: one frozen base + tiny adapters"]
+    direction TB
+    f0["Frozen W (175B, shared)"] --> a1["adapter A (a few MB)"]
+    f0 --> a2["adapter B (a few MB)"]
+    f0 --> a3["adapter C (a few MB)"]
+  end
+    </div>
+    <figcaption>The core problem and fix. Full fine-tuning clones the entire model per task; storage explodes. LoRA keeps <b>one shared frozen base</b> and stores only a small adapter per task, so a new task costs megabytes instead of hundreds of gigabytes.</figcaption>
+  </figure>
+
+  <p>The insight behind LoRA: when you adapt a big model to a narrow task, the <em>change</em> in the weights is far simpler than the weights themselves. The authors argue this update has a low "intrinsic rank" - it can be captured by a small number of directions. So do not learn a full dense update. Learn a low-rank one.</p>
+
+  <h2>2. The one idea: a low-rank detour around a frozen weight</h2>
+  <p>Take any linear layer with weight matrix <code>W</code> of shape <code>d &times; k</code>. Normally fine-tuning nudges <code>W</code> to <code>W + &Delta;W</code>, where <code>&Delta;W</code> is also <code>d &times; k</code> and dense. LoRA replaces that dense update with a product of two thin matrices: <code>&Delta;W = B A</code>, where <code>B</code> is <code>d &times; r</code> and <code>A</code> is <code>r &times; k</code>, with the rank <code>r</code> tiny (often 4, 8, or 16).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  x["input x"] --> W["frozen W (d x k)"]
+  x --> A["A (r x k)<br/><i>down-project to rank r</i>"]
+  A --> B["B (d x r)<br/><i>up-project back</i>"]
+  W --> add(("+"))
+  B --> scale["x (alpha / r)"]
+  scale --> add
+  add --> h["output h"]
+    </div>
+    <figcaption>The LoRA layer. The input flows through the <b>frozen</b> W as usual, and in parallel through a small bottleneck: A squeezes it down to r dimensions, B expands it back. The two paths are added. <b>Only A and B are trained</b>; W never moves.</figcaption>
+  </figure>
+
+  <p>Why is <code>B A</code> so much smaller? A dense <code>d &times; k</code> update has <code>d &times; k</code> numbers. The two thin matrices have only <code>r &times; (d + k)</code> numbers. For a <code>4096 &times; 4096</code> layer with <code>r = 8</code>, that is 65,536 trainable numbers instead of 16.7 million - about 256&times; fewer, in one layer.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph SHAPE["Shapes: why the bottleneck is cheap"]
+    direction LR
+    dw["Dense update W: d x k<br/>(millions of numbers)"]
+    ba["B A: (d x r) + (r x k)<br/>(thousands of numbers)"]
+    dw -. "same effect, far fewer params" .-> ba
+  end
+    </div>
+    <figcaption>The rank bottleneck. A full update matrix is wide and tall; the LoRA factorisation forces every change to pass through an <b>r-dimensional waist</b>. Choosing r small is what makes the adapter tiny while still capturing the dominant directions of the update.</figcaption>
+  </figure>
+
+  <h2>3. The forward pass, exactly</h2>
+  <p>Plain English first: send the input through the frozen weight, and separately through the small B A detour, then add them. The detour is scaled by <code>alpha / r</code> so you can tune its strength without re-tuning the learning rate.</p>
+
+  <div class="math">h = W x + (alpha / r) &middot; B A x
+    <span class="gloss"><b>W x</b>: the original frozen layer output; this never changes during training. <b>A x</b>: project the input down into an r-dimensional space (A is r&times;k). <b>B (A x)</b>: project that back up to the output size (B is d&times;r). <b>alpha / r</b>: a fixed scale factor; alpha is a chosen constant, dividing by r keeps the update size stable as you change the rank. At the start B is initialised to zero, so B A = 0 and the model behaves exactly like the pretrained one - training only adds on top.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why B starts at zero</span>
+    A is initialised with small random numbers and <code>B</code> is initialised to all zeros. So on step 0 the update <code>B A</code> is exactly zero and the model is identical to the pretrained one. Training then grows the adapter from nothing, which makes fine-tuning stable and never worse than the starting point.</div>
+
+  <h2>4. Merge for free: no inference tax</h2>
+  <p>Older "adapter" methods inserted extra little layers into the network, which added latency at every forward pass. LoRA avoids this because its update is a plain matrix that lives in the <em>same</em> space as <code>W</code>. After training you can compute <code>W' = W + (alpha/r) B A</code> once and store <code>W'</code>. Now inference uses a single matrix, exactly like the original model. Zero added cost.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Pretrained: load frozen W
+  Pretrained --> Training: attach A, B (train only these)
+  Training --> Adapter: save small B, A
+  Adapter --> Merged: W' = W + (alpha/r) B A
+  Merged --> Serving: one matrix, no extra latency
+  Adapter --> Swap: keep W frozen, load a different adapter
+  Swap --> Serving
+    </div>
+    <figcaption>The LoRA lifecycle. You train only the adapter, then either <b>merge</b> it into W for latency-free serving, or keep it separate and <b>hot-swap</b> adapters per task on the same frozen base. Merging is optional and reversible, since you still hold the original W.</figcaption>
+  </figure>
+
+  <h2>5. Where to put it: the attention projections</h2>
+  <p>LoRA can wrap any linear layer, but the paper found the best bang-for-buck is on the <strong>attention projection matrices</strong> - the query and value projections in particular. You do not need to adapt the feed-forward layers to get most of the benefit, which keeps the adapter even smaller.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  x["token representation"] --> Wq["W_Q + LoRA"]
+  x --> Wk["W_K (frozen)"]
+  x --> Wv["W_V + LoRA"]
+  Wq --> att["attention"]
+  Wk --> att
+  Wv --> att
+  att --> Wo["W_O (frozen)"]
+  Wo --> ffn["feed-forward (frozen)"]
+    </div>
+    <figcaption>A common placement. LoRA is applied to the query and value projections inside self-attention, while the key, output, and feed-forward weights stay frozen. <b>Adapting just Q and V captures most of the task-specific change</b> for a fraction of the parameters.</figcaption>
+  </figure>
+
+  <h2>6. Implement it: a LoRALinear layer in PyTorch</h2>
+  <p>Here is a drop-in wrapper around <code>nn.Linear</code>. It freezes the base weight, adds the low-rank A and B, does the scaled forward pass, and offers a <code>merge()</code>. Run it and watch the trainable-parameter count collapse.</p>
+
+  <div class="code-cap">lora_linear.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn
+
+class LoRALinear(nn.Module):
+    def __init__(self, in_features, out_features, r=8, alpha=16):
+        super().__init__()
+        # the pretrained layer we adapt - its weight is FROZEN
+        self.base = nn.Linear(in_features, out_features, bias=False)
+        self.base.weight.requires_grad = False
+
+        self.r, self.alpha = r, alpha
+        self.scale = alpha / r                       # the (alpha / r) factor
+        # A: down-project k -> r  (small random init)
+        self.A = nn.Parameter(torch.randn(r, in_features) * 0.01)
+        # B: up-project r -> d    (init to ZERO so B A = 0 at start)
+        self.B = nn.Parameter(torch.zeros(out_features, r))
+        self.merged = False
+
+    def forward(self, x):                            # x: (..., in_features)
+        out = self.base(x)                           # frozen path: W x
+        if not self.merged:                          # detour: (alpha/r) B A x
+            out = out + self.scale * (x @ self.A.t() @ self.B.t())
+        return out
+
+    def merge(self):
+        # fold the adapter into the base weight: W' = W + (alpha/r) B A
+        delta = self.scale * (self.B @ self.A)       # shape (out, in)
+        self.base.weight.data += delta
+        self.merged = True                           # now a single matrix
+
+# param-count demo on one 4096 x 4096 layer
+layer = LoRALinear(4096, 4096, r=8)
+trainable = sum(p.numel() for p in layer.parameters() if p.requires_grad)
+frozen    = sum(p.numel() for p in layer.parameters() if not p.requires_grad)
+print(f"trainable: {trainable:,}")   # 65,536  (A + B)
+print(f"frozen:    {frozen:,}")      # 16,777,216  (the base W)
+print(f"trainable fraction: {trainable / (trainable + frozen):.4%}")  # ~0.39%
+
+# check merge preserves the output
+x = torch.randn(2, 4096)
+before = layer(x)
+layer.merge()
+after = layer(x)
+print("max diff after merge:", (before - after).abs().max().item())  # ~0</code></pre>
+
+  <p>Two things to notice. First, the trainable fraction is well under one percent for a single layer, and it only shrinks as the model grows. Second, <code>merge()</code> leaves the output identical - proof that the deployed model pays no latency tax. During training you keep A and B separate so gradients only touch them; at serving time you fold them in.</p>
+
+  <div class="card callout"><span class="tag">In practice</span>
+    You rarely hand-write this. Libraries like Hugging Face <code>peft</code> attach LoRA to a named set of modules (for example <code>q_proj</code> and <code>v_proj</code>) with one config. But the module above <em>is</em> what they do underneath, so you can see there is no magic - just a frozen matrix plus a rank-r detour.</div>
+
+  <h2>7. LoRA versus the alternatives</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Full fine-tuning</th><th>Adapter layers</th><th>LoRA</th></tr></thead>
+    <tbody>
+      <tr><td>Trainable parameters</td><td>100%</td><td>~1-5%</td><td>~0.01-1%</td></tr>
+      <tr><td>Extra inference latency</td><td>None</td><td>Yes (added layers)</td><td>None (can merge)</td></tr>
+      <tr><td>Storage per new task</td><td>Full model copy</td><td>Small</td><td>Tiny (a few MB)</td></tr>
+      <tr><td>Swap tasks at serve time</td><td>Reload whole model</td><td>Toggle adapters</td><td>Hot-swap adapters</td></tr>
+      <tr><td>Quality vs full fine-tune</td><td>Baseline</td><td>Close</td><td>On par or better</td></tr>
+    </tbody>
+  </table>
+  <p>The headline result: on RoBERTa, DeBERTa, GPT-2, and GPT-3, LoRA matched or beat full fine-tuning quality while training a fraction of a percent of the weights. That combination - same quality, tiny footprint, no latency - is why LoRA became the default way to fine-tune large models.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">During LoRA training, which parameters actually receive gradient updates?</div>
+      <button class="q-opt">Only the pretrained weight matrix W of every adapted layer</button>
+      <button class="q-opt">Both the pretrained weight W and the small matrices A and B</button>
+      <button class="q-opt">Only the low-rank matrices A and B; the weight W is frozen</button>
+      <button class="q-opt">Only the bias vectors added on top of the attention outputs</button>
+      <div class="q-fb">W is frozen. The training updates only the thin A and B matrices, which is why the trainable count is tiny.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why can LoRA add zero extra latency at inference time?</div>
+      <button class="q-opt">The update B A can be merged into W to form one matrix</button>
+      <button class="q-opt">The adapter runs on a separate GPU stream in the background</button>
+      <button class="q-opt">The rank r is chosen so the extra matmul rounds down away</button>
+      <button class="q-opt">The base weight W is deleted once the adapter is done training</button>
+      <div class="q-fb">Because B A lives in the same space as W, you fold it in once: W' = W + (alpha/r) B A. Then serving uses a single matrix.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the effect of choosing a smaller rank r for the adapter?</div>
+      <button class="q-opt">It forces the frozen base weight to be retrained more slowly</button>
+      <button class="q-opt">It converts the linear layer into a convolution over tokens</button>
+      <button class="q-opt">It increases inference latency because of the extra detour</button>
+      <button class="q-opt">It shrinks the adapter but limits the directions it can learn</button>
+      <div class="q-fb">A smaller r means fewer parameters (cheaper) but a narrower bottleneck, so the update captures fewer distinct directions.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is the B matrix initialised to all zeros at the start?</div>
+      <button class="q-opt">So that gradients skip the A matrix on the first training step</button>
+      <button class="q-opt">So the update starts at zero and the model matches pretraining</button>
+      <button class="q-opt">So the adapter permanently outputs zero and never learns tasks</button>
+      <button class="q-opt">So the frozen weight W can be safely deleted before training</button>
+      <div class="q-fb">With B = 0 the product B A is zero, so at step 0 the model equals the pretrained one and training only adds on top.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next up, <a href="0029-qlora.html">QLoRA</a></b> keeps LoRA adapters in 16-bit but freezes the base model in 4-bit, letting you fine-tune a 65B model on a single 48GB GPU.</li>
+    <li>LoRA adapts the <b>attention projections</b> introduced in <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a> - the same Q/K/V matrices you built there.</li>
+    <li>It is a cheaper cousin of the post-training methods in Module 06, such as <a href="0023-instructgpt-rlhf.html">InstructGPT</a> and <a href="0025-dpo.html">DPO</a>, which you can run <em>through</em> LoRA adapters.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The whole trick is one product of thin matrices. If it still feels abstract, ask the agent to walk a single 4096-dimensional vector through <code>W x</code> and <code>B A x</code> with concrete shapes, or to show why merging B A into W cannot change the output. Do not move on until the rank bottleneck feels obvious.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original paper: <a href="https://arxiv.org/abs/2106.09685">Hu et al., "LoRA: Low-Rank Adaptation of Large Language Models" (2021)</a>. Then browse the reference implementation in Microsoft's <a href="https://github.com/microsoft/LoRA">LoRA GitHub repo</a> and the Hugging Face <a href="https://huggingface.co/docs/peft/index">PEFT library docs</a> to see how it is applied to real models.</p>
+
+  <div class="pager">
+    <a href="0027-grpo.html"><span class="dir">&larr; Previous</span><span class="ttl">GRPO</span></a>
+    <a class="nxt" href="0029-qlora.html"><span class="dir">Next &rarr;</span><span class="ttl">QLoRA</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 28 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

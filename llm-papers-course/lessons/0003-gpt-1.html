@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GPT-1: Generative Pre-Training - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Transformer Core &middot; Lesson 03</div>
+  <h1>GPT-1: Generative Pre-Training</h1>
+  <p class="paper-meta">
+    <span class="pill">2018</span>
+    Radford, Narasimhan, Salimans, Sutskever (OpenAI).
+    &middot; <a href="https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf">"Improving Language Understanding by Generative Pre-Training"</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>GPT-1 keeps the <b>decoder</b> half of the Transformer and trains it with one simple goal: <b>predict the next token</b>, over and over, on plain unlabeled text.</li>
+      <li>That is <b>generative pre-training</b>. It needs no labels, so it can drink from a huge corpus (BooksCorpus, ~7,000 books) and learn grammar, facts, and reasoning as a side effect.</li>
+      <li>Then comes a second, <b>supervised fine-tuning</b> stage on each specific task, using <b>input transformations</b> (delimiter tokens) so one architecture handles classification, entailment, similarity, and multiple choice.</li>
+      <li>A small <b>auxiliary language-modeling loss</b> during fine-tuning keeps the pretrained skills sharp and speeds convergence.</li>
+      <li>The 12-layer, ~117M-parameter model beat task-specific systems on 9 of 12 benchmarks - proof that one pretrained generator transfers everywhere. It is the direct ancestor of every GPT since.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Labeled data is scarce and expensive; raw text is nearly infinite and free. In 2018 most NLP models were still trained from scratch, per task, on small labeled datasets, each with a hand-crafted architecture. Progress was slow because every new task started from zero. The question GPT-1 answers is: <strong>can one model learn general language ability from unlabeled text, then transfer that ability to any task with only light tuning?</strong></p>
+
+  <p>Its sibling paper, BERT (Lesson 02), answered a related question with a bidirectional encoder. GPT took the other road: a <strong>left-to-right generator</strong>. The bet was that if a model gets genuinely good at predicting the next word, it must along the way learn syntax, world facts, and even some reasoning - because all of those help you guess what comes next.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph OLD["Before: train per task from scratch"]
+    direction TB
+    t1["task A data"] --> m1["model A"]
+    t2["task B data"] --> m2["model B"]
+    t3["task C data"] --> m3["model C"]
+  end
+  subgraph NEW["GPT-1: pretrain once, adapt many"]
+    direction TB
+    big["huge unlabeled text"] --> pre["one pretrained generator"]
+    pre --> a1["+head -> task A"]
+    pre --> a2["+head -> task B"]
+    pre --> a3["+head -> task C"]
+  end
+    </div>
+    <figcaption>The shift GPT-1 argued for. Instead of a bespoke model per task trained on scarce labels, <b>pretrain a single generator on abundant unlabeled text, then adapt it cheaply to each task</b>. The expensive language learning happens once and is reused everywhere.</figcaption>
+  </figure>
+
+  <h2>2. Decoder-only: what GPT keeps</h2>
+  <p>GPT-1 is the <strong>decoder</strong> stack from Lesson 01, with the encoder and the cross-attention removed. What remains is a tower of blocks doing <strong>masked (causal) self-attention</strong>: each token may attend only to itself and the tokens before it, never the future. That causal mask is the whole reason the model can generate - it predicts token N+1 using only tokens 1..N, exactly the setting it will face at generation time.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  IN["tokens 1..N + positions"] --> B1["decoder block 1<br/>causal self-attn + FFN"]
+  B1 --> B2["decoder block 2"]
+  B2 --> Bd["... x12 layers"]
+  Bd --> LN["final LayerNorm"]
+  LN --> HEAD["linear -> softmax over vocab"]
+  HEAD --> NEXT["P(next token | tokens so far)"]
+    </div>
+    <figcaption>The GPT-1 architecture: twelve stacked decoder blocks with causal self-attention, then a linear layer projecting to vocabulary logits. <b>Every position predicts the very next token from only its past</b>, which is what lets the same trained weights generate text one step at a time.</figcaption>
+  </figure>
+
+  <p>The concrete recipe: 12 layers, hidden size 768, 12 attention heads, a feed-forward inner size of 3072, and a context window of 512 tokens - roughly <strong>117M parameters</strong>. Tokenization is byte-pair encoding (BPE) with 40,000 merges.</p>
+
+  <h2>3. Stage one: unsupervised generative pretraining</h2>
+  <p>The pretraining objective could not be simpler. Slide over the corpus and, at every position, ask the model to predict the next token given a window of previous ones. Maximise the probability it assigns to the token that actually came next. No labels, no task - just the text predicting itself.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant D as BooksCorpus (unlabeled)
+    participant M as GPT-1 decoder
+    participant L as LM loss
+    D->>M: context "the cat sat on the"
+    M->>L: predict distribution over next token
+    L->>L: compare to true next token "mat"
+    L->>M: gradient: raise P(mat), lower the rest
+    Note over D,M: repeat for every position,<br/>over ~7000 books
+    </div>
+    <figcaption>Stage one, next-token prediction. The model reads a context and outputs a probability for every possible next token; the loss nudges it toward the token that truly followed. <b>Do this billions of times and general language ability falls out for free</b>, with no human labels involved.</figcaption>
+  </figure>
+
+  <p>GPT-1 pretrained on <strong>BooksCorpus</strong>: over 7,000 unique, unpublished books. Long books matter here - contiguous passages let the model learn genuinely long-range structure, not just neighbouring words.</p>
+
+  <h2>4. Stage two: supervised fine-tuning with input transformations</h2>
+  <p>After pretraining, you have a strong generator but no task-specific behaviour. Stage two fixes that. Take a labeled dataset, feed each example through the same model, and read out the final token's vector into a small <strong>linear task head</strong>. The clever part is how GPT-1 makes <em>every</em> task look like one long sequence, so the architecture never changes: it uses <strong>input transformations</strong> with special delimiter tokens.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph CL["Classification"]
+    c1["&#91;start&#93; text &#91;extract&#93;"] --> ch["-> linear head -> label"]
+  end
+  subgraph EN["Entailment"]
+    e1["&#91;start&#93; premise &#91;delim&#93; hypothesis &#91;extract&#93;"] --> eh["-> linear head -> yes/no"]
+  end
+  subgraph SI["Similarity (order-invariant)"]
+    s1["&#91;start&#93; A &#91;delim&#93; B &#91;extract&#93;"] --> sh1["encode"]
+    s2["&#91;start&#93; B &#91;delim&#93; A &#91;extract&#93;"] --> sh2["encode"]
+    sh1 --> add(("+")) --> sig["-> linear head"]
+    sh2 --> add
+  end
+  subgraph MC["Multiple choice"]
+    m1["&#91;start&#93; context &#91;delim&#93; answer 1 &#91;extract&#93;"] --> mh["score"]
+    m2["&#91;start&#93; context &#91;delim&#93; answer 2 &#91;extract&#93;"] --> mh
+    mh --> soft["softmax over answers"]
+  end
+    </div>
+    <figcaption>Input transformations turn structured tasks into flat token sequences. Delimiter tokens (<code>&#91;start&#93;</code>, <code>&#91;delim&#93;</code>, <code>&#91;extract&#93;</code>) mark the pieces, and the vector at the final <code>&#91;extract&#93;</code> token feeds a thin linear head. <b>One unchanged decoder handles classification, entailment, similarity, and multiple choice</b> just by reshaping the input.</figcaption>
+  </figure>
+
+  <h2>5. The auxiliary language-modeling loss</h2>
+  <p>During fine-tuning, GPT-1 does not just optimise the task label. It <strong>also</strong> keeps predicting the next token on the fine-tuning text, as a secondary objective, weighted by a small factor. This "auxiliary LM loss" acts like a memory aid: it stops the model from forgetting its general language skills while it specialises, and the paper reports it improves generalisation and speeds up convergence.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  X["fine-tuning example"] --> M["GPT-1 decoder"]
+  M --> T["task head<br/>-> supervised loss L_task"]
+  M --> A["LM head<br/>-> next-token loss L_lm"]
+  T --> S["total = L_task + &lambda; &middot; L_lm"]
+  A --> S
+  S --> G["one gradient step"]
+    </div>
+    <figcaption>Fine-tuning optimises two objectives at once: the supervised task loss and a down-weighted language-modeling loss on the same text. <b>The auxiliary term (weight &lambda;) preserves general fluency while the task head specialises</b>, giving better transfer than the task loss alone.</figcaption>
+  </figure>
+
+  <h2>6. The math: both objectives</h2>
+  <p>Pretraining maximises the log-probability of each token given the previous <em>k</em> tokens. Equivalently, we minimise the negative of that sum.</p>
+
+  <div class="math">L<sub>1</sub>(U) = &sum;<sub>i</sub> log P( u<sub>i</sub> | u<sub>i&minus;k</sub>, ..., u<sub>i&minus;1</sub> )
+    <span class="gloss"><b>U</b>: the stream of tokens u<sub>1</sub>, u<sub>2</sub>, ... in the corpus. <b>u<sub>i</sub></b>: the token at position i, the one we are trying to predict. <b>u<sub>i&minus;k</sub> ... u<sub>i&minus;1</sub></b>: the previous k tokens, the context window the model may look at. <b>P( u<sub>i</sub> | ... )</b>: the probability the model gives the correct next token. Sum the logs over all positions and push it up - that is "get good at predicting the next word."</span>
+  </div>
+
+  <p>Fine-tuning combines the supervised task objective with the auxiliary language-modeling objective from above.</p>
+
+  <div class="math">L<sub>3</sub>(C) = L<sub>2</sub>(C) + &lambda; &middot; L<sub>1</sub>(C)
+    <span class="gloss"><b>C</b>: the labeled fine-tuning dataset. <b>L<sub>2</sub></b>: the supervised loss - predict the right label from the final token's vector. <b>L<sub>1</sub></b>: the same next-token language-modeling loss as pretraining, now applied to the task text. <b>&lambda;</b>: a small weight (the paper uses 0.5) that says how much to care about staying fluent while specialising. Adding them means "learn the task, but do not forget how to model language."</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">One idea, two uses</span>
+    Notice that <code>L<sub>1</sub></code> is the <em>same</em> next-token loss in both stages. In pretraining it is the whole game; in fine-tuning it is a gentle regulariser. GPT's entire philosophy is that this one objective, at scale, is enough - a theme that only gets louder in GPT-2 and GPT-3.</div>
+
+  <h2>7. Implement it: a causal LM training loop</h2>
+  <p>Here is stage one in runnable PyTorch. It reuses the causal self-attention you built in Lesson 01, stacks it into a tiny GPT, and trains the next-token objective. Watch how the labels are just the inputs <strong>shifted by one</strong> - that shift <em>is</em> "predict the next token."</p>
+
+  <div class="code-cap">gpt1_pretrain.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class CausalBlock(nn.Module):
+    """Decoder block: causal self-attention (see Lesson 01) + feed-forward."""
+    def __init__(self, d_model=256, n_heads=4):
+        super().__init__()
+        self.attn = nn.MultiheadAttention(d_model, n_heads, batch_first=True)
+        self.ln1  = nn.LayerNorm(d_model)
+        self.mlp  = nn.Sequential(nn.Linear(d_model, 4 * d_model),
+                                  nn.GELU(),
+                                  nn.Linear(4 * d_model, d_model))
+        self.ln2  = nn.LayerNorm(d_model)
+
+    def forward(self, x):
+        N = x.size(1)
+        # causal mask: position i may not attend to any j > i (the future)
+        mask = torch.triu(torch.ones(N, N, device=x.device), diagonal=1).bool()
+        a, _ = self.attn(x, x, x, attn_mask=mask, need_weights=False)
+        x = self.ln1(x + a)
+        x = self.ln2(x + self.mlp(x))
+        return x
+
+class TinyGPT(nn.Module):
+    def __init__(self, vocab=5000, d_model=256, n_layers=4, max_len=128):
+        super().__init__()
+        self.tok = nn.Embedding(vocab, d_model)
+        self.pos = nn.Embedding(max_len, d_model)
+        self.blocks = nn.ModuleList(CausalBlock(d_model) for _ in range(n_layers))
+        self.ln_f = nn.LayerNorm(d_model)
+        self.head = nn.Linear(d_model, vocab)          # project to next-token logits
+
+    def forward(self, ids):
+        N = ids.size(1)
+        pos = torch.arange(N, device=ids.device).unsqueeze(0)
+        x = self.tok(ids) + self.pos(pos)
+        for blk in self.blocks:
+            x = blk(x)
+        return self.head(self.ln_f(x))                 # (B, N, vocab)
+
+# ---- the next-token training step ------------------------------------------
+model = TinyGPT()
+opt   = torch.optim.AdamW(model.parameters(), lr=3e-4)
+
+batch = torch.randint(0, 5000, (4, 65))                # 4 sequences of length 65
+inputs, labels = batch[:, :-1], batch[:, 1:]           # labels = inputs shifted by 1
+
+logits = model(inputs)                                 # (4, 64, vocab)
+loss = F.cross_entropy(logits.reshape(-1, 5000), labels.reshape(-1))
+loss.backward(); opt.step(); opt.zero_grad()
+print(round(loss.item(), 3))                           # ~log(vocab) at init
+</code></pre>
+
+  <p>The single most important line is <code>inputs, labels = batch[:, :-1], batch[:, 1:]</code>. Predicting a sequence shifted one step to the left is next-token prediction, and the causal mask guarantees no position ever cheats by seeing its own answer. This exact loop, scaled up, is how every GPT model is pretrained.</p>
+
+  <h2>8. GPT-1 versus BERT: two answers to one question</h2>
+  <table>
+    <thead><tr><th>Property</th><th>GPT-1 (this paper)</th><th>BERT (Lesson 02)</th></tr></thead>
+    <tbody>
+      <tr><td>Transformer half kept</td><td>Decoder</td><td>Encoder</td></tr>
+      <tr><td>Attention direction</td><td>Left-to-right (causal)</td><td>Bidirectional</td></tr>
+      <tr><td>Pretraining objective</td><td>Next-token prediction</td><td>Masked LM plus NSP</td></tr>
+      <tr><td>Adapting to a task</td><td>Input reshape plus head</td><td>Add a small task head</td></tr>
+      <tr><td>Natural strength</td><td>Generating text fluently</td><td>Understanding and tagging</td></tr>
+      <tr><td>Layers / parameters</td><td>12 layers / ~117M</td><td>12 or 24 / 110M-340M</td></tr>
+    </tbody>
+  </table>
+  <p>The two papers landed months apart and framed the field's central fork. BERT's bidirectional understanding won the classification leaderboards of the era. GPT's causal generation looked less flashy at first, but it is the branch that scales into GPT-2, GPT-3, and the chat assistants you use today - because prediction-as-pretraining and generation-as-interface turned out to be extraordinarily general.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What single objective does GPT-1 use for its pretraining stage?</div>
+      <button class="q-opt">Predicting whether two given sentences follow one another in text</button>
+      <button class="q-opt">Filling in tokens that were hidden from the middle of a passage</button>
+      <button class="q-opt">Predicting the next token given the tokens that came before it</button>
+      <button class="q-opt">Translating each input sentence into a second target language</button>
+      <div class="q-fb">Stage one is plain next-token prediction on unlabeled text - no labels, no masking, just modeling what comes next.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does one GPT-1 architecture handle so many different tasks?</div>
+      <button class="q-opt">By reshaping each input into a sequence with delimiter tokens plus a head</button>
+      <button class="q-opt">By swapping in a different attention mechanism for every single task</button>
+      <button class="q-opt">By training a fresh decoder stack from random weights for each task</button>
+      <button class="q-opt">By translating the labels into words the pretrained model already knew</button>
+      <div class="q-fb">Input transformations turn structured inputs into flat token sequences; only a thin linear head changes per task.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the auxiliary language-modeling loss used for during fine-tuning?</div>
+      <button class="q-opt">To replace the supervised task loss once the task accuracy is high</button>
+      <button class="q-opt">To mask random tokens so the model becomes bidirectional over time</button>
+      <button class="q-opt">To translate the fine-tuning examples before the task head reads them</button>
+      <button class="q-opt">To keep general language skill sharp and help the model generalise</button>
+      <div class="q-fb">The down-weighted next-token loss on task text acts as a regulariser, preserving fluency and improving transfer.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can GPT-1 generate text left to right at inference time?</div>
+      <button class="q-opt">Because the encoder half supplies keys and values from the full input</button>
+      <button class="q-opt">Because the causal mask trained every position to predict only its future</button>
+      <button class="q-opt">Because bidirectional attention lets each token average the whole context</button>
+      <button class="q-opt">Because the auxiliary loss rewrote the labels into the target vocabulary</button>
+      <div class="q-fb">Causal attention means each position was always trained to predict the next token from its past, exactly the generation setting.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Built on <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a></b> - GPT-1 is that paper's decoder stack, causal mask and all.</li>
+    <li><b>Contrast with <a href="0002-bert.html">BERT</a></b>, the encoder sibling that learns bidirectionally for understanding rather than generation.</li>
+    <li><b>Next up, <a href="0004-gpt-2.html">GPT-2</a></b> drops task-specific fine-tuning entirely and does tasks zero-shot, just by scaling this same recipe.</li>
+    <li>The "one objective at scale" bet here is quantified by the <a href="0005-scaling-laws.html">Scaling Laws</a> paper in Module 02.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The idea that "predict the next word" secretly teaches grammar, facts, and reasoning is worth sitting with. Ask the agent to give three concrete examples where guessing the next token forces the model to have learned something deeper. Then have it trace the label-shift line in the code with a real five-token sentence.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the original report: <a href="https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf">Radford et al., "Improving Language Understanding by Generative Pre-Training" (2018)</a>. Then watch Andrej Karpathy's <a href="https://www.youtube.com/watch?v=kCc8FmEb1nY">"Let's build GPT from scratch"</a> to implement this exact decoder end to end.</p>
+
+  <div class="pager">
+    <a href="0002-bert.html"><span class="dir">&larr; Previous</span><span class="ttl">BERT</span></a>
+    <a class="nxt" href="0004-gpt-2.html"><span class="dir">Next &rarr;</span><span class="ttl">GPT-2: Scaling + Zero-Shot</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 03 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

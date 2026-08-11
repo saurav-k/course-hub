@@ -1,0 +1,328 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DeepSeekMoE - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Mixture of Experts &middot; Lesson 36</div>
+  <h1>DeepSeekMoE</h1>
+  <p class="paper-meta">
+    <span class="pill">2024</span>
+    Dai, Deng, Zhao, Xu, Gao, Chen, Li, Zeng, Yu, Wu, Xie, and colleagues (DeepSeek-AI).
+    &middot; <a href="https://arxiv.org/abs/2401.06066">arXiv:2401.06066</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A Mixture of Experts (Lesson 35) gives a model many expert feed-forward networks and routes each token to a few. But experts often overlap: they learn the same common facts, and each is too big to specialise sharply.</li>
+      <li>DeepSeekMoE fixes this with <b>two</b> ideas. First, <b>fine-grained expert segmentation</b>: chop each expert into several smaller ones and route to more of them, so the router can mix and match far more combinations.</li>
+      <li>Second, <b>shared expert isolation</b>: set aside a few <b>always-on</b> shared experts that every token uses. They soak up the common knowledge, freeing the routed experts to specialise.</li>
+      <li>The result is sharper expert specialisation at the <b>same compute</b>. DeepSeekMoE 16B matched LLaMA2 7B while doing about 40% of the FLOPs, and this design is the backbone of DeepSeek-V2 and V3.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Switch Transformer showed that a Mixture of Experts (MoE) can grow a model's total parameters without growing the compute each token pays. But when the DeepSeek team looked closely at how the experts were used, they found two kinds of waste. The experts were not specialising the way the story promised.</p>
+
+  <p>The first problem is <strong>knowledge redundancy</strong>. Every token, whatever it is about, needs some common knowledge: grammar, basic word meanings, sentence structure. In a plain MoE each routed expert has to learn that shared background on its own, so many experts end up storing near-duplicate copies of the same basics. Parameters wasted on repetition.</p>
+
+  <p>The second problem is <strong>coarse routing</strong>. If a block has only 8 or 16 large experts and each token visits 1 or 2, there are very few ways to combine them. A token whose meaning sits between two specialities has no expert that fits, and no fine control to blend the right pieces. The experts are too few and too chunky to carve knowledge finely.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph OLD["Plain MoE (few big experts, top-1 or top-2)"]
+    direction TB
+    ot["token"] --> orr["router"]
+    orr --> oe1["Big Expert 1<br/>learns basics + topic A"]
+    orr --> oe2["Big Expert 2<br/>learns basics + topic B"]
+    oe1 -.->|"basics duplicated"| oe2
+  end
+  subgraph NEW["DeepSeekMoE (shared + many small routed)"]
+    direction TB
+    nt["token"] --> nsh["Shared experts<br/>always on: hold the basics"]
+    nt --> nr["router"]
+    nr --> ne1["small expert (topic A only)"]
+    nr --> ne2["small expert (topic B only)"]
+    nr --> ne3["small expert (topic C only)"]
+    nsh --> nout["output"]
+    ne1 --> nout
+    ne2 --> nout
+    ne3 --> nout
+  end
+    </div>
+    <figcaption>The core shift. In a plain MoE each big expert must relearn the common basics, so knowledge is duplicated and routing is coarse. DeepSeekMoE moves the basics into <b>always-on shared experts</b> and splits the rest into <b>many small routed experts</b>. <b>Shared experts hold what everyone needs; small routed experts each own a narrow speciality.</b></figcaption>
+  </figure>
+
+  <h2>2. Idea one: fine-grained expert segmentation</h2>
+  <p>Start from a normal MoE layer with <code>N</code> experts, each a full-size feed-forward network, and each token routed to the top <code>K</code>. DeepSeekMoE slices every expert into <code>m</code> smaller pieces. Each small expert has a hidden width <code>1/m</code> as large, so the total parameters are unchanged. There are now <code>mN</code> experts, and to keep the compute per token identical you route to <code>mK</code> of them instead of <code>K</code>.</p>
+
+  <p>Same parameters, same FLOPs per token. What changed is <strong>flexibility</strong>. The router now has many more experts to choose from and picks more of them, so it can assemble a token's computation from finer parts. A token that is 70% about law and 30% about medicine can grab a few legal experts and a couple of medical ones, rather than being forced into one lump that does both badly.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph B["Before: 1 big expert"]
+    direction TB
+    be["Expert<br/>width d_ff"]
+  end
+  subgraph A["After: split into m = 4 small experts"]
+    direction TB
+    ae1["expert<br/>width d_ff / 4"]
+    ae2["expert<br/>width d_ff / 4"]
+    ae3["expert<br/>width d_ff / 4"]
+    ae4["expert<br/>width d_ff / 4"]
+  end
+  be -->|"same total params<br/>route to more of them"| A
+    </div>
+    <figcaption>Fine-grained segmentation with m = 4. One full-width expert becomes four quarter-width experts. Total parameters and per-token compute are unchanged, but the router now chooses among four times as many experts and activates four times as many. <b>More, smaller experts give the router far more combinations to specialise with.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The combinatorial payoff</span>
+    With <code>N = 16</code> experts and top-<code>K = 2</code>, there are only <code>C(16, 2) = 120</code> possible expert teams. Split by <code>m = 4</code> into 64 experts routed <code>8</code> at a time, and there are <code>C(64, 8) &approx; 4.4</code> billion possible teams. Same parameters, same FLOPs, an astronomically richer set of ways to combine knowledge for each token.</div>
+
+  <h2>3. Idea two: shared expert isolation</h2>
+  <p>Fine-grained routing lets experts specialise, but it does not stop them from all wasting capacity on the same common basics. That is the job of the second idea. DeepSeekMoE reserves a small number of experts, <code>K<sub>s</sub></code> of them, as <strong>shared experts</strong> that are <strong>always active</strong> for every token, with no routing decision at all.</p>
+
+  <p>Because the shared experts see every token, they naturally learn the knowledge every token needs: grammar, common words, general structure. The routed experts no longer have to. Freed from carrying the basics, each routed expert can devote its full (small) capacity to one narrow speciality. The output for a token is the sum of its shared experts plus its selected routed experts.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  x["token vector x"] --> S1["Shared expert 1<br/>always on"]
+  x --> S2["Shared expert 2<br/>always on"]
+  x --> R["router (scores routed experts)"]
+  R --> pick["top-K routed experts<br/>(a few of the many)"]
+  pick --> E1["routed expert a"]
+  pick --> E2["routed expert b"]
+  pick --> E3["routed expert c"]
+  S1 --> SUM(("+"))
+  S2 --> SUM
+  E1 --> SUM
+  E2 --> SUM
+  E3 --> SUM
+  SUM --> y["output"]
+    </div>
+    <figcaption>Shared expert isolation. A couple of shared experts run for <b>every</b> token unconditionally and learn the common background. The router picks a handful of specialised routed experts on top. The token's output adds them all together. <b>Shared experts remove redundancy so each routed expert can specialise instead of relearning the basics.</b></figcaption>
+  </figure>
+
+  <h2>4. One token, end to end</h2>
+  <p>Put both ideas together and follow a single token through a DeepSeekMoE layer. The shared experts always fire. The router scores the many fine-grained routed experts, keeps the top few, and their gated outputs are added on.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant T as Token x
+  participant S as Shared experts
+  participant R as Router
+  participant E as Top-K routed experts
+  T->>S: always run (no routing)
+  S-->>T: shared output
+  T->>R: scores = softmax(x W_r) over routed experts
+  R->>R: keep top-K, renormalise their gates
+  R->>E: dispatch x to the K chosen experts
+  E-->>T: gate * expert(x) for each chosen expert
+  T->>T: output = shared output + sum of gated routed outputs
+    </div>
+    <figcaption>The full routing handshake. Shared experts contribute unconditionally; the router selects the top-K fine-grained experts and scales each by its (renormalised) gate. Everything is summed onto the residual stream. <b>Every token gets the same common core plus its own custom mix of specialists.</b></figcaption>
+  </figure>
+
+  <p>The concrete numbers from the paper's 16B model make it real. Each MoE layer has <strong>2 shared experts and 64 routed experts</strong>, and every expert is <code>0.25&times;</code> the width of a standard feed-forward network (so <code>m = 4</code>). Each token uses both shared experts plus the top <strong>6 of the 64</strong> routed ones, for 8 active experts in total, while the total parameter count stays large and the per-token compute stays small.</p>
+
+  <h2>5. The math, kept honest</h2>
+  <p>Here is a DeepSeekMoE layer written out. For a token <code>x</code>, the output adds the shared experts and the gated top-K routed experts. Only experts with a non-zero gate contribute, so all the others cost nothing for this token.</p>
+
+  <div class="math">y = x + &sum;<sub>i=1..K<sub>s</sub></sub> Shared<sub>i</sub>(x) + &sum;<sub>j=1..mN</sub> g<sub>j</sub> &middot; Routed<sub>j</sub>(x)
+    <span class="gloss"><b>x +</b> the residual connection carries the token forward unchanged. <b>&sum; Shared<sub>i</sub>(x)</b>: the K<sub>s</sub> shared experts, always summed in. <b>&sum; g<sub>j</sub> Routed<sub>j</sub>(x)</b>: over all mN routed experts, but the gate <b>g<sub>j</sub></b> is zero for every expert not in this token's top-K, so only mK terms are actually computed. <b>g<sub>j</sub></b> is the router's softmax score for expert j when it is selected, and 0 otherwise.</span>
+  </div>
+
+  <p>The gate itself is a softmax over the routed experts, kept only for the top-K:</p>
+
+  <div class="math">s<sub>j</sub> = softmax<sub>j</sub>( x &middot; W<sub>r</sub> ),&nbsp;&nbsp; g<sub>j</sub> = s<sub>j</sub> if j &isin; TopK(s), else 0
+    <span class="gloss"><b>x &middot; W<sub>r</sub></b>: the router is one small linear layer producing a score per routed expert. <b>softmax</b>: turns the scores into probabilities. <b>TopK</b>: keep the K highest, discard the rest by setting their gate to 0. In practice the kept gates are renormalised to sum to 1 so the blend is well-scaled.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why segmentation preserves compute</span>
+    Splitting an expert by <code>m</code> makes each <code>1/m</code> as expensive. Routing to <code>mK</code> of them instead of <code>K</code> multiplies the count back by <code>m</code>. The two cancel: <code>m &times; (1/m) = 1</code>. So fine-grained segmentation buys combinatorial flexibility for <b>free</b> in both parameters and FLOPs.</div>
+
+  <h2>6. Balancing many small experts</h2>
+  <p>With dozens of routed experts, the collapse risk from Lesson 35 is worse, not better: it is even easier for a few experts to hog the traffic. DeepSeekMoE keeps a Switch-style <strong>load-balancing loss</strong> that pushes routed usage toward uniform, and adds a second, device-level balance term so no single hardware shard is overloaded. The shared experts sit outside all of this, since they are never routed.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Score: router scores all routed experts
+  Score --> TopK: keep top-K, renormalise gates
+  TopK --> Run: run shared (always) + K routed
+  Run --> Balance: add load-balancing loss
+  Balance --> Score: gradients nudge router toward even use
+  Balance --> [*]: token output on residual
+    </div>
+    <figcaption>The training loop for one layer. Scores lead to a top-K selection; shared and selected routed experts run; a load-balancing loss is added so the router learns to spread tokens across the many small experts. <b>Fine-grained routing needs balancing even more than coarse routing, because there are more experts to starve.</b></figcaption>
+  </figure>
+
+  <h2>7. Implement it: a DeepSeekMoE layer in PyTorch</h2>
+  <p>This layer has both innovations. The experts are fine-grained (their width is divided by <code>m</code>), a couple of shared experts always run, and each token adds its top-K routed experts. It returns the auxiliary load-balancing loss for the training loop. Read it against the diagrams.</p>
+
+  <div class="code-cap">deepseek_moe.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class Expert(nn.Module):
+    """A fine-grained FFN: the SAME shape as a normal FFN but width / m."""
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.GELU(),
+            nn.Linear(d_ff, d_model),
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class DeepSeekMoE(nn.Module):
+    def __init__(self, d_model=128, d_ff_full=512, m=4,
+                 num_shared=2, num_routed=64, k_routed=6, aux_weight=0.01):
+        super().__init__()
+        d_ff = d_ff_full // m                     # fine-grained: each expert is 1/m wide
+        self.num_routed = num_routed
+        self.k_routed   = k_routed
+        self.aux_weight = aux_weight
+        # shared experts run for EVERY token, no routing
+        self.shared = nn.ModuleList([Expert(d_model, d_ff) for _ in range(num_shared)])
+        # many small routed experts; a token visits only its top-k
+        self.routed = nn.ModuleList([Expert(d_model, d_ff) for _ in range(num_routed)])
+        self.router = nn.Linear(d_model, num_routed)   # scores routed experts only
+
+    def forward(self, x):                         # x: (B, N, d_model)
+        B, N, d = x.shape
+        xf = x.reshape(B * N, d)                  # every token independent
+        T  = xf.size(0)
+
+        # ---- shared experts: unconditional, always paid for ----
+        out = sum(exp(xf) for exp in self.shared)
+
+        # ---- route to top-k of the many fine-grained experts ----
+        probs = self.router(xf).softmax(dim=-1)   # (T, num_routed)
+        topv, topi = probs.topk(self.k_routed, dim=-1)     # gate values & indices
+        topv = topv / topv.sum(dim=-1, keepdim=True)       # renormalise the k gates
+
+        for slot in range(self.k_routed):         # k selected experts per token
+            idx  = topi[:, slot]                  # which routed expert this slot picked
+            gate = topv[:, slot].unsqueeze(-1)    # its renormalised weight
+            for e in range(self.num_routed):
+                sel = (idx == e).nonzero(as_tuple=True)[0]
+                if sel.numel() == 0:
+                    continue
+                out[sel] = out[sel] + gate[sel] * self.routed[e](xf[sel])
+
+        # ---- load-balancing loss over routed experts (Switch-style) ----
+        chosen = F.one_hot(topi, self.num_routed).float().sum(dim=1)  # (T, E) 0/1
+        f_i = (chosen > 0).float().mean(dim=0)    # fraction of tokens using expert i
+        P_i = probs.mean(dim=0)                   # mean router probability for i
+        aux = self.aux_weight * self.num_routed * (f_i * P_i).sum()
+
+        return out.reshape(B, N, d), aux
+
+# smoke test: matches the paper's 16B layer shape (2 shared, 64 routed, top-6, m=4)
+layer = DeepSeekMoE(d_model=128, d_ff_full=512, m=4,
+                    num_shared=2, num_routed=64, k_routed=6)
+x = torch.randn(2, 16, 128)                       # batch 2, seq 16, d_model 128
+y, aux = layer(x)
+print(y.shape, float(aux))                        # torch.Size([2, 16, 128]) &lt;small number&gt;</code></pre>
+
+  <p>Two design choices carry the paper. The line <code>d_ff = d_ff_full // m</code> is fine-grained segmentation: every expert is small, so there can be many of them and each specialises. The unconditional <code>out = sum(exp(xf) for exp in self.shared)</code> is shared isolation: those experts run for all tokens and absorb the common knowledge, so the routed experts do not have to. The residual add lives one level up, as with any Transformer sub-layer.</p>
+
+  <div class="card callout"><span class="tag">In DeepSeek-V2 and V3</span>
+    This exact layer, scaled up, is the MoE block inside DeepSeek-V2 (236B total, 21B active) and DeepSeek-V3 (671B total, 37B active). V3 also drops the auxiliary loss in favour of an <b>auxiliary-loss-free</b> bias-adjustment trick for balancing, but the fine-grained plus shared-expert skeleton is unchanged.</div>
+
+  <h2>8. How it compares</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Switch (top-1)</th><th>Plain MoE (top-2)</th><th>DeepSeekMoE</th></tr></thead>
+    <tbody>
+      <tr><td>Expert size</td><td>Full FFN</td><td>Full FFN</td><td>Fine-grained (1/m width)</td></tr>
+      <tr><td>Experts active per token</td><td>One expert</td><td>Two experts</td><td>Several routed plus shared</td></tr>
+      <tr><td>Common knowledge</td><td>Duplicated in experts</td><td>Duplicated in experts</td><td>Held by shared experts</td></tr>
+      <tr><td>Routing combinations</td><td>Very few</td><td>Few</td><td>Combinatorially many</td></tr>
+      <tr><td>Specialisation</td><td>Coarse</td><td>Coarse</td><td>Sharp and targeted</td></tr>
+    </tbody>
+  </table>
+  <p>The measured payoff is strong. DeepSeekMoE 2B matched the much larger GShard 2.9B, DeepSeekMoE 16B reached LLaMA2 7B quality using roughly <strong>40%</strong> of the computation, and DeepSeekMoE 145B approached DeepSeek 67B while spending about <strong>28.5%</strong> of the FLOPs. Same sparse-activation bargain as Switch, but with far better use of each parameter.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What are the two core ideas DeepSeekMoE adds to a Mixture of Experts?</div>
+      <button class="q-opt">Segmenting experts into smaller ones and shared expert isolation</button>
+      <button class="q-opt">Dropping overflow tokens and raising the capacity factor higher</button>
+      <button class="q-opt">Routing each token to a single expert and freezing the router</button>
+      <button class="q-opt">Removing the router entirely and blending all experts evenly</button>
+      <div class="q-fb">DeepSeekMoE combines fine-grained expert segmentation (many small experts) with shared expert isolation (a few always-on experts).</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does fine-grained expert segmentation actually change?</div>
+      <button class="q-opt">It merges all the experts into one wide shared network layer</button>
+      <button class="q-opt">It splits experts into many smaller ones and routes to more</button>
+      <button class="q-opt">It caps every expert with a fixed slot count for each batch</button>
+      <button class="q-opt">It adds a learned positional vector onto every routed expert</button>
+      <div class="q-fb">Each expert is cut into m smaller experts and the token is routed to m times as many, so compute stays fixed but combinations explode.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does DeepSeekMoE reserve a few always-on shared experts?</div>
+      <button class="q-opt">To store overflow tokens until a later batch can process them</button>
+      <button class="q-opt">To prune unused experts so the total parameter count shrinks</button>
+      <button class="q-opt">To hold the common knowledge so routed experts can specialise</button>
+      <button class="q-opt">To freeze random experts so the router visits them far less</button>
+      <div class="q-fb">Shared experts run for every token and absorb common knowledge, freeing each routed expert to specialise instead of relearning basics.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does DeepSeekMoE routing differ from Switch top-1 routing?</div>
+      <button class="q-opt">It activates several small experts plus shared ones per token</button>
+      <button class="q-opt">It activates exactly one large expert for each token instead</button>
+      <button class="q-opt">It activates no experts and relies only on the attention path</button>
+      <button class="q-opt">It activates all of the experts at once for every input token</button>
+      <div class="q-fb">Switch picks one full expert; DeepSeekMoE runs a couple of shared experts plus the top-K of many fine-grained routed experts.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0035-switch-transformer-moe.html">Switch Transformer</a></b> introduced sparse top-1 routing and the load-balancing loss. DeepSeekMoE keeps that machinery and refines what the experts are.</li>
+    <li>The <b>feed-forward network</b> being split into experts is the one from <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a>. Attention is untouched; only the per-token FFN becomes an MoE.</li>
+    <li>The <b>sparse-activation bargain</b> - more parameters, flat per-token FLOPs - is the same lever as the <a href="0005-scaling-laws.html">scaling laws</a> and <a href="0008-chinchilla.html">Chinchilla</a>, spent on capacity rather than compute.</li>
+    <li><b>Next up, <a href="0037-muon-optimizer.html">Muon Optimizer</a></b> leaves the architecture alone and speeds up how the weights themselves are trained.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The combinatorics are the aha moment. Ask the agent to compute how many expert teams exist before and after segmentation for a few values of m and K, and watch the number explode. Then ask it to run the code with the shared experts removed and reason about what knowledge the routed experts would now be forced to duplicate.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2401.06066">Dai et al., "DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models" (2024)</a>. Then see how it scales in the <a href="https://arxiv.org/abs/2405.04434">DeepSeek-V2</a> and <a href="https://arxiv.org/abs/2412.19437">DeepSeek-V3</a> technical reports, which build directly on this block.</p>
+
+  <div class="pager">
+    <a href="0035-switch-transformer-moe.html"><span class="dir">&larr; Previous</span><span class="ttl">Switch Transformer (MoE)</span></a>
+    <a class="nxt" href="0037-muon-optimizer.html"><span class="dir">Next &rarr;</span><span class="ttl">Muon Optimizer</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 36 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

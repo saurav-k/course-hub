@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantization Tradeoffs: INT4, FP8, AWQ, GPTQ - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Quantization &middot; Lesson 07</div>
+  <h1>Quantization Tradeoffs: INT4, FP8, AWQ, GPTQ</h1>
+  <p class="paper-meta">Weights are the biggest thing in GPU memory and, during decode, the thing you re-read every token. Store them in fewer bits and you shrink memory and move fewer bytes per step. The catch is quality. This lesson maps the memory-quality-speed triangle and shows how to serve a quantized model in vLLM.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Quantization stores weights (and optionally the KV cache or activations) in <b>fewer bits</b>: FP16 to INT8, INT4, or FP8.</li>
+      <li>Because decode is memory-bound, fewer bits per weight means fewer bytes to move per token, so you get both <b>smaller VRAM</b> and often <b>higher throughput</b>.</li>
+      <li>The tension is a triangle: <b>memory</b> vs <b>quality</b> vs <b>speed</b>. Push bits down far enough and quality starts to drop.</li>
+      <li><b>GPTQ</b> and <b>AWQ</b> are smart 4-bit weight-only methods; <b>FP8</b> (E4M3/E5M2) is a hardware-native 8-bit format on H100-class GPUs.</li>
+      <li>In vLLM it is one flag: <code>--quantization awq|gptq|fp8</code>. This lab compares VRAM, throughput, and a quick quality check against FP16.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>A 13B model in FP16 needs about 26 GB just for weights, before any KV cache. That may not fit your GPU, and every decode step must stream all 26 GB from memory to produce one token. Halving the bits roughly halves both numbers. Quantization is the single highest-leverage move for fitting bigger models on smaller hardware and speeding up the memory-bound decode phase at the same time.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph FP16["FP16 weights"]
+    a["13B params x 2 bytes<br/>~26 GB<br/>stream 26 GB / token"]
+  end
+  subgraph INT4["INT4 weights"]
+    b["13B params x 0.5 bytes<br/>~6.5 GB<br/>stream ~6.5 GB / token"]
+  end
+  FP16 -->|"4x fewer bytes<br/>fits smaller GPU,<br/>faster decode"| INT4
+    </div>
+    <figcaption>Bits are bytes are time. FP16 spends 2 bytes per weight; INT4 spends half a byte. Since decode re-reads the weights every token, 4x fewer bytes means a smaller footprint <b>and</b> a faster memory-bound step. <b>Quantization is the rare optimisation that improves memory and speed together, paying only in quality.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    Decode is limited by memory bandwidth, not math. Fewer bits per weight directly cuts the bytes moved per token, so lower precision buys throughput as a side effect of buying memory. That is why quantization is a serving win, not just a fit-it-on-the-card trick.</div>
+
+  <h2>2. What you can quantize: weights, KV cache, activations</h2>
+  <p>Not all tensors are equal. <b>Weight-only</b> quantization shrinks the parameters and is the safest, most common choice. <b>KV-cache</b> quantization stores the growing per-token cache in fewer bits, which matters most for long contexts. <b>Activation</b> quantization also lowers the intermediate values, enabling faster integer math but hurting quality the most because activations have wild outliers.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q{"Which tensor to quantize?"}
+  Q -->|"the parameters"| W["Weight-only<br/>biggest VRAM win, safest quality<br/>AWQ, GPTQ, INT4"]
+  Q -->|"the per-token cache"| KV["KV-cache quant<br/>helps long context<br/>--kv-cache-dtype fp8"]
+  Q -->|"the intermediate values"| ACT["Activation quant<br/>enables integer matmul<br/>hardest on quality (outliers)"]
+  W --> S["serve with vLLM"]
+  KV --> S
+  ACT --> S
+    </div>
+    <figcaption>Three surfaces, three risk levels. Weight-only is the default because weights tolerate low precision well. KV-cache quant pays off on long sequences. Activation quant unlocks the fastest integer kernels but activations carry outliers that punish naive rounding. <b>Start with weight-only, add KV-cache quant for long context, reach for activation quant last.</b></figcaption>
+  </figure>
+
+  <h2>3. The formats: INT8, INT4, FP8</h2>
+  <p>Integer quantization maps a float range onto evenly spaced integer buckets using a scale (and sometimes a zero-point). INT8 is nearly lossless for weights; INT4 is aggressive and needs a smart method to stay accurate. FP8 keeps a floating layout in 8 bits, so it holds a much wider dynamic range than INT8, which is why modern hardware favours it.</p>
+
+  <div class="math">w<sub>q</sub> = round(w / s) &nbsp;&middot;&nbsp; s ,&nbsp;&nbsp; s = max(|w|) / (2<sup>b&minus;1</sup> &minus; 1)
+    <span class="gloss"><b>w</b>: the original weight. <b>s</b>: a scale that maps the float range onto <b>b</b>-bit integers. <b>w<sub>q</sub></b>: the reconstructed weight after rounding to the nearest bucket. Fewer bits (smaller <b>b</b>) means coarser buckets and larger rounding error, which is exactly the quality cost you are trading for memory.</span>
+  </div>
+
+  <p><b>FP8</b> comes in two shapes. <b>E4M3</b> (4 exponent, 3 mantissa bits) has more precision and a narrower range, good for weights and activations. <b>E5M2</b> (5 exponent, 2 mantissa) has more range and less precision, useful for gradients and some caches. FP8 matmul runs natively on Hopper-class GPUs (H100) and later, so it is fast without custom kernels.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph E4M3["FP8 E4M3"]
+    a["4 exp / 3 mantissa<br/>more precision<br/>narrower range<br/>weights, activations"]
+  end
+  subgraph E5M2["FP8 E5M2"]
+    b["5 exp / 2 mantissa<br/>less precision<br/>wider range<br/>gradients, some caches"]
+  end
+  HW["Hopper H100+<br/>native FP8 matmul"] --- E4M3
+  HW --- E5M2
+    </div>
+    <figcaption>The two FP8 layouts trade precision for range. E4M3 keeps more mantissa bits (finer values) at the cost of range; E5M2 keeps more exponent bits (wider values) at the cost of precision. <b>FP8 is fast because H100-class GPUs execute it in hardware, unlike INT4 which relies on dequantizing kernels.</b></figcaption>
+  </figure>
+
+  <h2>4. GPTQ vs AWQ: two ways to keep 4-bit accurate</h2>
+  <p>Naive 4-bit rounding wrecks quality because the coarse buckets destroy important weights. Both GPTQ and AWQ are post-training quantization (PTQ) methods that use a small calibration dataset to round more cleverly, but they think about the problem differently.</p>
+
+  <p><b>GPTQ</b> is Hessian-based: it looks at how sensitive the loss is to each weight (via second-order information) and adjusts the remaining weights to compensate for the error introduced by each one it rounds. It quantizes column by column, correcting as it goes. <b>AWQ</b> (activation-aware weight quantization) observes that a small fraction of weight channels are <em>salient</em> because they multiply large activations; it protects those channels by scaling them up before rounding so they survive at full effective precision, then scales back after.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Calibration data
+  participant G as GPTQ
+  participant A as AWQ
+  C->>G: forward pass, gather Hessian (weight sensitivity)
+  Note over G: round column by column,<br/>update remaining weights to cancel error
+  C->>A: forward pass, measure activation magnitudes
+  Note over A: find salient channels (big activations),<br/>scale them to protect from rounding
+  G-->>G: emit 4-bit weights + scales
+  A-->>A: emit 4-bit weights + per-channel scales
+    </div>
+    <figcaption>Two PTQ philosophies, both fed by a small calibration set. GPTQ uses second-order sensitivity to compensate rounding error across weights. AWQ identifies the few channels that matter (those hit by large activations) and shields them. <b>Both turn a lossy 4-bit dump into a model that stays close to FP16 on real tasks, using calibration data to decide what to protect.</b></figcaption>
+  </figure>
+
+  <h2>5. Where quality actually drops</h2>
+  <p>Quantized models rarely fail on easy prompts. Degradation shows up on the hard tail: multi-step reasoning, long-context recall, code with strict syntax, and rare tokens. INT8 weight-only is usually indistinguishable from FP16. INT4 with GPTQ or AWQ is close on most tasks but can lose a point or two on reasoning benchmarks. Push toward 3-bit or activation-quantize carelessly and the drop becomes obvious. Always measure on <em>your</em> prompts, not just a leaderboard number.</p>
+
+  <h2>6. Lab: serve a quantized model and measure the triangle</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Compare VRAM, throughput, and a quick quality check: AWQ/GPTQ vs FP16</h4>
+    <p>You will load the same model in FP16 and in a 4-bit AWQ (or GPTQ) build, then read off memory, tokens/s, and a handful of answers to judge quality. Pre-quantized checkpoints are on the Hugging Face Hub, so you do not have to run the calibration yourself.</p>
+
+    <div class="code-cap">serve an FP16 baseline, then an AWQ build</div>
+    <div class="term">
+<span class="p">$</span> pip install "vllm&gt;=0.6.3"
+<span class="c"># baseline: full precision</span>
+<span class="p">$</span> vllm serve Qwen/Qwen2.5-7B-Instruct --port 8000
+<span class="c"># AWQ 4-bit: vLLM auto-detects the method, or state it explicitly</span>
+<span class="p">$</span> vllm serve Qwen/Qwen2.5-7B-Instruct-AWQ --quantization awq --port 8001
+<span class="c"># GPTQ variant:  --quantization gptq  on a *-GPTQ checkpoint</span>
+<span class="c"># FP8 on H100:   vllm serve Qwen/Qwen2.5-7B-Instruct --quantization fp8</span>
+<span class="c"># Quantize the KV cache too (long context):  --kv-cache-dtype fp8</span>
+    </div>
+
+    <p>Read VRAM from <code>nvidia-smi</code> while each server is idle after load, then bench throughput on the same batch of prompts against each port.</p>
+
+    <div class="term">
+<span class="p">$</span> nvidia-smi --query-gpu=memory.used --format=csv
+<span class="o">memory.used [MiB]</span>
+<span class="o">15980 MiB   # FP16 Qwen2.5-7B</span>
+<span class="o"> 6120 MiB   # AWQ 4-bit build</span>
+    </div>
+
+    <div class="code-cap">quality_probe.py &middot; eyeball answers on prompts that stress reasoning</div>
+    <pre><code>from openai import OpenAI
+
+probes = [
+    "If 3 painters paint 3 fences in 3 hours, how long for 100 painters and 100 fences?",
+    "Write a Python function that returns the nth prime. Include a docstring.",
+    "Summarise the plot of Hamlet in exactly two sentences.",
+]
+
+def ask(port, model):
+    c = OpenAI(base_url=f"http://localhost:{port}/v1", api_key="none")
+    for p in probes:
+        r = c.chat.completions.create(model=model,
+            messages=[{"role": "user", "content": p}], max_tokens=200)
+        print(f"[{model}] {r.choices[0].message.content[:160]}\n")
+
+ask(8000, "Qwen/Qwen2.5-7B-Instruct")       # FP16
+ask(8001, "Qwen/Qwen2.5-7B-Instruct-AWQ")   # AWQ 4-bit</code></pre>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">FP16 VRAM</div><div class="v">~16 GB</div><div class="u">7B weights at 2 bytes each</div></div>
+      <div class="metric"><div class="k">AWQ 4-bit VRAM</div><div class="v">~6 GB</div><div class="u">roughly a quarter of FP16 weights</div></div>
+      <div class="metric"><div class="k">Throughput</div><div class="v">higher</div><div class="u">fewer bytes moved per decode step</div></div>
+      <div class="metric"><div class="k">Quality</div><div class="v">near FP16</div><div class="u">small dips on the reasoning tail</div></div>
+    </div>
+    <p class="kpi">The pass criterion: AWQ fits in far less VRAM and streams faster, and its answers on the probe prompts read as good as FP16. If a probe answer is clearly worse, that is your quality cost showing on the hard tail.</p>
+  </div>
+
+  <h2>7. Comparison: the methods side by side</h2>
+  <table>
+    <thead><tr><th>Method</th><th>Bits</th><th>Calibration</th><th>Quality vs FP16</th><th>Hardware note</th></tr></thead>
+    <tbody>
+      <tr><td>INT8 weight-only</td><td>8</td><td>Little or none</td><td>Essentially equal</td><td>Runs anywhere</td></tr>
+      <tr><td>GPTQ</td><td>4 (or 3/8)</td><td>Small dataset, Hessian</td><td>Close, minor tail dip</td><td>Dequant kernels</td></tr>
+      <tr><td>AWQ</td><td>4</td><td>Small dataset, activation</td><td>Close, protects salient</td><td>Dequant kernels</td></tr>
+      <tr><td>FP8 (E4M3)</td><td>8</td><td>Optional scales</td><td>Very close</td><td>Native on H100+</td></tr>
+      <tr><td>Naive INT4</td><td>4</td><td>None</td><td>Noticeably worse</td><td>Avoid for serving</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does weight quantization speed up the decode phase, not just save memory?</div>
+      <button class="q-opt">Because integer math runs at a higher clock than floating point on any GPU</button>
+      <button class="q-opt">Because decode is memory-bound, so fewer bits means fewer bytes moved per token</button>
+      <button class="q-opt">Because smaller weights let the scheduler pack many more requests per batch</button>
+      <button class="q-opt">Because lower precision lets the prefill phase skip most of its matrix work</button>
+      <div class="q-fb">Decode re-reads the weights every token and is limited by memory bandwidth, so cutting bits per weight directly cuts bytes moved and speeds the step up.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is the core idea behind AWQ's activation-aware quantization?</div>
+      <button class="q-opt">Protect the few weight channels that multiply large activations before rounding</button>
+      <button class="q-opt">Rescale every activation to the same fixed range before the matmul executes</button>
+      <button class="q-opt">Quantize the activations first and keep the weights at full precision always</button>
+      <button class="q-opt">Compute a Hessian for each layer to reorder the columns before rounding</button>
+      <div class="q-fb">AWQ finds salient channels (those hit by big activations) and scales them to survive 4-bit rounding. The Hessian approach is GPTQ, a different method.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What distinguishes FP8 E4M3 from E5M2?</div>
+      <button class="q-opt">E4M3 stores weights while E5M2 can only ever store the KV cache values</button>
+      <button class="q-opt">E4M3 runs on any GPU while E5M2 needs a Hopper-class card to execute at all</button>
+      <button class="q-opt">E4M3 keeps more precision and less range; E5M2 keeps more range and less</button>
+      <button class="q-opt">E4M3 uses eight bits total while E5M2 secretly uses sixteen bits per value</button>
+      <div class="q-fb">E4M3 has more mantissa bits (precision, narrower range); E5M2 has more exponent bits (range, less precision). Both are 8-bit and native on H100.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Where does quantization quality loss usually show up first?</div>
+      <button class="q-opt">On short greetings and simple factual prompts the model answers instantly</button>
+      <button class="q-opt">On the prefill phase, which slows down noticeably once weights are shrunk</button>
+      <button class="q-opt">On memory usage, which unexpectedly grows once activations are quantized</button>
+      <button class="q-opt">On the hard tail: multi-step reasoning, long context, and strict-syntax code</button>
+      <div class="q-fb">Easy prompts survive quantization fine. Degradation appears on reasoning, long-context recall, and code, so measure on your own hard prompts.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain why fewer bits helps both VRAM and decode speed</li>
+    <li>I can distinguish weight-only, KV-cache, and activation quantization</li>
+    <li>I can contrast GPTQ (Hessian) with AWQ (protect salient channels)</li>
+    <li>I can describe FP8 E4M3 vs E5M2 and why H100 runs FP8 natively</li>
+    <li>I served an AWQ or GPTQ model in vLLM and compared VRAM, tok/s, and quality</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want help reading whether a probe answer's regression is real or noise, or choosing between an AWQ and a GPTQ checkpoint for your GPU? Ask and we will run the A/B and interpret the numbers together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.vllm.ai/en/latest/features/quantization/">vLLM quantization docs</a> for the current <code>--quantization</code> options and supported formats, plus the original method papers: <a href="https://arxiv.org/abs/2210.17323">GPTQ</a> and <a href="https://arxiv.org/abs/2306.00978">AWQ</a>. For FP8 formats, see NVIDIA's <a href="https://docs.nvidia.com/deeplearning/transformer-engine/user-guide/examples/fp8_primer.html">FP8 primer</a>.</p>
+
+  <div class="pager">
+    <a href="0006-speculative-decoding-draft-handoff.html"><span class="dir">&larr; Prev</span><span class="ttl">Speculative Decoding and Draft Model Handoffs</span></a>
+    <a class="nxt" href="0008-model-router-cost-latency-quality.html"><span class="dir">Next &rarr;</span><span class="ttl">Build a Model Router by Cost, Latency, Quality</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 07 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

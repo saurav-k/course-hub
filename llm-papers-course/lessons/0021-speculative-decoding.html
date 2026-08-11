@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speculative Decoding - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Efficient Inference &amp; Systems &middot; Lesson 21</div>
+  <h1>Speculative Decoding</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Leviathan, Kalman, Matias (Google Research).
+    &middot; <a href="https://arxiv.org/abs/2211.17192">arXiv:2211.17192</a> &middot; "Fast Inference from Transformers via Speculative Decoding" (companion: <a href="https://arxiv.org/abs/2302.01318">Chen et al., DeepMind, 2302.01318</a>)
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Generation is slow because it is <b>sequential</b>: the big model runs one full forward pass per token, and each pass waits on the last.</li>
+      <li>Speculative decoding uses a small, fast <b>draft</b> model to guess the next <b>K</b> tokens autoregressively, then has the big <b>target</b> model check all K in a <b>single parallel forward pass</b>.</li>
+      <li>A <b>modified rejection sampling</b> rule accepts the guesses that agree and resamples the first one that does not. It is proved that the accepted output has <b>exactly</b> the target model's distribution.</li>
+      <li>When the small model guesses well, several tokens come out per big-model pass, giving a <b>2-3&times;</b> speedup with <b>identical</b> quality. No retraining, no approximation.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>A transformer can score a whole sequence in parallel during training, but generation is stubbornly serial. To produce token 100 you need token 99, which needs 98, and so on. Each step is one full pass through a giant model, and the GPU spends most of that pass waiting on memory rather than doing math. So the machine is underused: it <em>could</em> evaluate many tokens at once, but autoregression only asks it for one.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BASE["Standard decoding"]
+    direction LR
+    b1["big pass -> tok1"] --> b2["big pass -> tok2"] --> b3["big pass -> tok3"] --> b4["big pass -> tok4"]
+  end
+  subgraph SPEC["Speculative decoding"]
+    direction LR
+    d["small draft guesses tok1..K"] --> v["ONE big pass verifies all K"] --> a["accept the good prefix"]
+  end
+  BASE -->|"stop paying one big pass per token"| SPEC
+    </div>
+    <figcaption>The core shift. Standard decoding spends one expensive big-model pass per token in a strict sequence. Speculative decoding lets a cheap draft model race ahead and the big model <b>verify a whole batch of guesses in a single pass</b>, so multiple tokens can be confirmed per expensive step.</figcaption>
+  </figure>
+
+  <h2>2. The idea: draft, then verify in parallel</h2>
+  <p>Split the work. A small model (the <strong>draft</strong>, distribution <code>q</code>) is cheap, so let it generate a guess of the next K tokens one by one. Then feed those K guesses to the big model (the <strong>target</strong>, distribution <code>p</code>) <em>all at once</em>. Because the target can score many positions in parallel, checking K guesses costs about the same as generating one token normally. The trick is turning "the target scored these guesses" into "the target actually produced these tokens", with no change to what the target would have said on its own.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant D as Draft model (small, fast)
+  participant T as Target model (big, exact)
+  participant O as Output
+  D->>D: autoregressively propose x1, x2, x3 (K=3)
+  D->>T: send the 3 guesses
+  T->>T: ONE parallel pass scores p at each position
+  T->>O: accept x1 (p agrees), accept x2 (p agrees)
+  T->>O: reject x3, resample it from a corrected distribution
+  Note over O: output = x1, x2, corrected-x3<br/>distribution == target's exactly
+    </div>
+    <figcaption>Draft-then-verify as a sequence. The small model spends several cheap steps proposing tokens; the big model spends one pass judging them all. <b>Accepted guesses are free tokens; the first rejected guess is replaced by a corrected sample, and the loop restarts from there.</b> On a good run you gain two or three tokens per expensive pass.</figcaption>
+  </figure>
+
+  <h2>3. The accept/reject rule that keeps quality exact</h2>
+  <p>This is the clever heart of the paper. For each drafted token <code>x</code>, compare how likely the target thought it was, <code>p(x)</code>, to how likely the draft thought it was, <code>q(x)</code>. Accept <code>x</code> with probability <code>min(1, p(x)/q(x))</code>. If the target likes the token at least as much as the draft did, accept outright. If the target likes it less, accept it only proportionally, and on rejection resample from a corrected leftover distribution.</p>
+
+  <div class="math">accept x with prob = min(1, p(x) / q(x))
+    <span class="gloss"><b>p(x)</b>: the target (big) model's probability of the drafted token. <b>q(x)</b>: the draft (small) model's probability of the same token. If <b>p &ge; q</b> the ratio is &ge; 1 so we always accept. If <b>p &lt; q</b> we accept with probability p/q, correcting for the draft over-proposing that token.</span>
+  </div>
+
+  <p>When a token is rejected, you do not just retry - that would bias the result. You sample the replacement from the <strong>residual</strong> distribution: the target's probabilities minus the draft's, clipped at zero and renormalised. This exactly fills the gap the acceptance step left behind.</p>
+
+  <div class="math">on reject, sample from p&prime;(x) = norm( max(0, p(x) &minus; q(x)) )
+    <span class="gloss"><b>max(0, p &minus; q)</b>: keep only the probability mass the target wanted but the draft under-supplied (negative parts clipped to zero). <b>norm(...)</b>: divide by the total so it sums to 1. Sampling from this residual, combined with the acceptance rule above, provably reproduces the target distribution p exactly.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  ST["drafted token x, with p(x) and q(x)"] --> R{"p(x) >= q(x)?"}
+  R -->|yes| AC["accept x (always)"]
+  R -->|no| U{"random u < p(x)/q(x)?"}
+  U -->|yes| AC
+  U -->|no| RS["reject: resample from<br/>norm(max(0, p - q))<br/>then stop this batch"]
+  AC --> NX["move to next drafted token"]
+    </div>
+    <figcaption>The decision for one drafted token. Tokens the target likes at least as much as the draft are accepted for free. Tokens the target likes less are accepted only with probability p/q; a rejection triggers a corrected resample and ends the current batch. <b>This exact rule is what guarantees the output is a true sample from the big model, not an approximation.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Why this is not an approximation</span>
+    It would be easy to build something "close enough" to the target and call it fast. Speculative decoding refuses that trade. The acceptance probability and the residual resample are constructed so that the math cancels: the probability of emitting any token equals <code>p(x)</code> exactly, whatever the draft model is. A bad draft only makes it slower (more rejections), never wrong.</div>
+
+  <h2>4. Where the speedup comes from</h2>
+  <p>Every accepted draft token is a token the big model produced without its own sequential pass. If the draft agrees with the target most of the time, a single verification pass yields several tokens. The expected number of tokens per pass depends on the acceptance rate, which depends on how well the small model imitates the big one. Because the target verification is parallel, its cost is roughly one normal step, so the whole scheme turns "K sequential big passes" into "one big pass plus K cheap draft passes".</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph COST["One verification round"]
+    dr["K cheap draft passes<br/>(small model)"] --> tp["1 parallel target pass<br/>(big model, scores all K)"]
+  end
+  tp --> ok["accept n tokens<br/>(n up to K)"]
+  ok --> gain["big-model passes per token<br/>drops from 1 to about 1/n"]
+    </div>
+    <figcaption>The economics. A round is K small draft passes plus one big verification pass, and it yields up to K accepted tokens. <b>The scarce resource - sequential big-model passes - is amortised across several tokens</b>, which is exactly the 2-3x wall-clock speedup the paper measures, at unchanged output quality.</figcaption>
+  </figure>
+
+  <h2>5. Implement it: speculative sampling that preserves the distribution</h2>
+  <p>This toy runs the full accept/reject loop over small hand-made draft and target distributions, then checks empirically that the emitted tokens match the target distribution - the paper's central guarantee, verified by counting.</p>
+
+  <div class="code-cap">speculative.py &middot; runnable, numpy only</div>
+  <pre><code>import numpy as np
+rng = np.random.default_rng(0)
+
+# toy vocabulary of 5 tokens. p = target (truth), q = draft (approximation)
+p = np.array([0.05, 0.35, 0.30, 0.20, 0.10])   # big model distribution
+q = np.array([0.10, 0.20, 0.40, 0.20, 0.10])   # small model distribution
+
+def residual(p, q):
+    r = np.clip(p - q, 0, None)                 # keep mass target wanted, draft missed
+    return r / r.sum()
+
+def speculative_step(p, q):
+    x = rng.choice(len(q), p=q)                 # draft proposes a token from q
+    if rng.random() < min(1.0, p[x] / q[x]):    # accept with prob min(1, p/q)
+        return x                                # accepted draft token
+    return rng.choice(len(p), p=residual(p, q)) # rejected -> corrected resample
+
+# emit many tokens and compare their distribution to the target p
+N = 200_000
+counts = np.zeros(len(p))
+for _ in range(N):
+    counts[speculative_step(p, q)] += 1
+emp = counts / N
+
+print("token :  target p  |  speculative empirical")
+for i in range(len(p)):
+    print(f"  {i}   :   {p[i]:.3f}   |   {emp[i]:.3f}")
+print(f"max abs error vs target: {np.abs(emp - p).max():.4f}")   # ~0.00x, matches p</code></pre>
+
+  <p>Run it and the empirical column tracks the target <code>p</code> to within sampling noise, even though every proposal came from the different distribution <code>q</code>. That is the proof made concrete: the draft only changes <em>speed</em>, never the distribution you sample from. Swap in any <code>q</code> you like and the emitted tokens still follow <code>p</code>.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q["draft proposes<br/>from q"] --> ACC["accepted mass:<br/>min(p, q)"]
+  P["target truth<br/>is p"] --> ACC
+  P --> RES["residual mass:<br/>max(0, p - q)"]
+  ACC --> SUM["accepted + resampled"]
+  RES --> SUM
+  SUM --> OUT["emitted distribution<br/>== p exactly"]
+    </div>
+    <figcaption>Why the two pieces sum to the truth. The acceptance step emits the overlap <code>min(p, q)</code>, and the rejection resample emits the leftover <code>max(0, p - q)</code>. <b>Added together those cover every token with exactly probability p</b>, which is the algebra behind the empirical match you just printed.</figcaption>
+  </figure>
+
+  <h2>6. The trade-off table</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Standard decoding</th><th>Speculative decoding</th></tr></thead>
+    <tbody>
+      <tr><td>Big-model passes per token</td><td>Exactly one</td><td>About one over n accepted</td></tr>
+      <tr><td>Output distribution</td><td>Target model p</td><td>Target model p (identical)</td></tr>
+      <tr><td>Extra model needed</td><td>None</td><td>A small draft model</td></tr>
+      <tr><td>Failure mode of bad draft</td><td>Not applicable</td><td>Slower only, never wrong</td></tr>
+    </tbody>
+  </table>
+  <p>The whole appeal is in the second row: the answer is bit-for-bit the distribution the big model would have produced, just reached with fewer sequential big-model steps. A companion DeepMind paper published the same idea independently, and speculative decoding is now standard in production inference stacks.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is the division of labour in speculative decoding?</div>
+      <button class="q-opt">The big model drafts tokens and a small model then rewrites them</button>
+      <button class="q-opt">Two big models each draft half and average their predictions out</button>
+      <button class="q-opt">A small model drafts K tokens and the big model verifies them</button>
+      <button class="q-opt">A small model trains the big one to predict several tokens ahead</button>
+      <div class="q-fb">The draft model proposes K tokens autoregressively; the target model checks all K in one parallel pass.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How is a single drafted token accepted?</div>
+      <button class="q-opt">Keep it with probability equal to min of one and p over q</button>
+      <button class="q-opt">Keep it whenever the small model assigned it the top rank</button>
+      <button class="q-opt">Keep it only if both models pick the identical exact token</button>
+      <button class="q-opt">Keep it with probability equal to the average of p and of q</button>
+      <div class="q-fb">Acceptance probability is min(1, p(x)/q(x)) - always if the target likes it at least as much as the draft.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">On rejection, where does the replacement token come from?</div>
+      <button class="q-opt">From the draft distribution q sampled a second independent time</button>
+      <button class="q-opt">From a uniform choice over the whole vocabulary of the target</button>
+      <button class="q-opt">From the token that the big model ranked as its single most likely</button>
+      <button class="q-opt">From the corrected residual, the normalised clip of p minus q</button>
+      <div class="q-fb">You resample from norm(max(0, p - q)); with the accept rule this reproduces the target distribution exactly.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does a poorly matched draft model cost you?</div>
+      <button class="q-opt">It quietly biases the outputs away from the target distribution</button>
+      <button class="q-opt">It lowers the acceptance rate so you gain fewer tokens per pass</button>
+      <button class="q-opt">It forces the target model to be retrained on the draft outputs</button>
+      <button class="q-opt">It increases the number of parameters the big model must store</button>
+      <div class="q-fb">A bad draft is rejected more often, so it is slower, but the output distribution is still exactly the target's.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Follows <a href="0020-pagedattention-vllm.html">PagedAttention</a></b> - both are serving-layer speedups that leave the model's outputs unchanged.</li>
+    <li><b>Attacks the same sequential bottleneck as <a href="0015-multi-query-attention.html">MQA</a> and <a href="0016-grouped-query-attention.html">GQA</a></b>, but by skipping big-model passes rather than shrinking the cache.</li>
+    <li><b>Assumes the autoregressive decoder of <a href="0003-gpt-1.html">GPT</a></b> and the causal attention of <a href="0001-attention-is-all-you-need.html">the Transformer</a>.</li>
+    <li>Ends Module 05; next you move to <a href="0022-self-instruct.html">Self-Instruct</a> and the alignment era in Module 06.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to measure the expected tokens per pass as the draft gets closer to the target, or extend the toy to accept a whole run of K tokens at once? Ask and we will graph the acceptance rate against the speedup together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2211.17192">Leviathan, Kalman, and Matias, "Fast Inference from Transformers via Speculative Decoding" (2022)</a>, and the independent companion <a href="https://arxiv.org/abs/2302.01318">Chen et al., "Accelerating Large Language Model Decoding with Speculative Sampling" (2023)</a>. Both give the correctness proof in full.</p>
+
+  <div class="pager">
+    <a href="0020-pagedattention-vllm.html"><span class="dir">&larr; Previous</span><span class="ttl">PagedAttention (vLLM)</span></a>
+    <a class="nxt" href="0022-self-instruct.html"><span class="dir">Next &rarr;</span><span class="ttl">Self-Instruct</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 21 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

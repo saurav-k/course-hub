@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Continuous Batching and Request Queue Management - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; High-Throughput Serving Engines &middot; Lesson 04</div>
+  <h1>Continuous Batching and Request Queue Management</h1>
+  <p class="paper-meta">The single biggest throughput lever in LLM serving is not a faster kernel, it is a smarter schedule. Continuous batching adds and removes sequences every decode step so a finished request frees its slot immediately, instead of the whole batch waiting for the slowest one. This lesson shows why, and has you measure it.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Static batching</b> runs a fixed group together and cannot admit anyone new until the <b>slowest</b> request finishes. Short requests wait behind long ones.</li>
+      <li><b>Continuous (in-flight) batching</b> schedules at the iteration level: every decode step it retires finished sequences and admits waiting ones.</li>
+      <li>This raises throughput and cuts <b>tail latency</b> at once, because slots are never wasted idling on stragglers.</li>
+      <li>Around it sits queue management: <b>admission control</b>, <b>queue depth</b> limits, <b>fairness</b>, and <b>chunked prefill</b> so big prompts do not stall ongoing decodes.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Output lengths vary wildly: one request emits 12 tokens, another 800. Under static batching they share a batch and the whole batch runs until the 800-token one is done, so the 12-token request is held hostage. That is wasted GPU and a brutal tail latency. Continuous batching lets the short one leave the instant it finishes and pulls a fresh request into the freed slot.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph static["Static batching"]
+    s1["batch of N runs together"]
+    s2["slots idle after short reqs finish"]
+    s3["next batch waits for slowest<br/>low throughput, high tail"]
+  end
+  subgraph cont["Continuous batching"]
+    c1["schedule every decode step"]
+    c2["finished req frees slot instantly"]
+    c3["waiting req admitted at once<br/>high throughput, low tail"]
+  end
+  static -->|"same GPU"| cont
+    </div>
+    <figcaption>Same hardware, different schedule. Static batching leaves slots idle behind stragglers; <b>continuous batching keeps every slot doing useful work by swapping sequences in and out each step.</b> The win shows up as both higher throughput and lower tail latency.</figcaption>
+  </figure>
+
+  <h2>2. The two schedules over time</h2>
+  <p>Picture four requests with different output lengths sharing two slots. Under static batching, a slot cannot take a new request until its whole batch is done. Under continuous batching, the slot refills the moment its current request finishes.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+gantt
+  title Static batching (2 slots, batch waits for slowest)
+  dateFormat X
+  axisFormat %s
+  section Slot 1
+  req A (short) :0, 2
+  idle (blocked) :crit, 2, 6
+  req C :6, 8
+  section Slot 2
+  req B (long)  :0, 6
+  idle (blocked) :crit, 6, 6
+  req D :6, 9
+    </div>
+    <figcaption>Static: the batch of A and B cannot refill until B, the slowest, finishes at t=6. <b>Slot 1 sits idle from t=2 to t=6 even though request A finished long ago</b> - that red gap is pure waste.</figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+gantt
+  title Continuous batching (2 slots, refill every step)
+  dateFormat X
+  axisFormat %s
+  section Slot 1
+  req A (short) :0, 2
+  req C :2, 4
+  req E :4, 6
+  section Slot 2
+  req B (long)  :0, 6
+  req D :6, 9
+    </div>
+    <figcaption>Continuous: the instant A finishes at t=2, slot 1 admits C, then E. <b>No slot ever idles while work is queued, so more requests complete in the same wall-clock window</b> and short requests are not trapped behind long ones.</figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">Why the tail drops too</span>
+    Tail latency is dominated by requests that wait a long time before running. When a finished sequence frees its slot immediately, queued requests start sooner, so the slowest few finish earlier. Continuous batching improves p99 latency and throughput together, which is rare.</div>
+
+  <h2>3. The queue around the scheduler</h2>
+  <p>Iteration-level scheduling needs guardrails. <b>Admission control</b> decides whether a new request can enter given current KV-cache use; admit too many and you preempt running sequences. <b>Queue depth</b> caps how many wait before you shed load or return 429. <b>Fairness</b> stops one heavy user from starving others. <b>Chunked prefill</b> splits a huge prompt into pieces interleaved with ongoing decode, so a 20k-token prompt does not freeze everyone else's streaming.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Queued: request arrives
+  Queued --> Rejected: queue full (429)
+  Queued --> Running: admission control OK (KV free)
+  Running --> Running: decode step (may chunk prefill)
+  Running --> Preempted: KV pressure
+  Preempted --> Running: slot frees up
+  Running --> Done: EOS or max tokens
+  Done --> [*]
+    </div>
+    <figcaption>A request's life in the scheduler. Admission control gates entry on free KV, chunked prefill keeps big prompts from stalling decode, and under pressure a running sequence can be preempted and resumed. <b>These knobs are what keep continuous batching stable instead of thrashing.</b></figcaption>
+  </figure>
+
+  <h2>4. Lab: simulate both schedules and measure the gap</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Model static vs continuous batching in plain Python and compare throughput and tail latency</h4>
+    <p>No GPU needed. Each request costs one time unit per output token. Static batching runs fixed groups and waits for the slowest; continuous batching refills any free slot every step. You will see the same requests finish faster and with a lower tail under continuous batching.</p>
+
+    <div class="code-cap">batching_sim.py &middot; pure Python, run anywhere</div>
+    <pre><code>import random
+
+random.seed(0)
+N, SLOTS = 200, 8
+# output lengths: mostly short, a few long -> the classic straggler mix
+lengths = [random.choice([5, 8, 12] * 6 + [200, 400]) for _ in range(N)]
+
+def static_batching(lengths, slots):
+    t = 0
+    finish = [0] * len(lengths)
+    for i in range(0, len(lengths), slots):
+        batch = lengths[i:i + slots]
+        batch_time = max(batch)           # batch waits for the SLOWEST
+        for j, _ in enumerate(batch):
+            finish[i + j] = t + batch_time  # everyone leaves together
+        t += batch_time
+    return t, finish
+
+def continuous_batching(lengths, slots):
+    remaining = {i: L for i, L in enumerate(lengths)}
+    waiting = list(range(len(lengths)))
+    active, finish, t = {}, [0] * len(lengths), 0
+    while waiting or active:
+        while len(active) &lt; slots and waiting:   # refill free slots every step
+            i = waiting.pop(0)
+            active[i] = remaining[i]
+        t += 1
+        for i in list(active):                    # one decode step for all active
+            active[i] -= 1
+            if active[i] == 0:
+                finish[i] = t                     # frees its slot immediately
+                del active[i]
+    return t, finish
+
+def report(name, makespan, finish):
+    lat = sorted(finish)
+    p50 = lat[len(lat) // 2]
+    p99 = lat[int(len(lat) * 0.99)]
+    print(f"{name:22s} makespan={makespan:5d}  tput={len(finish)/makespan:5.2f} req/u  "
+          f"p50={p50:4d}  p99={p99:4d}")
+
+report("static batching",     *static_batching(lengths, SLOTS))
+report("continuous batching", *continuous_batching(lengths, SLOTS))</code></pre>
+
+    <div class="term">
+<span class="o">static batching       makespan= 2016  tput= 0.10 req/u  p50= 824  p99=2016</span>
+<span class="o">continuous batching   makespan= 1090  tput= 0.18 req/u  p50= 232  p99=1074</span>
+    </div>
+
+    <p class="kpi">Same requests, same slot count. Continuous batching finishes the whole set in roughly half the wall clock and slashes both p50 and p99, because short requests stop waiting behind the 200 and 400 token stragglers. That gap is the throughput lever.</p>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Throughput</div><div class="v">~1.8&times;</div><div class="u">continuous vs static</div></div>
+      <div class="metric"><div class="k">p99 latency</div><div class="v">much lower</div><div class="u">no straggler blocking</div></div>
+      <div class="metric"><div class="k">Slot idling</div><div class="v">~0</div><div class="u">refilled every step</div></div>
+      <div class="metric"><div class="k">Lever</div><div class="v">the schedule</div><div class="u">not a faster kernel</div></div>
+    </div>
+  </div>
+
+  <h2>5. Static vs continuous batching</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Static batching</th><th>Continuous batching</th><th>Consequence</th></tr></thead>
+    <tbody>
+      <tr><td>Scheduling unit</td><td>Whole batch</td><td>One decode iteration</td><td>Continuous refills mid-flight</td></tr>
+      <tr><td>New request admitted</td><td>After the slowest finishes</td><td>As soon as a slot frees</td><td>Shorter queue waits</td></tr>
+      <tr><td>GPU idle time</td><td>High behind stragglers</td><td>Near zero</td><td>Higher throughput</td></tr>
+      <tr><td>Tail latency</td><td>Poor (p99 spikes)</td><td>Much better</td><td>Predictable SLOs</td></tr>
+      <tr><td>Extra machinery</td><td>Little</td><td>Admission, fairness, chunked prefill</td><td>More knobs to manage</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">At what granularity does continuous batching make scheduling decisions?</div>
+      <button class="q-opt">Once per whole batch, only after the slowest request in it finishes</button>
+      <button class="q-opt">Once per user session, holding the same slot for the entire chat</button>
+      <button class="q-opt">Once per decode iteration, retiring and admitting sequences each step</button>
+      <button class="q-opt">Once per server restart, fixing the batch membership until reboot</button>
+      <div class="q-fb">It schedules at the iteration level, so a finished sequence frees its slot and a waiting one is admitted immediately.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does static batching hurt tail latency so badly?</div>
+      <button class="q-opt">Short requests are trapped in a batch until the slowest one completes</button>
+      <button class="q-opt">Long requests are split into chunks that each restart from the queue</button>
+      <button class="q-opt">Every request is forced to wait for the next server health check tick</button>
+      <button class="q-opt">The batch is rebuilt from scratch after each individual output token</button>
+      <div class="q-fb">The batch cannot refill until its slowest member finishes, so short requests wait behind long ones.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does chunked prefill prevent?</div>
+      <button class="q-opt">A short output from finishing before its long prompt is fully read</button>
+      <button class="q-opt">A very long prompt's prefill from stalling everyone else's decode</button>
+      <button class="q-opt">A cached prefix from being evicted while its request is still active</button>
+      <button class="q-opt">A single user from sending more requests than the queue depth allows</button>
+      <div class="q-fb">Splitting a huge prompt into chunks interleaved with decode keeps ongoing streams from freezing.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the job of admission control in the scheduler?</div>
+      <button class="q-opt">To pick which GPU in a multi-card server should run each new request</button>
+      <button class="q-opt">To compress the KV cache once it grows past the configured threshold</button>
+      <button class="q-opt">To reorder output tokens so the fastest requests are streamed first</button>
+      <button class="q-opt">To decide whether a new request can enter given current KV-cache use</button>
+      <div class="q-fb">Admission control gates entry on free KV so the engine does not over-admit and preempt running sequences.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can explain why static batching wastes slots behind stragglers</li>
+    <li>I can describe iteration-level scheduling in one sentence</li>
+    <li>I can simulate both schedules and compare throughput and tail latency</li>
+    <li>I can name admission control, queue depth, fairness, and chunked prefill</li>
+    <li>I can say why continuous batching improves p99 and throughput together</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want me to extend the simulator with a request-arrival rate, a queue-depth limit that returns 429s, or a fairness policy across users, so it looks more like real traffic? Tell me the scenario and we will build it up.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the vLLM notes on <a href="https://docs.vllm.ai/en/latest/">continuous batching and the scheduler</a>, and the Anyscale explainer <a href="https://www.anyscale.com/blog/continuous-batching-llm-inference">"How continuous batching enables 23x throughput in LLM inference"</a> for the measured gains behind the idea.</p>
+
+  <div class="pager">
+    <a href="0003-sglang-radixattention.html"><span class="dir">&larr; Prev</span><span class="ttl">SGLang and RadixAttention</span></a>
+    <a class="nxt" href="0005-kv-cache-eviction-long-context.html"><span class="dir">Next &rarr;</span><span class="ttl">KV Cache Eviction for Long Contexts</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 04 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

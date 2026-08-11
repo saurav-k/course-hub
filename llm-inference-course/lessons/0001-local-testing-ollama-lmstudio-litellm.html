@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local Testing: Ollama, LM Studio, LiteLLM - LLM Inference Optimization</title>
+<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../assets/lab.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INFERENCE OPS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 00 &middot; Inference Foundations &middot; Lesson 01</div>
+  <h1>Local Testing: Ollama, LM Studio, LiteLLM</h1>
+  <p class="paper-meta">Get a real model answering on your laptop in minutes, then hide every provider behind one OpenAI-compatible endpoint so your code never changes when you swap the backend. This is the workbench you will use for the rest of the course.</p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Ollama</b> is the fastest way to a running model: <code>ollama run llama3</code> pulls the weights and serves an OpenAI-compatible API at <code>http://localhost:11434/v1</code>.</li>
+      <li><b>LM Studio</b> is the same idea with a GUI: browse models, click load, click <b>Start Server</b>, and it exposes <code>http://localhost:1234/v1</code>.</li>
+      <li><b>LiteLLM</b> is a thin proxy and SDK that puts one OpenAI-compatible face in front of Ollama, OpenAI, Anthropic, and 100+ others, so your app code stops caring who serves the tokens.</li>
+      <li>The pattern for the whole course: point the standard <code>openai</code> client at a <code>base_url</code>, keep the code fixed, and change only the URL behind it.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this matters</h2>
+  <p>Every serving engine you meet later - vLLM, SGLang, TensorRT-LLM - speaks the same OpenAI HTTP dialect. If you write your client against that dialect once, you can point it at a toy model on your laptop today and a GPU fleet in production next month with zero code changes. The job of this lesson is to build that habit: one client, many swappable backends, unified by a gateway.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  app["Your app<br/>(openai client)"] --> gw["LiteLLM gateway<br/>one OpenAI-compatible URL"]
+  gw --> o["Ollama<br/>:11434/v1"]
+  gw --> lm["LM Studio<br/>:1234/v1"]
+  gw --> cloud["OpenAI / Anthropic<br/>cloud APIs"]
+    </div>
+    <figcaption>The shape you are building toward. Your app only ever talks to one endpoint. <b>LiteLLM fans that single request out to whichever backend you configured</b>, so switching from a local Llama to a cloud model is a config change, not a code change.</figcaption>
+  </figure>
+
+  <h2>2. Ollama: the fastest path to a running model</h2>
+  <p>Ollama bundles a model runner and a small HTTP server into one binary. You give it a model name, it downloads a quantized build, loads it, and starts serving. The <code>run</code> command drops you into a chat REPL, but the moment the daemon is up it is also answering HTTP on port 11434.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Pulling: ollama run llama3
+  Pulling --> Loading: weights on disk
+  Loading --> Serving: model in VRAM/RAM
+  Serving --> Idle: no requests
+  Idle --> Serving: new request
+  Idle --> Unloaded: keep_alive expires
+  Unloaded --> Loading: next request
+    </div>
+    <figcaption>The Ollama model lifecycle. The first <code>run</code> pulls and loads; after that the model stays warm in memory. <b>Ollama unloads an idle model after its keep_alive window, so the next call pays the load cost again</b> - worth knowing when your first request looks mysteriously slow.</figcaption>
+  </figure>
+
+  <p>Crucially, Ollama exposes an OpenAI-compatible surface at <code>/v1</code>. That means the same <code>openai</code> Python client you would use against api.openai.com works unchanged - you only change the <code>base_url</code> and pass a throwaway API key.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as openai client
+  participant O as Ollama :11434
+  participant M as llama3 (in memory)
+  C->>O: POST /v1/chat/completions
+  O->>M: run prefill + decode
+  M-->>O: generated tokens
+  O-->>C: OpenAI-shaped JSON (or SSE stream)
+    </div>
+    <figcaption>Ollama translating for you. Your client sends the exact OpenAI request body; <b>Ollama maps it onto its own runner and maps the result back into OpenAI-shaped JSON</b>, so nothing downstream can tell the difference between local Llama and the real OpenAI API.</figcaption>
+  </figure>
+
+  <h2>3. LM Studio: the same thing with a GUI</h2>
+  <p>LM Studio is a desktop app for people who would rather click than type. You search a model catalog, download a quantized GGUF build, and load it with a slider for how much to offload to the GPU. Its <b>Local Server</b> (or Developer) tab has a <b>Start Server</b> button that exposes an OpenAI-compatible API on <code>http://localhost:1234/v1</code>. Same contract as Ollama, different front door - handy on a workstation where you want to eyeball memory use and token speed as you go.</p>
+
+  <div class="card callout key"><span class="tag">One contract, many doors</span>
+    Ollama and LM Studio both speak <code>/v1/chat/completions</code>. The only differences that reach your code are the port (11434 vs 1234) and the model string. That is exactly why a gateway in front of them pays off.</div>
+
+  <h2>4. LiteLLM: one endpoint in front of everything</h2>
+  <p>LiteLLM comes in two shapes. As an <b>SDK</b>, <code>litellm.completion(...)</code> calls any provider with one function and provider-prefixed model names like <code>ollama/llama3</code> or <code>gpt-4o-mini</code>. As a <b>proxy</b>, <code>litellm --model ollama/llama3</code> starts an OpenAI-compatible server on <code>http://0.0.0.0:4000</code> that forwards to the backend you named. The proxy is the piece you deploy: it centralizes keys, retries, rate limits, and cost tracking so individual apps stay dumb.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph clients["clients (unchanged)"]
+    a["app A"]
+    b["notebook"]
+    c["load test"]
+  end
+  clients --> proxy["litellm proxy :4000<br/>keys, retries, routing, cost logs"]
+  proxy --> r1["ollama/llama3"]
+  proxy --> r2["openai/gpt-4o-mini"]
+  proxy --> r3["anthropic/claude"]
+    </div>
+    <figcaption>The proxy as a control point. Every client hits port 4000 with an OpenAI request. <b>LiteLLM owns the provider keys and the routing table, so you add a model, rotate a key, or cap spend in one place</b> without redeploying a single client.</figcaption>
+  </figure>
+
+  <h2>5. Lab: run a model, then put a gateway in front of it</h2>
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h4>Start Ollama, call it with the openai client, then front it with LiteLLM and prove the code did not change</h4>
+    <p>You will bring up a local model, hit it directly, then insert the LiteLLM proxy and confirm the exact same client code works by only swapping the URL. That swap-the-URL-not-the-code move is the entire point.</p>
+
+    <div class="code-cap">step 1 &middot; install and start a model with Ollama</div>
+    <div class="term">
+<span class="c"># macOS: brew install ollama   |   Linux: curl -fsSL https://ollama.com/install.sh | sh</span>
+<span class="p">$</span> ollama serve <span class="c"># start the daemon (skip if the app is already running)</span>
+<span class="p">$</span> ollama run llama3 <span class="c"># pulls weights on first run, then opens a chat REPL</span>
+<span class="o">&gt;&gt;&gt; Send a message (/bye to exit)</span>
+<span class="p">$</span> curl http://localhost:11434/v1/models <span class="c"># confirm the OpenAI-compatible surface is up</span>
+<span class="o">{"object":"list","data":[{"id":"llama3","object":"model",...}]}</span>
+    </div>
+
+    <div class="code-cap">step 2 &middot; call Ollama directly with the standard openai client</div>
+    <pre><code>from openai import OpenAI
+
+# point the STANDARD OpenAI client straight at Ollama
+client = OpenAI(base_url="http://localhost:11434/v1", api_key="ollama")  # key is ignored
+
+resp = client.chat.completions.create(
+    model="llama3",
+    messages=[{"role": "user", "content": "Say hello in one short sentence."}],
+)
+print(resp.choices[0].message.content)</code></pre>
+
+    <div class="code-cap">step 3 &middot; put LiteLLM in front, then repoint the SAME client</div>
+    <div class="term">
+<span class="p">$</span> pip install "litellm[proxy]"
+<span class="p">$</span> litellm --model ollama/llama3 <span class="c"># OpenAI-compatible proxy on http://0.0.0.0:4000</span>
+<span class="o">LiteLLM: Proxy running on http://0.0.0.0:4000</span>
+    </div>
+    <pre><code>from openai import OpenAI
+
+# ONLY the base_url changed: 11434 -> 4000. The rest is byte-for-byte identical.
+client = OpenAI(base_url="http://localhost:4000", api_key="sk-anything")
+
+resp = client.chat.completions.create(
+    model="ollama/llama3",   # provider-prefixed name the proxy routes on
+    messages=[{"role": "user", "content": "Say hello in one short sentence."}],
+)
+print(resp.choices[0].message.content)</code></pre>
+
+    <p class="kpi">Success looks like this: identical client code returns a reply in both step 2 and step 3, and the LiteLLM terminal logs the request. You have just decoupled your app from the backend.</p>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Ollama API</div><div class="v">:11434</div><div class="u">/v1 OpenAI-compatible</div></div>
+      <div class="metric"><div class="k">LM Studio API</div><div class="v">:1234</div><div class="u">/v1 after Start Server</div></div>
+      <div class="metric"><div class="k">LiteLLM proxy</div><div class="v">:4000</div><div class="u">one URL, many backends</div></div>
+      <div class="metric"><div class="k">Code changed</div><div class="v">0 lines</div><div class="u">only the base_url moved</div></div>
+    </div>
+  </div>
+
+  <h2>6. Which tool for which job</h2>
+  <table>
+    <thead><tr><th>Tool</th><th>Interface</th><th>Best for</th><th>Watch out for</th></tr></thead>
+    <tbody>
+      <tr><td>Ollama</td><td>CLI + HTTP :11434/v1</td><td>Fast local dev, scripting, CI smoke tests</td><td>Idle models unload; quantized builds only</td></tr>
+      <tr><td>LM Studio</td><td>Desktop GUI + HTTP :1234/v1</td><td>Exploring models visually on a workstation</td><td>GUI-first; not built for headless servers</td></tr>
+      <tr><td>LiteLLM (SDK)</td><td>Python <code>completion()</code></td><td>Calling many providers from one function</td><td>Still a library inside each app process</td></tr>
+      <tr><td>LiteLLM (proxy)</td><td>HTTP :4000/v1</td><td>Central keys, routing, retries, cost logs</td><td>One more hop to run and monitor</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">On which URL does Ollama expose its OpenAI-compatible API by default?</div>
+      <button class="q-opt">On http://localhost:1234/v1 once the model has finished loading</button>
+      <button class="q-opt">On http://localhost:4000/v1 whenever the proxy is left running</button>
+      <button class="q-opt">On http://localhost:11434/v1 as soon as the daemon is running</button>
+      <button class="q-opt">On http://localhost:8000/v1 after enabling the compat setting</button>
+      <div class="q-fb">Ollama serves the OpenAI-compatible surface at port 11434 under the /v1 path.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the main reason to run LiteLLM as a proxy?</div>
+      <button class="q-opt">It makes each local model generate tokens noticeably faster on a GPU</button>
+      <button class="q-opt">It centralizes keys, routing, and cost logs behind one stable endpoint</button>
+      <button class="q-opt">It converts quantized GGUF weights into full-precision safetensors</button>
+      <button class="q-opt">It replaces the openai client library with a faster custom transport</button>
+      <div class="q-fb">The proxy is a control point: one OpenAI-compatible URL, with keys and routing managed in one place.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">When you move a client from Ollama to the LiteLLM proxy, what changes in your code?</div>
+      <button class="q-opt">Only the base_url value; the request body and calls stay identical</button>
+      <button class="q-opt">Only the message schema; the base_url and model name stay identical</button>
+      <button class="q-opt">Only the transport library; the endpoint and payload stay identical</button>
+      <button class="q-opt">Only the streaming flag; the model and base_url both stay identical</button>
+      <div class="q-fb">That is the whole habit: the code is fixed, only the base_url (11434 to 4000) moves.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why might your very first Ollama request feel slow after a pause?</div>
+      <button class="q-opt">The proxy has to rebuild its routing table before the first hop</button>
+      <button class="q-opt">The openai client re-negotiates a fresh TLS session on each call</button>
+      <button class="q-opt">The prompt is re-tokenized from scratch every single request cycle</button>
+      <button class="q-opt">The model was unloaded when idle and must load into memory again</button>
+      <div class="q-fb">Ollama unloads idle models after keep_alive, so the next call pays the load cost again.</div>
+    </div>
+  </div>
+
+  <h2>Your checklist for this lesson</h2>
+  <ul class="checklist">
+    <li>I can start a local model with <code>ollama run</code> and confirm its /v1 endpoint</li>
+    <li>I can call a local model with the standard openai client by setting base_url</li>
+    <li>I can start the LiteLLM proxy and route to a provider-prefixed model</li>
+    <li>I can swap backends by changing only the base_url, not the client code</li>
+    <li>I can pick Ollama vs LM Studio vs LiteLLM for a given task</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want me to help you write a <code>config.yaml</code> that fronts Ollama, LM Studio, and a cloud model from one LiteLLM proxy, or wire this endpoint into the latency script from Lesson 00? Ask and we will set it up together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.ollama.com/api/openai-compatibility">Ollama OpenAI-compatibility docs</a> and the <a href="https://docs.litellm.ai/docs/proxy/quick_start">LiteLLM Proxy quick start</a>. Both show the exact request shapes and flags used above.</p>
+
+  <div class="pager">
+    <a href="0000-inference-101.html"><span class="dir">&larr; Prev</span><span class="ttl">Inference 101: Prefill, Decode, and the Metrics That Matter</span></a>
+    <a class="nxt" href="0002-vllm-paged-attention-serving.html"><span class="dir">Next &rarr;</span><span class="ttl">vLLM and PagedAttention Serving</span></a>
+  </div>
+
+  <footer><p>LLM Inference Optimization &middot; Lesson 01 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

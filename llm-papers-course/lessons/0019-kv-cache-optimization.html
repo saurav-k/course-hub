@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>KV Cache Compression &amp; Optimization - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Efficient Inference &amp; Systems &middot; Lesson 19</div>
+  <h1>KV Cache Compression &amp; Optimization</h1>
+  <p class="paper-meta">
+    <span class="pill">2023-2024</span>
+    A family of methods (survey lesson): H2O, StreamingLLM, KIVI/KVQuant, DeepSeek-V2 MLA.
+    &middot; <a href="https://arxiv.org/abs/2306.14048">2306.14048</a> &middot; <a href="https://arxiv.org/abs/2309.17453">2309.17453</a> &middot; <a href="https://arxiv.org/abs/2405.04434">2405.04434</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>This lesson is a <b>family survey</b>, not one paper. At long context lengths the <b>KV cache dominates GPU memory</b> - it grows with every token, layer, and head, and it is the wall you hit first.</li>
+      <li>There are <b>four families</b> of ways to shrink it. <b>Eviction</b>: throw away KV entries you will not need. <b>Quantization</b>: store each entry in fewer bits. <b>Head sharing</b>: keep fewer KV heads. <b>Low-rank</b>: compress KV into a small latent vector.</li>
+      <li>Eviction methods like <b>H2O</b> (keep the "heavy hitter" tokens) and <b>StreamingLLM</b> (keep the first "attention sink" tokens plus a recent window) can drop most of the cache with little quality loss.</li>
+      <li>These stack. A real serving stack often combines <b>GQA</b> head sharing, <b>int8</b> quantization, and a windowed eviction policy at once. This lesson maps the landscape and codes two of the four families end to end.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this family exists</h2>
+  <p>Every previous efficiency lesson has circled the same enemy: the KV cache. During generation the model stores a key and value vector for every past token, in every layer, in every head, so it never recomputes them. That cache is fixed-cost per token, and at long context it eclipses the model weights themselves. A 7B model in fp16 is about 14 GB of weights, but its KV cache at 128k tokens can be tens of gigabytes on its own. Long context is a <em>memory</em> problem before it is a compute problem.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph SHORT["Short context"]
+    w1["model weights<br/>(fixed)"]; c1["KV cache<br/>(small)"]
+  end
+  subgraph LONG["Long context"]
+    w2["model weights<br/>(same fixed size)"]; c2["KV cache<br/>(grows with every token)"]
+  end
+  SHORT -->|"context grows 100x"| LONG
+    </div>
+    <figcaption>Where the memory goes. Model weights are a fixed cost. The KV cache is not - it grows linearly with sequence length, so past a few thousand tokens it <b>overtakes the weights and becomes the dominant consumer of GPU memory</b>. Every method in this lesson attacks that growing block.</figcaption>
+  </figure>
+
+  <h2>2. The four families</h2>
+  <p>Broadly, you can make the KV cache smaller in four independent ways. They are orthogonal, which means a production system can apply several at once.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  ROOT["KV cache is too big"] --> E["1. Eviction<br/><i>store fewer tokens</i>"]
+  ROOT --> Q["2. Quantization<br/><i>fewer bits per entry</i>"]
+  ROOT --> H["3. Head sharing<br/><i>fewer KV heads</i>"]
+  ROOT --> L["4. Low-rank<br/><i>compress KV to a latent</i>"]
+  E --> E1["H2O: keep heavy hitters"]
+  E --> E2["StreamingLLM: sinks + window"]
+  Q --> Q1["KIVI / KVQuant: int8 / int4 KV"]
+  H --> H1["MQA / GQA (lessons 15-16)"]
+  L --> L1["MLA in DeepSeek-V2"]
+    </div>
+    <figcaption>The map of the field. Four levers, each cutting a different factor of the cache-size formula. <b>Eviction cuts the token count, quantization cuts the bits, head sharing cuts the head count, and low-rank cuts the per-token dimension.</b> They multiply together, so combining two or three is normal.</figcaption>
+  </figure>
+
+  <div class="math">cache_bytes = 2 &middot; L &middot; G &middot; d<sub>head</sub> &middot; S &middot; bytes
+    <span class="gloss"><b>2</b>: key and value. <b>L</b>: layers. <b>G</b>: KV heads (head sharing shrinks this - lessons 15-16). <b>d<sub>head</sub></b>: per-head width (low-rank/MLA shrinks the stored version of this). <b>S</b>: tokens kept (eviction shrinks this). <b>bytes</b>: precision, 2 for fp16 (quantization shrinks this to 1 for int8 or 0.5 for int4). Each family targets a different letter.</span>
+  </div>
+
+  <h2>3. Family 1 - eviction: keep the tokens that matter</h2>
+  <p>The simplest question: do you actually need every past token's key and value? Empirically, no. Attention is sparse - most tokens receive almost no weight most of the time. Two influential papers exploit this differently.</p>
+
+  <p><strong>H2O (Heavy-Hitter Oracle)</strong> observed that a small set of tokens - the "heavy hitters" - soak up most of the attention mass across the whole sequence. Keep those, plus a window of recent tokens, and evict the rest. <strong>StreamingLLM</strong> found something stranger: the very first tokens accumulate huge attention scores even when they carry no semantic meaning. They act as an <em>attention sink</em>, a place for the softmax to dump probability. Keep a few sink tokens at the front plus a sliding recent window, and a model trained on short contexts streams to millions of tokens without recomputation.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph FULL["Full cache (all tokens)"]
+    t0["tok 0"]; t1["tok 1"]; td["..."]; tk["... many ..."]; tr["recent"]
+  end
+  subgraph STREAM["StreamingLLM eviction"]
+    s0["sink tok 0"]; s1["sink tok 1"]; gap["(evicted middle)"]; w1["window"]; w2["window"]
+  end
+  FULL -->|"drop the low-attention middle"| STREAM
+    </div>
+    <figcaption>StreamingLLM in one row. Keep the first few <b>attention-sink</b> tokens and a recent sliding window, and evict the low-attention middle. The sink tokens stabilise the softmax so the model does not fall apart, and the recent window carries local context. <b>The cache stays a fixed size no matter how long the stream runs.</b></figcaption>
+  </figure>
+
+  <h2>4. Family 2 - quantization: fewer bits per entry</h2>
+  <p>A different lever: keep every token, but store its key and value in lower precision. Methods like <strong>KIVI</strong> and <strong>KVQuant</strong> push the KV cache from fp16 (16 bits) down to int8 or even int4, often quantizing keys and values with different strategies because they have different statistics. Halve the bits, halve the cache, with careful scaling to keep quality.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph HBM["GPU memory (HBM) - the scarce resource"]
+    direction TB
+    F["fp16 KV entry<br/>16 bits each"] -->|"quantize"| I["int8 KV entry<br/>8 bits each"]
+    I -->|"quantize further"| Q4["int4 KV entry<br/>4 bits each"]
+  end
+  F -. "2x smaller" .-> I
+  I -. "2x smaller again" .-> Q4
+    </div>
+    <figcaption>Quantization on the memory hierarchy. The KV cache lives in high-bandwidth GPU memory (HBM), the resource you run out of. Storing each entry in <b>int8 halves the footprint, int4 quarters it</b>, at the cost of a small rounding error that good per-channel scaling keeps negligible. This is orthogonal to eviction: you can quantize the tokens you decide to keep.</figcaption>
+  </figure>
+
+  <h2>5. Families 3 and 4 - share heads, or compress to a latent</h2>
+  <p><strong>Head sharing</strong> is the pair of lessons you just finished: <a href="0015-multi-query-attention.html">MQA</a> keeps one KV head, <a href="0016-grouped-query-attention.html">GQA</a> keeps a few. That cuts the <code>G</code> term directly and is now standard. <strong>Low-rank compression</strong> goes further on the <code>d_head</code> term: DeepSeek-V2's <strong>Multi-head Latent Attention (MLA)</strong> projects the keys and values down into a single small latent vector per token, stores only that, and reconstructs the full keys and values on the fly. The paper reports the KV cache shrinks by <strong>93.3%</strong> versus the previous model, while quality holds.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant T as New token
+  participant Down as Down-projection
+  participant Cache as KV cache (stores latent only)
+  participant Up as Up-projection
+  participant Att as Attention
+  T->>Down: project keys/values down
+  Down->>Cache: store one small latent vector
+  Note over Cache: cache holds a tiny latent,<br/>not full K and V
+  Cache->>Up: read latent back
+  Up->>Att: reconstruct full K, V on the fly
+  Att-->>T: attention output
+    </div>
+    <figcaption>Multi-head Latent Attention as a sequence. Instead of caching full keys and values, MLA caches a <b>single compressed latent</b> per token and rebuilds K and V when needed. The heavy per-token dimension never touches the cache, which is how DeepSeek-V2 reports cutting KV memory by over 90%. Compute goes slightly up; memory goes dramatically down.</figcaption>
+  </figure>
+
+  <h2>6. Implement two families: eviction cache + int8 quantizer</h2>
+  <p>This code builds a fixed-size streaming cache (attention sinks plus a recent window) and a simple symmetric int8 quantizer for the entries you keep, then measures the memory saved against a naive full-precision cache. Read it as the eviction and quantization families combined.</p>
+
+  <div class="code-cap">kv_optim.py &middot; runnable with torch</div>
+  <pre><code>import torch
+
+class StreamingKVCache:
+    """Attention-sink + sliding-window eviction (StreamingLLM style)."""
+    def __init__(self, n_sink=4, window=1024):
+        self.n_sink, self.window = n_sink, window
+        self.k, self.v = [], []                      # lists of per-token tensors
+
+    def append(self, k_t, v_t):
+        self.k.append(k_t); self.v.append(v_t)
+        # keep the first n_sink tokens forever; keep only the last `window` others
+        if len(self.k) > self.n_sink + self.window:
+            drop = len(self.k) - (self.n_sink + self.window)
+            self.k = self.k[:self.n_sink] + self.k[self.n_sink + drop:]
+            self.v = self.v[:self.n_sink] + self.v[self.n_sink + drop:]
+
+    def size(self):
+        return len(self.k)
+
+def quantize_int8(x):
+    """Symmetric per-tensor int8 quantization: fp16 -> int8 + one scale."""
+    scale = x.abs().max() / 127.0
+    q = torch.clamp((x / scale).round(), -127, 127).to(torch.int8)
+    return q, scale
+
+def dequantize_int8(q, scale):
+    return q.to(torch.float16) * scale
+
+# --- demo: stream 100k tokens through the fixed-size cache ---
+d_head = 128
+cache = StreamingKVCache(n_sink=4, window=1024)
+for t in range(100_000):
+    cache.append(torch.randn(d_head), torch.randn(d_head))
+
+kept = cache.size()                                  # bounded, not 100k
+full_fp16 = 100_000 * d_head * 2 * 2                 # tokens*d*2(K,V)*2 bytes
+evicted_fp16 = kept * d_head * 2 * 2
+evicted_int8 = kept * d_head * 2 * 1                 # int8 = 1 byte
+print(f"tokens streamed : 100000, tokens kept: {kept}")
+print(f"full fp16 cache : {full_fp16/1e6:8.1f} MB")
+print(f"+ eviction      : {evicted_fp16/1e6:8.1f} MB "
+      f"({full_fp16/evicted_fp16:.0f}x smaller)")
+print(f"+ eviction+int8 : {evicted_int8/1e6:8.1f} MB "
+      f"({full_fp16/evicted_int8:.0f}x smaller)")</code></pre>
+
+  <p>The measurement makes the stacking visible: eviction caps the token count at a constant no matter how long you stream, and int8 halves whatever is left. Two orthogonal families multiply into a large combined saving, and you could still add GQA head sharing on top.</p>
+
+  <h2>7. The families side by side</h2>
+  <table>
+    <thead><tr><th>Family</th><th>Cuts which term</th><th>Example method</th><th>Rough cost</th></tr></thead>
+    <tbody>
+      <tr><td>Eviction</td><td>Tokens kept (S)</td><td>H2O, StreamingLLM</td><td>May drop far context</td></tr>
+      <tr><td>Quantization</td><td>Bytes per entry</td><td>KIVI, KVQuant</td><td>Small rounding error</td></tr>
+      <tr><td>Head sharing</td><td>KV heads (G)</td><td>MQA, GQA</td><td>Slight quality dip</td></tr>
+      <tr><td>Low-rank</td><td>Per-token width</td><td>MLA (DeepSeek-V2)</td><td>Extra reconstruct compute</td></tr>
+    </tbody>
+  </table>
+  <p>No single family is "the answer". Which you reach for depends on the workload - streaming chat leans on eviction, memory-starved serving leans on quantization, new model designs bake in head sharing or low-rank from the start. The next lesson attacks the same memory from a completely different angle: not making the cache smaller, but <em>managing</em> it without waste.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does the KV cache dominate memory at long context?</div>
+      <button class="q-opt">Because the model weights themselves keep growing per token</button>
+      <button class="q-opt">Because the softmax stores a copy of the vocabulary per step</button>
+      <button class="q-opt">Because each layer adds new parameters as the input gets longer</button>
+      <button class="q-opt">Because it grows with every token while the weights stay fixed</button>
+      <div class="q-fb">Weights are a fixed cost; the cache adds a key and value per token, so it overtakes them.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is an "attention sink" in StreamingLLM?</div>
+      <button class="q-opt">A recent window of tokens holding the local context together</button>
+      <button class="q-opt">Early tokens that soak up attention mass despite little meaning</button>
+      <button class="q-opt">A special layer that drains gradients away from the residual</button>
+      <button class="q-opt">A learned token appended at the end to mark the sequence stop</button>
+      <div class="q-fb">The first tokens accumulate large attention weight; keeping them stabilises windowed streaming.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which lever does KV quantization pull to shrink the cache?</div>
+      <button class="q-opt">It stores each key and value in fewer bits, such as int8</button>
+      <button class="q-opt">It stores each key and value for fewer of the past tokens</button>
+      <button class="q-opt">It stores each key and value across fewer attention heads</button>
+      <button class="q-opt">It stores each key and value with fewer transformer layers</button>
+      <div class="q-fb">Quantization keeps every entry but in lower precision - fp16 to int8 or int4 - halving or quartering bytes.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does Multi-head Latent Attention actually cache?</div>
+      <button class="q-opt">Full key and value heads exactly as standard attention would</button>
+      <button class="q-opt">Only the heavy-hitter tokens chosen by an eviction oracle</button>
+      <button class="q-opt">One small compressed latent that keys and values rebuild from</button>
+      <button class="q-opt">Nothing at all, recomputing every key and value each new step</button>
+      <div class="q-fb">MLA stores a low-rank latent per token and reconstructs full K/V on the fly, cutting cache over 90%.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Head sharing is <a href="0015-multi-query-attention.html">MQA</a> and <a href="0016-grouped-query-attention.html">GQA</a></b> - two of the four families live in the previous module.</li>
+    <li><b>Complements <a href="0017-flashattention.html">FlashAttention</a> and <a href="0018-flashattention-2.html">FlashAttention-2</a></b> - those cut attention <em>compute</em>; this cuts cache <em>memory</em>.</li>
+    <li><b>Sets up <a href="0020-pagedattention-vllm.html">PagedAttention</a></b> - the next lesson manages the cache without waste rather than shrinking it.</li>
+    <li>Traces back to the original <a href="0001-attention-is-all-you-need.html">Transformer</a>, whose O(N&sup2;) attention and per-token caching created this problem.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Want to see why the sink tokens really matter (delete them and watch quality collapse), or benchmark int4 vs int8 KV on a real prompt? Ask and we will run the ablation and read the numbers together.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Start with <a href="https://arxiv.org/abs/2309.17453">Xiao et al., "Efficient Streaming Language Models with Attention Sinks" (StreamingLLM, 2023)</a> - the attention-sink figures are unforgettable. Then read <a href="https://arxiv.org/abs/2306.14048">Zhang et al., "H2O: Heavy-Hitter Oracle" (2023)</a> for eviction and <a href="https://arxiv.org/abs/2405.04434">the DeepSeek-V2 report (2024)</a> for Multi-head Latent Attention.</p>
+
+  <div class="pager">
+    <a href="0018-flashattention-2.html"><span class="dir">&larr; Previous</span><span class="ttl">FlashAttention-2</span></a>
+    <a class="nxt" href="0020-pagedattention-vllm.html"><span class="dir">Next &rarr;</span><span class="ttl">PagedAttention (vLLM)</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 19 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

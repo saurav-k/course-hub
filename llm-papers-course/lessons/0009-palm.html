@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PaLM - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Big &amp; Open Models &middot; Lesson 09</div>
+  <h1>PaLM: Scaling Language Modeling with Pathways</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Chowdhery, Narang, Devlin, Bosma, Mishra, and 62 others (Google).
+    &middot; <a href="https://arxiv.org/abs/2204.02311">arXiv:2204.02311</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>PaLM is a <b>540-billion-parameter</b> dense decoder-only Transformer - every parameter is used for every token, no mixture-of-experts.</li>
+      <li>It was trained with Google's <b>Pathways</b> system across <b>two TPU v4 pods (6144 chips)</b>, one of the largest single models trained at the time.</li>
+      <li>It bundles a set of now-standard architecture upgrades: <b>SwiGLU</b> activations, <b>parallel</b> attention and feed-forward layers, <b>multi-query attention</b>, <b>RoPE</b> positions, <b>no bias</b> terms, and <b>shared input-output embeddings</b>.</li>
+      <li>Its headline result was <b>reasoning</b>: with <b>chain-of-thought</b> prompting, PaLM broke through on multi-step arithmetic and commonsense tasks and beat the fine-tuned state of the art on several BIG-bench problems.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>By 2022 the field had a recipe: make the model bigger, feed it more text, and capabilities keep climbing. GPT-3 (Lesson 06) proved few-shot learning at 175B parameters. But two questions were still open. Could you push an order of magnitude further in <em>training scale</em> without the whole run collapsing? And would raw scale unlock genuinely new abilities, especially <strong>reasoning</strong>, rather than just sharper autocomplete?</p>
+
+  <p>PaLM answers both. The engineering answer is <strong>Pathways</strong>, a system that lets one model span two entire TPU pods efficiently. The science answer is that at 540B, with the right prompting, PaLM crosses thresholds on tasks that smaller models simply fail - some skills appear <strong>discontinuously</strong> with scale.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph OLD["GPT-3 era (2020)"]
+    direction TB
+    o1["175B params"] --> o2["one cluster"]
+    o2 --> o3["few-shot prompting"]
+  end
+  subgraph NEW["PaLM (2022)"]
+    direction TB
+    n1["540B params"] --> n2["Pathways over<br/>2 TPU v4 pods"]
+    n2 --> n3["chain-of-thought<br/>reasoning breaks through"]
+  end
+  OLD ==>|3x scale + better prompting| NEW
+    </div>
+    <figcaption>The leap PaLM makes. GPT-3 showed few-shot prompting at 175B on a single cluster. PaLM roughly triples the parameter count and spans two TPU pods with the Pathways system, and its <b>signature payoff is multi-step reasoning</b> unlocked by chain-of-thought prompting.</figcaption>
+  </figure>
+
+  <h2>2. Dense, not sparse: what 540B means here</h2>
+  <p>PaLM is <strong>densely activated</strong>. That word matters. In a mixture-of-experts model (Module 09) only a slice of the parameters fire for any given token, so a "540B" MoE might touch far fewer parameters per step. PaLM touches <em>all</em> 540 billion for every token. That makes it a clean scaling experiment - and an expensive one.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  T["one input token"] --> D{"model type?"}
+  D -->|"dense (PaLM)"| A["all 540B params compute"]
+  D -->|"sparse (MoE)"| B["router picks a few experts<br/>only that subset computes"]
+  A --> R1["max quality per param,<br/>max cost per token"]
+  B --> R2["cheaper per token,<br/>routing complexity"]
+    </div>
+    <figcaption>Dense versus sparse. PaLM sends every token through <b>every parameter</b>, so nothing is skipped. Mixture-of-experts models route each token to a small set of experts. PaLM's dense design makes it the honest yardstick for <b>what pure scale buys you</b>, at the price of high compute per token.</figcaption>
+  </figure>
+
+  <h2>3. The Pathways training system</h2>
+  <p>Training a 540B dense model needs thousands of accelerators working as one. A single TPU v4 pod has 3072 chips; PaLM used <strong>two pods, 6144 chips</strong>. The trick is combining two kinds of parallelism. <strong>Model parallelism</strong> splits one copy of the giant model across many chips (no single chip could hold it). <strong>Data parallelism</strong> runs many copies over different batches of data and averages the gradients. Pathways coordinates both across pods with high efficiency.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph POD1["TPU v4 Pod A (3072 chips)"]
+    p1["model shard 1..N"]
+  end
+  subgraph POD2["TPU v4 Pod B (3072 chips)"]
+    p2["model shard 1..N"]
+  end
+  DATA["training batches"] --> POD1
+  DATA --> POD2
+  POD1 <-->|"gradient sync<br/>across pods"| POD2
+  POD1 --> W["one updated<br/>540B model"]
+  POD2 --> W
+    </div>
+    <figcaption>How Pathways spans two pods. Each pod holds a sharded copy of the model (model parallelism) and processes its own batches (data parallelism); gradients are synchronised across the pods. The payoff is a <b>very high hardware utilisation</b> even at 6144 chips, which is what made a dense 540B run practical.</figcaption>
+  </figure>
+
+  <h2>4. The architecture upgrades, one by one</h2>
+  <p>PaLM keeps the decoder-only Transformer from GPT but swaps in six refinements. Each is small; together they improve quality and training stability. You will meet most of them again in LLaMA (Lesson 12) and later.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  base["GPT-style<br/>decoder block"] --> u1["SwiGLU FFN"]
+  base --> u2["parallel attn + FFN"]
+  base --> u3["multi-query attention"]
+  base --> u4["RoPE positions"]
+  base --> u5["no bias terms"]
+  base --> u6["shared in/out embeddings"]
+  u1 & u2 & u3 & u4 & u5 & u6 --> palm["PaLM block"]
+    </div>
+    <figcaption>PaLM's six changes to the standard block. None reinvents the Transformer; each is a targeted upgrade for quality, speed, or stability. The two most consequential for later models are <b>SwiGLU activations and the parallel-layer formulation</b>, which we implement below.</figcaption>
+  </figure>
+
+  <ul>
+    <li><strong>SwiGLU activation</strong> in the feed-forward network - a gated activation that outperforms plain ReLU at the same compute.</li>
+    <li><strong>Parallel layers</strong> - attention and the feed-forward network read the <em>same</em> normalised input and run side by side, instead of one after the other. This speeds up large-scale training with roughly neutral quality.</li>
+    <li><strong>Multi-query attention (MQA)</strong> - all heads share one Key and one Value projection (many queries, one key/value). This shrinks the memory read during generation and speeds up inference. Full lesson: 0015.</li>
+    <li><strong>RoPE embeddings</strong> - rotary position encoding instead of learned or sinusoidal absolute positions. Better extrapolation to longer sequences. Full lesson: 0013.</li>
+    <li><strong>No biases</strong> - bias terms are dropped from all dense layers and layer norms, which improved training stability at scale.</li>
+    <li><strong>Shared input-output embeddings</strong> - the token embedding matrix and the final output projection are the same weights, saving parameters.</li>
+  </ul>
+
+  <h2>5. SwiGLU, exactly</h2>
+  <p>A standard Transformer feed-forward network is <code>Linear -&gt; ReLU -&gt; Linear</code>. SwiGLU replaces the middle with a <strong>gate</strong>: it computes two linear projections, passes one through a smooth Swish activation, and multiplies them elementwise. One branch decides "how much", the other decides "of what".</p>
+
+  <div class="math">FFN<sub>SwiGLU</sub>(x) = ( Swish(x W<sub>1</sub>) &odot; (x W<sub>3</sub>) ) W<sub>2</sub>
+    <span class="gloss"><b>x W<sub>1</sub></b> and <b>x W<sub>3</sub></b>: two separate linear projections of the same input. <b>Swish(z) = z &middot; sigmoid(z)</b>: a smooth activation that, unlike ReLU, never fully zeroes small negatives. <b>&odot;</b>: elementwise multiply - the Swish branch <i>gates</i> the other branch. <b>W<sub>2</sub></b>: projects the gated result back to the model width. Because there are now three matrices instead of two, PaLM shrinks the hidden width so total compute stays comparable.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why gating helps</span>
+    A plain ReLU makes a hard yes/no decision per unit. A gate makes a <b>soft, input-dependent</b> decision: the network can pass a feature at 30% strength. That extra expressiveness, for the same parameter budget, is why SwiGLU became the default feed-forward network in PaLM, LLaMA, Mistral, and most models since.</div>
+
+  <h2>6. Parallel layers: the block rewired</h2>
+  <p>In the original Transformer (Lesson 01) a block is <strong>serial</strong>: normalise, attend, add back, normalise again, feed-forward, add back. Attention must finish before the feed-forward network starts. PaLM makes them <strong>parallel</strong>: one normalisation feeds both attention and the feed-forward network at once, and their outputs are summed with the residual together.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph SER["Serial block (Lesson 01)"]
+    direction TB
+    s0["x"] --> s1["LayerNorm"] --> s2["Attention"] --> s3(("+"))
+    s0 --> s3
+    s3 --> s4["LayerNorm"] --> s5["FFN"] --> s6(("+"))
+    s3 --> s6
+    s6 --> s7["out"]
+  end
+  subgraph PAR["Parallel block (PaLM)"]
+    direction TB
+    p0["x"] --> p1["LayerNorm"]
+    p1 --> p2["Attention"]
+    p1 --> p3["FFN (SwiGLU)"]
+    p2 --> p4(("+"))
+    p3 --> p4
+    p0 --> p4
+    p4 --> p5["out"]
+  end
+    </div>
+    <figcaption>Serial versus parallel. The classic block runs attention, then the feed-forward network, each with its own LayerNorm. PaLM runs both branches from a <b>single shared LayerNorm and sums them together</b>, which lets the two large matrix multiplies be fused and overlapped on the accelerator - a real speedup at 540B with about neutral quality.</figcaption>
+  </figure>
+
+  <h2>7. Implement it: SwiGLU and the parallel block</h2>
+  <p>Here is the difference in code. First the serial block you already know from Lesson 01, then PaLM's parallel version with a SwiGLU feed-forward network. Read them side by side - the only structural change is that attention and the feed-forward network share one norm and are added together.</p>
+
+  <div class="code-cap">palm_block.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class SwiGLU(nn.Module):
+    """PaLM/LLaMA feed-forward network: gated Swish."""
+    def __init__(self, d_model, hidden):
+        super().__init__()
+        self.w1 = nn.Linear(d_model, hidden, bias=False)  # gate branch
+        self.w3 = nn.Linear(d_model, hidden, bias=False)  # value branch
+        self.w2 = nn.Linear(hidden, d_model, bias=False)  # project back
+    def forward(self, x):
+        # Swish(x) = x * sigmoid(x); F.silu is exactly that
+        return self.w2(F.silu(self.w1(x)) * self.w3(x))
+
+class SerialBlock(nn.Module):
+    """The Lesson 01 shape: attention THEN feed-forward, each own norm."""
+    def __init__(self, attn, d_model, hidden):
+        super().__init__()
+        self.n1, self.n2 = nn.LayerNorm(d_model), nn.LayerNorm(d_model)
+        self.attn, self.ffn = attn, SwiGLU(d_model, hidden)
+    def forward(self, x):
+        x = x + self.attn(self.n1(x))     # attend, add residual
+        x = x + self.ffn(self.n2(x))      # THEN feed-forward, add residual
+        return x
+
+class ParallelBlock(nn.Module):
+    """The PaLM shape: ONE norm feeds both branches, summed together."""
+    def __init__(self, attn, d_model, hidden):
+        super().__init__()
+        self.norm = nn.LayerNorm(d_model, bias=False)   # note: no bias
+        self.attn, self.ffn = attn, SwiGLU(d_model, hidden)
+    def forward(self, x):
+        h = self.norm(x)                  # shared, computed once
+        return x + self.attn(h) + self.ffn(h)   # both read h, summed with residual
+
+# smoke test with a stand-in attention module
+attn = lambda h: h                       # identity placeholder for shape check
+blk  = ParallelBlock(attn, d_model=128, hidden=256)
+out  = blk(torch.randn(2, 6, 128))
+print(out.shape)                          # torch.Size([2, 6, 128])</code></pre>
+
+  <p>Two things to notice. The SwiGLU uses <code>bias=False</code> everywhere, matching PaLM's no-bias choice. And in <code>ParallelBlock.forward</code>, <code>self.norm(x)</code> is computed <strong>once</strong> and reused by both branches - that shared <code>h</code> is the whole idea. On real hardware the attention and feed-forward matrix multiplies can then be batched into fewer, larger operations.</p>
+
+  <h2>8. What scale unlocked: reasoning</h2>
+  <p>PaLM's most cited result is not a benchmark number but a behaviour. On multi-step problems - grade-school math, logical puzzles - large models fail if you ask for the answer directly. But if you prompt them to <strong>show their work first</strong> (chain-of-thought, Lesson 30), PaLM 540B jumps sharply and, on several tasks, beats systems that were <em>fine-tuned</em> specifically for them.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Prompt
+  participant P as PaLM 540B
+  U->>P: "Roger has 5 balls, buys 2 cans of 3. How many?"
+  Note over U,P: direct answer -> often wrong
+  U->>P: same question + "Let's think step by step"
+  P->>P: 5 + 2 x 3 = 5 + 6
+  P-->>U: "11" (correct)
+    </div>
+    <figcaption>Chain-of-thought at scale. Asked directly, a large model often blurts a wrong number. Prompted to reason step by step, PaLM lays out the intermediate arithmetic and lands the answer. The key finding is that this ability is <b>strong only at large scale</b> - it barely helps small models, and it appears somewhat suddenly as the model grows.</figcaption>
+  </figure>
+
+  <h2>9. How PaLM compares</h2>
+  <table>
+    <thead><tr><th>Property</th><th>GPT-3 (2020)</th><th>PaLM (2022)</th></tr></thead>
+    <tbody>
+      <tr><td>Parameters</td><td>175B dense</td><td>540B dense</td></tr>
+      <tr><td>Feed-forward activation</td><td>GeLU, serial block</td><td>SwiGLU, parallel block</td></tr>
+      <tr><td>Attention variant</td><td>Standard multi-head</td><td>Multi-query attention</td></tr>
+      <tr><td>Position encoding</td><td>Learned absolute</td><td>Rotary (RoPE)</td></tr>
+      <tr><td>Bias terms</td><td>Present</td><td>Removed everywhere</td></tr>
+      <tr><td>Training hardware</td><td>V100 GPU cluster</td><td>6144 TPU v4 chips</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does it mean that PaLM is a "dense" 540B model?</div>
+      <button class="q-opt">A router sends each token to a small chosen subset of parameters</button>
+      <button class="q-opt">Every one of the parameters is used to process every input token</button>
+      <button class="q-opt">The model stores its weights in a compressed low-precision format</button>
+      <button class="q-opt">Its layers are packed tightly with no residual skip connections</button>
+      <div class="q-fb">Dense means no expert routing: all 540B parameters fire for every token, unlike a mixture-of-experts model.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">In PaLM's parallel block, what is shared between the two branches?</div>
+      <button class="q-opt">A single set of query, key, and value projection weight matrices</button>
+      <button class="q-opt">A single softmax that normalises attention and feed-forward both</button>
+      <button class="q-opt">A single normalisation whose output feeds attention and the network</button>
+      <button class="q-opt">A single residual added only once at the very end of training</button>
+      <div class="q-fb">One LayerNorm is computed once; both attention and the SwiGLU feed-forward read that same normalised input, and the outputs are summed.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does the SwiGLU feed-forward network add over a plain ReLU one?</div>
+      <button class="q-opt">A gate branch that softly scales features by an input-dependent amount</button>
+      <button class="q-opt">A cache branch that stores past keys to speed up later generation</button>
+      <button class="q-opt">A router branch that picks which expert should handle the token</button>
+      <button class="q-opt">A bias branch that shifts every activation by a learned constant</button>
+      <div class="q-fb">SwiGLU multiplies a Swish-activated gate against a value branch, giving a soft, input-dependent gate instead of ReLU's hard cutoff.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What was PaLM's headline capability finding?</div>
+      <button class="q-opt">It compressed the model to run on a single consumer graphics card</button>
+      <button class="q-opt">It removed the need for any positional information inside attention</button>
+      <button class="q-opt">It matched much smaller models while using far less training compute</button>
+      <button class="q-opt">It unlocked strong multi-step reasoning via chain-of-thought prompts</button>
+      <div class="q-fb">At 540B, chain-of-thought prompting let PaLM solve multi-step reasoning tasks, sometimes beating fine-tuned systems.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0008-chinchilla.html">Chinchilla</a></b> argued many big models were undertrained; PaLM is a dense scale-up that predates fully adopting that lesson, which <a href="0012-llama.html">LLaMA</a> then takes to heart.</li>
+    <li>PaLM's <b>SwiGLU + RoPE + no-bias</b> recipe is inherited almost wholesale by <a href="0012-llama.html">LLaMA</a> and later open models.</li>
+    <li><b>Multi-query attention</b> here gets its own treatment in <a href="0015-multi-query-attention.html">Lesson 15</a>, and its successor in <a href="0016-grouped-query-attention.html">GQA</a>.</li>
+    <li><b>RoPE</b> positions are unpacked in <a href="0013-rope.html">Lesson 13</a>.</li>
+    <li>The <b>chain-of-thought</b> reasoning PaLM showcased is the subject of <a href="0030-chain-of-thought.html">Lesson 30</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> PaLM is best understood as a bundle of upgrades, not one idea. Ask the agent to run the code above and print the parameter counts of the serial versus parallel block, or to explain why removing bias terms helps stability at scale. If multi-query attention is fuzzy, jump ahead and skim Lesson 15, then come back.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2204.02311">Chowdhery et al., "PaLM: Scaling Language Modeling with Pathways" (2022)</a>. Pair it with Google's <a href="https://research.google/blog/pathways-language-model-palm-scaling-to-540-billion-parameters-for-breakthrough-performance/">PaLM blog post</a> for the reasoning examples, and the <a href="https://arxiv.org/abs/2201.11903">chain-of-thought paper</a> for the prompting method that made PaLM shine.</p>
+
+  <div class="pager">
+    <a href="0008-chinchilla.html"><span class="dir">&larr; Previous</span><span class="ttl">Chinchilla: Compute-Optimal Scaling</span></a>
+    <a class="nxt" href="0010-opt.html"><span class="dir">Next &rarr;</span><span class="ttl">OPT</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 09 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

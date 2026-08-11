@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>InstructGPT (RLHF) - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Alignment &amp; Post-Training &middot; Lesson 23</div>
+  <h1>InstructGPT (RLHF)</h1>
+  <p class="paper-meta">
+    <span class="pill">2022</span>
+    Ouyang, Wu, Jiang, Almeida, Wainwright, Mishkin, Zhang, Agarwal, Slama, Ray, Schulman, Hilton, Kelton, Miller, Simens, Askell, Welinder, Christiano, Leike, Lowe (OpenAI).
+    &middot; <a href="https://arxiv.org/abs/2203.02155">arXiv:2203.02155</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A raw language model only knows how to <b>continue text</b>. It is not trying to be helpful, honest, or safe - it just predicts the next token. Ask it a question and it might reply with more questions.</li>
+      <li>InstructGPT aligns the model to <b>follow instructions</b> using human feedback in three stages: <b>SFT</b> (copy human demonstrations), a <b>reward model</b> (learn human taste from rankings), and <b>PPO</b> (reinforcement learning to maximise that taste).</li>
+      <li>The reward model is trained on <b>pairwise comparisons</b>: humans rank several answers, and the model learns to score preferred answers higher.</li>
+      <li>PPO then pushes the policy toward high reward while a <b>KL penalty</b> keeps it close to the SFT model, so it does not drift into gibberish that games the reward.</li>
+      <li>The punchline: labelers preferred the <b>1.3B</b> InstructGPT over the <b>175B</b> GPT-3 - 100x fewer parameters, better behaviour. Alignment beat raw scale.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>GPT-3 (Lesson 6) was trained on one objective: predict the next token in web text. That makes a brilliant autocomplete, but not an assistant. The training objective and what a user actually wants are <strong>misaligned</strong>. Ask "Explain the moon landing to a six-year-old" and a raw model might continue with "Explain gravity to a six-year-old. Explain the sun to a six-year-old." - because that pattern is common in its training data. It is doing its job perfectly. Its job is just the wrong one.</p>
+  <p>The paper's fix is to add a second training phase that optimises for <strong>human preferences</strong> instead of raw likelihood. This is <strong>Reinforcement Learning from Human Feedback</strong>, or RLHF. It is the recipe that turned GPT-3 into something you could actually talk to, and the direct ancestor of ChatGPT.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BEFORE["Raw GPT-3: predict next token"]
+    direction TB
+    p1["prompt:<br/>'Explain the moon landing'"] --> o1["continuation:<br/>'Explain gravity...'<br/><i>plausible text, not an answer</i>"]
+  end
+  subgraph AFTER["InstructGPT: follow the instruction"]
+    direction TB
+    p2["prompt:<br/>'Explain the moon landing'"] --> o2["answer:<br/>'In 1969, astronauts...'<br/><i>helpful, on-task reply</i>"]
+  end
+    </div>
+    <figcaption>The alignment gap. A raw model optimises for <b>likely text</b>, which is not the same as a <b>useful answer</b>. InstructGPT adds a training phase whose objective <b>is</b> human usefulness, so the same prompt now produces a reply the user actually wanted.</figcaption>
+  </figure>
+
+  <h2>2. The three-stage pipeline</h2>
+  <p>RLHF is not one step but three, run in order. Each stage produces an artefact the next stage needs. Read this diagram top to bottom - it is the whole paper in one picture.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  base["Pretrained GPT-3<br/>(next-token model)"]
+
+  subgraph S1["Stage 1 - Supervised Fine-Tuning (SFT)"]
+    direction TB
+    d1["Humans write ideal answers<br/>to sample prompts"] --> t1["Fine-tune GPT-3 to copy them"]
+  end
+
+  subgraph S2["Stage 2 - Reward Model (RM)"]
+    direction TB
+    d2["Model samples several answers<br/>per prompt"] --> r2["Humans rank them best to worst"]
+    r2 --> t2["Train RM to score<br/>preferred answers higher"]
+  end
+
+  subgraph S3["Stage 3 - PPO (RL)"]
+    direction TB
+    g3["Policy generates an answer"] --> s3["RM scores it"]
+    s3 --> u3["PPO updates policy<br/>to raise reward<br/>+ KL penalty to SFT"]
+    u3 --> g3
+  end
+
+  base --> S1
+  S1 -->|"SFT model = starting policy AND reference"| S2
+  S2 -->|"frozen reward model"| S3
+  S1 -.->|"KL anchor"| S3
+    </div>
+    <figcaption>The three stages of RLHF. <b>SFT</b> teaches the basic instruction-following shape. The <b>reward model</b> distils human taste into a single scalar scoring function. <b>PPO</b> then treats that scorer as a reward signal and does reinforcement learning, while a KL leash to the SFT model stops it wandering. <b>The SFT model plays double duty: it is both the starting point and the anchor PPO is not allowed to stray far from.</b></figcaption>
+  </figure>
+
+  <h2>3. Stage 1: Supervised fine-tuning</h2>
+  <p>The simplest stage. OpenAI collected prompts (many from real API traffic) and paid trained labelers to write high-quality answers - the demonstrations. Then GPT-3 is fine-tuned with ordinary supervised learning to imitate those answers: the same next-token loss as pretraining, but now on curated <em>(prompt, ideal answer)</em> pairs. The result is the <strong>SFT model</strong>. It already follows instructions reasonably well, and it is the foundation for everything after.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["prompt from API traffic"] --> L["labeler writes<br/>the ideal answer"]
+  L --> D["(prompt, answer) pairs"]
+  D --> FT["supervised fine-tune<br/>GPT-3 to imitate"]
+  FT --> SFT["SFT model"]
+    </div>
+    <figcaption>Stage 1 in detail. Humans <b>demonstrate</b> good behaviour and the model learns by imitation. This is cheap and stable but limited: writing demonstrations is slow, and the model can only be as good as what humans bother to write out in full. <b>SFT gets you most of the way; the next two stages squeeze out the rest.</b></figcaption>
+  </figure>
+
+  <h2>4. Stage 2: The reward model learns human taste</h2>
+  <p>Writing a perfect answer is hard. <em>Judging</em> which of two answers is better is easy. Stage 2 exploits that asymmetry. For a prompt, the SFT model samples several candidate answers, and a labeler <strong>ranks</strong> them from best to worst. From <code>K</code> ranked answers you get every pairwise comparison - <code>C(K, 2)</code> of them. In the paper <code>K</code> ranged from 4 to 9, giving 6 to 36 comparisons per prompt from a single labeling session.</p>
+  <p>A <strong>reward model</strong> (a copy of the model with the token head replaced by a single scalar output) is trained so that, for every compared pair, the winner scores higher than the loser.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Prompt
+  participant M as SFT model
+  participant H as Human labeler
+  participant R as Reward model
+  U->>M: one prompt x
+  M->>H: sample K answers (K = 4..9)
+  H->>H: rank them best to worst
+  H->>R: all C(K,2) pairwise (winner, loser) pairs
+  Note over R: train so r(x, y_win) > r(x, y_lose)
+  R->>R: output = one scalar reward per (prompt, answer)
+    </div>
+    <figcaption>Stage 2 as a conversation. Ranking is turned into many <b>pairwise</b> training examples. The reward model never sees an absolute "quality score" - it only ever learns the <b>relative</b> judgement "this answer beat that one," which is exactly what humans are reliable at giving. <b>The trained reward model becomes a cheap, automatic stand-in for a human judge.</b></figcaption>
+  </figure>
+
+  <h3>The reward-model loss, exactly</h3>
+  <p>The loss is a <strong>Bradley-Terry pairwise ranking loss</strong>. It says: the difference in reward between winner and loser, squashed through a sigmoid, should be as close to 1 as possible.</p>
+
+  <div class="math">loss(&theta;) = &minus; ( 1 / C(K,2) ) &middot; E<sub>(x, y<sub>w</sub>, y<sub>l</sub>) ~ D</sub> [ log &sigma;( r<sub>&theta;</sub>(x, y<sub>w</sub>) &minus; r<sub>&theta;</sub>(x, y<sub>l</sub>) ) ]
+    <span class="gloss"><b>r<sub>&theta;</sub>(x, y)</b>: the scalar reward the model gives answer <i>y</i> for prompt <i>x</i>. <b>y<sub>w</sub></b>: the winning (human-preferred) answer; <b>y<sub>l</sub></b>: the losing one. <b>r(x, y<sub>w</sub>) &minus; r(x, y<sub>l</sub>)</b>: how much the model prefers the winner - we want this positive and large. <b>&sigma;</b>: the sigmoid, turning that gap into a probability the winner beats the loser. <b>log &sigma;(&middot;)</b>: reward the model when that probability is near 1. <b>1 / C(K,2)</b>: average over all pairs from one prompt so a prompt with more answers does not dominate. <b>E<sub>...~D</sub></b>: average over the whole comparison dataset.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why pairwise, not a score</span>
+    Ask a human "rate this answer 0 to 10" and you get noisy, drifting numbers. Ask "which of these two is better" and you get a clean, consistent signal. Bradley-Terry converts many such binary judgements into a single continuous reward function. It is the same math behind Elo chess ratings.</div>
+
+  <h2>5. Stage 3: PPO optimises the policy against the reward</h2>
+  <p>Now the reinforcement learning. The <strong>policy</strong> (initialised from the SFT model) generates an answer, the frozen reward model scores it, and <strong>PPO</strong> - Proximal Policy Optimization, Schulman et al. 2017 - nudges the policy to make high-reward answers more likely. Left alone, this goes wrong: the policy discovers weird text that the reward model over-scores, and quality collapses. This is <strong>reward hacking</strong>.</p>
+  <p>The fix is a <strong>KL penalty</strong>. Every token, the objective subtracts a penalty proportional to how far the RL policy's probabilities have drifted from the SFT model's. The policy is free to improve, but on a leash.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  x["prompt x"] --> pol["RL policy pi_RL<br/>(starts = SFT)"]
+  pol --> y["sampled answer y"]
+  y --> rm["frozen reward model<br/>r(x, y)"]
+  y --> kl["KL vs SFT model<br/>how far did we drift?"]
+  rm --> obj["objective = reward<br/>&minus; beta &middot; KL"]
+  kl --> obj
+  obj --> ppo["PPO update on pi_RL"]
+  ppo --> pol
+    </div>
+    <figcaption>Stage 3, the tug of war. The <b>reward</b> pulls the policy toward answers humans like; the <b>KL penalty</b> pulls it back toward the sensible SFT model. Balance them and you get a model that is more helpful without going off the rails. <b>The KL term is the single most important guardrail in RLHF - remove it and the policy hacks the reward model within a few hundred steps.</b></figcaption>
+  </figure>
+
+  <h3>The PPO objective, exactly</h3>
+  <p>The paper maximises this objective (their Equation 2). Two pieces matter: the reward-minus-KL term, and an optional pretraining-mix term that stops the model forgetting general skills.</p>
+
+  <div class="math">objective(&phi;) = E<sub>(x,y) ~ &pi;<sub>&phi;</sub><sup>RL</sup></sub> [ r<sub>&theta;</sub>(x, y) &minus; &beta; &middot; log( &pi;<sub>&phi;</sub><sup>RL</sup>(y|x) / &pi;<sup>SFT</sup>(y|x) ) ] + &gamma; &middot; E<sub>x ~ D<sub>pretrain</sub></sub> [ log &pi;<sub>&phi;</sub><sup>RL</sup>(x) ]
+    <span class="gloss"><b>&pi;<sub>&phi;</sub><sup>RL</sup></b>: the policy being trained (parameters &phi;). <b>r<sub>&theta;</sub>(x, y)</b>: the frozen reward model's score for the answer it just generated - the thing we want to raise. <b>&beta; &middot; log(&pi;<sup>RL</sup>/&pi;<sup>SFT</sup>)</b>: the <b>per-token KL penalty</b>; it grows when the RL policy assigns very different probabilities than the SFT model, and &beta; sets how tight the leash is. <b>&gamma; &middot; E<sub>D<sub>pretrain</sub></sub>[log &pi;<sup>RL</sup>]</b>: the <b>pretraining mix</b> - keep scoring well on ordinary pretraining text so RL does not degrade general ability (this variant is "PPO-ptx"; set &gamma; = 0 for plain PPO).</span>
+  </div>
+
+  <h2>6. Implement it: the two objectives in code</h2>
+  <p>The two formulas above are short in PyTorch. First the reward-model pairwise loss, then a simplified sketch of the PPO reward-minus-KL objective. These are teaching versions - a real PPO loop adds clipping, advantages, and a value head - but the core signals are exactly these.</p>
+
+  <div class="code-cap">reward_model_loss.py &middot; the pairwise ranking loss</div>
+  <pre><code>import torch
+import torch.nn.functional as F
+
+def reward_model_loss(reward_win, reward_lose):
+    """
+    reward_win : (B,) scalar reward the RM gave the human-preferred answer
+    reward_lose: (B,) scalar reward the RM gave the rejected answer
+    Bradley-Terry: maximise log-sigmoid of (winner - loser).
+    """
+    # want reward_win - reward_lose to be large and positive
+    return -F.logsigmoid(reward_win - reward_lose).mean()
+
+# --- smoke test ---
+# imagine a batch of 4 comparisons. The RM currently scores them like this:
+r_win  = torch.tensor([2.0, 0.5, -1.0, 3.0])   # preferred answers
+r_lose = torch.tensor([1.0, 1.5,  0.0, 1.0])   # rejected answers
+loss = reward_model_loss(r_win, r_lose)
+print(float(loss))     # positive; drops toward 0 as winners outscore losers
+# note: comparison 2 (0.5 vs 1.5) is currently WRONG - the loss punishes it most</code></pre>
+
+  <div class="code-cap">ppo_objective_sketch.py &middot; reward minus KL, per token</div>
+  <pre><code>import torch
+
+def ppo_reward_with_kl(logp_rl, logp_sft, reward, beta=0.02):
+    """
+    logp_rl : (B, T) log-prob the RL policy gave each generated token
+    logp_sft: (B, T) log-prob the frozen SFT model gave the SAME tokens
+    reward  : (B,)   scalar RM reward for the whole answer
+    beta    : strength of the KL leash to the SFT model
+    Returns a per-sequence score PPO tries to MAXIMISE.
+    """
+    # per-token KL estimate: how far the RL policy drifted from SFT.
+    # log(pi_RL / pi_SFT) = logp_rl - logp_sft
+    per_token_kl = logp_rl - logp_sft            # (B, T)
+    kl_penalty   = beta * per_token_kl.sum(dim=-1)   # sum over the answer
+
+    # the RM reward lands on the full sequence; subtract the KL leash
+    score = reward - kl_penalty                   # (B,)
+    return score.mean()
+
+# --- smoke test ---
+B, T = 2, 5
+logp_rl  = torch.log(torch.rand(B, T))           # pretend log-probs
+logp_sft = torch.log(torch.rand(B, T))
+reward   = torch.tensor([1.2, -0.3])             # RM scores
+print(float(ppo_reward_with_kl(logp_rl, logp_sft, reward)))
+# high reward pushes score up; drifting far from SFT (big KL) pushes it down</code></pre>
+
+  <p>Read the two together and the whole method is visible: the reward model turns human rankings into <code>reward</code>, and the PPO objective spends that reward while paying a KL tax for every step away from the trusted SFT model. Balance is everything.</p>
+
+  <h2>7. Why it mattered</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Raw GPT-3 (pretraining only)</th><th>InstructGPT (RLHF)</th></tr></thead>
+    <tbody>
+      <tr><td>Training objective</td><td>Predict the next token</td><td>Maximise human preference</td></tr>
+      <tr><td>Follows instructions</td><td>Often not; continues the pattern</td><td>Yes; answers the actual request</td></tr>
+      <tr><td>Signal from humans</td><td>None beyond the raw corpus</td><td>Demonstrations plus rankings</td></tr>
+      <tr><td>Head-to-head preference</td><td>Baseline</td><td>1.3B beats 175B GPT-3</td></tr>
+      <tr><td>Truthfulness &amp; toxicity</td><td>Worse</td><td>Improved on both</td></tr>
+    </tbody>
+  </table>
+  <p>The headline number reframed the field: a <strong>1.3B</strong> InstructGPT was preferred to the <strong>175B</strong> GPT-3, 100x larger. At the 175B scale, InstructGPT outputs were preferred to GPT-3 outputs about 85% of the time. Alignment, not just scale, was suddenly a first-class lever. Every stage here - SFT, reward model, PPO with KL - is what the next few lessons streamline or replace.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What data does the reward model actually train on?</div>
+      <button class="q-opt">Absolute quality scores that labelers assign from zero to ten</button>
+      <button class="q-opt">The raw pretraining corpus relabeled by the policy network</button>
+      <button class="q-opt">Pairwise comparisons where humans ranked candidate answers</button>
+      <button class="q-opt">Reward values produced by the frozen policy during rollout</button>
+      <div class="q-fb">Humans rank several answers per prompt; each ranking yields C(K,2) pairwise winner-loser pairs, and the RM learns to score winners higher.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the KL penalty in the PPO objective for?</div>
+      <button class="q-opt">To force the policy to memorise every human demonstration answer</button>
+      <button class="q-opt">To keep the policy near the SFT model and stop reward hacking</button>
+      <button class="q-opt">To raise the reward model score faster than plain PPO would</button>
+      <button class="q-opt">To convert the scalar reward into a valid probability per token</button>
+      <div class="q-fb">Without the KL leash the policy drifts into strange text that fools the reward model. The penalty anchors it to the trusted SFT model.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is judging answers easier for humans than writing them?</div>
+      <button class="q-opt">Ranking two answers is a cheap binary call versus authoring a whole one</button>
+      <button class="q-opt">Ranking answers needs no training data whereas writing needs a lot</button>
+      <button class="q-opt">Judging answers is done by the model while writing is done by people</button>
+      <button class="q-opt">Judging answers uses the reward model while writing uses the policy</button>
+      <div class="q-fb">The paper exploits this asymmetry: comparisons are quick and consistent, so they scale the human signal far better than demonstrations.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What was the paper's headline result about size?</div>
+      <button class="q-opt">The 175B InstructGPT matched the 175B GPT-3 on every single task</button>
+      <button class="q-opt">The 6B reward model outscored the 175B policy on held-out prompts</button>
+      <button class="q-opt">The 175B GPT-3 stayed strictly better than any aligned smaller model</button>
+      <button class="q-opt">The 1.3B InstructGPT was preferred over the 175B GPT-3 by labelers</button>
+      <div class="q-fb">A model 100x smaller won on human preference once aligned. Alignment, not just parameter count, drives usefulness.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0022-self-instruct.html">Self-Instruct</a></b> generated instruction data automatically - a cheaper substitute for the human demonstrations Stage 1 relies on.</li>
+    <li><b>Next, <a href="0024-constitutional-ai.html">Constitutional AI</a></b> replaces the human harmlessness labels in Stage 2 with an AI that judges against written principles (RLAIF).</li>
+    <li><a href="0025-dpo.html">DPO</a> shows the reward model and PPO can be collapsed into a single loss - no RL loop at all.</li>
+    <li><a href="0027-grpo.html">GRPO</a> keeps PPO-style RL but drops the value network, using a group of samples as the baseline - the engine behind modern reasoning models.</li>
+    <li>The reward model here is the same idea GPT-3 (<a href="0006-gpt-3.html">Lesson 6</a>) needed to become a usable assistant.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The confusing part is that <em>three</em> models are in play at once: the reward model, the RL policy, and the frozen SFT reference. Ask the agent to trace one prompt through all three and show where each number goes, or to demonstrate reward hacking by setting &beta; = 0 in the PPO sketch. Do not move on until "reward pulls, KL holds back" feels obvious.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2203.02155">Ouyang et al., "Training language models to follow instructions with human feedback" (2022)</a>. Pair it with OpenAI's <a href="https://openai.com/index/instruction-following/">blog summary</a> for the plain-English version, and Hugging Face's <a href="https://huggingface.co/blog/rlhf">"Illustrating RLHF"</a> for a diagram-by-diagram walkthrough of all three stages.</p>
+
+  <div class="pager">
+    <a href="0022-self-instruct.html"><span class="dir">&larr; Previous</span><span class="ttl">Self-Instruct</span></a>
+    <a class="nxt" href="0024-constitutional-ai.html"><span class="dir">Next &rarr;</span><span class="ttl">Constitutional AI</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 23 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

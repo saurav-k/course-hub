@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Switch Transformer (MoE) - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Mixture of Experts &middot; Lesson 35</div>
+  <h1>Switch Transformer (MoE)</h1>
+  <p class="paper-meta">
+    <span class="pill">2021</span>
+    William Fedus, Barret Zoph, Noam Shazeer (Google Research / Google Brain).
+    &middot; <a href="https://arxiv.org/abs/2101.03961">arXiv:2101.03961</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A normal Transformer block sends every token through the <b>same</b> feed-forward network (FFN). That one FFN holds all the model's "knowledge", and every token pays for all of it.</li>
+      <li>A <b>Mixture of Experts</b> replaces the single FFN with <b>many</b> expert FFNs plus a small <b>router</b>. The router picks which experts a token visits, so most experts stay idle for any given token.</li>
+      <li>Switch simplifies MoE to <b>top-1 routing</b>: each token goes to <b>exactly one</b> expert. That cuts routing math and the cross-device traffic of moving tokens around.</li>
+      <li>Two safety valves keep it working: an <b>expert-capacity</b> limit that drops overflow tokens, and an <b>auxiliary load-balancing loss</b> that pushes the router to use experts evenly.</li>
+      <li>The payoff is <b>sparse activation</b>: parameter count grows into the trillions while the FLOPs each token pays stay roughly fixed. Switch trained up to <b>7x</b> faster than a dense T5 baseline.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>By 2021 the recipe for a better language model was blunt: add parameters. But in a dense Transformer, every extra parameter is used on every token. Double the width of the feed-forward network and you double the compute for <em>every</em> token in <em>every</em> forward pass. Capacity and cost were welded together, and that made scaling brutally expensive.</p>
+
+  <p>The escape hatch is an old idea, <strong>conditional computation</strong>: only run the part of the network a given input actually needs. If a token about French grammar could skip the experts specialised in Python code, you could hold far more total knowledge while each token still touches only a slice of it. Switch Transformer makes that idea simple enough to train stably at scale.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph DENSE["Dense FFN: every token pays for everything"]
+    direction TB
+    dt["token"] --> dffn["one big FFN<br/>(all parameters active)"] --> do["output"]
+  end
+  subgraph MOE["Switch MoE: token pays for one slice"]
+    direction TB
+    mt["token"] --> r["router picks 1 expert"]
+    r --> e2["Expert 2 (active)"]
+    e1["Expert 1 (idle)"] -.-> mo["output"]
+    e2 --> mo
+    e3["Expert 3 (idle)"] -.-> mo
+    e4["Expert 4 (idle)"] -.-> mo
+  end
+    </div>
+    <figcaption>The core shift. A dense block runs every token through <b>one</b> FFN that contains all the parameters. Switch keeps <b>many</b> expert FFNs but the router activates just one per token, so total capacity can be huge while the work done per token stays small. <b>Parameters scale, per-token FLOPs do not.</b></figcaption>
+  </figure>
+
+  <h2>2. What a Mixture of Experts actually is</h2>
+  <p>Inside a Transformer block, the attention layer lets tokens share information, and then a <strong>feed-forward network</strong> processes each token on its own (you met this in Lesson 1). MoE only touches that second part. It swaps the single FFN for a set of <code>N</code> expert FFNs, each with identical shape but its own weights, and adds a tiny <strong>gating network</strong> (the router) that decides where each token goes.</p>
+
+  <p>The router is just one small linear layer. It reads a token's vector and produces a score for each expert. In classic MoE you keep the top-<code>k</code> experts and blend their outputs. Switch's contribution is to set <strong>k = 1</strong>: keep only the single best expert. That was thought to hurt quality, but the paper shows top-1 works well and is far cheaper.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  x["token vector x"] --> g["router: h = x W_r<br/><i>one score per expert</i>"]
+  g --> sm["softmax over experts"]
+  sm --> pick["argmax: choose expert i*<br/><i>top-1</i>"]
+  pick --> gate["gate value p = softmax score of i*"]
+  x --> exp["Expert i* FFN"]
+  gate --> mul["multiply"]
+  exp --> mul
+  mul --> y["output y = p &middot; Expert_i*(x)"]
+    </div>
+    <figcaption>One token through a Switch layer. The router scores every expert, softmax turns the scores into probabilities, and top-1 picks the single highest. The chosen expert processes the token, and its output is scaled by the router's probability <b>p</b> for that expert. Multiplying by <b>p</b> keeps the router differentiable, so gradients can teach it to route better.</figcaption>
+  </figure>
+
+  <h2>3. Routing, in plain steps</h2>
+  <p>Follow one token end to end. The router turns the token into a preference over experts, one expert wins, that expert does the work, and the result is scaled by how confident the router was.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant T as Token
+  participant R as Router (W_r)
+  participant E as Chosen Expert
+  T->>R: send vector x
+  R->>R: scores = x W_r, then softmax
+  R->>R: i* = argmax(scores), p = scores[i*]
+  R->>E: route token x to expert i*
+  E->>E: y = FFN_i*(x)
+  E->>T: return p * y
+    </div>
+    <figcaption>The routing handshake for a single token. The router computes a probability for each expert, selects the top one, and forwards the token. Only the <b>chosen</b> expert runs. The router's probability <b>p</b> scales the output so the router receives a learning signal - if the expert helped, gradients raise <b>p</b> next time.</figcaption>
+  </figure>
+
+  <p>Now the catch. Tokens are routed independently, so nothing stops thousands of tokens in a batch from all picking expert 3 while expert 7 sits empty. On real hardware each expert lives on a device with a fixed buffer. If too many tokens land on one expert, some cannot fit. Switch handles this with two mechanisms working together: a hard capacity limit, and a soft loss that discourages the imbalance in the first place.</p>
+
+  <h2>4. Expert capacity and token dropping</h2>
+  <p>Each expert gets a fixed number of slots per batch, its <strong>capacity</strong>. Capacity is set by a <strong>capacity factor</strong>: if tokens were split perfectly evenly, each expert would receive <code>tokens / experts</code> of them, and the capacity factor multiplies that even share to leave some slack.</p>
+
+  <div class="math">capacity = capacity_factor &times; (tokens_per_batch / num_experts)
+    <span class="gloss"><b>tokens_per_batch / num_experts</b>: the fair share each expert would get under a perfectly even split. <b>capacity_factor</b>: a slack multiplier (Switch uses values like 1.0, 1.25, or 2.0). Above 1.0 you leave headroom so small imbalances do not overflow; the cost is padding buffers with empty slots. Below 1.0 you save memory but drop more tokens.</span>
+  </div>
+
+  <p>When an expert's slots fill up, extra tokens are <strong>dropped</strong>: they skip the expert entirely and pass through on the residual connection unchanged. Dropping sounds alarming, but the residual path means a dropped token still moves forward with its attention update; it just misses this one FFN. A higher capacity factor drops fewer tokens but wastes more memory on padding. It is a direct dial between compute waste and information loss.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph B["A batch of tokens routed to Expert 3 (capacity = 3)"]
+    t1["token A"] --> s1["slot 1 ok"]
+    t2["token B"] --> s2["slot 2 ok"]
+    t3["token C"] --> s3["slot 3 ok"]
+    t4["token D"] --> drop["overflow: DROPPED<br/>skips FFN via residual"]
+    t5["token E"] --> drop
+  end
+    </div>
+    <figcaption>Capacity in action. Expert 3 has three slots this batch. Tokens A, B, and C fit and get processed. Tokens D and E overflow and are dropped - they bypass the expert on the residual connection and continue unchanged. <b>Capacity caps the per-expert cost, and the residual path stops a dropped token from being lost entirely.</b></figcaption>
+  </figure>
+
+  <h2>5. The load-balancing loss</h2>
+  <p>Dropping is a last resort. The real fix is to stop the imbalance forming, and that job falls to an <strong>auxiliary load-balancing loss</strong> added to the training objective. It rewards the router for spreading tokens evenly across experts. Left alone, routers collapse - they learn to favour a few experts, which then hog all the training signal and get better, which makes the router favour them even more. The auxiliary loss breaks that feedback loop.</p>
+
+  <p>For a batch, look at two quantities per expert <code>i</code>: the fraction of tokens actually dispatched to it, <code>f<sub>i</sub></code>, and the average router probability it received, <code>P<sub>i</sub></code>. The loss multiplies them together and sums, scaled so the ideal is a flat, uniform assignment.</p>
+
+  <div class="math">L_aux = &alpha; &middot; N &middot; &sum;<sub>i=1..N</sub> f<sub>i</sub> &middot; P<sub>i</sub>
+    <span class="gloss"><b>N</b>: number of experts. <b>f<sub>i</sub></b>: fraction of the batch's tokens that were routed to expert i (a hard count, from argmax). <b>P<sub>i</sub></b>: the mean softmax probability the router assigned to expert i across the batch (soft, differentiable). <b>&sum; f<sub>i</sub> P<sub>i</sub></b>: this product is minimised when both are flat at 1/N, i.e. perfectly balanced. <b>&alpha;</b>: a small weight (the paper uses 0.01) so balancing nudges the router without overwhelming the real language-modelling loss. Multiplying by N keeps the target value near 1 regardless of expert count.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Why f times P</span>
+    You cannot backpropagate through the hard argmax that produces <code>f<sub>i</sub></code>. But you can through the soft probabilities <code>P<sub>i</sub></code>. Pairing the two - a non-differentiable count with a differentiable probability - gives a loss whose gradient flows into the router and whose minimum is exactly the uniform assignment you want. It is a small, clever trick that makes balance learnable.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph BAD["Without the aux loss"]
+    direction TB
+    b1["Expert 1: 70%"]
+    b2["Expert 2: 5%"]
+    b3["Expert 3: 20%"]
+    b4["Expert 4: 5%"]
+  end
+  subgraph GOOD["With the aux loss"]
+    direction TB
+    g1["Expert 1: 26%"]
+    g2["Expert 2: 24%"]
+    g3["Expert 3: 25%"]
+    g4["Expert 4: 25%"]
+  end
+  BAD -->|"L_aux penalises imbalance"| GOOD
+    </div>
+    <figcaption>What the auxiliary loss buys you. Left unchecked, a router collapses onto a few favourite experts and the rest waste their parameters. The load-balancing loss penalises this, pushing usage toward the flat 1/N target on the right. <b>Balanced experts mean fewer dropped tokens and every parameter earning its keep.</b></figcaption>
+  </figure>
+
+  <h2>6. Sparse activation: the whole point</h2>
+  <p>Put it together and you get the property that makes MoE worth the trouble. The model's <strong>total</strong> parameters equal all experts combined, which can be enormous. But the parameters <strong>active</strong> for any one token are just its single chosen expert plus the shared attention and router. So you can grow capacity almost for free in FLOPs.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  T["total parameters<br/>= attention + router + ALL experts<br/>(can be trillions)"]
+  A["active parameters per token<br/>= attention + router + ONE expert<br/>(roughly constant)"]
+  T -.->|"top-1 routing selects a slice"| A
+  A --> F["FLOPs per token stay flat<br/>as you add experts"]
+    </div>
+    <figcaption>Sparse activation stated plainly. Adding experts grows the <b>total</b> parameter count but not the <b>active</b> count per token, because each token still visits exactly one expert. <b>This decouples model capacity from per-token compute - the single reason MoE exists.</b> Switch used it to reach a trillion parameters while keeping training cost comparable to a much smaller dense model.</figcaption>
+  </figure>
+
+  <h2>7. Implement it: a top-1 Switch layer in PyTorch</h2>
+  <p>Here is a compact but faithful Switch MoE layer. It builds the experts, routes each token top-1, enforces capacity with dropping, blends by the router probability, and returns the auxiliary load-balancing loss so the training loop can add it. Read it against the diagrams above.</p>
+
+  <div class="code-cap">switch_moe.py &middot; runnable with torch</div>
+  <pre><code>import torch, torch.nn as nn, torch.nn.functional as F
+
+class Expert(nn.Module):
+    """A standard Transformer FFN: expand, activate, project back."""
+    def __init__(self, d_model, d_ff):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Linear(d_model, d_ff), nn.ReLU(),
+            nn.Linear(d_ff, d_model),
+        )
+    def forward(self, x):
+        return self.net(x)
+
+class SwitchMoE(nn.Module):
+    def __init__(self, d_model=128, d_ff=512, num_experts=8,
+                 capacity_factor=1.25, aux_weight=0.01):
+        super().__init__()
+        self.num_experts = num_experts
+        self.capacity_factor = capacity_factor
+        self.aux_weight = aux_weight
+        self.router  = nn.Linear(d_model, num_experts)          # the gating network
+        self.experts = nn.ModuleList(
+            [Expert(d_model, d_ff) for _ in range(num_experts)])
+
+    def forward(self, x):                       # x: (B, N, d_model)
+        B, N, d = x.shape
+        x_flat = x.reshape(B * N, d)            # treat every token independently
+        T = x_flat.size(0)                      # total tokens in the batch
+
+        # ---- route: one score per expert, then top-1 ----
+        logits = self.router(x_flat)            # (T, num_experts)
+        probs  = logits.softmax(dim=-1)         # router probabilities
+        gate, idx = probs.max(dim=-1)           # top-1 gate value and expert index
+
+        # ---- auxiliary load-balancing loss:  alpha * N * sum_i f_i * P_i ----
+        # f_i = fraction of tokens sent to expert i (hard, from argmax)
+        # P_i = mean router probability for expert i (soft, differentiable)
+        one_hot = F.one_hot(idx, self.num_experts).float()      # (T, E)
+        f_i = one_hot.mean(dim=0)               # dispatch fraction per expert
+        P_i = probs.mean(dim=0)                 # mean probability per expert
+        aux_loss = self.aux_weight * self.num_experts * (f_i * P_i).sum()
+
+        # ---- capacity: fixed slots per expert; overflow is dropped ----
+        capacity = int(self.capacity_factor * T / self.num_experts)
+        out = torch.zeros_like(x_flat)
+        for e in range(self.num_experts):
+            token_ids = (idx == e).nonzero(as_tuple=True)[0]     # tokens picking expert e
+            if token_ids.numel() == 0:
+                continue
+            keep = token_ids[:capacity]         # first `capacity` fit; rest overflow
+            y = self.experts[e](x_flat[keep])   # only kept tokens run the FFN
+            out[keep] = gate[keep].unsqueeze(-1) * y   # scale by router probability
+        # dropped tokens keep out=0 here; the residual add outside restores them
+
+        return out.reshape(B, N, d), aux_loss
+
+# smoke test
+layer = SwitchMoE(d_model=128, num_experts=8)
+x = torch.randn(2, 16, 128)                     # batch 2, seq 16, d_model 128
+y, aux = layer(x)
+print(y.shape, float(aux))                      # torch.Size([2, 16, 128]) <small number>
+
+# in a real block you would use it as a residual sub-layer, and add aux to the loss:
+#   moe_out, aux = layer(h)
+#   h = h + moe_out                    # dropped tokens survive via this residual
+#   loss = task_loss + aux             # balance is trained jointly</code></pre>
+
+  <p>Two lines carry the whole idea. <code>keep = token_ids[:capacity]</code> is token dropping: any token past an expert's slot count is simply not processed. And <code>out[keep] = gate[keep] * y</code> scales each expert's output by the router probability, which is how the router gets a gradient and learns to route better. The residual add <em>outside</em> the layer is what saves dropped tokens from vanishing.</p>
+
+  <div class="card callout"><span class="tag">Real systems</span>
+    In production the experts sit on <b>different devices</b>, and routing becomes an all-to-all network shuffle: tokens are sent to wherever their expert lives, processed, and sent back. Top-1 routing halves that traffic compared to top-2. Frameworks like GShard, Mesh-TensorFlow, and later Megablocks handle the sharding; the math above is unchanged.</div>
+
+  <h2>8. How it compares</h2>
+  <table>
+    <thead><tr><th>Property</th><th>Dense FFN</th><th>Classic MoE (top-2)</th><th>Switch (top-1)</th></tr></thead>
+    <tbody>
+      <tr><td>Experts visited per token</td><td>Not applicable (one FFN)</td><td>Two experts blended</td><td>One expert only</td></tr>
+      <tr><td>Router compute and traffic</td><td>None</td><td>Higher (two dispatches)</td><td>Lower (one dispatch)</td></tr>
+      <tr><td>Total vs active parameters</td><td>Equal (all active)</td><td>Total much larger</td><td>Total much larger</td></tr>
+      <tr><td>Needs load-balancing loss</td><td>No balancing needed</td><td>Yes, to avoid collapse</td><td>Yes, to avoid collapse</td></tr>
+      <tr><td>Token dropping possible</td><td>Never drops tokens</td><td>On expert overflow</td><td>On expert overflow</td></tr>
+    </tbody>
+  </table>
+  <p>The Switch paper reports up to <strong>7x</strong> faster pre-training than a dense T5 baseline at matched compute, and scales a sparse model to <strong>one trillion</strong> parameters, all trained on the Colossal Clean Crawled Corpus (C4). The simplification to top-1 is what made that stable and cheap enough to be practical.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does Switch routing do differently from earlier Mixture-of-Experts designs?</div>
+      <button class="q-opt">It removes the router and sends every token to all experts</button>
+      <button class="q-opt">It blends the top two experts for each token it processes</button>
+      <button class="q-opt">It sends each token to exactly one expert, the top pick</button>
+      <button class="q-opt">It replaces the experts with a single shared feed-forward</button>
+      <div class="q-fb">Switch uses top-1 routing: each token visits exactly one expert, which cuts routing compute and cross-device traffic.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What happens to a token when its chosen expert is already at capacity?</div>
+      <button class="q-opt">It is rerouted to the second-best expert for that token</button>
+      <button class="q-opt">It is dropped and passes through unchanged on the residual</button>
+      <button class="q-opt">It forces the expert to grow one extra slot on the fly</button>
+      <button class="q-opt">It stalls the whole batch until a free slot opens later</button>
+      <div class="q-fb">Overflow tokens are dropped: they skip the FFN and continue on the residual connection, missing just that one expert.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does Switch add an auxiliary load-balancing loss during training?</div>
+      <button class="q-opt">To spread tokens evenly and stop the router collapsing onto a few</button>
+      <button class="q-opt">To shrink the total parameter count down to a dense model size</button>
+      <button class="q-opt">To convert router scores into integer expert identity numbers</button>
+      <button class="q-opt">To replace the softmax with a cheaper hard argmax operation</button>
+      <div class="q-fb">Without it, routers favour a few experts in a runaway loop. The loss rewards uniform usage so every expert is trained and fewer tokens drop.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the defining benefit of sparse activation in an MoE model?</div>
+      <button class="q-opt">Every token runs through every expert for maximum accuracy gain</button>
+      <button class="q-opt">The router learns to delete experts it never selects at runtime</button>
+      <button class="q-opt">Attention layers are skipped so only the experts do any work</button>
+      <button class="q-opt">Total parameters can grow while per-token FLOPs stay roughly flat</button>
+      <div class="q-fb">Each token touches one expert, so capacity (total params) scales while the compute paid per token stays nearly constant.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>The <b>feed-forward network</b> that MoE replaces is the one from <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a>. MoE leaves attention untouched and only swaps the per-token FFN.</li>
+    <li><b>Next up, <a href="0036-deepseekmoe.html">DeepSeekMoE</a></b> keeps this machinery but splits experts into many fine-grained ones and adds always-on shared experts for sharper specialisation.</li>
+    <li>Switch's trade of capacity for constant compute is the same lever behind <a href="0005-scaling-laws.html">scaling laws</a> and <a href="0008-chinchilla.html">Chinchilla</a> - just spent on parameters instead of FLOPs.</li>
+    <li>The cross-device token shuffle that top-1 routing minimises is a systems cousin of the memory tricks in <a href="0017-flashattention.html">FlashAttention</a> and <a href="0020-pagedattention-vllm.html">PagedAttention</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The two safety valves trip people up. Ask the agent to run the code with a deliberately imbalanced batch and watch tokens drop, then turn the auxiliary loss on and off and see the dispatch fractions flatten. If the <code>f<sub>i</sub> &middot; P<sub>i</sub></code> trick feels like magic, ask why you cannot just backprop through the argmax directly.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2101.03961">Fedus, Zoph, Shazeer, "Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity" (2021)</a>. For the MoE idea it builds on, see Shazeer et al., <a href="https://arxiv.org/abs/1701.06538">"Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer" (2017)</a>.</p>
+
+  <div class="pager">
+    <a href="0034-test-time-scaling.html"><span class="dir">&larr; Previous</span><span class="ttl">Test-Time Scaling</span></a>
+    <a class="nxt" href="0036-deepseekmoe.html"><span class="dir">Next &rarr;</span><span class="ttl">DeepSeekMoE</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 35 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Direct Preference Optimization - LLM Papers Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Alignment &amp; Post-Training &middot; Lesson 25</div>
+  <h1>Direct Preference Optimization</h1>
+  <p class="paper-meta">
+    <span class="pill">2023</span>
+    Rafailov, Sharma, Mitchell, Ermon, Manning, Finn (Stanford University). "Your Language Model is Secretly a Reward Model."
+    &middot; <a href="https://arxiv.org/abs/2305.18290">arXiv:2305.18290</a>
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>RLHF (Lesson 23) is powerful but fiddly: train a reward model, then run PPO with sampling, a value network, and a KL penalty. Lots of moving parts, easy to destabilise.</li>
+      <li>DPO proves the RLHF objective has a <b>closed-form optimal policy</b>. Rearranging it shows the reward is just a scaled log-ratio of the trained policy to a reference policy.</li>
+      <li>Substitute that into the preference model and the intractable normaliser <b>cancels</b>. What remains is a plain <b>classification loss</b> on preference pairs.</li>
+      <li>So you can optimise preferences <b>directly</b>: no reward model, no RL, no sampling during training. Just one loss over (prompt, chosen, rejected) triples.</li>
+      <li>The loss: <b>&minus;log &sigma;( &beta;( log &pi;<sub>&theta;</sub>(y<sub>w</sub>)/&pi;<sub>ref</sub>(y<sub>w</sub>) &minus; log &pi;<sub>&theta;</sub>(y<sub>l</sub>)/&pi;<sub>ref</sub>(y<sub>l</sub>) ) )</b>. Stable, cheap, and now the default alignment recipe.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this paper exists</h2>
+  <p>InstructGPT works, but look at everything it needs: a reward model trained on comparisons, then a PPO loop that samples fresh answers, scores them, tracks a separate value network, and clips updates while a KL penalty holds the policy near the SFT model. Each piece has hyperparameters, and RL is famously touchy. Practitioners spent enormous effort just keeping PPO stable.</p>
+  <p>DPO's insight is that all of that RL scaffolding is solving a problem with a known analytic answer. The RLHF objective - maximise reward while staying close to a reference - has an <strong>exact optimal solution</strong> you can write down. Once you do, the reward model and the RL loop dissolve into a single supervised loss. Same goal, a fraction of the machinery.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph RLHF["RLHF pipeline (Lesson 23)"]
+    direction TB
+    r1["preference data"] --> r2["train reward model"]
+    r2 --> r3["PPO loop:<br/>sample, score, value net,<br/>clip, KL penalty"]
+    r3 --> r4["aligned model"]
+  end
+  subgraph DPO["DPO pipeline"]
+    direction TB
+    d1["preference data"] --> d2["one classification loss<br/>on (chosen, rejected)"]
+    d2 --> d4["aligned model"]
+  end
+    </div>
+    <figcaption>What DPO removes. RLHF trains a separate reward model and then runs a delicate reinforcement-learning loop. DPO collapses both into a single loss computed directly on preference pairs. <b>Same alignment target, no reward model and no RL.</b></figcaption>
+  </figure>
+
+  <h2>2. The key idea: your policy is secretly a reward model</h2>
+  <p>Start from the RLHF objective. It says: pick the policy that earns the most reward, but do not stray too far from the reference (SFT) policy - the same reward-versus-KL tug-of-war from Lesson 23.</p>
+
+  <div class="math">max<sub>&pi;</sub> &nbsp; E<sub>x~D, y~&pi;(y|x)</sub> [ r(x, y) ] &minus; &beta; &middot; D<sub>KL</sub>[ &pi;(y|x) &Vert; &pi;<sub>ref</sub>(y|x) ]
+    <span class="gloss"><b>&pi;</b>: the policy we are optimizing. <b>r(x, y)</b>: the reward for answer <i>y</i> to prompt <i>x</i>. <b>&beta;</b>: how hard the KL leash pulls. <b>D<sub>KL</sub>[&pi; &Vert; &pi;<sub>ref</sub>]</b>: how far the policy has drifted from the reference model. This is exactly InstructGPT's objective - maximize reward, stay near SFT.</span>
+  </div>
+
+  <p>This particular objective has a known <strong>closed-form solution</strong>. The optimal policy re-weights the reference model by the exponentiated reward:</p>
+
+  <div class="math">&pi;<sub>r</sub>(y|x) = ( 1 / Z(x) ) &middot; &pi;<sub>ref</sub>(y|x) &middot; exp( (1/&beta;) r(x, y) )
+    <span class="gloss"><b>&pi;<sub>r</sub></b>: the best possible policy for this reward. <b>&pi;<sub>ref</sub>(y|x) &middot; exp((1/&beta;) r)</b>: take the reference model and up-weight answers with high reward, more sharply when &beta; is small. <b>Z(x)</b>: the partition function - a normaliser that sums that product over all possible answers so the probabilities add to 1. It is astronomically expensive to compute, and it is the whole reason people fell back on RL instead of using this formula directly.</span>
+  </div>
+
+  <p>Now the pivot. Take logs of that equation and solve for the reward instead of the policy:</p>
+
+  <div class="math">r(x, y) = &beta; &middot; log( &pi;<sub>r</sub>(y|x) / &pi;<sub>ref</sub>(y|x) ) + &beta; &middot; log Z(x)
+    <span class="gloss"><b>r(x, y)</b>: the reward, now written in terms of policies. <b>&beta; log(&pi;<sub>r</sub>/&pi;<sub>ref</sub>)</b>: the reward of any answer is just how much more probable the optimal policy makes it versus the reference, scaled by &beta;. <b>&beta; log Z(x)</b>: a term that depends only on the prompt <i>x</i>, not on the answer. This is the "secret reward model": the policy itself encodes the reward through its log-ratio to the reference.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["RLHF objective:<br/>reward &minus; beta&middot;KL"] --> B["closed-form optimal policy<br/>pi_r &prop; pi_ref &middot; exp(r/beta)"]
+  B --> C["solve for reward:<br/>r = beta&middot;log(pi_r/pi_ref) + beta&middot;log Z(x)"]
+  C --> D["plug into Bradley-Terry<br/>preference model"]
+  D --> E["log Z(x) cancels<br/>(same for both answers)"]
+  E --> F["DPO loss:<br/>pure classification on pairs"]
+    </div>
+    <figcaption>The derivation as a chain. Each arrow is one algebraic step: from the RLHF objective, to its optimal policy, to the reward-as-log-ratio, into the preference model, where the intractable Z(x) cancels because it is identical for both answers to a prompt. <b>The impossible partition function disappears, leaving a loss you can actually compute.</b></figcaption>
+  </figure>
+
+  <h2>3. Why the impossible term cancels</h2>
+  <p>Human preferences are usually modelled with <strong>Bradley-Terry</strong>: the probability that answer <code>y<sub>1</sub></code> beats <code>y<sub>2</sub></code> is the sigmoid of their <em>reward difference</em>. That word - difference - is the whole trick. Substitute the reward expression above, and the <code>&beta; log Z(x)</code> term appears in both rewards. Since both answers share the same prompt <code>x</code>, the term is identical and <strong>subtracts to zero</strong>. The expensive normaliser we could never compute simply vanishes.</p>
+
+  <div class="math">p(y<sub>w</sub> &gt; y<sub>l</sub> | x) = &sigma;( r(x, y<sub>w</sub>) &minus; r(x, y<sub>l</sub>) ) = &sigma;( &beta; log(&pi;(y<sub>w</sub>|x)/&pi;<sub>ref</sub>(y<sub>w</sub>|x)) &minus; &beta; log(&pi;(y<sub>l</sub>|x)/&pi;<sub>ref</sub>(y<sub>l</sub>|x)) )
+    <span class="gloss"><b>&sigma;(r(x,y<sub>w</sub>) &minus; r(x,y<sub>l</sub>))</b>: the Bradley-Terry model - preference probability depends only on the reward <i>difference</i>. <b>after substitution</b>: each reward becomes a &beta;-scaled log-ratio, and the log Z(x) terms (equal for y<sub>w</sub> and y<sub>l</sub>) cancel. What is left is written entirely in terms of the policy &pi; and reference &pi;<sub>ref</sub> - no reward model anywhere.</span>
+  </div>
+
+  <h2>4. The DPO loss, exactly</h2>
+  <p>Fit that preference probability to the data by maximum likelihood and you get the DPO loss (the paper's Equation 7). It is the exact loss named in this lesson's summary.</p>
+
+  <div class="math">L<sub>DPO</sub>(&pi;<sub>&theta;</sub>; &pi;<sub>ref</sub>) = &minus; E<sub>(x, y<sub>w</sub>, y<sub>l</sub>) ~ D</sub> [ log &sigma;( &beta; log( &pi;<sub>&theta;</sub>(y<sub>w</sub>|x) / &pi;<sub>ref</sub>(y<sub>w</sub>|x) ) &minus; &beta; log( &pi;<sub>&theta;</sub>(y<sub>l</sub>|x) / &pi;<sub>ref</sub>(y<sub>l</sub>|x) ) ) ]
+    <span class="gloss"><b>&pi;<sub>&theta;</sub></b>: the policy being trained. <b>&pi;<sub>ref</sub></b>: the frozen reference (usually the SFT model). <b>y<sub>w</sub></b>: the chosen (preferred) answer; <b>y<sub>l</sub></b>: the rejected one. <b>log(&pi;<sub>&theta;</sub>(y<sub>w</sub>)/&pi;<sub>ref</sub>(y<sub>w</sub>))</b>: the implicit reward of the chosen answer - how much more the trained policy likes it than the reference did. <b>&beta;</b>: scales those implicit rewards and, as before, controls how far the policy may drift from &pi;<sub>ref</sub>. <b>log &sigma;(&middot;)</b>: push the chosen answer's implicit reward above the rejected one's. <b>E<sub>...~D</sub></b>: average over all preference triples.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">Read it in one line</span>
+    Make the chosen answer more likely than the reference made it, and the rejected answer less likely, with &beta; setting how aggressively. That is the entire method. It is the InstructGPT reward loss from Lesson 23 with the reward replaced by a log-ratio of policies - so the "reward model" and the policy became one object.</div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  pair["preference triple<br/>(x, y_w, y_l)"] --> pol["trained policy pi_theta"]
+  pair --> ref["frozen reference pi_ref"]
+  pol --> lpw["log pi_theta(y_w|x)"]
+  pol --> lpl["log pi_theta(y_l|x)"]
+  ref --> lrw["log pi_ref(y_w|x)"]
+  ref --> lrl["log pi_ref(y_l|x)"]
+  lpw --> rw["implicit reward chosen<br/>beta&middot;(lpw &minus; lrw)"]
+  lrw --> rw
+  lpl --> rl["implicit reward rejected<br/>beta&middot;(lpl &minus; lrl)"]
+  lrl --> rl
+  rw --> loss["&minus;log sigma(rw &minus; rl)"]
+  rl --> loss
+    </div>
+    <figcaption>One DPO training step. Four log-probabilities are computed - the chosen and rejected answers scored by both the trained policy and the frozen reference. Their differences are the implicit rewards, and a single log-sigmoid of their gap is the loss. <b>No answers are generated and no reward model is queried; everything is a forward pass on fixed pairs.</b></figcaption>
+  </figure>
+
+  <h3>The gradient tells you what it does</h3>
+  <p>The gradient (Equation 8) is illuminating: it raises the probability of the chosen answer and lowers the rejected one, <strong>weighted by how wrong the implicit reward currently is</strong>. When the model already orders a pair correctly, the update is small; when it confidently gets the pair backwards, the update is large.</p>
+
+  <div class="math">&nabla;<sub>&theta;</sub> L<sub>DPO</sub> = &minus; &beta; &middot; E [ &sigma;( r&#770;(x,y<sub>l</sub>) &minus; r&#770;(x,y<sub>w</sub>) ) &middot; ( &nabla;<sub>&theta;</sub> log &pi;(y<sub>w</sub>|x) &minus; &nabla;<sub>&theta;</sub> log &pi;(y<sub>l</sub>|x) ) ]
+    <span class="gloss"><b>r&#770;(x, y) = &beta; log(&pi;<sub>&theta;</sub>(y|x)/&pi;<sub>ref</sub>(y|x))</b>: the implicit reward the policy assigns. <b>&sigma;(r&#770;(y<sub>l</sub>) &minus; r&#770;(y<sub>w</sub>))</b>: the weight - large exactly when the model wrongly rates the rejected answer above the chosen one. <b>&nabla; log &pi;(y<sub>w</sub>) &minus; &nabla; log &pi;(y<sub>l</sub>)</b>: push probability toward the chosen answer, away from the rejected. This weighting is what stops the model degenerating; without it, naive fine-tuning misbehaves.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph CORR["Pair already ordered right"]
+    direction TB
+    c1["implicit reward:<br/>chosen &gt; rejected"] --> c2["sigmoid weight small"]
+    c2 --> c3["tiny update"]
+  end
+  subgraph WRONG["Pair ordered backwards"]
+    direction TB
+    w1["implicit reward:<br/>rejected &gt; chosen"] --> w2["sigmoid weight large"]
+    w2 --> w3["big update"]
+  end
+    </div>
+    <figcaption>How the gradient weights each pair. When the policy already ranks the chosen answer above the rejected one, the sigmoid weight is near zero and the update is negligible. When it confidently gets the pair backwards, the weight is near one and the update is large. <b>DPO spends its effort exactly on the examples it currently gets wrong.</b></figcaption>
+  </figure>
+
+  <h2>5. Implement it: DPO loss in PyTorch</h2>
+  <p>The formula is a few lines. You need four numbers per example - the log-probabilities the trained policy and the frozen reference each assign to the chosen and rejected answers. From those, DPO is a single log-sigmoid.</p>
+
+  <div class="code-cap">dpo_loss.py &middot; the full DPO objective</div>
+  <pre><code>import torch
+import torch.nn.functional as F
+
+def dpo_loss(
+    policy_logp_chosen,   # (B,) log pi_theta(y_w | x)   - trained policy, chosen
+    policy_logp_rejected, # (B,) log pi_theta(y_l | x)   - trained policy, rejected
+    ref_logp_chosen,      # (B,) log pi_ref(y_w | x)     - frozen reference, chosen
+    ref_logp_rejected,    # (B,) log pi_ref(y_l | x)     - frozen reference, rejected
+    beta=0.1,
+):
+    """
+    Direct Preference Optimization loss (Rafailov et al., 2023, Eq. 7).
+    Each log-prob is the SUM of per-token log-probs of that whole answer.
+    """
+    # implicit reward = beta * log( pi_theta(y) / pi_ref(y) )
+    #                 = beta * (policy_logp - ref_logp)   for each answer
+    chosen_reward   = beta * (policy_logp_chosen   - ref_logp_chosen)
+    rejected_reward = beta * (policy_logp_rejected - ref_logp_rejected)
+
+    # we want the chosen answer's implicit reward ABOVE the rejected one's.
+    # loss = -log sigma(chosen_reward - rejected_reward)
+    logits = chosen_reward - rejected_reward
+    loss = -F.logsigmoid(logits).mean()
+
+    # handy diagnostic: fraction of pairs already ordered correctly
+    acc = (logits &gt; 0).float().mean()
+    return loss, acc
+
+# --- smoke test with made-up log-probs ---
+B = 4
+pol_c = torch.tensor([-5.0, -8.0, -3.0, -6.0])   # policy: chosen
+pol_r = torch.tensor([-6.0, -7.0, -9.0, -6.5])   # policy: rejected
+ref_c = torch.tensor([-5.5, -8.5, -3.5, -6.0])   # reference: chosen
+ref_r = torch.tensor([-6.0, -7.0, -8.0, -6.0])   # reference: rejected
+loss, acc = dpo_loss(pol_c, pol_r, ref_c, ref_r)
+print(float(loss), float(acc))   # loss drops as chosen outscores rejected</code></pre>
+
+  <p>Every term maps to the math. <code>policy_logp - ref_logp</code> is the log-ratio; times <code>beta</code> it is the implicit reward; the difference between chosen and rejected goes through <code>logsigmoid</code>. No answers are sampled during training - you compute log-probs on the fixed pairs you already have, which is why DPO is so much cheaper and steadier than PPO.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant D as Preference data
+  participant P as Policy pi_theta
+  participant R as Reference pi_ref (frozen)
+  loop each batch
+    D->>P: (x, y_w, y_l)
+    P->>P: log-probs of y_w and y_l
+    R->>P: reference log-probs of y_w and y_l
+    P->>P: DPO loss = -log sigma(beta&middot;(ratio_w - ratio_l))
+    P->>P: backprop, update pi_theta
+  end
+    </div>
+    <figcaption>The whole DPO training loop as a sequence. Each batch pulls fixed preference triples, scores them with the trained policy and the frozen reference, forms the log-sigmoid loss, and updates. <b>Compare with Lesson 23: there is no generation step, no reward-model call, and no value network anywhere in this loop.</b></figcaption>
+  </figure>
+
+  <h2>6. Why it mattered</h2>
+  <table>
+    <thead><tr><th>Property</th><th>RLHF / PPO (Lesson 23)</th><th>DPO</th></tr></thead>
+    <tbody>
+      <tr><td>Separate reward model</td><td>Required</td><td>None - policy is the reward</td></tr>
+      <tr><td>Reinforcement learning loop</td><td>Required (PPO)</td><td>None - plain classification</td></tr>
+      <tr><td>Sampling during training</td><td>Yes, every step</td><td>No, log-probs on fixed pairs</td></tr>
+      <tr><td>Extra networks in memory</td><td>Policy, reward, value</td><td>Policy plus frozen reference</td></tr>
+      <tr><td>Stability &amp; tuning burden</td><td>High</td><td>Low, few hyperparameters</td></tr>
+    </tbody>
+  </table>
+  <p>DPO matched or beat PPO-based RLHF on summarisation and dialogue while being dramatically simpler to run. It turned alignment from a specialist RL task into something any team with preference data and a fine-tuning script can do. It is now the default post-training method across open models, and the springboard for the next two lessons, which push even further - ORPO removes the reference model, GRPO keeps RL but drops the value network.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h4>Retrieval practice</h4>
+    <p style="font-family:var(--sans);font-size:.85rem;color:var(--ink-faint)">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does DPO remove from the RLHF pipeline?</div>
+      <button class="q-opt">The preference data pairs that record which answer humans chose</button>
+      <button class="q-opt">The frozen reference policy that anchors the trained model down</button>
+      <button class="q-opt">The sigmoid link that turns reward gaps into a probability value</button>
+      <button class="q-opt">The separate reward model and the reinforcement learning loop</button>
+      <div class="q-fb">DPO keeps the preference data and a reference model, but drops the trained reward model and the whole PPO loop, replacing them with one classification loss.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does the intractable partition function Z(x) cancel?</div>
+      <button class="q-opt">Because Bradley-Terry depends only on the reward difference per prompt</button>
+      <button class="q-opt">Because the reference policy is frozen so its normaliser is a constant</button>
+      <button class="q-opt">Because beta is chosen small enough to drive that whole term to zero</button>
+      <button class="q-opt">Because sampling during training averages the normaliser out to zero</button>
+      <div class="q-fb">Z(x) is the same for both answers to a prompt, so in the reward difference inside Bradley-Terry it subtracts to exactly zero.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is the "implicit reward" of an answer in DPO?</div>
+      <button class="q-opt">The scalar output of a reward network trained on the ranking data</button>
+      <button class="q-opt">The KL divergence between the trained policy and the frozen model</button>
+      <button class="q-opt">Beta times the log-ratio of the policy to the reference on that answer</button>
+      <button class="q-opt">The softmax weight the policy assigns to that answer among all others</button>
+      <div class="q-fb">The reward is beta times log(pi_theta(y)/pi_ref(y)). The policy encodes the reward through its log-ratio to the reference - the paper's title point.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does the DPO gradient weight each training pair?</div>
+      <button class="q-opt">Equally, so that every preference pair contributes the same update size</button>
+      <button class="q-opt">By how wrongly the model currently orders that chosen-rejected pair</button>
+      <button class="q-opt">By the raw length in tokens of the chosen answer within the pair</button>
+      <button class="q-opt">By the entropy of the reference policy measured over that prompt</button>
+      <div class="q-fb">The sigmoid weight is largest when the implicit reward orders the pair backwards, so confidently wrong pairs drive the biggest updates.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Previously, <a href="0023-instructgpt-rlhf.html">InstructGPT (RLHF)</a></b> is the pipeline DPO compresses - its reward loss is the same Bradley-Terry form, now applied to the policy directly.</li>
+    <li><b>Constitutional AI</b> (<a href="0024-constitutional-ai.html">Lesson 24</a>) shows preference data can be AI-labeled; DPO happily trains on those pairs too.</li>
+    <li><b>Next, <a href="0026-orpo.html">ORPO</a></b> goes further and removes the reference model, folding preference learning into SFT in one stage.</li>
+    <li><a href="0027-grpo.html">GRPO</a> keeps reinforcement learning but drops the value network, a different way to cut RLHF's cost.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The one thing to nail is the cancellation: why the scary Z(x) disappears. Ask the agent to write out r(x, y<sub>w</sub>) &minus; r(x, y<sub>l</sub>) term by term and point to where the two log Z(x) terms meet and vanish. Then ask it to set &beta; very large versus very small in the code and describe how the leash to the reference changes. Do not move on until "the policy is its own reward model" clicks.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2305.18290">Rafailov et al., "Direct Preference Optimization: Your Language Model is Secretly a Reward Model" (2023)</a>. Pair it with Hugging Face's <a href="https://huggingface.co/docs/trl/dpo_trainer">TRL DPOTrainer docs</a> to run it on real data, and the appendix of the paper for the full derivation of the cancellation.</p>
+
+  <div class="pager">
+    <a href="0024-constitutional-ai.html"><span class="dir">&larr; Previous</span><span class="ttl">Constitutional AI</span></a>
+    <a class="nxt" href="0026-orpo.html"><span class="dir">Next &rarr;</span><span class="ttl">ORPO</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 25 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
