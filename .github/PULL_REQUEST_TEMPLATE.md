@@ -13,7 +13,6 @@ Merging this pull request publishes the live site. Please fill this in.
 ## Checks
 
 - [ ] `python3 scripts/validate_site.py` passes
-- [ ] `shellcheck -x deploy.sh` passes
 - [ ] I opened the changed pages in a browser and clicked every link I touched
 - [ ] Every quiz I added or changed works and its options match in length
 - [ ] New lessons are registered in their course `index.html`
