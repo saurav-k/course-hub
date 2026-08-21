@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 3: State, Async and Degradation - Production Agent Engineering</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AGENT ENGINEERING</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 03 &middot; State, Async and Degradation &middot; Chapter 3</div>
+  <h1>State, Async and Degradation</h1>
+  <p class="paper-meta">
+    <span class="pill">3 topics</span>
+    What happens to a half-finished agent when the process dies, the tool takes four minutes, or the provider stops answering.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>An agent loop holding state in process memory is an <b>unreplicated database with no write-ahead log</b>. Durable execution moves that state to a recorded history you can replay.</li>
+      <li>A tool call that outlives a request timeout must become a <b>long-running operation</b>: return a handle immediately, deliver the result by webhook, and let the agent resume on arrival.</li>
+      <li>A <b>degradation chain</b> trades quality for availability in a defined order, and each tier needs its own trigger, timeout, and quality expectation. An untested tier is not a tier.</li>
+      <li>Every degraded response must <b>declare which tier produced it</b>, or your evaluation data silently mixes tiers and your quality metrics become uninterpretable.</li>
+    </ul>
+  </div>
+
+  <h2>1. The mental model: an agent step is a distributed transaction</h2>
+
+  <p>Here is the framing that makes this chapter easy for someone with your background. A single agent turn reads state, calls a remote service that charges money, mutates the world through a tool, and writes state back. That is a distributed transaction with no coordinator, and most agent frameworks default to keeping the coordinator's state in a Python variable inside one process. Every reliability property you would demand of a payment flow is absent by default, and nothing complains until a deploy restarts the pod at step seven of twelve.</p>
+
+  <p>The three topics in this chapter are the three consequences. Persistence answers what survives a crash. Asynchrony answers what happens when a step outlives the request. Degradation answers what the system serves when a dependency will not answer at all. They are the same question asked at three timescales, and a design that answers only the first is the one that pages you.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph DUR["Durable loop: state lives in a recorded history"]
+    direction TB
+    D1["Steps 1 to 6 run.<br/>Each step recorded<br/>before its effect."] --> D2["Pod restarts at step 7"]
+    D2 --> D3["Replay the history.<br/>Resume at step 7 with<br/>no effect repeated."]
+  end
+  subgraph EPH["Ephemeral loop: state lives in the process"]
+    direction TB
+    E1["Steps 1 to 6 run.<br/>Two paid calls made,<br/>one charge issued."] --> E2["Pod restarts at step 7"]
+    E2 --> E3["State lost. Restart from<br/>step 1 and pay again,<br/>or drop the work."]
+  end
+  </div><figcaption>The only structural difference is where the loop's state lives, and it decides whether a routine deploy is invisible or expensive. <b>An agent that cannot be resumed cannot be safely deployed during working hours, which is why persistence is a release-velocity concern before it is a reliability concern.</b> Note that replay protects paid calls and side effects only if each step is recorded before its effect is acknowledged.</figcaption></figure>
+
+  <h2>2. Surviving the crash</h2>
+
+  <h3 id="stateful-persistence">Stateful persistence and checkpoints</h3>
+  <p>Durable execution is the property that an application runs to completion despite adverse conditions, and Temporal implements it by recording a complete and durable log of everything that has happened in the lifecycle of a workflow execution. If a worker crashes, the replacement worker uses that event history to replay the code and recreate the workflow state as it stood immediately before the crash. The responsibility for failure management moves from your application to the platform, which is precisely the trade you want when the application logic is already hard enough. <em>Source: <a href="https://docs.temporal.io/evaluate/understanding-temporal">Temporal, "Understanding Temporal"</a>.</em></p>
+  <p>LangGraph reaches a similar place from the agent-framework direction. A checkpointer persists a thread's graph state as checkpoints, which is what enables conversation continuity, human-in-the-loop pauses, time travel, and fault tolerance. The vocabulary differs and the shape does not: the loop's state becomes an inspectable, restorable, external artifact rather than a stack frame. <em>Source: <a href="https://docs.langchain.com/oss/python/langgraph/persistence">LangGraph persistence documentation</a>.</em></p>
+  <p>Choosing between them is a scope decision rather than a quality one. Take the workflow engine when the agent coordinates work across services, holds money or inventory, spans hours or days, or needs a human approval step in the middle; you get timers, retries, versioning, and visibility that a framework checkpointer does not attempt. Take the framework checkpointer when the durable unit is a conversation and the operational win you want is resuming a thread and inspecting how it got where it is. The expensive mistake is running an engine's determinism model without understanding it, because replay requires that your workflow code produce the same decisions given the same history, and a bare model call is not deterministic. The model call belongs on the other side of the boundary, in an activity or a node whose result is recorded, so replay reads the recorded answer rather than paying for a new one.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your agent crashes at step seven of twelve, after two paid model calls and one external charge. What does durable execution give you that a retry queue does not?</div>
+    <button class="q-opt">It replays recorded history and resumes exactly at step seven</button>
+    <button class="q-opt">It restarts the whole workflow on a freshly scheduled worker</button>
+    <button class="q-opt">It retries the failed model call with exponential backoff added</button>
+    <button class="q-opt">It discards the workflow and returns a typed error upstream</button>
+    <div class="q-fb">The recorded history is what makes resumption possible, so the completed steps are not re-executed and the external charge is not repeated. A retry queue gives you the second option, a clean restart from the beginning, which is exactly the behaviour that double-charges the customer. Backoff is a policy for a single failed call and says nothing about the eleven other steps. Returning a typed error is honest but abandons work that is recoverable.</div>
+  </div>
+
+  <h2>3. Surviving the long tool call</h2>
+
+  <h3 id="async-tool-execution">Async tool execution with webhooks</h3>
+  <p>When a tool takes longer than a request timeout, holding the connection open is not an option, and neither is polling from inside the agent loop. The established API pattern is the long-running operation: a method that takes a substantial amount of time should return an operation object instead of the ultimate response message, which Google's API guidance compares to a promise or a future in other languages. The operation carries its own identity, status, metadata, and eventual result or error, and clients interact with a standard operations service rather than a bespoke interface per endpoint. <em>Source: <a href="https://google.aip.dev/151">Google AIP-151, Long-running operations</a>.</em></p>
+  <p>Delivery of the completion is where webhooks come in, and the reason to follow a specification rather than invent one is that the failure modes are all security failures. Standard Webhooks exists because webhook implementations fragmented across providers, and it addresses server-side request forgery, spoofing, and replay explicitly, alongside the reliability concerns of retry and ordering. A signed, timestamped, idempotency-keyed callback is the difference between an agent that resumes correctly and an agent that can be resumed by anyone who guesses a URL. <em>Source: <a href="https://www.standardwebhooks.com/">Standard Webhooks specification</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant A as Durable agent
+  participant O as Orchestrator
+  participant T as Slow tool
+  participant W as Webhook receiver
+  A->>O: Tool call: render_report(...)
+  O->>T: Start operation (idempotency key)
+  T-->>O: operation_id, status = RUNNING
+  O-->>A: Handle recorded, workflow parks
+  Note over A: No process held open.<br/>No tokens burned waiting.
+  T->>W: POST result (signed, timestamped)
+  W->>W: Verify signature, reject replays
+  W->>O: Signal operation_id
+  O->>A: Resume with typed result
+  A->>A: Continue at the next step
+  </div><figcaption>The agent parks rather than waits, so a four-minute tool costs no held connection and no idle context. <b>The webhook receiver is a public, unauthenticated-by-default surface, so signature verification and replay rejection are part of the tool integration rather than a later hardening pass.</b> The idempotency key on the start call is what makes a duplicated resume harmless.</figcaption></figure>
+
+  <p>Two design consequences follow that are easy to miss. The first is that the agent's context must be reconstructable at resume time rather than held in memory, which is why this topic sits next to persistence rather than in its own chapter. The second is that the user-facing contract changes: something must tell the user the work is in flight, and something must handle the case where the callback never arrives. Give every operation a deadline and a reconciliation sweep that polls for the operations whose webhooks were lost, because a webhook-only design has no answer for a receiver that was down for ten minutes. The interview track frames the same boundary as <a href="../../ai-system-design-course/lessons/0002-ai-system-architecture.html#async-processing">async processing</a>.</p>
+
+  <h2>4. Surviving the dependency</h2>
+
+  <h3 id="graceful-degradation-chains">Graceful degradation chains</h3>
+  <p>A degradation chain is an ordered ladder of progressively cheaper and weaker ways to answer, walked when the tier above it will not serve. A frontier model first, then a mid-tier model, then a locally hosted open-weight model, then a cached or retrieval-only answer, then an honest refusal. The SRE literature separates the two mechanisms cleanly: load shedding drops a proportion of requests as a server approaches overload, while graceful degradation reduces the amount of work done per request instead of rejecting it, serving results without images or using a faster and less accurate ranking algorithm. Agent systems are unusually well suited to the second, because quality is a continuous dial rather than a binary. <em>Source: <a href="https://sre.google/sre-book/addressing-cascading-failures/">"Addressing Cascading Failures", Google SRE Book</a>.</em></p>
+  <p>The same source carries the warning that matters most here, and it is the one teams skip. Degradation paths should trigger infrequently, stay simple and testable, and be monitored, because rarely exercised code carries higher risk, and complex implementations can trigger inappropriately or create feedback loops. A four-tier chain written once and never exercised is four untested code paths that will run for the first time during your worst incident. Exercise them deliberately: force each tier in a scheduled test, and score each tier against the golden dataset separately so you know what quality you are actually promising when it fires.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  REQ["Request"] --> T1{"Tier 1:<br/>frontier model"}
+  T1 -->|"ok"| OUT["Response<br/>+ tier label<br/>+ quality expectation"]
+  T1 -->|"breaker open,<br/>timeout, or 5xx"| T2{"Tier 2:<br/>mid-tier model"}
+  T2 -->|"ok"| OUT
+  T2 -->|"fails"| T3{"Tier 3:<br/>local open-weight model"}
+  T3 -->|"ok"| OUT
+  T3 -->|"fails"| T4{"Tier 4:<br/>semantic cache"}
+  T4 -->|"hit above<br/>similarity floor"| OUT
+  T4 -->|"miss"| T5["Tier 5:<br/>honest refusal<br/>with a retry hint"]
+  T5 --> OUT
+  OUT --> EVAL["Evaluation store,<br/>sliced by tier"]
+  </div><figcaption>Each tier has its own trigger condition and its own measured quality, and the response carries the tier that produced it all the way into the evaluation store. <b>Without the tier label your quality metrics average four different systems together, so an outage looks like a model regression and you spend the next week debugging a prompt that never changed.</b> The final tier is a refusal rather than a fabrication, which is the only honest floor.</figcaption></figure>
+
+  <p>Three properties turn a diagram into a working chain. The trigger must include latency, not only errors, because providers commonly fail slowly rather than cleanly, which is the standard argument for tripping a <a href="../../ai-system-design-course/lessons/0005-reliability-and-security.html#circuit-breakers">circuit breaker</a> on latency. The budget must be end-to-end, since a chain that gives every tier a full timeout turns a fast failure into a four-times-slower one and the user leaves before tier three answers. And the cheaper tiers usually have smaller context windows and weaker instruction following, so the request must be re-packed for the tier that will serve it rather than replayed verbatim.</p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">Your degradation chain works correctly in an incident, but the following week your quality dashboard is unreadable. What was most likely missing?</div>
+    <button class="q-opt">The chain must retry the primary provider on every request</button>
+    <button class="q-opt">The chain must return an error once the primary fails</button>
+    <button class="q-opt">The chain must run every tier and compare their answers</button>
+    <button class="q-opt">The response must record which tier of the chain answered</button>
+    <div class="q-fb">Unlabelled responses mix four systems into one average, so an outage reads as a model regression. Retrying the primary on every request defeats the circuit breaker that opened for a reason and prolongs the incident. Returning an error at the first failure is the absence of a chain rather than a fix for it. Running every tier multiplies cost by four on every request and still would not tell you which answer was served.</div>
+  </div>
+
+  <h2>5. Field drill</h2>
+
+  <p>Questions a Staff+ reviewer will put to this design, and the trap inside each one.</p>
+
+  <ul>
+    <li><b>"A deploy restarts every pod mid-conversation. What does the user see?"</b> The trap is answering "we retry". Retry from the top re-executes side effects. Answer with where the loop's state lives, what is recorded before each effect, and where the resume point is.</li>
+    <li><b>"Why not just poll the slow tool from inside the agent?"</b> The trap is calling it simpler. Polling holds a worker, burns context on every wake, and turns one long operation into many short billable ones. The operation handle plus a signed callback costs nothing while parked.</li>
+    <li><b>"Your webhook receiver was down for ten minutes. Now what?"</b> The trap is describing sender retries, which you do not control. Answer with a reconciliation sweep over operations past their deadline, plus idempotency so a late callback and a reconciled result cannot both take effect.</li>
+    <li><b>"How good is tier three?"</b> The trap is not knowing. Every tier needs its own score against the golden dataset, because the chain is a promise about degraded quality and an unmeasured promise is a guess.</li>
+    <li><b>"When did your fallback chain last run?"</b> The trap is answering "during the incident in March". Untested degradation paths fail when they fire. Answer with the scheduled exercise that forces each tier on a cadence.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Try this on a system you own: pick the agent step that spends real money, and trace what is durably recorded immediately before and immediately after the side effect. Most implementations record after, which means a crash in the window repeats the charge on resume. Bring me the sequence and we will work out where the record has to move to, and what idempotency key makes the repeat harmless when it moves.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://sre.google/sre-book/addressing-cascading-failures/">"Addressing Cascading Failures"</a> in full, particularly its insistence that degradation modes be exercised regularly, because that is the discipline this chapter most often loses. Pair it with <a href="https://google.aip.dev/151">AIP-151</a>, which is short and gives you a defensible shape for every slow tool you will ever integrate.</p>
+
+  <div class="pager">
+    <a href="0001-evaluation-and-the-data-flywheel.html"><span class="dir">&larr; Previous</span><span class="ttl">Evaluation and the Data Flywheel</span></a>
+    <a class="nxt" href="0003-latency-cost-and-local-first.html"><span class="dir">Next &rarr;</span><span class="ttl">Latency, Cost and Local-First</span></a>
+  </div>
+
+  <footer><p>Production Agent Engineering &middot; Chapter 3 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

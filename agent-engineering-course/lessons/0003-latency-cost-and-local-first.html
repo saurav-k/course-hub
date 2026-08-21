@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 4: Latency, Cost and Local-First - Production Agent Engineering</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AGENT ENGINEERING</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 04 &middot; Latency, Cost and Local-First &middot; Chapter 4</div>
+  <h1>Latency, Cost and Local-First</h1>
+  <p class="paper-meta">
+    <span class="pill">4 topics</span>
+    Measuring what users feel rather than what a timer reports, and building the two controls that stop a bill before it arrives.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Total latency is the wrong number. <b>Time to first token</b> is what responsiveness feels like, and <b>inter-token latency</b> times output length is what patience feels like. They move independently and they have different fixes.</li>
+      <li><b>Semantic caching</b> serves a stored answer when a new query is close enough in embedding space. The saving is entirely workload-dependent, and the risk is a confidently wrong hit.</li>
+      <li>A <b>cost kill-switch</b> is an enforcement point that refuses work, per user and per tenant. An alert is not a kill-switch, because an alert needs a human who is awake.</li>
+      <li><b>Local-first inference</b> on the user's own hardware moves the marginal cost to zero and keeps the data on the device, at the price of shipping and supporting a second inference stack.</li>
+    </ul>
+  </div>
+
+  <h2>1. The mental model: two clocks, two bills</h2>
+
+  <p>A classic service has one latency number worth arguing about and one cost number that scales with requests. A streaming agent has two of each, and conflating them is the most common way a performance investigation goes nowhere. The user's experience is split at the moment the first token lands: everything before it is silence, and everything after it is reading speed. The bill is split the same way, because a long prompt and a long answer cost different amounts and respond to different interventions.</p>
+
+  <p>Hold this shape in mind for the whole chapter. Anything that shortens the silence is a first-token intervention: shorter prompts, cached prefixes, smaller routing decisions, fewer sequential hops before generation starts. Anything that shortens the reading is a per-token intervention: fewer output tokens, a faster model, better serving throughput. A team that reports "we cut latency by a fifth" without saying which half moved has not yet learned anything actionable.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  R["Request<br/>accepted"] --> Q["Queue +<br/>routing"]
+  Q --> PF["Prefill:<br/>process the prompt"]
+  PF --> F(("First token"))
+  F --> D["Decode:<br/>token, token, token..."]
+  D --> E(("Last token"))
+  R -. "TTFT: the silence.<br/>Fixed by shorter prompts,<br/>cache hits, fewer hops" .-> F
+  F -. "ITL x output length:<br/>the reading. Fixed by<br/>shorter answers, faster model" .-> E
+  </div><figcaption>One request, two clocks, and each clock has its own set of levers that do nothing for the other. <b>A cache hit collapses the first clock to almost nothing and does not touch the second, while trimming the answer collapses the second and leaves the silence exactly as it was.</b> Always report both, and always report them at the tail rather than the mean.</figcaption></figure>
+
+  <h2>2. Measuring what the user feels</h2>
+
+  <h3 id="ttft-and-itl">Time to first token and inter-token latency</h3>
+  <p>Time to first token measures how long you wait before seeing the model's output, from query submission to the first received token. Inter-token latency is the average time between consecutive tokens, also known as time per output token. Those are the definitions the serving benchmark tooling uses, and adopting them verbatim is worth doing because it makes your dashboards comparable with the numbers vendors publish. <em>Source: <a href="https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html">NVIDIA LLM benchmarking metrics documentation</a>.</em></p>
+  <p>The two numbers diagnose different systems. A first-token regression usually points at something before generation: queueing, a longer prompt, a cold model, a retrieval hop that got slower, or a router that added a classification call to the critical path. A per-token regression usually points at the serving tier: batch composition, contention, a model swap, or a change in output length. Reporting only the total lets a first-token regression hide behind a per-token improvement, and the aggregate stays flat while the product feels worse.</p>
+  <p>For an agent the picture needs one more term. A multi-step agent has a first-token time per model call and a first useful output time for the whole task, and only the second is what the user is waiting for. If your agent runs six sequential steps before it says anything, your effective silence is six queues and six prefills long. That is why streaming intermediate progress and parallelising independent steps are latency work rather than user-interface polish. The interview track sizes the resulting budgets under <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a>.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Users report the assistant "feels slower" this month, but total end-to-end latency is unchanged. Which measurement isolates the cause fastest?</div>
+    <button class="q-opt">Time to first token, measured separately from inter-token latency</button>
+    <button class="q-opt">Total wall-clock latency, measured only at the highest percentile</button>
+    <button class="q-opt">Output token count, measured across the whole traffic population</button>
+    <button class="q-opt">Provider error rate, measured across the same trailing time window</button>
+    <div class="q-fb">A constant total with a worse feel is the signature of a longer silence offset by faster generation, which only a split measurement can show. A higher percentile of the same combined number preserves exactly the blending that hid the problem. Output token count is an input to the second clock rather than a measurement of either. Error rate would explain failures, not a change in perceived pace on requests that succeeded.</div>
+  </div>
+
+  <h2>3. Paying less, safely</h2>
+
+  <h3 id="semantic-caching">Semantic caching</h3>
+  <p>A semantic cache stores previous responses and, when a new query arrives, looks for a stored answer whose query is close enough in embedding space to reuse rather than calling the model again. GPTCache is the reference open-source implementation of the pattern and reports that a cache hit both speeds up the response and avoids the API charge. <em>Source: <a href="https://aclanthology.org/2023.nlposs-1.24/">"GPTCache: An Open-Source Semantic Cache for LLM Applications" (Bang, NLP-OSS 2023)</a>.</em></p>
+  <p>Be careful with the savings claim, because it is the one people repeat without a source. What you save is a direct function of your hit rate, and your hit rate is a property of your traffic rather than of the cache. Three things determine it. First, the repetitiveness of real user queries: a support assistant answering the same twenty questions in different words caches beautifully, while a coding agent operating on a different repository every time barely caches at all. Second, the similarity threshold, which trades hit rate against correctness directly. Third, how much of the answer depends on state outside the query, since anything personalised, permissioned, or time-sensitive is not reusable across users no matter how similar the wording. Measure your own hit rate on a replay of production traffic before you promise anyone a number, and quote the figure you measured rather than one you read.</p>
+
+  <div class="callout warn"><b>The failure you will actually hit.</b> A semantic cache fails differently from an exact-match cache, and worse. An exact cache either hits or misses. A semantic cache can hit on a query that means the opposite of the stored one, because "can I cancel after the trial ends" and "can I cancel before the trial ends" sit close together in embedding space and far apart in consequence. Treat the threshold as a safety parameter, exclude anything permissioned or personalised from the cache entirely, and include the model, the prompt version, and the tenant in the cache key. The interview track develops the same hazard under <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#semantic-caching">semantic caching</a>.</div>
+
+  <h3 id="cost-kill-switches">Cost kill-switches</h3>
+  <p>An agent can spend without bound in ways a classic service cannot, because a loop that fails to terminate keeps buying tokens and a retry storm multiplies an expensive call rather than a cheap one. The control you need is an enforcement point that refuses work when a threshold is crossed, evaluated per user and per tenant, on a window short enough to matter. The pattern is well established in cloud cost management: AWS Budgets can run an action on your behalf when a budget exceeds a cost or usage threshold, and the available actions include applying a restrictive policy so that no new resources can be provisioned during the budget period. Note the important property, which is that the action runs rather than merely notifying. <em>Source: <a href="https://docs.aws.amazon.com/cost-management/latest/userguide/budgets-controls.html">AWS Budgets, configuring budget actions</a>.</em></p>
+  <p>Translate that shape into the agent stack with four decisions. The counter must be denominated in money or tokens rather than requests, because request counts do not bound spend when one request can call the model thirty times. The window must be short, since a monthly budget cannot stop an overnight runaway that completes before the month does. Enforcement belongs in the model gateway, in front of every provider call, because a limit implemented in one application is a limit one code path can bypass. And the switch needs a defined blast radius: a per-user cap should degrade that user, while a tenant cap should degrade that tenant, and neither should be able to take the platform down for everyone.</p>
+  <p>Decide the failure direction deliberately. If the counter store is unavailable, a kill-switch that blocks turns a cache outage into a total outage, and one that allows turns a cache outage into an unbounded bill. The usual resolution is to fail permissive on a short grace window with a loud alert, and to fail restrictive once the grace expires, so a brief blip does not break the product and a sustained one cannot drain the account.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  REQ["Agent step wants<br/>a model call"] --> GW["Model gateway"]
+  GW --> KS{"Cost kill-switch:<br/>user spend + tenant spend<br/>over a short window"}
+  KS -->|"over limit"| STOP["Refuse: typed error,<br/>degrade this caller only,<br/>alert the owner"]
+  KS -->|"within limit"| SC{"Semantic cache:<br/>similarity above floor,<br/>same tenant, same version?"}
+  SC -->|"hit"| SERVE["Serve cached answer<br/>(no tokens bought)"]
+  SC -->|"miss"| ROUTE{"Route by task"}
+  ROUTE -->|"private, small,<br/>on-device capable"| LOCAL["Local model<br/>(MLX / WebLLM)"]
+  ROUTE -->|"needs frontier<br/>capability"| API["Hosted provider"]
+  LOCAL --> METER["Meter: tokens, cost,<br/>TTFT, ITL, tier"]
+  API --> METER
+  SERVE --> METER
+  METER --> GW
+  </div><figcaption>Three cost controls in series, ordered cheapest-check-first, with one meter behind all of them. <b>The kill-switch sits in front of the cache rather than behind it, because a caller who is already over budget should not consume even the embedding call that a cache lookup costs.</b> Everything, including cache hits and local generations, reports to the same meter, or your unit economics are computed from a subset of reality.</figcaption></figure>
+
+  <h3 id="local-first-inference">Local-first inference</h3>
+  <p>Some work does not need a data centre. MLX is Apple's array framework for machine learning on Apple silicon, and its distinguishing property for this purpose is unified memory: arrays live in shared memory, and operations can run on any supported device without performing data copies. WebLLM takes the same idea to the browser, running models client-side with WebGPU acceleration and no backend server, with an OpenAI-compatible interface including streaming and function calling. <em>Sources: <a href="https://ml-explore.github.io/mlx/build/html/index.html">MLX documentation (Apple)</a> and <a href="https://webllm.mlc.ai/">WebLLM (MLC AI)</a>.</em></p>
+  <p>Two properties make this strategically interesting rather than merely cheap. The marginal cost of a request is zero, which changes what features are viable: continuous suggestion, always-on classification, and per-keystroke assistance are all unaffordable per-token and free on-device. And the data never leaves the machine, which turns a privacy review from a negotiation into a statement of fact and unlocks users whose policies forbid sending content to a third party at all.</p>
+  <p>The costs are real and belong in the decision. You now ship and support a second inference stack across a hardware matrix you do not control, with model weights measured in gigabytes to download and cache. Capability is bounded by what fits in the user's memory, which is a different and lower bar than the frontier. Nothing is centrally observable, so your evaluation signal for the local path is whatever telemetry the user consents to send. The mature position is the routing decision drawn above: local for the narrow, high-frequency, privacy-sensitive path, hosted for the long tail, and one measured boundary between them rather than a preference.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Your team is asked to predict how much a semantic cache will cut the model bill. Which factor most determines the answer?</div>
+    <button class="q-opt">The dimensionality of the embedding model your cache uses</button>
+    <button class="q-opt">The repetitiveness of the queries your users actually send</button>
+    <button class="q-opt">The physical distance between your cache and your users</button>
+    <button class="q-opt">The number of tokens your system prompt currently holds</button>
+    <div class="q-fb">Savings are hit rate times avoided call cost, and hit rate is a property of the traffic rather than of the cache, so the honest answer is to replay production traffic and measure. Embedding dimensionality affects lookup cost and some accuracy, not whether two user questions mean the same thing. Distance affects the milliseconds of the lookup, not the fraction of calls avoided. A long system prompt raises the price of a miss without changing how often you miss.</div>
+  </div>
+
+  <h2>4. Field drill</h2>
+
+  <p>Questions a Staff+ reviewer will put to this design, and the trap inside each one.</p>
+
+  <ul>
+    <li><b>"You cut latency by twenty percent. Which twenty percent?"</b> The trap is quoting the total. Say whether the silence before the first token shortened or the generation did, because they have disjoint fixes and only one of them is what users called slow.</li>
+    <li><b>"How much will the semantic cache save us?"</b> The trap is repeating a figure you read somewhere. The honest answer is a measurement: replay a week of production queries, sweep the threshold, and report hit rate and the false-hit rate together.</li>
+    <li><b>"Show me the runaway bill that your kill-switch would have stopped."</b> The trap is describing the alert. Walk the enforcement point, the counter, the window, and what the affected user sees when it fires, then say when you last tested it.</li>
+    <li><b>"Why not run everything locally?"</b> The trap is answering on cost. Answer on capability ceiling, the hardware matrix you must support, weight distribution, and the loss of central evaluation signal for the local path.</li>
+    <li><b>"Your cache hit rate doubled last week and complaints rose. What happened?"</b> The trap is celebrating the hit rate. Somebody almost certainly lowered the similarity threshold, and the extra hits are answers to questions the user did not ask.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Instrument before you optimise, and instrument the split. Add first-token time and inter-token latency to one real endpoint, watch them for a week at the ninety-fifth and ninety-ninth percentiles, and see which one your users were actually complaining about. Almost everyone is surprised. Bring me the two curves and we will decide which lever is worth pulling and what it will cost you elsewhere.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://docs.nvidia.com/nim/benchmarking/llm/latest/metrics.html">LLM benchmarking metrics reference</a> for the exact definitions and formulas, and adopt its vocabulary so your dashboards line up with published numbers. Then read the <a href="https://aclanthology.org/2023.nlposs-1.24/">GPTCache paper</a> for the semantic-cache design, paying attention to how much of it is threshold management rather than storage.</p>
+
+  <div class="pager">
+    <a href="0002-state-async-and-degradation.html"><span class="dir">&larr; Previous</span><span class="ttl">State, Async and Degradation</span></a>
+    <a class="nxt" href="0004-retrieval-and-isolation.html"><span class="dir">Next &rarr;</span><span class="ttl">Retrieval and Isolation</span></a>
+  </div>
+
+  <footer><p>Production Agent Engineering &middot; Chapter 4 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

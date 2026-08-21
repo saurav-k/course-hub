@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 5: Retrieval and Isolation - Production Agent Engineering</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AGENT ENGINEERING</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 05 &middot; Retrieval and Isolation &middot; Chapter 5</div>
+  <h1>Retrieval and Isolation</h1>
+  <p class="paper-meta">
+    <span class="pill">3 topics</span>
+    Getting the right evidence into the window, from documents that are not plain text, without letting one tenant or one agent reach another.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Most enterprise documents are not text. <b>Multi-modal retrieval</b> indexes tables, charts, and page layout instead of throwing them away in a text-extraction step you never inspected.</li>
+      <li>A <b>multi-tenant vector store</b> filters on a tenant field inside the search, not after it. Post-filtering does not leak data, but it silently destroys recall, which is the harder bug to find.</li>
+      <li>Anything an agent reads is <b>untrusted input</b>, including another agent's output and a tool description. Agent A can inject Agent B through content it merely summarised.</li>
+      <li>The defence is <b>bounded authority</b> rather than better wording. Constrain what the receiving agent is permitted to do, since no filter reliably removes an instruction from prose.</li>
+    </ul>
+  </div>
+
+  <h2>1. The mental model: retrieval is an authority boundary</h2>
+
+  <p>You are used to treating a database read as a data operation and an authorisation check as a separate concern layered around it. In an agent system those merge, and the merge is the whole chapter. Every document retrieved becomes text the model treats as knowledge, and that text can contain instructions. Retrieval is therefore the point where both a permission decision and a trust decision are made, and both are made per request, inside the query, on live state.</p>
+
+  <p>Two independent failures follow from getting this wrong, and they are easy to confuse in an incident review. A permission failure means a tenant received evidence it was not entitled to, which is a disclosure. A trust failure means the evidence contained instructions that changed what the agent did, which is an integrity failure and does not require any data to have leaked. A design that only defends the first is the common case, and it fails the second in a way that is invisible in access logs.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph UNTRUSTED["Untrusted region: everything here may contain instructions"]
+    WEB["Fetched web page"]
+    DOC["Uploaded document"]
+    TOOLDESC["Third-party tool description"]
+    OUT_A["Agent A's own output"]
+  end
+  UNTRUSTED --> CTX["Agent B's context window"]
+  subgraph TRUSTED["Trusted region: authored by you, versioned, reviewed"]
+    SYS["System policy"]
+    SCHEMA["Handoff schema"]
+    POLICY["Authority policy:<br/>what B may do at all"]
+  end
+  TRUSTED --> CTX
+  CTX --> DECIDE["Agent B proposes an action"]
+  DECIDE --> ENF{"Enforcement point<br/>outside the model"}
+  POLICY --> ENF
+  ENF -->|"within authority"| ACT["Execute as the user"]
+  ENF -->|"beyond authority"| HUMAN["Refuse or escalate<br/>to a human"]
+  </div><figcaption>Agent A's output sits in the untrusted region alongside the web page it summarised, because a summariser faithfully carries an instruction it was asked to summarise. <b>The only thing that reliably bounds the damage is the enforcement point outside the model, which decides what Agent B may do regardless of what Agent B was persuaded to want.</b> Every wording-based defence lives inside the box that the attacker is already influencing.</figcaption></figure>
+
+  <h2>2. Retrieving what the document actually contains</h2>
+
+  <h3 id="multi-modal-rag">Multi-modal RAG</h3>
+  <p>A conventional retrieval pipeline runs a document through text extraction, discards whatever the extractor could not represent, and embeds what is left. For a plain prose document that is nearly lossless. For a quarterly report, an engineering drawing, a scanned invoice, or a slide deck it is destructive in a way nobody measures, because the extractor's failures are silent and the resulting index simply lacks the answer. Users then report that the assistant "cannot find" a figure that is plainly on page four.</p>
+  <p>The research direction that made this tractable is to stop extracting. ColPali embeds page images directly with a vision language model and retrieves using a late-interaction mechanism, which means the layout, the table structure, and the chart are part of what is indexed rather than casualties of a preprocessing step. The paper's own claim, and the ceiling on what you should assert, is that this approach outperforms modern document retrieval pipelines on their visual document retrieval benchmark while remaining end-to-end trainable. <em>Source: <a href="https://arxiv.org/abs/2407.01449">"ColPali: Efficient Document Retrieval with Vision Language Models" (Faysse et al., 2024)</a>.</em></p>
+  <p>The engineering trade is storage and compute against recall on visually structured content. Late interaction keeps multiple vectors per page rather than one, so the index is substantially larger and scoring is more expensive than a single-vector dot product. That cost is worth paying where the corpus is genuinely visual and wasteful where it is prose. The pragmatic production shape is a hybrid: keep the cheap text path for documents the extractor handles well, add the page-image path for the document classes it does not, and route by document type at ingestion. Whichever path you choose, the chunk that reaches the window should carry its page reference so the answer can cite a location a human can open, which is the grounding requirement the interview track develops under <a href="../../ai-system-design-course/lessons/0001-rag-and-retrieval.html#citation-grounding">citation grounding</a>.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  SRC["Source document<br/>(PDF, deck, scan)"] --> CLASS{"Classify at ingestion:<br/>prose or visual?"}
+  CLASS -->|"prose"| TXT["Text extraction<br/>+ structure-aware chunking"]
+  TXT --> EMB1["Single-vector<br/>text embeddings"]
+  CLASS -->|"tables, charts,<br/>layout, scans"| IMG["Render page images"]
+  IMG --> VLM["Vision language model<br/>page embeddings"]
+  VLM --> EMB2["Multi-vector index<br/>(late interaction)"]
+  EMB1 --> STORE[("Vector store<br/>tenant-partitioned")]
+  EMB2 --> STORE
+  STORE --> Q["Query: fuse both paths,<br/>rerank, cap per source"]
+  Q --> CITE["Evidence + page reference<br/>a human can open"]
+  </div><figcaption>Two ingestion paths chosen by document class, converging on one tenant-partitioned store and one fused query. <b>The classification step at ingestion is what keeps the expensive multi-vector path off the prose corpus, which is the difference between an affordable index and one you cannot justify.</b> Both paths must emit a page reference, or the answer is unverifiable no matter which path found it.</figcaption></figure>
+
+  <h2>3. Keeping tenants and agents apart</h2>
+
+  <h3 id="multi-tenant-vector-db">Multi-tenant vector databases</h3>
+  <p>The instinct to give each tenant its own collection is usually wrong at scale. Qdrant's guidance is direct: creating a separate collection for each tenant is rarely the most efficient approach, because each collection carries its own resource overhead and many collections become expensive quickly. The recommended default is a single collection with a keyword index on a tenant field, marked as a tenant key, and every query filtered on it, which the documentation describes as efficient for a large number of small, similarly sized tenants. Dedicated sharding per tenant and a tiered combination of the two remain available for the minority of tenants large enough to justify them. <em>Source: <a href="https://qdrant.tech/documentation/guides/multiple-partitions/">Qdrant multitenancy guide</a>.</em></p>
+  <p>The correctness question underneath the efficiency question is when the filter is applied. Approximate nearest neighbour search walks a graph and returns a candidate set; if the tenant filter is applied to that candidate set afterwards, the search wasted its budget on other tenants' vectors and your tenant is left with whatever survives. For a small tenant in a large index that can be very little, and occasionally nothing at all. This is why the filter must participate in the search rather than follow it, which is exactly what a tenant-key index exists to enable.</p>
+  <p>The failure mode is worth stating precisely because it is counterintuitive. Post-filtering is not a disclosure bug: the other tenants' documents are removed before anything is returned. It is a recall bug, and it presents as an assistant that cannot answer questions about documents the tenant certainly owns, on some queries but not others, more often for smaller tenants. Nobody files that as a security ticket, which is why it survives for months. Test it directly: seed a tiny tenant inside a large index and assert that its own documents are retrievable at your production top-k.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your vector store applies the tenant filter after the approximate nearest neighbour search returns its candidates. What is the actual failure?</div>
+    <button class="q-opt">A tenant can receive fewer results, or none, despite matches</button>
+    <button class="q-opt">A tenant can receive another tenant's documents in its response</button>
+    <button class="q-opt">A tenant can receive results ranked by recency, not relevance</button>
+    <button class="q-opt">A tenant can receive duplicated documents from one indexed source</button>
+    <div class="q-fb">The search spends its candidate budget across the whole index, so a small tenant's own documents may never enter the candidate set and the filter then removes almost everything that did. Cross-tenant disclosure is what post-filtering does prevent, which is why the bug hides: it is a recall failure wearing the costume of a correct security control. Ranking order and duplication are separate concerns that pre-filtering neither causes nor fixes.</div>
+  </div>
+
+  <h3 id="inter-agent-security">Inter-agent security</h3>
+  <p>Once agents hand work to each other, one agent's output is another agent's untrusted input. The attack is direct: a web page instructs the agent reading it, the summarising agent carries those words forward faithfully because carrying words forward is its job, and the receiving agent acts on them with whatever authority it holds. No boundary was crossed that a permission system would notice, because the injected content travelled the same path the legitimate content did.</p>
+  <p>Google's published framework for agent security is built on three principles worth memorising, because they are the vocabulary a reviewer will expect: agents must have well-defined human controllers, their powers must be carefully limited, and their actions and planning must be observable. The approach combines traditional deterministic security controls with dynamic reasoning-based defences, and the framing is important because it concedes that a reasoning-based defence alone is not a control. <em>Source: <a href="https://research.google/pubs/an-introduction-to-googles-approach-for-secure-ai-agents/">"Google's Approach for Secure AI Agents" (Diaz, Kern, and Olive, 2025)</a>.</em></p>
+  <p>The design pattern that gives this teeth is separating planning from data. The CaMeL work proposes defeating prompt injections by design rather than by detection, keeping control flow under a trusted component that never sees untrusted content, so retrieved text can supply values but cannot alter the plan. Applied to a multi-agent system this becomes a concrete rule: an agent that touches untrusted content proposes data, never actions, and any capability it might trigger is granted by a component that has not read the untrusted text. <em>Source: <a href="https://arxiv.org/abs/2503.18813">"Defeating Prompt Injections by Design" (Debenedetti et al., 2025)</a>.</em></p>
+  <p>Four controls follow, and none of them is a wording change. Give each agent its own least-privilege credential rather than a shared service identity, so a compromised summariser cannot reach the mail API at all. Type every handoff, as Chapter 1 argued, since a schema-constrained payload has far less room to carry prose than a paragraph does. Put a human in the loop for consequential, irreversible actions, which is what "carefully limited powers" means operationally. And make the trajectory observable and retained, because the only way you will ever detect this class of attack is by looking at what the agent did rather than at what it said. The threat itself is catalogued as the first entry in the OWASP list for these applications. <em>Source: <a href="https://owasp.org/www-project-top-10-for-large-language-model-applications/">OWASP Top 10 for LLM Applications</a>.</em></p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Agent A summarises an untrusted web page and hands the summary to Agent B, which can send email. What is the strongest available control?</div>
+    <button class="q-opt">Instruct Agent B to ignore instructions found in its input</button>
+    <button class="q-opt">Bound Agent B's authority so sending email needs human approval</button>
+    <button class="q-opt">Run a classifier that removes injection phrases from the summary</button>
+    <button class="q-opt">Give both agents the same system prompt and policy statement</button>
+    <div class="q-fb">Limiting what the agent may do holds regardless of what it was persuaded to want, which is why bounded authority is a control and the others are mitigations. An instruction to ignore instructions is more text in the same window the attacker is already influencing. A classifier raises the cost of an attack without bounding its success, so it belongs in a layered defence rather than at the load-bearing position. Sharing a system prompt spreads policy without removing any capability, and capability is what the attacker is after.</div>
+  </div>
+
+  <h2>4. Field drill</h2>
+
+  <p>Questions a Staff+ reviewer will put to this design, and the trap inside each one.</p>
+
+  <ul>
+    <li><b>"A user says the answer is on page four and the assistant cannot find it. Where do you look?"</b> The trap is tuning retrieval parameters. Look at ingestion first, because the likeliest explanation is that page four was a table and the extractor dropped it before any embedding was computed.</li>
+    <li><b>"Is your tenant filter applied before or after the search?"</b> The trap is answering "we filter by tenant", which is true of both and distinguishes nothing. Say which, and say how you tested that a small tenant's documents are still retrievable inside a large index.</li>
+    <li><b>"Agent A was compromised. What can the attacker reach?"</b> The trap is describing the prompt defences. Answer with the credential each agent holds, since the blast radius is the union of those capabilities and nothing about the wording changes it.</li>
+    <li><b>"Why not filter injection attempts out of retrieved text?"</b> The trap is agreeing that filtering solves it. There is no reliable way to separate an instruction from prose, so filtering raises attacker cost and cannot be the load-bearing control.</li>
+    <li><b>"Multi-modal indexing tripled our storage. Justify it."</b> The trap is defending it everywhere. Justify it per document class, with recall measured on the visual corpus specifically, and keep the cheap text path for everything the extractor already handles well.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Run the two experiments that expose this chapter's failures, because neither shows up in normal use. First, seed a tenant with three documents inside your largest index and check that all three are retrievable at your production top-k; if they are not, your filter is running in the wrong place. Second, put a plain instruction inside a document your agent will summarise and watch what the downstream agent does with it. Bring me both results and we will decide which control you are actually missing.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/2503.18813">"Defeating Prompt Injections by Design"</a>, because it is the clearest published argument that this is a control-flow problem rather than a filtering problem, and that reframing is what changes your architecture. Pair it with <a href="https://research.google/pubs/an-introduction-to-googles-approach-for-secure-ai-agents/">"Google's Approach for Secure AI Agents"</a> for the three principles a reviewer will expect you to name.</p>
+
+  <div class="pager">
+    <a href="0003-latency-cost-and-local-first.html"><span class="dir">&larr; Previous</span><span class="ttl">Latency, Cost and Local-First</span></a>
+    <a class="nxt" href="../reference/glossary.html"><span class="dir">Next &rarr;</span><span class="ttl">Glossary</span></a>
+  </div>
+
+  <footer><p>Production Agent Engineering &middot; Chapter 5 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
