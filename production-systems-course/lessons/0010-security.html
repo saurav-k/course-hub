@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 11: Security - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 11 &middot; Security</div>
+  <h1>Security</h1>
+  <p class="paper-meta">
+    <span class="pill">12 topics</span>
+    The controls that decide how bad a mistake gets.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Authentication answers who you are. Authorisation answers what you may do.</b> Almost every confused access-control design is a system that has quietly merged the two questions into one.</li>
+      <li><b>Every injection class is the same bug.</b> Data crosses into a position where something interprets it as instructions: a SQL parser, an HTML parser, a URL fetcher. The fix is always to keep the channel that carries data separate from the channel that carries instructions.</li>
+      <li><b>Two things practitioners routinely get wrong.</b> CORS is a browser mechanism, not a server-side access control. A signed JSON Web Token cannot be revoked, which is exactly why short lifetimes, rotation, and revocation lists exist.</li>
+      <li><b>Security decisions are latency and cost decisions.</b> Token lifetime buys revocation speed with request volume. Session resumption buys handshake cost with replay risk. Show the arithmetic or you are guessing.</li>
+    </ul>
+  </div>
+
+  <h2>1. The three questions every request must survive</h2>
+
+  <p>Security in a production system is not a feature list. It is a sequence of three questions asked of every single request, in a fixed order, where getting the order wrong is itself the vulnerability. First, who is making this request? That is authentication, and it is answered with a credential: a password, a client certificate, a signed token. Second, is this principal permitted to do this specific thing to this specific resource? That is authorisation, and it is answered with a policy. Third, and this is the question most designs never ask explicitly, does any part of this request end up somewhere that will interpret it as an instruction rather than as data?</p>
+
+  <p>That third question is the whole injection family. SQL injection, cross-site scripting, and server-side request forgery look like three different subjects in a syllabus. They are one bug wearing three costumes. A string the user controls reaches a parser or a fetcher, and the parser cannot tell the difference between the part you wrote and the part they wrote. Once you see it that way, the fix stops being a list of dangerous characters and becomes a structural rule: give the interpreter a separate channel for data, and it will never mistake data for code.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  R["Incoming request"] --> A{"Authentication<br/>who are you?"}
+  A -->|"no proof"| D1["401 reject"]
+  A -->|"credential proven"| Z{"Authorisation<br/>what may you do?"}
+  Z -->|"policy denies"| D2["403 reject"]
+  Z -->|"policy permits"| P{"Interpretation<br/>boundary"}
+  P -->|"data stays data"| OK["Work performed"]
+  P -->|"data becomes<br/>instruction"| INJ["Injection<br/>SQLi, XSS, SSRF"]
+</div><figcaption>Every request passes three gates, and each gate has its own failure mode. <b>Authentication failures let the wrong person in, authorisation failures let the right person do the wrong thing, and interpretation failures let a string become a command.</b> Most teams instrument the first two and never draw the third.</figcaption></figure>
+
+  <h2>2. Identity: secrets and permissions</h2>
+
+  <h3 id="secrets-management">Secrets management</h3>
+  <p>A secret is any credential whose disclosure grants access: a database password, an API key, a signing key, a private certificate. Secrets management is the discipline of storing those values somewhere other than your source code, handing them to workloads at run time, restricting who can read each one, logging every read, and replacing them on a schedule. OWASP's guidance is to centralise storage, provisioning, auditing, rotation, and management rather than letting each team invent a scheme, and to prefer short-lived dynamic credentials generated per session over long-lived static ones. The mechanism that makes this practical is workload identity: the process proves what it is to the secret store using something it did not have to be given in plaintext, such as an instance role or a signed service-account token, and the store returns a lease.</p>
+  <p>Stripe's API key model is a good published example from payments. Stripe issues publishable keys that are safe to embed in front-end code, restricted keys whose permissions you scope to exactly what one part of your application needs, and unrestricted secret keys that it now recommends migrating away from. Rotation is designed around the operational reality that you cannot swap a credential everywhere at once: when you rotate a key in the dashboard, the old and new keys both work for up to seven days, and Stripe's guidance is to roll the new key out to a subset of servers, watch the request logs for the old key, and expire it only after its volume has been at zero for a while. Without that overlap window, every rotation is an outage.</p>
+  <p>The arithmetic that decides your rotation period is a blast-radius calculation. Assume a secret leaks at a uniformly random moment during its validity period, which is the honest assumption because you do not know when the laptop was stolen or the log was scraped.</p>
+  <div class="math">
+expected_exposure = R / 2
+
+R = 90 days   ->  expected_exposure = 45 days   = 3,888,000 s
+R = 1 hour    ->  expected_exposure = 30 minutes =     1,800 s
+
+ratio = 3,888,000 / 1,800 = 2,160
+    <span class="gloss">R is the rotation period, the time between replacing one secret with the next. expected_exposure is how long a stolen copy stays valid on average, given that the theft happens at a random point in the period. Moving from quarterly rotation to hourly dynamic credentials shrinks the average window of a usable stolen credential by a factor of 2,160. The assumption doing the work here is uniform-random theft time; if you know the leak happened right after issuance, the worst case is the full R.</span>
+  </div>
+  <p><b>At 100 requests per second</b> a managed secret store with environment-injected values at deploy time is enough, and quarterly rotation with a documented runbook is defensible. <b>At 1,000 requests per second</b> the manual runbook is what breaks first, because rotation now spans dozens of instances and any instance still holding the old value fails loudly at the moment you expire it; rotation has to become automated and dual-valid, with an overlap window like Stripe's. <b>At 10,000 requests per second</b> static secrets stop being the right shape at all: you want dynamic, per-session credentials issued by the store with a lease measured in minutes, because at that volume a single leaked long-lived database password is worth millions of queries before anyone notices. The trade-off is availability. Your secret store is now on the critical path of every deploy and every credential renewal, so it needs the same high-availability treatment as your database, and the failure mode is total: when the secret store is unreachable, nothing can start.</p>
+  <p><em>Source: <a href="https://cheatsheetseries.owasp.org/cheatsheets/Secrets_Management_Cheat_Sheet.html">OWASP Secrets Management Cheat Sheet</a>, with the rotation-overlap example from <a href="https://docs.stripe.com/keys">Stripe API keys documentation</a>.</em></p>
+
+  <h3 id="iam">IAM</h3>
+  <p>Identity and access management is the policy engine that answers the second question: given this principal, this action, and this resource, is the request allowed? The mechanism worth internalising is the evaluation algorithm, because it is what makes a policy set predictable. AWS states it plainly: a request is denied by default, an explicit allow in an applicable policy can permit it, and an explicit deny anywhere overrides every allow. Beyond that single rule, the composition matters. Identity-based policies and resource-based policies combine as a union, so an action allowed by either one is allowed. Permissions boundaries and organisation service control policies combine as an intersection, so an action must be allowed by the identity policy and by the boundary and by the service control policy to survive.</p>
+  <p>Take a logistics company keeping shipment labels in Amazon S3. The label-rendering service assumes a role whose identity policy allows <span class="code-cap">s3:GetObject</span> on one prefix, the bucket policy separately allows that role, and an organisation-level service control policy denies every S3 action outside the approved regions. Union for the first two, intersection with the third: the service can read labels in region, and nothing anyone writes in a team-level policy can widen it across the region boundary, because the explicit deny wins. Without that structure, permissions only ever accumulate, and the role that was created to render labels ends up able to delete the bucket.</p>
+  <p><b>At 100 requests per second</b> a handful of hand-written roles reviewed at code review is workable, and the real risk is not scale but drift. <b>At 1,000 requests per second</b> you have enough services that hand-written roles stop being reviewable; policy generation from actual observed usage, plus permissions boundaries so that a team can create roles without being able to create powerful ones, is where the control moves. <b>At 10,000 requests per second</b> the dominant concern becomes the latency and availability of authorisation itself: per-request policy evaluation against a remote service adds a network hop to every call, so authorisation decisions get cached, and cache invalidation becomes the security-relevant design question. The trade-off is that every layer you add is another place a legitimate request can be denied. The characteristic failure mode of a mature IAM setup is not a breach, it is an outage at 3am where a deploy quietly lost a permission and the intersection of four policies now evaluates to nothing.</p>
+  <p><em>Source: <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html">AWS IAM policy evaluation logic</a>.</em></p>
+
+  <h2>3. Delegated authorisation and tokens</h2>
+
+  <h3 id="oauth">OAuth</h3>
+  <p>OAuth 2.0, specified in RFC 6749, is a delegation protocol. It exists so that a user can let an application act on their behalf without handing that application their password. It defines four roles: the resource owner who owns the data, the client application that wants access, the authorisation server that issues tokens, and the resource server that holds the data and accepts them. The flow that matters in production is the authorisation code grant. The client sends the user to the authorisation server, the user authenticates and consents there, the authorisation server redirects back with a short-lived code, and the client exchanges that code at the token endpoint for an access token. RFC 6749 section 10 requires that the code expire shortly after issuance, recommends a maximum of ten minutes, and requires that a code used twice be rejected with all tokens derived from it revoked where possible.</p>
+  <p>The code exchange has one structural weakness: on a mobile device or in a single-page application there is no client secret, because anything shipped to the user is not a secret. A malicious application registered for the same redirect URI can intercept the code. RFC 7636 fixes this with Proof Key for Code Exchange. The client generates a random <span class="code-cap">code_verifier</span>, sends only its SHA-256 hash as the <span class="code-cap">code_challenge</span> when it starts the flow, and presents the original verifier when it redeems the code. An attacker who steals the code never saw the verifier, so the code is useless to them. RFC 9700, published as BCP 240, makes this mandatory: public clients MUST use PKCE, redirect URIs must be compared by exact string matching rather than pattern matching, the implicit grant is discouraged because it cannot prevent access token leakage, and the resource owner password credentials grant is deprecated outright because it exposes the user's password to the client.</p>
+  <p>Spotify's Web API is a published example from streaming: its developer documentation names authorisation code with PKCE as the recommended flow for mobile apps, single-page applications, and any client where a client secret cannot be stored safely. Millions of third-party players and playlist tools authenticate this way, and none of them ever sees a user's Spotify password.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant U as User agent
+  participant C as Client, public and secretless
+  participant Auth as Authorisation server
+  participant RS as Resource server
+  C->>C: generate random code_verifier
+  C->>C: code_challenge = BASE64URL(SHA256(code_verifier))
+  C->>U: redirect to /authorize with code_challenge and S256
+  U->>Auth: user authenticates and consents
+  Auth->>Auth: store code_challenge against the issued code
+  Auth-->>U: redirect back with authorization code
+  U-->>C: authorization code
+  C->>Auth: POST /token with code plus original code_verifier
+  Auth->>Auth: check SHA256(verifier) equals stored challenge
+  Auth-->>C: access token and refresh token
+  C->>RS: request with the access token
+  RS-->>C: protected resource
+  Note over Auth,C: A stolen code is useless without the verifier
+  </div><figcaption>The authorisation code flow with PKCE, as specified in RFC 6749 and RFC 7636. <b>The code and the verifier travel on different paths, so intercepting the redirect gives an attacker only half of what the token endpoint demands.</b> RFC 9700 makes this mandatory for every public client.</figcaption></figure>
+
+  <p><b>At 100 requests per second</b> the authorisation server can be a managed identity provider and you will never think about its capacity, because authorisation events are user-initiated and vastly rarer than API calls. <b>At 1,000 requests per second</b> the ratio starts to matter: token issuance is a write to a database and token validation is a read, and if your resource servers introspect every token against the authorisation server, the authorisation server now carries your full request rate rather than your login rate. <b>At 10,000 requests per second</b> that coupling is untenable and you move to self-contained signed tokens validated locally against a cached public key set, which is exactly the trade that creates the revocation problem in the next topic. The failure mode to name in a design review is the redirect URI: a pattern match instead of an exact match turns your authorisation endpoint into an open redirector, and every code you issue can be delivered to an attacker's domain.</p>
+  <p><em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6749">RFC 6749, The OAuth 2.0 Authorization Framework</a>, <a href="https://www.rfc-editor.org/rfc/rfc7636">RFC 7636, Proof Key for Code Exchange</a>, and <a href="https://www.rfc-editor.org/rfc/rfc9700">RFC 9700 (BCP 240), Best Current Practice for OAuth 2.0 Security</a>. Client guidance from <a href="https://developer.spotify.com/documentation/web-api/tutorials/code-pkce-flow">Spotify's authorization code with PKCE tutorial</a>.</em></p>
+
+  <h3 id="jwt-rotation">JWT rotation</h3>
+  <p>A JSON Web Token, specified in RFC 7519, is a set of claims serialised as three base64url segments: a header describing the algorithm, a payload of claims, and a signature. The registered claims include <span class="code-cap">exp</span> for expiry, <span class="code-cap">iat</span> for issue time, <span class="code-cap">iss</span> for issuer, <span class="code-cap">aud</span> for audience, and <span class="code-cap">jti</span> for a unique token identifier. The property that makes JWTs attractive at scale is that they are self-contained: a resource server verifies the signature with a public key it already holds, checks <span class="code-cap">exp</span> and <span class="code-cap">aud</span>, and decides, with no call to the issuer.</p>
+  <p>That property is also the defect, and it is worth stating without hedging. <b>A self-contained JWT cannot be revoked.</b> There is no revocation mechanism because there is no conversation with the issuer in which revocation could be communicated. RFC 7009, which defines the OAuth token revocation endpoint, says this in its own implementation note: where deployments use self-contained access tokens and the resource server performs no additional check with the authorisation server, revoked tokens may remain valid until they expire, and the standard remedies are a non-standardised back-channel between the servers or simply issuing short-lived tokens that can be refreshed at any time.</p>
+  <p>So the three real mitigations are lifetime, rotation, and a revocation list, and each one buys revocation speed with a different currency. Short lifetimes buy it with refresh traffic. A revocation list, meaning a deny-list of <span class="code-cap">jti</span> values checked on every request, buys it with a lookup on the hot path and a distributed cache to keep it fast. Refresh token rotation, which RFC 9700 requires for public clients that do not use sender-constrained tokens, buys detection rather than prevention: each refresh issues a new refresh token and invalidates the old one, so if a stolen refresh token is ever replayed, the authorisation server sees a used token presented twice and can revoke the entire chain.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  state "Issued by the authorisation server" as Issued
+  state "Accepted by every resource server" as Active
+  state "Revoked at the issuer, still accepted" as Stale
+  state "Rejected, exp has passed" as Dead
+  [*] --> Issued
+  Issued --> Active: signature and claims verify locally
+  Active --> Stale: operator revokes the session
+  Active --> Dead: exp reached
+  Stale --> Dead: exp reached
+  Active --> Issued: refresh token presented, old one invalidated
+  Dead --> [*]
+  </div><figcaption>The lifecycle of a self-contained access token, with the state nobody draws made explicit. <b>The window between "revoked at the issuer" and "rejected because exp has passed" is the exposure you are buying when you choose a token lifetime.</b> Nothing in the signature check can shorten it.</figcaption></figure>
+
+  <p>Now the arithmetic that turns the policy into a number. Suppose access tokens live 15 minutes, and an operator revokes a compromised session at a moment that is uniformly random within the token's life.</p>
+  <div class="math">
+exposure_worst     = T_access                    = 900 s   (15 minutes)
+exposure_expected  = T_access / 2                = 450 s   (7.5 minutes)
+
+attacker_requests  = exposure * attacker_rate
+                   = 900 s * 20 req/s            = 18,000 requests
+
+# the alternative: check a revocation list, cached
+introspect_qps     = active_tokens / cache_ttl
+                   = 200,000 / 30 s              = 6,667 checks/s
+revocation_latency = cache_ttl                   = 30 s
+    <span class="gloss">T_access is the access token lifetime. exposure_worst is the longest a revoked token can still be accepted, which equals the full lifetime when revocation happens right after issuance; exposure_expected is the average, half the lifetime, under the assumption that revocation timing is uniformly random. attacker_rate of 20 requests per second is my assumption for a scripted attacker, not a measured figure. active_tokens of 200,000 and a 30-second cache TTL are likewise assumptions; they show that a revocation list turns a 450-second average exposure into a 30-second bounded one, and the price is 6,667 extra lookups per second that your token verification path did not previously make.</span>
+  </div>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Access tokens live 15 minutes and are verified by signature alone. Support revokes a compromised session at a random moment. What is the expected further exposure?</div>
+    <button class="q-opt">About seven minutes, roughly half the remaining token lifetime</button>
+    <button class="q-opt">Exactly zero minutes, because revocation takes effect at once</button>
+    <button class="q-opt">About thirty minutes, because the refresh token keeps working</button>
+    <button class="q-opt">Exactly fifteen minutes, because expiry always runs full length</button>
+    <div class="q-fb">Revocation at a uniformly random point in a 15-minute life leaves half the life remaining on average, so 7.5 minutes expected and 15 minutes worst case. "Zero" is the common wrong answer and assumes a revocation channel that a self-contained token does not have: the resource server never asks the issuer anything. "Thirty minutes" confuses the access token window with refresh behaviour; revoking the refresh token stops renewal but does nothing to the access token already in the attacker's hands. "Exactly fifteen" quotes the worst case as if it were the expectation, which overstates the exposure by a factor of two and will get corrected in a design review.</div>
+  </div>
+
+  <p><b>At 100 requests per second</b> you can afford to check a revocation list on every request and get near-instant revocation, so long tokens are fine and simplicity wins. <b>At 1,000 requests per second</b> the list becomes a shared cache with a TTL, and revocation latency becomes an explicit, documented number rather than an accident. <b>At 10,000 requests per second</b> local verification is close to mandatory, so lifetime becomes the primary control: 5 to 15 minutes for access tokens with rotating refresh tokens behind them, and a revocation list reserved for high-value principals such as administrators rather than applied to every session. The trade-off is refresh traffic. Halving the token lifetime doubles the refresh rate against your authorisation server, which is why the token lifetime debate is really a capacity-planning debate wearing a security hat. The failure mode is a signing key you cannot rotate: if resource servers cache the public key set without honouring its expiry, an emergency key rotation locks out every client at once.</p>
+  <p><em>Source: <a href="https://www.rfc-editor.org/rfc/rfc7519">RFC 7519, JSON Web Token</a>, and <a href="https://www.rfc-editor.org/rfc/rfc7009">RFC 7009, OAuth 2.0 Token Revocation</a>, whose implementation note states directly that revoked self-contained tokens may remain valid until expiry. Refresh token rotation requirement from <a href="https://www.rfc-editor.org/rfc/rfc9700">RFC 9700</a>.</em></p>
+
+  <h2>4. Cryptography: the wire and the disk</h2>
+
+  <h3 id="tls">TLS</h3>
+  <p>Transport Layer Security gives a connection three properties: confidentiality, integrity, and authentication of the server, optionally of the client too. TLS 1.3, specified in RFC 8446, is a substantial simplification of what came before. It pruned the symmetric algorithms down to authenticated encryption with associated data only, removed static RSA and static Diffie-Hellman key exchange entirely so that every key exchange now provides forward secrecy, and encrypts everything after the ServerHello. Forward secrecy is the property worth being precise about: it means that compromising the server's long-term private key tomorrow does not decrypt the traffic you captured today, because the session keys came from an ephemeral exchange that was discarded.</p>
+  <p>The performance story is the handshake. TLS 1.3 completes a full handshake in one round trip before application data flows. Resumption is redesigned around pre-shared keys: after a successful handshake the server sends a NewSessionTicket carrying a PSK identity, and a returning client presents that identity instead of repeating the full exchange. RFC 8446 also defines 0-RTT early data, where the client sends application data in its very first flight, and is explicit about the price: that data is not forward secret and the protocol provides no replay protection for it between connections. Cloudflare's implementation shows what that means operationally in the content delivery industry: 0-RTT is offered for GET, HEAD, and OPTIONS requests but not for POST, and requests that arrived as early data are tagged with an <span class="code-cap">Early-Data: 1</span> header so the origin can decide for itself.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  rect rgba(128,128,128,0.08)
+  Note over C,S: Full handshake, 1 round trip before application data
+  C->>S: ClientHello with key share
+  S-->>C: ServerHello, certificate, Finished (all encrypted after hello)
+  C->>S: Finished, then the first request
+  S-->>C: Response
+  end
+  rect rgba(128,128,128,0.08)
+  Note over C,S: Resumption with a pre-shared key ticket
+  S-->>C: NewSessionTicket (sent on the earlier connection)
+  C->>S: ClientHello with PSK identity, plus optional early data
+  S-->>C: ServerHello, Finished, response
+  end
+  Note over C,S: Early data is not forward secret and is replayable
+  </div><figcaption>TLS 1.3 needs one round trip to establish a fresh session and can skip that round trip entirely for a returning client holding a ticket. <b>0-RTT buys back a full round trip in exchange for two properties RFC 8446 says you lose: forward secrecy for that data, and replay protection.</b> That is why it is restricted to idempotent methods in practice.</figcaption></figure>
+
+  <p>Handshake cost is the arithmetic that changes by tier, and the lever is not TLS configuration but connection reuse.</p>
+  <div class="math">
+new_conn_rate   = rps / requests_per_connection
+full_handshakes = new_conn_rate * (1 - resumption_rate)
+
+keep-alive, 100 requests per connection, 90% resumption:
+  10,000 / 100 = 100 new conn/s ; 100 * 0.10 =    10 full handshakes/s
+
+no keep-alive, 1 request per connection, 90% resumption:
+  10,000 / 1   = 10,000 new conn/s ; 10,000 * 0.10 = 1,000 full handshakes/s
+
+latency saved per resumed connection = 1 RTT = 40 ms at an assumed 40 ms RTT
+    <span class="gloss">rps is the request rate. requests_per_connection is how many requests share one TCP and TLS connection before it closes; 100 with keep-alive and 1 without are my assumptions. resumption_rate is the fraction of new connections that present a valid ticket; 90% is an assumption. The result is the point: at a fixed 10,000 requests per second, turning off connection reuse multiplies expensive full handshakes by 100, from 10 per second to 1,000 per second, without changing a single line of your TLS configuration.</span>
+  </div>
+  <p><b>At 100 requests per second</b> terminate TLS wherever is convenient and do not think about handshake cost; the round trip is a latency item, not a capacity item. <b>At 1,000 requests per second</b> connection reuse and session resumption start showing up in your tail latency, because every cold connection pays a round trip that a warm one does not, and this is where a client library that opens a fresh connection per request becomes visible in the p99. <b>At 10,000 requests per second</b> you terminate at a dedicated edge tier with a shared ticket key so that resumption works across servers rather than only against the one that issued the ticket, and 0-RTT becomes a considered decision per endpoint rather than a global switch. The trade-off is that terminating early means the hop from the terminator to your service is now unencrypted unless you encrypt it separately, which is the next topic. The failure mode is certificate expiry, and it is the single most reliable outage in this chapter: it is a scheduled, predictable, fully preventable total loss of service that keeps happening because the renewal was somebody's calendar reminder.</p>
+  <p><em>Source: <a href="https://www.rfc-editor.org/rfc/rfc8446">RFC 8446, The Transport Layer Security (TLS) Protocol Version 1.3</a>, with the deployment restriction on early data from <a href="https://developers.cloudflare.com/speed/optimization/protocol/0-rtt-connection-resumption/">Cloudflare's 0-RTT connection resumption documentation</a>.</em></p>
+
+  <h3 id="encryption-at-rest">Encryption at rest</h3>
+  <p>Encryption at rest protects data on storage media against an attacker who obtains the media rather than the application: a stolen disk, a decommissioned drive, a snapshot copied to the wrong account, a backup left in a public bucket. It does not protect against an attacker who has valid application credentials, because your application decrypts for a living. Saying that out loud is what separates a real threat model from a compliance checkbox.</p>
+  <p>The mechanism that makes it workable at scale is envelope encryption. You do not encrypt terabytes of data directly with a key held in a hardware security module; you generate a fresh data key per object, encrypt the object with it, encrypt the data key with a wrapping key that never leaves the module, and store the wrapped data key alongside the ciphertext. AWS describes exactly this flow: each message is encrypted under a unique data key, the data key is encrypted by the wrapping keys you specify, the plaintext data key is discarded immediately after use, and decryption starts by asking the key service to unwrap one encrypted data key. A healthcare provider storing patient documents this way gets per-object cryptographic isolation and a single auditable choke point, because every decryption is an API call that lands in the audit log.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph HSM["Key service, hardware backed"]
+    KEK["Wrapping key<br/>never leaves the module<br/>rotating key material"]
+  end
+  P["Plaintext object"] --> ENC["Encrypt with a fresh data key"]
+  DK["Data key, unique per object"] --> ENC
+  DK --> WRAP["Wrap the data key"]
+  KEK --> WRAP
+  ENC --> CT["Ciphertext object"]
+  WRAP --> EDK["Encrypted data key"]
+  CT --> STORE[("Stored together")]
+  EDK --> STORE
+  STORE --> DEC["Decrypt: unwrap the data key, then the object"]
+  KEK --> DEC
+  </div><figcaption>Envelope encryption puts a cheap, disposable key next to the data and an expensive, protected key behind an API. <b>Rotating the wrapping key changes nothing about the stored ciphertext, because the key service retains the old key material and picks the right version on decrypt.</b> That is a feature for availability and a trap for anyone who believes rotation re-protects old data.</figcaption></figure>
+
+  <p>That last point deserves emphasis because it is the most commonly misunderstood sentence in key management. AWS states it directly: key rotation has no effect on the data the key protects, it does not rotate the data keys the key generated, it does not re-encrypt any data, and it will not mitigate the effect of a compromised data key. Old key material is retained so old ciphertext stays decryptable, and the default automatic rotation period is 365 days, configurable. If you genuinely need to re-key stored data, you have to re-wrap every data key yourself, and that is a job with a size.</p>
+  <div class="math">
+rewrap_ops = number_of_objects                       = 100,000,000
+elapsed    = rewrap_ops / key_service_rate_budget
+           = 100,000,000 / 10,000 per second         = 10,000 s = 2.78 hours
+
+re-encrypting the payloads instead, at 4 MB per object:
+  bytes = 100,000,000 * 4 MB = 400 TB read and 400 TB written
+    <span class="gloss">rewrap_ops is one unwrap plus one wrap per object, since envelope encryption gives every object its own data key. key_service_rate_budget of 10,000 operations per second is my assumption for what you are willing to spend, not a published service limit. The comparison is the whole argument for the envelope pattern: re-keying 100 million objects touches 100 million small key blobs in under three hours, whereas re-encrypting the payloads themselves would move 400 TB in each direction.</span>
+  </div>
+  <p><b>At 100 requests per second</b> take the storage service's default encryption with a service-managed key and move on; the marginal risk reduction from a customer-managed key is small next to the operational risk of managing it. <b>At 1,000 requests per second</b> customer-managed keys become worth the effort because you gain the audit trail and the ability to revoke access to the key independently of access to the data, which is the control that actually contains a compromised account. <b>At 10,000 requests per second</b> the key service becomes a latency and quota dependency on your write path, so you cache unwrapped data keys in memory for a bounded time and accept that the cache is now a place plaintext keys live. The trade-off is that key management complexity is a real availability risk, and the failure mode is unambiguous: lose the wrapping key and the data is gone, permanently, with no support ticket that can recover it.</p>
+  <p><em>Source: <a href="https://docs.aws.amazon.com/encryption-sdk/latest/developer-guide/how-it-works.html">AWS Encryption SDK, how envelope encryption works</a>, and <a href="https://docs.aws.amazon.com/kms/latest/developerguide/rotate-keys.html">AWS KMS key rotation</a>, which states that rotation does not re-encrypt data.</em></p>
+
+  <h3 id="encryption-in-transit">Encryption in transit</h3>
+  <p>Encryption in transit is the broader discipline that TLS implements at one hop. The design question is not "do we use HTTPS" but "which hops are encrypted, and which are trusted because they are inside something". A request that arrives over TLS 1.3 at a load balancer, travels in plaintext to a service, and then queries a database over an unencrypted connection is encrypted in transit for exactly one of its three hops. Internal hops are where this quietly fails, because the network was assumed to be trusted, and that assumption has an expiry date the moment a second tenant, a misconfigured route, or a compromised sidecar exists.</p>
+  <p>The browser-facing part has its own mechanism. RFC 6797 defines HTTP Strict Transport Security: a server sends <span class="code-cap">Strict-Transport-Security</span> with a <span class="code-cap">max-age</span> and optionally <span class="code-cap">includeSubDomains</span>, and the browser refuses plaintext connections to that host for that duration. The RFC is candid about the gap it cannot close by itself: the very first request, before the browser has ever seen the header, is still exposed to an active network attacker. That bootstrap hole is why preload lists exist, where browser vendors ship the policy for known hosts in the browser itself. A payments checkout page is the canonical case in that industry, because a single downgraded first request is enough to capture a card number.</p>
+  <p><b>At 100 requests per second</b> terminate TLS at the edge, enable HSTS with a real <span class="code-cap">max-age</span>, and encrypt the database connection; internal service-to-service traffic can reasonably ride on network isolation. <b>At 1,000 requests per second</b> you have enough internal hops that "the network is trusted" stops being a statement anyone can verify, and mutual TLS between services starts paying for itself, mostly because it gives every service a cryptographic identity that authorisation policy can reference. <b>At 10,000 requests per second</b> the certificate lifecycle becomes the hard part rather than the encryption: thousands of short-lived workload certificates have to be issued, rotated, and revoked automatically, and a certificate authority outage becomes a fleet-wide outage. The trade-off is per-hop handshake and encryption overhead plus a large increase in moving parts. The failure mode that catches teams is the mixed one: encryption enabled everywhere but certificate verification disabled somewhere to make a test pass, which produces confidentiality against a passive observer and none at all against an active one.</p>
+  <p><em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6797">RFC 6797, HTTP Strict Transport Security</a>, with the transport mechanism itself from <a href="https://www.rfc-editor.org/rfc/rfc8446">RFC 8446</a>.</em></p>
+
+  <h2>5. The browser boundary</h2>
+
+  <h3 id="cors">CORS</h3>
+  <p>This is the topic where the industry's collective mental model is wrong, so here is the correction first. <b>Cross-Origin Resource Sharing is not a security control for your server.</b> It is a mechanism defined in the Fetch Standard by which a server can <em>relax</em> the browser's same-origin policy, and it is enforced entirely by the user agent. It protects your users' browsers from reading responses they should not read. It does nothing whatsoever to protect your API from a client that is not a browser. A request from curl, a script, a mobile app, or an attacker's server reaches your endpoint and gets a full response regardless of what your <span class="code-cap">Access-Control-Allow-Origin</span> header says, because there is no browser in the loop to enforce anything.</p>
+  <p>The mechanism is worth knowing precisely. For a request the standard considers simple, using a CORS-safelisted method such as GET, HEAD, or POST and only safelisted headers, the browser sends the request and then decides whether the calling page may read the response based on the <span class="code-cap">Access-Control-Allow-Origin</span> response header. Note the ordering: the request already happened, which is why CORS is not a defence against state change. For anything else, the browser first sends a preflight OPTIONS request carrying <span class="code-cap">Access-Control-Request-Method</span> and <span class="code-cap">Access-Control-Request-Headers</span>, and only proceeds if the response permits it; <span class="code-cap">Access-Control-Max-Age</span> says how long that permission may be cached. One hard rule follows from the credentials mode: when a request includes credentials, the server may not answer with a wildcard origin and must name the exact origin instead, so that credentialed responses are never shared with an origin nobody vetted.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  REQ["A cross-origin request<br/>arrives at your API"] --> WHO{"Is the caller<br/>a browser?"}
+  WHO -->|"no: curl, script,<br/>mobile app, attacker server"| DIRECT["No CORS check exists<br/>anywhere in the path"]
+  DIRECT --> FULL["Server answers in full,<br/>every single time"]
+  WHO -->|"yes: a page on<br/>another origin"| FLIGHT{"Preflight<br/>required?"}
+  FLIGHT -->|"yes"| OPT["OPTIONS preflight<br/>must be approved first"]
+  FLIGHT -->|"no"| SENT["Request is sent regardless"]
+  OPT --> SENT
+  SENT --> READ{"Does the response<br/>name this origin?"}
+  READ -->|"yes"| OKB["The page may<br/>read the response"]
+  READ -->|"no"| BLOCK["The browser blocks<br/>the read, nothing else"]
+</div><figcaption>The same endpoint, two callers, two completely different outcomes. <b>CORS headers are instructions to a browser about what a page may read; a non-browser client never consults them and is never restricted by them.</b> Authentication and authorisation are what protect the endpoint. CORS only decides which web origins may use it on the user's behalf.</figcaption></figure>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your API sets Access-Control-Allow-Origin to a wildcard. A reviewer says this lets anyone call the API. What is the accurate correction?</div>
+    <button class="q-opt">The header widens browser reads; direct clients were never blocked</button>
+    <button class="q-opt">The header blocks browser reads; direct clients were always blocked</button>
+    <button class="q-opt">The header widens server access; browsers were never really involved</button>
+    <button class="q-opt">The header blocks server access; direct clients were always allowed</button>
+    <div class="q-fb">CORS is enforced by the user agent, so the wildcard only changes which web origins may read a response in a browser. Anyone with curl could always call the endpoint, wildcard or not, which is why authentication and authorisation are the controls that matter here. The second option inverts the mechanism: CORS relaxes the same-origin policy rather than imposing a restriction, and it never touched non-browser clients. The third is right that non-browser clients are unaffected but wrong that the header does anything server-side; the server still answers everyone identically. The fourth invents a server-side block that no CORS header has ever performed. Note the genuine risk the wildcard does carry: with credentialed requests the standard forbids a wildcard entirely, so a wildcard plus cookies is a configuration the browser will reject.</div>
+  </div>
+
+  <p><b>At 100 requests per second</b> a static allow-list of your own front-end origins is all you need, and preflight volume is not a topic. <b>At 1,000 requests per second</b> preflights become measurable: a cross-origin single-page application that triggers a preflight per call is doubling its request count, and setting a sensible <span class="code-cap">Access-Control-Max-Age</span> collapses that back. <b>At 10,000 requests per second</b> the header should be produced at the edge from a maintained allow-list rather than by each service independently, because per-service divergence is how one endpoint ends up reflecting the request origin back verbatim. That reflection is the failure mode: dynamically echoing the <span class="code-cap">Origin</span> header while allowing credentials is functionally equivalent to allowing every origin to make credentialed requests on your users' behalf, and it will pass every test you have.</p>
+  <p><em>Source: <a href="https://fetch.spec.whatwg.org/">Fetch Standard, the CORS protocol</a>.</em></p>
+
+  <h3 id="csrf">CSRF</h3>
+  <p>Cross-Site Request Forgery exploits the fact that browsers attach cookies to requests based on the destination, not the origin of the page making them. If a user is logged into your bank and visits a hostile page, a form that posts to your transfer endpoint carries the user's session cookie automatically. The user's browser is authenticated, so the request is authentic; it simply was not intended. Notice what this is: an authentication mechanism that answers "who are you" correctly while failing to answer "did you mean this".</p>
+  <p>The fix is to require something the attacker's page cannot obtain or set. OWASP's priority order is to use the framework's built-in protection first, then the synchroniser token pattern for stateful applications, and the signed double-submit cookie for stateless ones. Django is the widely deployed published example: it sets a CSRF cookie holding a secret that another site cannot read, requires a matching <span class="code-cap">csrfmiddlewaretoken</span> form field or <span class="code-cap">X-CSRFToken</span> header on every unsafe method, masks the token differently on each response to frustrate compression side channels, performs strict Referer checking over HTTPS when no Origin header is present, and returns 403 on mismatch. It deliberately ignores GET requests, on the stated assumption that GET has no side effects, which is a requirement your application has to actually honour.</p>
+  <p>Two clarifications that come up constantly. <span class="code-cap">SameSite</span> cookies are defence in depth, not a replacement: the default Lax value only blocks unsafe methods, so a state-changing GET is still reachable, and a cookie set on one host is still same-site for any sibling subdomain, so a compromised subdomain defeats it. And for pure API clients that never render HTML forms, requiring a custom header such as <span class="code-cap">X-CSRF-Token</span> is itself sufficient, because a custom header is not on the CORS safelist, so the browser must preflight it and your server can refuse. That is the one place CORS genuinely participates in a security control, and it works only because a browser is enforcing it.</p>
+  <p><b>At 100 requests per second</b> the framework default is correct and requires no thought. <b>At 1,000 requests per second</b> the synchroniser token's server-side state becomes a shared-session concern across instances, and this is where teams move to the signed double-submit variant to avoid a session store lookup on every form post. <b>At 10,000 requests per second</b> most traffic is usually API calls with bearer tokens rather than cookies, and cookie-based CSRF stops applying to those paths entirely, which is a good reason to be deliberate about which endpoints accept cookie authentication at all. The trade-off is friction on every state-changing request and a class of confusing 403s. The failure mode is exemption creep: one endpoint marked exempt for a webhook, then another for a mobile client, and the protection is now a list of endpoints nobody has re-read in two years.</p>
+  <p><em>Source: <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP Cross-Site Request Forgery Prevention Cheat Sheet</a>, with the implementation from <a href="https://docs.djangoproject.com/en/stable/ref/csrf/">Django's CSRF protection documentation</a>.</em></p>
+
+  <h2>6. The injection family: data crossing into an instruction position</h2>
+
+  <p>The three topics that follow are one bug. In each case a value the user controls is placed somewhere that an interpreter reads, and the interpreter has no way to know which characters came from your program and which came from the request. Recognising the shape is worth more than memorising the payloads, because the shape tells you where the fix has to go: not at the input, where you would be guessing at what is dangerous, but at the boundary, where you can hand the interpreter a separate channel for data.</p>
+
+  <h3 id="sql-injection">SQL injection</h3>
+  <p>SQL injection happens when user input is concatenated into a query string, so that characters in the input change the structure of the statement rather than only its values. <b>The fix is parameterised queries, not escaping.</b> OWASP is unambiguous: prepared statements with parameterised queries force the developer to define all the SQL code first and pass each parameter in later, so the database always distinguishes between code and data regardless of what input is supplied. Escaping is listed last and marked strongly discouraged, with the cheat sheet stating outright that it is fragile compared to other defences and that it cannot be guaranteed to prevent all SQL injection in all situations.</p>
+  <p>PostgreSQL's extended query protocol is the concrete mechanism, and seeing it makes the argument stop being a matter of taste. The client sends a Parse message containing the statement text with placeholders such as <span class="code-cap">$1</span> and <span class="code-cap">$2</span>, then a separate Bind message carrying the actual parameter values, then Execute. The values travel in different protocol messages from the statement text and are never concatenated into the query string, so there is no string for a quote character to escape out of. An e-commerce order-search endpoint built this way is immune by construction, not by vigilance, and it is faster too, because the parsed plan is reusable across binds.</p>
+  <p>One honest limitation: parameters bind values, not identifiers. You cannot bind a table name, a column name, or a sort direction. OWASP's guidance there is allow-list validation, mapping user input onto a fixed set of permitted values, and it adds a pointed observation worth repeating in design reviews: using user-supplied values to target table or column names is a symptom of poor design, and a rewrite should be considered.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A reporting endpoint concatenates a user-supplied filter into SQL. Which change removes the vulnerability class rather than one instance of it?</div>
+    <button class="q-opt">Escape every quote character found in the supplied user filter string</button>
+    <button class="q-opt">Bind the filter as a parameter sent separately from statement text</button>
+    <button class="q-opt">Reject any filter string that contains a suspicious SQL keyword list</button>
+    <button class="q-opt">Run the reporting query under a strictly read-only database service login</button>
+    <div class="q-fb">Binding sends the value in a different protocol message from the statement, so the parser never sees it as syntax and there is nothing to escape out of. Escaping quotes is the defence OWASP explicitly discourages: it is fragile, depends on charset and dialect, and misses cases such as a numeric context with no quotes at all. Keyword deny-lists are guessing games that break legitimate input like a customer named O'Brien while missing encodings you did not anticipate. The read-only login is genuinely good defence in depth and limits the damage, but the injection is still there and can still read every row the reporting user can see, so it reduces blast radius rather than removing the class.</div>
+  </div>
+
+  <p><b>At 100 requests per second</b> parameterised queries through any competent driver or object-relational mapper are the whole answer, and the residual risk is the one hand-built dynamic query somebody wrote for a search feature. <b>At 1,000 requests per second</b> prepared statement reuse becomes a performance feature as well as a security one, and the pressure that creates new injection sites is dynamic filtering and sorting for user-facing tables, which is exactly the identifier case parameters cannot cover. <b>At 10,000 requests per second</b> the query surface is wide enough that enforcement has to be mechanical: static analysis in CI that fails on string-built SQL, plus per-service database users with least-privilege grants so that an injection in the reporting path cannot write to the orders table. The trade-off for parameterisation is essentially zero, which is rare in this chapter and worth saying. The failure mode is the dynamic query builder that supports a legitimate feature, ships with an allow-list, and then has one branch added later that concatenates.</p>
+  <p><em>Source: <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP SQL Injection Prevention Cheat Sheet</a>, with the wire-level mechanism from <a href="https://www.postgresql.org/docs/current/protocol-flow.html">the PostgreSQL extended query protocol</a>.</em></p>
+
+  <h3 id="xss">XSS</h3>
+  <p>Cross-site scripting is the same bug with an HTML parser instead of a SQL parser. Attacker-controlled text reaches a page and the browser interprets part of it as markup or script. It comes in three shapes worth naming: stored, where the payload is persisted and served to other users; reflected, where it is echoed straight back from the request; and DOM-based, where the page's own JavaScript writes untrusted data into a sink such as <span class="code-cap">innerHTML</span> and no server-side encoding could have helped.</p>
+  <p>The fix is context-correct output encoding, and the word context is doing real work. OWASP's rules differ by where the value lands: HTML entity encoding in an element body, more aggressive encoding in an attribute, Unicode escaping in a JavaScript context, hex encoding in CSS, percent encoding in a URL. Using the wrong one either opens a hole or breaks the page. Modern frameworks apply the right encoding automatically, which is why OWASP's first recommendation is to use a framework and to understand precisely where its escape hatches are, such as React's <span class="code-cap">dangerouslySetInnerHTML</span> or Angular's bypass functions. When a feature genuinely requires user-authored HTML, as a gaming community's rich profile pages do, encoding would destroy the formatting, so you sanitise instead with a maintained library such as DOMPurify, and you must not modify the string after sanitising, because a later transformation can reintroduce what sanitising removed.</p>
+  <p>Content Security Policy is the second layer, and the specification is refreshingly direct about its own role: CSP is not intended as a first line of defence against content injection and is best used as defence in depth. A policy restricting <span class="code-cap">script-src</span> to specific sources, or to nonces or hashes that only your server can mint, means an injected script tag does not execute even when encoding failed. Report-only mode lets you deploy and observe before enforcing, which is how you roll a policy onto a large existing site without breaking it.</p>
+  <p><b>At 100 requests per second</b> framework auto-escaping plus a report-only CSP that you actually read is a proportionate posture. <b>At 1,000 requests per second</b> user-generated content is usually a real product feature, so a sanitiser on the ingest path and an enforced CSP become worth the deployment effort, and the nonce has to be generated per response, which interacts badly with full-page caching and needs designing. <b>At 10,000 requests per second</b> the page is assembled from many teams' fragments and third-party scripts, so CSP with nonces plus <span class="code-cap">strict-dynamic</span> is the only policy that stays maintainable, and violation reports become a monitored telemetry stream rather than a mailbox. The trade-off is that a strict CSP breaks inline scripts and legacy widgets, which is why it is usually adopted report-only for months first. The failure mode is a single innerHTML sink in a widget nobody owns, which no amount of server-side encoding will ever reach.</p>
+  <p><em>Source: <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">OWASP Cross Site Scripting Prevention Cheat Sheet</a>, with the layered-defence framing from <a href="https://www.w3.org/TR/CSP3/">W3C Content Security Policy Level 3</a>.</em></p>
+
+  <h3 id="ssrf">SSRF</h3>
+  <p>Server-Side Request Forgery is the same bug again, with a URL fetcher as the interpreter. Your application takes a user-supplied URL, for a webhook target, an avatar import, a link preview, or a PDF renderer following an image reference, and fetches it. The attacker does not control your code; they control your destination. <b>What makes SSRF dangerous is not the request itself but what your server can reach that the attacker cannot.</b> Your server sits inside a network where internal admin panels have no authentication because "it is internal", where databases listen on private addresses, and, above all, where a link-local metadata service hands out cloud credentials to anyone who asks from that instance.</p>
+  <p>That metadata service is the prize. OWASP names it directly: AWS, Azure, and Google Cloud all expose metadata at <span class="code-cap">169.254.169.254</span>, these endpoints grant access to credentials and tokens, and the guidance is to block them and to migrate to IMDSv2 on AWS. In the original request-response design, a single unauthenticated GET to the instance's credentials path returns an access key, a secret, and a session token, and from that moment the attacker acts as your instance role from anywhere on the internet.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant A as Attacker
+  participant W as Webhook worker in your VPC
+  participant M as Metadata service at 169.254.169.254
+  participant S as Object storage
+  Note over A,S: The original request-response metadata service
+  A->>W: submit a callback URL pointing at the link-local address
+  W->>M: GET /latest/meta-data/iam/security-credentials/
+  M-->>W: the instance role name
+  W->>M: GET the credentials for that role
+  M-->>W: access key, secret key, session token
+  W-->>A: the fetch result is echoed back in the response body
+  A->>S: list and read buckets as the instance role
+  Note over A,S: The same attack against IMDSv2
+  A->>W: submit the same callback URL
+  W->>M: GET without a session token
+  M-->>W: 401 Unauthorized
+  W-->>A: fetch failed, nothing disclosed
+  </div><figcaption>SSRF turns your server into a proxy that already sits inside the trust boundary. <b>The vulnerability is one unvalidated URL, but the impact is decided entirely by what the server can reach from where it stands.</b> A metadata service that answers an unauthenticated GET converts a webhook bug into stolen cloud credentials.</figcaption></figure>
+
+  <p>This is precisely why IMDSv2 exists, and its design is a case study in making an attack shape structurally impossible rather than filtering for it. Retrieving metadata now requires a session: a PUT request to <span class="code-cap">/latest/api/token</span> carrying an <span class="code-cap">X-aws-ec2-metadata-token-ttl-seconds</span> header returns a token, and every subsequent GET must carry that token in <span class="code-cap">X-aws-ec2-metadata-token</span> or receive a 401. Each of those requirements defeats a different bypass. Most SSRF primitives can only issue a GET, and AWS notes that a PUT is a request type that open web application firewalls very rarely support. The token is instance-specific and rejected elsewhere. Responses to the PUT are sent with an IP time-to-live of 1 by default, so the token cannot traverse a single network hop, which stops a compromised instance acting as a router and stops a container from reaching it unless you deliberately raise the hop limit. And PUT requests carrying an <span class="code-cap">X-Forwarded-For</span> header are rejected outright, which is what an open reverse proxy would add. AWS's own framing is that this is strictly more effective than requiring a static header, and that it protects against the vast majority of SSRF vulnerabilities.</p>
+  <p>The application-side controls are the same shape as everywhere else in this chapter: prefer an allow-list of permitted destinations over a deny-list of blocked ones, because deny-lists are bypassable through decimal, hex, octal, and mixed encodings of the same address. Disable redirect following, because a permitted host can redirect you to a forbidden one after validation has already passed. Beware DNS rebinding, a time-of-check to time-of-use attack where the name resolves to a public address when you validate and to a private one when you connect. And segment the network so that the fetching workload has outbound access only to what it genuinely needs.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">An image-fetch worker accepts a URL. What makes reaching 169.254.169.254 dangerous, and what does IMDSv2 change?</div>
+    <button class="q-opt">Credentials are served there; version two demands a PUT-obtained token per session</button>
+    <button class="q-opt">Bandwidth is metered there; version two demands a signed outbound request header</button>
+    <button class="q-opt">Credentials are served there; version two demands a longer network allow-list entry</button>
+    <button class="q-opt">Bandwidth is metered there; version two demands an encrypted transport channel instead</button>
+    <div class="q-fb">The link-local metadata service hands out the instance role's credentials, and IMDSv2 requires a PUT to obtain a session token that every later GET must carry, which most SSRF primitives cannot perform. The two "bandwidth is metered" options misidentify the asset entirely: the danger is credential disclosure, not cost, and neither a signed header nor an encrypted channel addresses an attacker who is making the request through your own server, which would sign and encrypt it for them. The third option names the right asset but the wrong remedy: an allow-list is an application-side control you should also have, whereas IMDSv2's protection is the session token plus a default IP hop limit of one, enforced by the metadata service itself.</div>
+  </div>
+
+  <p><b>At 100 requests per second</b> an allow-list of permitted hosts and disabled redirects handles most of it, and if you have no user-supplied URLs at all you have no SSRF surface. <b>At 1,000 requests per second</b> user-supplied URLs are usually an actual product feature, webhooks or imports, so validation moves into a shared library and the fetch moves to a dedicated worker pool whose egress rules differ from the rest of the fleet. <b>At 10,000 requests per second</b> the correct architecture is a separate egress proxy in its own network segment with no instance role worth stealing, so the outbound fetch is performed by something that has nothing to give away even if it is fully compromised. The trade-off is an extra hop, an extra service, and legitimate destinations that your allow-list will wrongly refuse. The failure mode is the partial fix: blocking <span class="code-cap">169.254.169.254</span> as a literal string while a redirect, a DNS name resolving to it, or an alternative encoding walks straight past.</p>
+  <p><em>Source: <a href="https://cheatsheetseries.owasp.org/cheatsheets/Server_Side_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP Server Side Request Forgery Prevention Cheat Sheet</a>, <a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/configuring-instance-metadata-service.html">AWS instance metadata service documentation</a>, and <a href="https://aws.amazon.com/blogs/security/defense-in-depth-open-firewalls-reverse-proxies-ssrf-vulnerabilities-ec2-instance-metadata-service/">AWS on the defence-in-depth design of IMDSv2</a>.</em></p>
+
+  <h2>7. Scale drill: a checkout API from 100 to 10,000 requests per second</h2>
+
+  <p>Take one system and walk it across the tiers. The system is a card-payment checkout API: a browser-based checkout page on merchant domains, a mobile application, a server-side settlement path, and a webhook delivery service that posts events to merchant-supplied URLs.</p>
+
+  <p><b>At 100 requests per second</b> almost everything is a default. Secrets live in a managed store and are injected at deploy, rotated quarterly by a runbook. A handful of hand-written IAM roles cover the services. Access tokens are long enough that revocation latency never comes up, and a revocation check on every request costs nothing at this volume. TLS terminates at a managed load balancer, HSTS is on, and the database connection is encrypted. Storage encryption is the provider default with a service-managed key. CORS lists the two merchant origins you have. The framework's CSRF protection is enabled and untouched. Queries are parameterised because the object-relational mapper does it. The webhook sender has an allow-list of merchant hosts and does not follow redirects. The dominant risk at this tier is not attack volume, it is a single unreviewed piece of glue code.</p>
+
+  <p><b>At 1,000 requests per second</b> the manual paths break first. Quarterly rotation by runbook now spans enough instances that a rotation without an overlap window is an outage, so rotation becomes automated and dual-valid. Revocation checks against a central store start showing in p99 latency, so they become a cache with an explicit TTL, and the revocation window becomes a number in the design doc rather than an assumption. Connection reuse and TLS session resumption start mattering to tail latency, and a client library opening a fresh connection per request becomes visible. Customer-managed keys become worth the operational cost because the audit trail and independent revocation are what actually contain a compromised account. Preflight requests from the checkout page double your request count until <span class="code-cap">Access-Control-Max-Age</span> is set. The webhook sender moves to its own worker pool with its own egress rules.</p>
+
+  <p><b>At 10,000 requests per second</b> the coupling decisions dominate. Token validation must be local, so access tokens become short-lived with rotating refresh tokens behind them, and the revocation list is reserved for administrators rather than applied to every session. Static database passwords give way to dynamic per-session credentials with leases in minutes. Authorisation decisions get cached, and cache invalidation becomes a security-relevant design question rather than a performance one. TLS terminates at a dedicated edge tier with shared ticket keys so resumption works across servers, and 0-RTT is enabled per endpoint only where the method is idempotent. Envelope data keys are cached unwrapped in memory for a bounded time, and you accept that the cache holds plaintext keys. CORS headers are produced at the edge from one maintained allow-list. Injection defences become mechanical: CI fails on string-built SQL, CSP is enforced with per-response nonces, and outbound fetches go through an egress proxy that holds no credentials worth stealing. Latency budgeting for these controls belongs with the rest of your budget work, which the <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a> discussion develops, and the client-side half of the same argument appears in <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">time to first token and inter-token latency</a>.</p>
+
+  <div class="callout warn"><b>The pattern across all three tiers.</b> Nothing in that walk is a new security control appearing at 10,000 requests per second. Every single change is the same control being moved off a synchronous path, given an explicit numeric budget, or made mechanical so a human cannot forget it. Scale does not introduce new threats. It removes your ability to handle the existing ones manually.</div>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is asking, of any input, "what will eventually interpret this?" Pick a feature you already own that takes a string from a user, and trace it all the way to every interpreter it reaches: a query planner, an HTML parser, a shell, a template engine, an HTTP client, a log aggregator that renders fields as markup. Then say for each one which channel keeps the data separate from the instructions. Bring me the trace and I will push on the hop you left out, because there is almost always one. Ask me to check your token-lifetime arithmetic too, and to argue the other side of it.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://www.rfc-editor.org/rfc/rfc9700">RFC 9700, the OAuth 2.0 Security Best Current Practice (BCP 240)</a>. It is the rare specification that documents what a decade of real attacks taught the people maintaining the protocol, and it explains why each recommendation exists rather than only stating it. Pair it with the <a href="https://fetch.spec.whatwg.org/">Fetch Standard's CORS protocol</a> if you want to permanently fix your mental model of what the browser does and does not enforce, and with <a href="https://www.rfc-editor.org/rfc/rfc8446">RFC 8446</a> section 8 for the clearest available statement of what 0-RTT costs you.</p>
+
+  <div class="pager">
+    <a href="0009-observability-and-operations.html"><span class="dir">&larr; Previous</span><span class="ttl">Observability and Operations</span></a>
+    <a class="nxt" href="../reference/glossary.html"><span class="dir">Next &rarr;</span><span class="ttl">Glossary</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 11 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

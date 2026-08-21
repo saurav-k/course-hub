@@ -1,0 +1,461 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 06: Distributing Data - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 06 &middot; Distributing Data</div>
+  <h1>Distributing Data</h1>
+  <p class="paper-meta">
+    <span class="pill">9 topics</span>
+    What changes the moment your data no longer fits on one machine, or in one region.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Splitting</b> data buys write throughput and costs you joins, transactions, and the freedom to change your mind about the key later.</li>
+      <li><b>Copying</b> data buys read throughput and survival, and costs you a window during which two replicas disagree. Quorum arithmetic is how you price that window.</li>
+      <li><b>CAP is about partitions only.</b> It says nothing about how your system behaves on a normal day, and the popular "pick two of three" reading is wrong. Brewer said so himself.</li>
+      <li><b>Distance is a physical cost.</b> Speed of light in fibre sets a floor under every cross-region write, and no amount of engineering moves it.</li>
+    </ul>
+  </div>
+
+  <h2>1. What actually changes</h2>
+
+  <p>Every chapter before this one assumed a single authoritative copy of the data. Once you delete that assumption, three new questions appear and they never go away. Where does a given row live? How many copies of it exist? And what does a reader see while those copies disagree? Almost every distributed data design is an answer to those three questions, and almost every distributed data outage is one of those answers being wrong under load.</p>
+
+  <p>The vocabulary is worth pinning down before we start, because it is used loosely in practice. <b>Partitioning</b> is splitting one logical dataset into disjoint parts. <b>Sharding</b> is partitioning across independent machines so that each machine owns a subset. <b>Replication</b> is keeping more than one copy of the same part. The two axes are independent: you can partition without replicating, replicate without partitioning, or do both, which is what any system above a few thousand requests per second ends up doing.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  subgraph one["Single node"]
+    A["All rows<br/>one primary"]
+  end
+  subgraph part["Partitioned only"]
+    B1["Shard 1<br/>keys a-h"]
+    B2["Shard 2<br/>keys i-p"]
+    B3["Shard 3<br/>keys q-z"]
+  end
+  subgraph both["Partitioned and replicated"]
+    C1["Shard 1 leader"] --> C1a["follower"]
+    C1 --> C1b["follower"]
+    C2["Shard 2 leader"] --> C2a["follower"]
+    C2 --> C2b["follower"]
+  end
+  one -->|"write rate exceeds<br/>one primary"| part
+  part -->|"a node loss must not<br/>lose the data"| both
+  </div><figcaption>The two axes of distributing data are independent and are driven by different pressures. <b>You partition because writes outgrew one machine, and you replicate because losing one machine must not lose the data.</b> Systems reach for them in that order and for those reasons, so if you cannot name which pressure you are under, you are not ready to add either.</figcaption></figure>
+
+  <h2>2. Splitting the data</h2>
+
+  <h3 id="sharding">Sharding</h3>
+
+  <p>Sharding splits one dataset horizontally across independent machines, each of which owns a disjoint subset of the rows. The mechanism has three moving pieces. A <b>shard key</b> is the field or fields that decide placement. A routing function maps that key to a range or a hash bucket, and then to the machine currently holding it. A background process rebalances those ranges as machines are added or removed. MongoDB's documentation states the mechanism plainly: "MongoDB uses the shard key to distribute the collection's documents across shards", data is partitioned "into chunks" where "each chunk has an inclusive lower and exclusive upper range based on the shard key", and "a balancer runs in the background to migrate ranges across the shards". <em>Source: <a href="https://www.mongodb.com/docs/manual/sharding/">MongoDB Manual, Sharding</a>.</em></p>
+
+  <p>The choice between ranged and hashed sharding is the choice you will be asked about. Ranged sharding keeps neighbouring keys together, so "a mongos can route the operations to only the shards that contain the required data", but "poorly considered shard keys can result in uneven distribution of data". Hashed sharding spreads monotonically increasing keys evenly, at the documented cost that "range-based queries on the shard key are less likely to target a single shard, resulting in more cluster-wide broadcast operations". Timestamps and auto-increment identifiers are the classic trap: under ranged sharding every new row lands on the last shard, so you have bought a distributed system and are still writing to one machine.</p>
+
+  <p><b>A named example.</b> Google's advertising backend, F1, ran on a MySQL database that was "manually sharded many ways". The Spanner paper is unusually candid about what that cost: "Resharding this revenue-critical database as it grew in the number of customers and their data was extremely costly. The last resharding took over two years of intense effort, and involved coordination and testing across dozens of teams to minimize risk. This operation was too complex to do regularly." Without sharding the dataset would not have fit; with manual sharding, the team ended up limiting growth on the database and pushing data into external stores, "which compromised transactional behavior and the ability to query across all data". That is the real failure mode of a bad shard key. It is not a page at three in the morning, it is an architecture that cannot grow. <em>Source: <a href="https://static.googleusercontent.com/media/research.google.com/en//archive/spanner-osdi2012.pdf">"Spanner: Google's Globally-Distributed Database" (Corbett et al., OSDI 2012)</a>.</em></p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, do not shard. One primary with a standby handles this comfortably, and every cross-shard problem you would import is pure cost with no benefit. At <b>1,000 requests per second</b>, sharding is still usually the wrong answer, but this is the tier where you must <em>choose the key you would shard on</em> and stop writing queries that would be impossible under it. Concretely: stop relying on cross-entity joins and multi-row transactions that span customers. At <b>10,000 requests per second</b> with a write-heavy mix, sharding is mandatory, because sustained write throughput is the one thing a read replica cannot help with. The decision that actually matters was made two tiers earlier.</p>
+
+  <p>The arithmetic is simple and worth doing out loud, because it tells you how many shards to provision.</p>
+
+  <div class="math">
+    per-shard load = total request rate / shard count
+    <span class="gloss">Divide the whole system's requests per second by the number of shards to get what one shard must serve, assuming keys are spread evenly.</span>
+  </div>
+
+  <p>Take a 16-shard cluster. At 100 requests per second each shard sees 6.25, which is a rounding error and proof the cluster should not exist. At 1,000 requests per second each shard sees 62.5. At 10,000 requests per second each shard sees 625, which is real work but comfortable for a single node. That last line is the whole argument for sharding: 10,000 writes per second is hard, and 625 writes per second sixteen times over is routine. The catch is the phrase "assuming keys are spread evenly", and they never are.</p>
+
+  <p><b>The trade-off and the failure mode.</b> You give up cheap joins, multi-shard transactions, and global secondary indexes, and you gain a rebalancing process that is, in MongoDB's own words, "slow and resource intensive". The dominant failure mode is the hot shard: one shard saturates while fifteen sit idle, and because your dashboards average across the fleet, the cluster looks half-loaded while users see timeouts. Always alert on per-shard maxima, never on fleet means.</p>
+
+  <div class="callout warn"><span class="tag">The hot shard, with numbers</span> Suppose 5 percent of keys carry 60 percent of traffic, and the hot keys happen to hash into one of 20 shards. At 10,000 requests per second the hot shard serves 0.60 &times; 10,000 = 6,000 requests per second from the hot keys, plus its even share of the remaining 4,000, which is 4,000 / 20 = 200, for 6,200 in total. The other nineteen shards average 200 each. The hot shard is carrying 31 times its neighbour and 12.4 times the fleet mean of 500. Now apply a real published ceiling: AWS documents that "every partition in a DynamoDB table is designed to deliver a maximum capacity of 3,000 read units per second and 1,000 write units per second". At 6,200 requests per second that partition is over the read ceiling by a factor of two before you have written a line of application code. <em>Source: <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-partition-key-design.html">AWS, Best practices for designing and using partition keys in DynamoDB</a>.</em></div>
+
+  <p>Resharding cost is the other number nobody computes until they need it. Assume 16 shards holding 4 TB each, doubling to 32, so half of every shard moves: 2 TB per shard, 32 TB in total. Assume a migration budget of 200 MB per second, deliberately throttled so the copy does not starve live traffic. Then 2 TB / 200 MB per second = 10,000 seconds, about 2.8 hours per shard, and 16 shards run sequentially in roughly 44 hours. With four migrations in flight, about 11 hours. Those are stated assumptions, not measurements, but the shape holds: resharding is measured in hours or days at best, and the F1 experience shows what it looks like when the key was wrong and the migration is manual.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  R["Incoming write<br/>key = user_id"] --> H{"Routing function"}
+  H -->|"ranged: user_id"| RA["Shard A<br/>ids 1 to 1M"]
+  H -->|"ranged: user_id"| RB["Shard B<br/>ids 1M to 2M"]
+  H -->|"ranged: user_id"| RC["Shard C<br/>ids 2M and up<br/>ALL NEW USERS"]
+  H -->|"hashed: user_id"| HA["Shard A<br/>hash bucket 0"]
+  H -->|"hashed: user_id"| HB["Shard B<br/>hash bucket 1"]
+  H -->|"hashed: user_id"| HC["Shard C<br/>hash bucket 2"]
+  RC -.->|"every new signup<br/>lands here"| HOT["Hot shard"]
+  HA -.->|"range scan must<br/>ask every shard"| FAN["Scatter and gather"]
+  HB -.-> FAN
+  HC -.-> FAN
+  </div><figcaption>The same key routed two ways produces two different failure modes. <b>Ranged sharding on a monotonic key concentrates all new writes on the last shard, while hashed sharding spreads writes evenly but turns every range query into a broadcast.</b> There is no third option that avoids both, which is why the shard key is an architecture decision rather than a configuration value.</figcaption></figure>
+
+  <h3 id="partitioning">Partitioning</h3>
+
+  <p>Partitioning is the same split without the requirement that the parts live on different machines. A partitioned table is one logical table made of many physical tables chosen by a key; the query planner then skips the ones that cannot contain matching rows. PostgreSQL supports three forms and defines them precisely: <b>range</b> partitioning, where "the table is partitioned into ranges defined by a key column or set of columns, with no overlap between the ranges"; <b>list</b> partitioning, "by explicitly listing which key value(s) appear in each partition"; and <b>hash</b> partitioning, "by specifying a modulus and a remainder for each partition". The payoff mechanism is <b>partition pruning</b>, where "the planner will examine the definition of each partition and prove that the partition need not be scanned because it could not contain any rows meeting the query's WHERE clause". <em>Source: <a href="https://www.postgresql.org/docs/current/ddl-partitioning.html">PostgreSQL Documentation, Table Partitioning</a>.</em></p>
+
+  <p>The under-appreciated benefit is not query speed, it is lifecycle. PostgreSQL notes that "dropping an individual partition using DROP TABLE, or doing ALTER TABLE DETACH PARTITION, is far faster than a bulk operation" and that these "entirely avoid the VACUUM overhead caused by a bulk DELETE". Retention on a large event table stops being a nightly job that fights the write path and becomes a metadata operation.</p>
+
+  <p><b>A named example.</b> Apache Kafka, in streaming and event pipelines, partitions every topic and makes the consequences explicit: "Events with the same event key (e.g., a customer or vehicle ID) are written to the same partition", and "Kafka guarantees that any consumer of a given topic-partition will always read that partition's events in exactly the same order as they were written". The critical reading is what is <em>not</em> guaranteed. Ordering is per partition, never per topic. A ride-hailing platform that keys trip events by trip identifier gets correct per-trip ordering for free; the same platform keying by event type gets a topic where a trip's "completed" event can be consumed before its "started" event. Without partition-aware keying, the consumer sees a physically impossible history. <em>Source: <a href="https://kafka.apache.org/intro">Apache Kafka Introduction</a>.</em></p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, partition only for retention, if at all. A monthly range partition so you can drop a month instantly is worth it; anything more is premature. At <b>1,000 requests per second</b> partitioning starts paying for itself on the read path, because pruning turns a full scan of a year into a scan of a day. PostgreSQL gives a useful rule of thumb for when the table is big enough to care: "the size of the table should exceed the physical memory of the database server". At <b>10,000 requests per second</b> partition count becomes its own cost. The planner "is generally able to handle partition hierarchies with up to a few thousand partitions fairly well, provided that typical queries allow the query planner to prune all but a small number of partitions", and beyond that "planning times become longer and memory consumption becomes higher".</p>
+
+  <div class="math">
+    partitions retained = retention window / partition granularity
+    <span class="gloss">The number of live partitions equals how long you keep data divided by how much time each partition covers.</span>
+  </div>
+
+  <p>Two years of daily partitions is 730 partitions, safely inside PostgreSQL's stated comfort zone. Two years of hourly partitions is 17,520, well outside it, and the planning cost is paid by every query whether or not it prunes. Five years of hourly partitions is 43,800 and the planner becomes the bottleneck rather than the disk. Choose granularity from the retention window, not from the ingest rate.</p>
+
+  <p><b>The trade-off and the failure mode.</b> The sharp edge is uniqueness. PostgreSQL requires that for a unique or primary key constraint on a partitioned table, "the constraint's columns must include all of the partition key columns", because "the individual indexes making up the constraint can only directly enforce uniqueness within their own partitions". A team that partitions an orders table by month and expects a globally unique order reference has quietly lost that guarantee. The failure mode is delayed and ugly: nothing breaks at deploy time, and duplicates appear months later at a partition boundary.</p>
+
+  <h2>3. Copying the data</h2>
+
+  <h3 id="replication">Replication</h3>
+
+  <p>Replication keeps more than one copy of the same data so that a machine loss is not a data loss. Three mechanisms dominate. <b>Leader-based replication</b> streams a change log from one writable node to followers. <b>Consensus replication</b> commits a write once a majority of nodes have durably accepted it. <b>Leaderless quorum replication</b> writes to several nodes at once and reads from several, sizing the two sets so they must overlap.</p>
+
+  <p>PostgreSQL is the clearest first-party description of the leader-based form: "The standby connects to the primary, which streams WAL records to the standby as they're generated, without waiting for the WAL file to be filled." It is "asynchronous by default", with a delay "typically under one second assuming the standby is powerful enough to keep up with the load". The documentation is equally clear about the price of that default: "If the primary server crashes then some transactions that were committed may not have been replicated to the standby server, causing data loss. The amount of data loss is proportional to the replication delay at the time of failover." <em>Source: <a href="https://www.postgresql.org/docs/current/warm-standby.html">PostgreSQL Documentation, Log-Shipping Standby Servers</a>.</em></p>
+
+  <p>Turning that off has a stated cost too, and it is a physical one: "The minimum wait time is the round-trip time between primary and standby." PostgreSQL also warns about the second-order effect that catches teams out: "transaction locks continue to be held until the transfer is confirmed", so synchronous replication does not merely slow the committing transaction, it raises contention for everything queued behind its locks.</p>
+
+  <p>Consensus replication replaces "the leader says so" with "a majority says so". Raft's rule is that a leader "is elected leader if it receives votes from a majority of the servers in the full cluster", and an entry is committed once replicated on a majority, which is why "a cluster of five servers can tolerate the failure of two servers". <em>Source: <a href="https://raft.github.io/raft.pdf">"In Search of an Understandable Consensus Algorithm" (Ongaro and Ousterhout)</a>.</em></p>
+
+  <p>The leaderless form is Dynamo's, and it is the one with the arithmetic. Dynamo defines N as the number of replicas, "R is the minimum number of nodes that must participate in a successful read operation" and "W is the minimum number of nodes that must participate in a successful write operation", and states the rule directly: "Setting R and W such that R + W &gt; N yields a quorum-like system." <em>Source: <a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf">"Dynamo: Amazon's Highly Available Key-value Store" (DeCandia et al., SOSP 2007)</a>.</em></p>
+
+  <div class="math">
+    R + W &gt; N
+    <span class="gloss">The number of replicas a read must reach, plus the number a write must reach, must be greater than the total number of replicas. That forces the read set and the write set to share at least one node, so a read cannot miss the latest committed write.</span>
+  </div>
+
+  <p>Work it through. With N = 3, R = 2 and W = 2, R + W = 4 &gt; 3, and any read set of two overlaps any write set of two by at least one node. Dynamo reports that "the common (N,R,W) configuration used by several instances of Dynamo is (3,2,2)". Now vary it. R = 1 and W = 3 gives fast reads and writes that fail the moment any replica is down. R = 3 and W = 1 gives the mirror image: writes always succeed, reads stall on the slowest replica and fail if any replica is unavailable. With N = 5 and W = 3, the smallest safe R is 3, because 2 + 3 = 5 which is not greater than 5. That single "not greater than" is where most people get the arithmetic wrong.</p>
+
+  <p>Latency follows from the same numbers. Dynamo states that "the latency of a get (or put) operation is dictated by the slowest of the R (or W) replicas". So W = 2 of N = 3 waits for the second-fastest of three, which is far better than waiting for the slowest, and that is precisely why "R and W are usually configured to be less than N, to provide better latency".</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant Co as Coordinator
+  participant R1 as Replica 1
+  participant R2 as Replica 2
+  participant R3 as Replica 3
+  Note over C,R3: N = 3, W = 2, R = 2, so R + W = 4 which is greater than 3
+  C->>Co: put(key, v2)
+  Co->>R1: write v2
+  Co->>R2: write v2
+  Co->>R3: write v2
+  R1-->>Co: ack
+  R2-->>Co: ack
+  Note over Co: W = 2 acks reached, commit returns now
+  Co-->>C: write ok
+  R3--xCo: slow or unreachable, still holds v1
+  C->>Co: get(key)
+  Co->>R2: read
+  Co->>R3: read
+  R2-->>Co: v2
+  R3-->>Co: v1 (stale)
+  Note over Co: read set touched R2, which is in the write set
+  Co-->>C: v2 wins by version
+  </div><figcaption>A quorum write returns as soon as W replicas acknowledge, leaving the remaining replicas behind, and the read quorum is sized so it must touch at least one replica that saw the write. <b>Overlap, not speed, is what makes the read correct: the third replica is still stale and the answer is still right.</b> Lower W below the overlap point and this diagram silently becomes a stale read.</figcaption></figure>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">You run five replicas with W set to three, and a read must never miss a committed write. What is the smallest usable R?</div>
+    <button class="q-opt">One replica, because each replica holds every committed write</button>
+    <button class="q-opt">Three replicas, because three plus three exceeds five replicas</button>
+    <button class="q-opt">Two replicas, because reads should equal half the write quorum</button>
+    <button class="q-opt">Five replicas, because only complete read sets are ever safe</button>
+    <div class="q-fb">R + W must be strictly greater than N, so R = 3 gives 3 + 3 = 6 &gt; 5. One replica is wrong because a write of three out of five leaves two replicas stale, and a single-replica read can land on one of them. Two replicas is the trap: 2 + 3 = 5 is equal to N, not greater, so the read set and write set can be disjoint. Five replicas is arithmetically safe but needlessly strict, and Dynamo notes the operation is then dictated by the slowest replica, so you have paid tail latency for nothing.</div>
+  </div>
+
+  <p><b>A named example.</b> An e-commerce order database on PostgreSQL with one asynchronous standby is the default shape of the mid-size internet. It survives a node loss, and it loses the transactions that had not shipped yet, "proportional to the replication delay at the time of failover". Teams that need the money path to be safe and the browsing path to be fast use PostgreSQL's per-transaction control, which the documentation illustrates directly: "10% of changes are important customer details, while 90% of changes are less important data that the business can more easily survive if it is lost, such as chat messages between users."</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, one asynchronous standby is the whole design, and it exists for durability rather than throughput. At <b>1,000 requests per second</b> read replicas start carrying real traffic, and the instant they do, replication lag stops being an operational metric and becomes a correctness property of your application. At <b>10,000 requests per second</b> you have a replica set per shard, and you are choosing synchronous commit per transaction class rather than per cluster, because paying a network round trip on all 10,000 writes per second is a different business than paying it on the 300 that move money.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Synchronous replication trades latency and lock contention for a bounded recovery point; asynchronous trades a bounded recovery point for latency. The failure mode people forget is that a replica faithfully replicates a mistake. A dropped table, a bad migration, or a malicious delete arrives at every replica in milliseconds. Replication protects against machine loss, never against data loss caused by the writer.</p>
+
+  <div class="callout key"><span class="tag">Say this out loud once</span> Replication is not backup. A replica is a copy of your current state, including your current corruption. A backup is a copy of a past state that the writer can no longer reach. You need both, and the disaster recovery section below is where the second one gets priced.</div>
+
+  <h2>4. What the network does to you</h2>
+
+  <h3 id="cap-theorem">CAP Theorem</h3>
+
+  <p>This is the most misquoted result in the field, so start with what was actually proved. Gilbert and Lynch formalised Brewer's conjecture and proved it. Their consistency is atomic, or linearizable, consistency: "there must exist a total order on all operations such that each operation looks as if it were completed at a single instant". Their availability is strong: "every request received by a non-failing node in the system must result in a response". Their partition tolerance is modelled by allowing the network "to lose arbitrarily many messages sent from one node to another". Theorem 1 then states that it is impossible "in the asynchronous network model to implement a read/write data object that guarantees" both availability and atomic consistency "in all fair executions, including those in which messages are lost", and Theorem 2 extends the same impossibility to the partially synchronous model where clocks and bounded delays exist. <em>Source: <a href="https://www.comp.nus.edu.sg/~gilbert/pubs/BrewersConjecture-SigAct.pdf">"Brewer's Conjecture and the Feasibility of Consistent, Available, Partition-Tolerant Web Services" (Gilbert and Lynch, 2002)</a>.</em></p>
+
+  <p>Now the correction, and it is the single highest-value one in this course. The theorem constrains behaviour <b>during a partition and only during a partition</b>. It says nothing whatsoever about how a system behaves when the network is healthy. Brewer wrote a follow-up making this explicit: "The '2 of 3' formulation was always misleading because it tended to oversimplify the tensions among properties", and "CAP prohibits only a tiny part of the design space: perfect availability and consistency in the presence of partitions, which are rare". His conclusion follows directly: "because partitions are rare, there is little reason to forfeit C or A when the system is not partitioned". <em>Source: <a href="https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/">"CAP Twelve Years Later: How the 'Rules' Have Changed" (Eric Brewer, IEEE Computer, 2012)</a>.</em></p>
+
+  <p>So "we are an AP system" is not a description of your architecture. It is a description of one branch of one conditional, taken during an event that may occur for a few minutes a year. A well-run system is consistent <em>and</em> available almost all the time, and CAP only tells you which of the two it abandons in the minutes when it cannot be both.</p>
+
+  <p>The second correction is where the choice physically happens. Brewer locates it in the timeout: "Operationally, the essence of CAP takes place during a timeout, a period when the program must make a fundamental decision - the partition decision." Gilbert and Lynch explain why the timeout is unavoidable rather than lazy engineering: in the asynchronous model "an algorithm has no way of determining whether a message has been lost, or has been arbitrarily delayed in the transmission channel". Your node is not choosing between consistency and availability in the abstract. It is sitting on an unanswered request, unable to tell a dead peer from a slow one, and it must either answer with possibly stale data or refuse to answer.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  START["Healthy cluster<br/>5 replicas, all reachable"] --> CUT{"Link fails between<br/>racks"}
+  CUT --> MAJ["Majority side<br/>3 replicas"]
+  CUT --> MIN["Minority side<br/>2 replicas"]
+  MAJ --> CP1["CP choice:<br/>keep serving writes<br/>quorum still reachable"]
+  MIN --> CP2["CP choice:<br/>refuse writes<br/>return an error"]
+  MAJ --> AP1["AP choice:<br/>accept writes locally"]
+  MIN --> AP2["AP choice:<br/>accept writes locally"]
+  CP2 --> CPOUT["Result: no divergence,<br/>some users see failures"]
+  AP1 --> APOUT["Result: two histories,<br/>everyone gets a response"]
+  AP2 --> APOUT
+  APOUT --> HEAL["On heal: detect conflicts,<br/>merge, compensate"]
+  CPOUT --> HEAL2["On heal: minority catches up,<br/>nothing to merge"]
+  </div><figcaption>A single link failure splits five replicas into a majority of three and a minority of two, and the design must have already decided what each side does. <b>The consistency-preserving choice makes the minority side refuse writes, while the availability-preserving choice lets both sides accept writes and pays for it with a merge and a compensation step after the heal.</b> Note that neither branch exists on a healthy day, which is exactly why CAP describes so little of your system's actual behaviour.</figcaption></figure>
+
+  <p><b>A named example.</b> Two publicly documented systems sit on opposite branches. Amazon's Dynamo targets "an 'always writeable' data store", because for the shopping cart "rejecting customer updates could result in a poor customer experience", and it pushes conflict resolution to read time. Google's Spanner takes the other branch for the advertising backend F1: it replicates through Paxos state machines, so the minority side of a partition simply cannot commit. Same year, same industry maturity, opposite answers, both correct for their workload.</p>
+
+  <p><b>The three scale tiers.</b> CAP itself is not a function of request rate, but your exposure to it is. At <b>100 requests per second</b> in a single availability zone, the honest answer is that a partition is an outage: you page a human and eat a few minutes of downtime. At <b>1,000 requests per second</b> across three availability zones, partitions become frequent enough that failure-detector tuning is a real workstream, and the partition branch needs to be written down and tested rather than discovered. At <b>10,000 requests per second</b> across regions, you need Brewer's full three-step protocol as a designed feature: "detect partitions, enter explicit partition mode limiting operations, then initiate recovery to restore consistency and compensate for mistakes made during unavailability."</p>
+
+  <p>Here is what a partition costs at each tier, using a published failure rate rather than an invented one. The Microsoft data-centre study reports "an average failure rate of 5.2 devices per day and 40.8 links per day, with a median time to repair of approximately five minutes".</p>
+
+  <div class="math">
+    affected requests = request rate &times; fraction of keys isolated &times; partition duration
+    <span class="gloss">Multiply how many requests per second you serve, by the share of your data cut off, by how many seconds the cut lasts.</span>
+  </div>
+
+  <p>Assume one link failure isolates one shard of twenty for the median five minutes, which is 300 seconds. At 100 requests per second: 100 &times; 0.05 &times; 300 = 1,500 affected requests. At 1,000: 15,000. At 10,000: 150,000 affected requests from a single median-length link failure. At the low tier that is an apology; at the high tier it is an incident report, and it is the reason the partition branch has to be designed rather than improvised.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">An architect says "we chose AP, so our system gave up consistency". What is the precise correction?</div>
+    <button class="q-opt">The choice binds only during an active partition, and never otherwise</button>
+    <button class="q-opt">The choice binds each request the system serves, partitioned or not</button>
+    <button class="q-opt">The theorem forbids all three of the properties ever holding together</button>
+    <button class="q-opt">The theorem applies to latency budgets rather than to lost messages</button>
+    <div class="q-fb">Gilbert and Lynch prove impossibility only for executions "in which messages are lost", and Brewer states directly that the two-of-three framing "was always misleading" and that "because partitions are rare, there is little reason to forfeit C or A when the system is not partitioned". The second option is the popular misreading: a healthy AP system can and should be linearizable. The third option inverts the theorem, which forbids one specific combination during partitions rather than all three in general. The fourth confuses CAP with the separate and real observation that latency and consistency trade off even without partitions, which is a different argument and not what CAP proves.</div>
+  </div>
+
+  <h3 id="eventual-consistency">Eventual Consistency</h3>
+
+  <p>Eventual consistency is the availability branch of the diagram above, given a name and a set of guarantees. Werner Vogels defines it as a storage system that "guarantees that if no new updates are made to the object eventually (after the inconsistency window closes) all accesses will return the last updated value", and defines the <b>inconsistency window</b> as "the period between the update and the moment when it is guaranteed that any observer will always see the updated value". <em>Source: <a href="https://www.allthingsdistributed.com/2007/12/eventually_consistent.html">"Eventually Consistent" (Werner Vogels, 2007)</a>.</em></p>
+
+  <p>The important part is the family of client-side guarantees that sit above it, because these are the ones you actually build against. <b>Read-your-writes consistency</b> means a process "always accesses the updated value and never will see an older value" after its own update. <b>Monotonic read consistency</b> means "if a process has seen a particular value for the object any subsequent accesses will never return any previous values". <b>Session consistency</b> gives read-your-writes within one session. <b>Causal consistency</b> means "if process A has communicated to process B that it has updated a data item, a subsequent access by process B will return the updated value". Almost every "eventual consistency broke our product" story is really a missing session guarantee, not a missing global one.</p>
+
+  <p><b>A named example.</b> The Dynamo shopping cart, in e-commerce. The requirement is stated in the paper as a product rule: "the shopping cart application requires that an 'Add to Cart' operation can never be forgotten or rejected", and "if the most recent state of the cart is unavailable, and a user makes changes to an older version of the cart, that change is still meaningful and should be preserved". Divergent versions are tracked with vector clocks, "a list of (node, counter) pairs", and reconciled later. What breaks without it is precise: during a partition, add-to-cart returns an error, and an e-commerce site that cannot accept an add-to-cart is a site that is not selling. Note also the honest cost of the design, which the paper does not hide: cart deletes can be resurrected by a merge, because a merge that unions two carts cannot distinguish "never added" from "added then removed".</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, all reads go to the primary and eventual consistency is a non-issue you should not import. At <b>1,000 requests per second</b>, you start serving reads from replicas, and this is the tier where read-your-writes breaks in production for the first time: a user saves a profile, is routed to a lagging replica, sees the old value, and files a bug that the team cannot reproduce. The fix is a session guarantee, usually sticky routing or a write token carried by the client. At <b>10,000 requests per second</b> across regions, you additionally need a written conflict-resolution policy, because concurrent writes to the same key from two regions are no longer hypothetical.</p>
+
+  <div class="math">
+    bad reads per second = read rate &times; share of reads following own write &times; probability lag exceeds that gap
+    <span class="gloss">Multiply your reads per second, by the share of them that closely follow the same user's own write, by how often replication lag is longer than that gap.</span>
+  </div>
+
+  <p>Work it: 10,000 requests per second, of which 30 percent are reads issued within one second of that same user's write, so 3,000 per second are exposed. If replication lag exceeds one second for 1 percent of the time, that is 3,000 &times; 0.01 = 30 wrong answers per second, which is 108,000 per hour. Those are assumed inputs, but they are the inputs you can actually measure: read mix, follow-up gap, and the lag distribution. The lesson is that a lag figure quoted as a mean is useless here. Only the tail matters, because the tail is when the bad reads happen.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant LB as Router
+  participant P as Primary
+  participant R as Replica (lag 800ms)
+  U->>LB: POST update profile
+  LB->>P: write
+  P-->>LB: committed
+  LB-->>U: 200 OK
+  Note over P,R: replication in flight
+  U->>LB: GET profile, 300ms later
+  LB->>R: read (routed to replica)
+  R-->>LB: OLD value
+  LB-->>U: stale profile shown
+  Note over U: user reports "my save did not work"
+  P->>R: WAL record arrives at 800ms
+  Note over R: replica now correct, bug not reproducible
+  </div><figcaption>The classic read-after-write failure needs no partition and no outage, only a replica that is a few hundred milliseconds behind and a router that does not know the user just wrote. <b>The bug is unreproducible by construction, because by the time anyone investigates, the replica has caught up.</b> The fix is a session guarantee at the router, not a faster replica.</figcaption></figure>
+
+  <h3 id="network-partitions">Network Partitions</h3>
+
+  <p>A partition is any condition in which one group of nodes cannot exchange messages with another, and the operational definition is broader than a cut cable. Asymmetric reachability where A hears B but B does not hear A, a switch dropping a fraction of packets, a long garbage-collection pause that stops a process for seconds, and an overloaded node that stops answering heartbeats all present to the rest of the cluster as the same thing. Gilbert and Lynch's model captures why: the network "will be allowed to lose arbitrarily many messages", and a node "has no way of determining whether a message has been lost, or has been arbitrarily delayed".</p>
+
+  <p>The empirical picture is the value of Bailis and Kingsbury's survey. From the Microsoft data-centre study: "an average failure rate of 5.2 devices per day and 40.8 links per day, with a median time to repair of approximately five minutes (and a maximum of one week)", with "a median packet loss of 59,000 packets per failure", and the finding that "network redundancy improves median traffic by only 43 percent - that is, network redundancy does not eliminate common causes of network failure". From the HP managed-networks study: "connectivity-related tickets accounted for 11.4 percent of support tickets (14 percent of which were of the highest-priority level), with a median incident duration of 2 hours and 45 minutes for the highest-priority tickets". <em>Source: <a href="https://www.bailis.org/papers/partitions-queue2014.pdf">"The Network is Reliable" (Bailis and Kingsbury, ACM Queue, 2014)</a>.</em></p>
+
+  <p><b>A named example.</b> The same survey documents a managed-hosting incident at freistil IT, where monitoring showed "a 50-100 percent packet loss localized to a specific data center" caused by a router firmware bug. The consequence was not a clean outage: "elevated packet loss caused the GlusterFS distributed file system to enter split-brain undetected", and the operators only learned of it "when a customer called our support hotline because their website failed to deliver certain image files". That is the shape of the real failure. Not a node that goes down, but a cluster that stays up and silently disagrees with itself, discovered by a customer.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> in one availability zone, treat a partition as an outage and let a human resolve it; automated failover at this tier causes more incidents than it prevents. At <b>1,000 requests per second</b> across zones, you need a tuned failure detector and a tested failover, because partial failures now happen often enough that the manual path will be exercised at an inconvenient hour. At <b>10,000 requests per second</b>, you need Brewer's explicit partition mode: a detection signal, a restricted set of operations permitted while partitioned, and a recovery routine that merges state and compensates for what was accepted in the meantime.</p>
+
+  <p>Timeout selection is the concrete design decision and it has arithmetic. A failure detector declares a peer dead after a silence longer than its timeout, so the timeout trades detection speed against false positives.</p>
+
+  <div class="math">
+    false failovers per day = heartbeats per day &times; P(round trip exceeds timeout)
+    <span class="gloss">Multiply the number of heartbeats sent in a day by how often a single heartbeat takes longer than the timeout, to get how many times you will declare a healthy node dead.</span>
+  </div>
+
+  <p>One heartbeat per second is 86,400 per day. If one heartbeat in ten thousand exceeds a tight 100 ms timeout, that is 8.64 false failovers per day, each one a leader election and a write stall. Widen the timeout so that only one in ten million exceeds it and you get 0.0086 per day, roughly one every four months, at the cost of detecting a genuine failure more slowly. There is no setting that is fast and quiet; there is only the pair of numbers, and you should be able to state both.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Normal
+  Normal --> Suspected: heartbeat missed
+  Suspected --> Normal: heartbeat resumes,<br/>false alarm
+  Suspected --> PartitionMode: timeout exceeded
+  PartitionMode --> PartitionMode: serve restricted<br/>operation set only
+  note right of PartitionMode
+    Log every operation
+    accepted while split,
+    so it can be merged
+    or compensated later
+  end note
+  PartitionMode --> Recovery: connectivity restored
+  Recovery --> Merge: reconcile divergent state
+  Merge --> Compensate: undo or apologise for<br/>what cannot be merged
+  Compensate --> Normal
+  Recovery --> Normal: nothing diverged
+  </div><figcaption>Brewer's three-step protocol drawn as a state machine: detect the partition, enter a mode with a deliberately restricted operation set, then recover by merging state and compensating for what could not be merged. <b>The compensation state is the one teams forget to build, and it is the one that has to exist because some conflicts have no automatic resolution.</b> A refunded double charge and an apology email are legitimate implementations of that state.</figcaption></figure>
+
+  <h2>5. Time and geography</h2>
+
+  <h3 id="clock-skew">Clock Skew</h3>
+
+  <p>Two machines never agree on the time, and the size of the disagreement decides whether timestamps can order your writes. NTP's own specification is measured about what it delivers: "Typical primary servers using modern machines are precise within a few tens of microseconds. Typical secondary servers and clients on fast LANs are within a few hundred microseconds", and "with NTPv4, servers and clients are precise within a few tens of milliseconds with poll intervals up to 36 hours". <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc5905">RFC 5905, Network Time Protocol Version 4 (June 2010)</a>.</em></p>
+
+  <p>Spanner's contribution was to stop pretending the error is zero and to put it in the API instead. TrueTime returns an interval rather than an instant: "TT.now" returns a "TTinterval" that "is guaranteed to contain the absolute time during which TT.now was invoked", with the instantaneous error bound defined as half that interval's width. In production, "epsilon is typically a sawtooth function of time, varying from about 1 to 7 ms over each poll interval", and is "4 ms most of the time". The mechanism behind the sawtooth is stated too: "the daemon's poll interval is currently 30 seconds, and the current applied drift rate is set at 200 microseconds/second". Multiply those and the sawtooth explains itself: 200 microseconds per second &times; 30 seconds = 6 ms of accumulated uncertainty between polls, which is exactly the 1 to 7 ms band. The time references are "GPS and atomic clocks", used together "because they have different failure modes".</p>
+
+  <p>Spanner then spends that uncertainty rather than hiding it. The commit-wait rule holds a transaction until the uncertainty has passed: "the coordinator leader ensures that clients cannot see any data committed by Ti until TT.after(si) is true". A commit therefore waits roughly two epsilons, which at 4 ms is single-digit milliseconds of deliberate delay bought in exchange for globally correct ordering.</p>
+
+  <p><b>A named example.</b> F1, Google's advertising backend, in ad tech. It "uses five replicas spread across the United States", and TrueTime is what lets a transaction committed in one of them be ordered correctly against a transaction committed in another. Without it, the system would be back to comparing wall-clock timestamps across a continent and resolving ties by coin flip.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, last-write-wins on wall-clock timestamps is usually harmless, because two writes to the same key inside a few milliseconds are rare. At <b>1,000 requests per second</b>, hot keys begin producing timestamp ties and the resolution starts silently discarding real updates. At <b>10,000 requests per second</b> with any hot key at all, it is continuous, and you need either a logical ordering, an explicit merge function, or bounded-uncertainty timestamps.</p>
+
+  <p>Here is why, with arithmetic. Take a key receiving 50 writes per second, and take the uncertainty window as Spanner's worst-case 7 ms in each direction, so 14 ms wide. Treat arrivals as independent, which is a stated simplification.</p>
+
+  <div class="math">
+    P(a competing write inside the window) = 1 - e<sup>-&lambda;w</sup>
+    <span class="gloss">Lambda is the write rate for that key and w is the width of the clock-uncertainty window; the formula gives the chance that at least one other write to the same key falls inside it.</span>
+  </div>
+
+  <p>With &lambda; = 50 per second and w = 0.014 seconds, &lambda;w = 0.7, so the probability is 1 - e<sup>-0.7</sup> = 0.50. Half of the writes to that key have a competitor inside the window where the clocks cannot tell you which came first. Last-write-wins on that key is a coin flip, not a policy. At 5 writes per second the same arithmetic gives &lambda;w = 0.07 and a probability of 0.068, which is why the same design looks fine at low volume and rots as traffic grows.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Bounded-uncertainty timestamps cost you a commit wait on every write and an expensive time infrastructure of GPS receivers and atomic clocks. Logical clocks such as vector clocks cost you nothing in latency but give you no relationship to real time, so they cannot answer "did this happen before the customer clicked". The failure mode of ignoring both is the worst kind: silent, correct-looking data loss where the later update is discarded and no error is ever raised.</p>
+
+  <h3 id="multi-region-deployments">Multi-Region Deployments</h3>
+
+  <p>A multi-region deployment places replicas in geographically separate regions so that losing one region does not lose the service. The mechanism worth studying is Spanner's, because Google documents both shapes side by side. A <b>regional</b> configuration holds "three read-write replicas, each within a different Google Cloud zone in that region", where "write quorums are formed from two out of the three replicas", and carries a "99.99% SLA". A <b>multi-region</b> configuration holds two read-write regions with two replicas each plus "a witness replica in a third region", where "a write quorum forms, consisting of one of the replicas from the default leader region and any two of the additional four voting replicas", and carries "99.999% availability". Google states the cost of that extra nine directly: "your application achieves faster reads in more places at the cost of a small increase in write latency", and advises placing "compute resources for write-heavy workloads within or close to the default leader region". <em>Source: <a href="https://docs.cloud.google.com/spanner/docs/instance-configurations">Google Cloud, Spanner instance configurations</a>.</em></p>
+
+  <p>Convert those SLA figures into the unit humans argue about. A year is 525,600 minutes, so 99.99 percent allows 52.56 minutes of unavailability per year and 99.999 percent allows 5.26 minutes. The multi-region configuration buys back about 47 minutes a year. Whether 47 minutes is worth a permanent write-latency penalty is a business question, and the point of doing the arithmetic is that it becomes a business question rather than an architectural preference.</p>
+
+  <p>The write-latency penalty is not a tuning problem, it is physics. Assume signal propagation in single-mode fibre at a group index of about 1.47, giving roughly 204,000 km per second, and assume a straight great-circle path, which no real fibre route follows. Then:</p>
+
+  <div class="math">
+    round-trip floor = 2 &times; great-circle distance / 204,000 km per second
+    <span class="gloss">Take the straight-line distance between two regions, divide by the speed of light in fibre to get one-way time, and double it because a quorum write needs an answer back.</span>
+  </div>
+
+  <p>Northern Virginia to Oregon is about 3,500 km, giving a floor of 34 ms round trip. Northern Virginia to Ireland is about 5,460 km, giving 54 ms. Northern Virginia to Frankfurt is about 6,550 km, giving 64 ms. Northern Virginia to Singapore is about 15,500 km, giving 152 ms. Those are floors, not estimates: real routes are longer, and switching, queueing, and the remote node's own commit all add to them. A synchronous cross-Atlantic quorum write therefore cannot commit faster than about 54 ms, so a workload needing 20 ms writes cannot be synchronously replicated across the Atlantic at any price. That is the most useful sentence in this chapter for a capacity conversation.</p>
+
+  <p><b>A named example.</b> AWS documents the three write topologies for active/active, and they are the full design space. <b>Write global</b> routes "all writes to a single Region", and AWS notes that with Aurora global database "you can promote one of the secondary Regions to take read/write responsibilities in less than one minute". <b>Write local</b> routes writes to the closest region, which "Amazon DynamoDB global tables enables", using "a last writer wins reconciliation between concurrent updates". <b>Write partitioned</b> "assigns writes to a specific Region based on a partition key (like user ID) to avoid write conflicts". Read that middle option next to the clock-skew section above: last-writer-wins across regions means the coin flip described there is now being decided by clocks thousands of kilometres apart. <em>Source: <a href="https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html">AWS, Disaster Recovery of Workloads on AWS</a>.</em></p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, run in one region and keep backups in another; a multi-region write path at this volume is cost and complexity with no measurable benefit. At <b>1,000 requests per second</b> with a geographically spread user base, put read replicas near users and keep a single write region, which captures most of the latency win for a fraction of the complexity. At <b>10,000 requests per second</b>, you must choose consciously between write-partitioned, which preserves correctness by giving each key exactly one home region, and write-local, which preserves latency and hands you a conflict-resolution problem. Choosing write-local by accident, because it was the default, is how this goes wrong.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  U1["Users in Europe"] --> EU["Region B<br/>2 read-write replicas"]
+  U2["Users in North America"] --> US["Region A<br/>default leader region<br/>2 read-write replicas"]
+  W["Region C<br/>witness replica<br/>votes, stores no data"]
+  US <-->|"quorum traffic<br/>54ms RTT floor"| EU
+  US <-->|"quorum traffic"| W
+  EU <-->|"quorum traffic"| W
+  EU --> RD["Local reads<br/>served in region B"]
+  EU -.->|"writes must reach the leader<br/>region plus two more voters"| US
+  </div><figcaption>A multi-region quorum spans two data-holding regions plus a witness that votes without storing data, so a write needs the leader region plus two of the four other voters. <b>Reads become local and fast everywhere, while every write still pays the round trip between regions, which is bounded below by the speed of light in fibre.</b> The witness exists to break ties cheaply, which is why the third region needs latency but almost no capacity.</figcaption></figure>
+
+  <h2>6. When the region is gone</h2>
+
+  <h3 id="disaster-recovery">Disaster Recovery</h3>
+
+  <p>Disaster recovery is the plan for losing a whole location rather than a machine, and it is measured by exactly two numbers. AWS defines them precisely: "Recovery Time Objective (RTO) is the maximum acceptable delay between the interruption of service and restoration of service" and "Recovery Point Objective (RPO) is the maximum acceptable time after the last data recovery point". RTO is how long you are down; RPO is how much data you lose. AWS is also explicit that these are business decisions, listing among the anti-patterns "you select arbitrary recovery objectives" and "you select unrealistic recovery objectives, such as zero time to recover or zero data loss, which may not be achievable for your workload configuration". <em>Source: <a href="https://docs.aws.amazon.com/wellarchitected/latest/reliability-pillar/rel_planning_for_recovery_objective_defined_recovery.html">AWS Well-Architected, REL13-BP01 Define recovery objectives</a>.</em></p>
+
+  <p>The four documented strategies form a ladder of cost against those two numbers. <b>Backup and restore</b> keeps data copies and rebuilds infrastructure on demand; AWS notes that "how often you run your backup will determine your achievable recovery point". <b>Pilot light</b> keeps data replicated continuously and core infrastructure provisioned but switched off. <b>Warm standby</b> keeps "a scaled down, but fully functional, copy of your production environment in another Region", and AWS draws the distinction sharply: "pilot light cannot process requests without additional action taken first, whereas warm standby can handle traffic (at reduced capacity levels) immediately". <b>Multi-site active/active</b> serves live traffic from every region, "the most complex and costly approach", which "can reduce your recovery time to near zero for most disasters".</p>
+
+  <p>Two operational details in that whitepaper are worth more than the ladder itself. First, prefer data-plane operations when failing over: "For maximum resiliency, you should use only data plane operations as part of your failover operation. This is because the data planes typically have higher availability design goals than the control planes." A failover plan whose first step is to create resources depends on the control plane being healthy during exactly the event that is likely to have hurt it. Second, active/active does not retire your backups: "recovery times for a data disaster involving data corruption, deletion, or obfuscation will always be greater than zero and the recovery point will always be at some point before the disaster was discovered."</p>
+
+  <p><b>A named example.</b> A regulated workload such as a healthcare records system, where the recovery objectives are contractual rather than aspirational, is where this stops being theoretical. AWS notes for continuous replication that Aurora global database "can replicate to the secondary Region with typical latency of under a second" and that a secondary can be promoted "in less than one minute even in the event of a complete regional outage". Those two figures are the achievable floor for the replication-based strategies, and everything slower is a choice about cost.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b>, backup and restore is correct and everything above it is waste. At <b>1,000 requests per second</b>, pilot light with continuous replication is the usual landing point, because the restore time in the backup-and-restore approach now exceeds what the business will tolerate. At <b>10,000 requests per second</b>, warm standby or active/active, because at this volume both the restore duration and the lost-write count from a backup-shaped RPO become unacceptable in the same conversation.</p>
+
+  <p>Now price a specific plan. Assume nightly backups completing at 02:00, a 4 TB dataset, and a restore that streams at 500 MB per second.</p>
+
+  <div class="math">
+    achievable RPO = time since last completed backup; achievable RTO = detect + decide + restore + cut over
+    <span class="gloss">Your data-loss window is however long ago the last good backup finished, and your downtime is detection plus the decision to fail over plus the restore itself plus repointing traffic.</span>
+  </div>
+
+  <p>A failure at 20:00 means 18 hours of writes since the 02:00 backup, so the achievable RPO is 18 hours regardless of what the policy document claims. The restore is 4 TB / 500 MB per second = 8,000 seconds, which is 2.2 hours. Add 15 minutes to detect and decide and 10 minutes to cut traffic over, and the achievable RTO is about 2.6 hours. Now convert the RPO into the unit the business understands: at 10,000 requests per second with 20 percent writes, that is 2,000 writes per second, and 18 hours is 64,800 seconds, so 129.6 million writes are inside the loss window. Hourly backups would cut the worst case to 7.2 million and continuous replication with one-second lag to about 2,000. The ladder is not an opinion once you have written that line down.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Serving
+  Serving --> Impaired: region event begins
+  note right of Impaired
+    RPO is measured backwards
+    from here to the last
+    durable recovery point
+  end note
+  Impaired --> Detected: monitoring fires
+  Detected --> Decided: human authorises failover
+  Decided --> Restoring: data plane operations only
+  Restoring --> CutOver: traffic repointed
+  CutOver --> Serving: service restored
+  note left of CutOver
+    RTO is measured forwards
+    from the event to here
+  end note
+  Restoring --> Failed: restore untested,<br/>backup unreadable
+  Failed --> [*]
+  </div><figcaption>The two recovery objectives are measured from the same instant in opposite directions: the recovery point looks backwards to the last durable copy, and the recovery time looks forwards to restored service. <b>Detection and the decision to fail over sit inside the recovery time, so an unmonitored or unrehearsed failover blows the objective before any data has moved.</b> The failure branch is not decorative; an untested backup is a plan you have not verified you own.</figcaption></figure>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Nightly backups complete at 02:00 and a full restore takes three hours. The region fails at 20:00. What do you actually achieve?</div>
+    <button class="q-opt">An RPO of eighteen hours and an RTO above three hours</button>
+    <button class="q-opt">An RPO of three hours and an RTO of eighteen hours</button>
+    <button class="q-opt">An RPO of twenty hours and an RTO of about two hours</button>
+    <button class="q-opt">An RPO of eighteen hours and an RTO of zero hours</button>
+    <div class="q-fb">The recovery point is the gap back to the last completed backup, which is 02:00 to 20:00, so 18 hours of writes are gone. The recovery time is at least the three-hour restore plus detection, the decision to fail over, and the traffic cut-over, so it exceeds three hours rather than equalling it. The second option swaps the two definitions, which is the most common error. The third measures the recovery point from midnight rather than from the backup's completion. The fourth ignores that AWS lists zero recovery time among its anti-patterns precisely because detection and cut-over are never free.</div>
+  </div>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your twenty shards hold near-identical amounts of data, yet one serves ten times the requests of any other. What does that indicate?</div>
+    <button class="q-opt">The shard key spreads bytes evenly but not request traffic</button>
+    <button class="q-opt">The balancer has stalled and must be restarted right away</button>
+    <button class="q-opt">The chosen replication factor for that shard is too small</button>
+    <button class="q-opt">The network path to that shard is dropping many packets</button>
+    <div class="q-fb">Even bytes with uneven requests is the signature of a hot key or a hot key range: placement is balanced, access is not. The balancer answer is wrong because the balancer equalises stored ranges, and the ranges are already equal, so it has nothing to correct. Replication factor changes how many copies exist and therefore read capacity, but it does not explain why requests concentrate on one shard's key range in the first place. Packet loss would raise latency and errors on that path rather than raise its request count, so it contradicts the symptom rather than explaining it.</div>
+  </div>
+
+  <h2>7. Scale drill</h2>
+
+  <p>Take one system and walk it up the tiers: the trip store of a ride-hailing platform, holding trip records, their status transitions, and the fare computed at the end.</p>
+
+  <ul>
+    <li><b>At 100 requests per second.</b> One PostgreSQL primary, one asynchronous standby, monthly range partitions on the trips table so that retention is a DETACH rather than a DELETE. No sharding, no multi-region write path, backup and restore for disaster recovery. The only forward-looking work is deciding that the shard key would be the trip identifier and refusing to write queries that would break under it.</li>
+    <li><b>At 1,000 requests per second.</b> Read replicas now carry map and history reads, so read-your-writes becomes a product requirement: a driver who ends a trip must see the fare, so that read is pinned to the primary or carries a write token. Partition pruning starts mattering because the trips table has outgrown memory. Disaster recovery moves to pilot light with continuous replication, because a 2.6-hour restore is no longer tolerable. Clock skew is still tolerable, but last-write-wins on trip status is now on borrowed time.</li>
+    <li><b>At 10,000 requests per second.</b> Shard by trip identifier with hashed placement, because trip identifiers issued in time order would otherwise pile every new trip onto one shard. Each shard is a replica set with a quorum sized R + W &gt; N. Status transitions stop using wall-clock last-write-wins and move to an explicit state machine, because at this rate the coin flip from the clock-skew arithmetic is happening continuously on busy trips. Traffic is served from more than one region, and the write path is write-partitioned by city so that a trip has exactly one home region and cross-region conflicts cannot arise. Disaster recovery is warm standby, and the failover runbook uses data-plane operations only.</li>
+  </ul>
+
+  <p>Notice what actually changed across the three tiers. The hardware grew, but the decisive changes were all about <em>which guarantees the application is allowed to assume</em>: at 100 it may assume one copy and one clock, at 1,000 it may no longer assume its own writes are visible, and at 10,000 it may no longer assume timestamps order anything. Latency budgeting for that kind of tiered system is developed further in <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a>, and the case for keeping data close to where it is used is argued from the client side in <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#local-first-inference">local-first inference</a>.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is refusing to accept a consistency claim without a number attached. When someone says "the replica lag is small", ask for the ninety-ninth percentile and multiply it by the rate of reads that follow a write. When someone says "we are eventually consistent", ask how long the inconsistency window is and what the application does inside it. Pick a system you work on, estimate its lag distribution and its read-after-write share, and compute the wrong-answer rate the way we did above. Bring me the number and I will challenge your assumptions, which is exactly where a design review will push hardest.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://www.infoq.com/articles/cap-twelve-years-later-how-the-rules-have-changed/">Brewer's "CAP Twelve Years Later"</a> first, because it is short and it repairs a misconception you will meet weekly. Then read <a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf">the Dynamo paper</a> and <a href="https://static.googleusercontent.com/media/research.google.com/en//archive/spanner-osdi2012.pdf">the Spanner paper</a> back to back: they are the two branches of the CAP diagram implemented at scale by teams who documented their reasoning honestly. Finish with <a href="https://www.bailis.org/papers/partitions-queue2014.pdf">"The Network is Reliable"</a>, which is the empirical antidote to assuming any of this is hypothetical.</p>
+
+  <div class="pager">
+    <a href="0004-database-performance.html"><span class="dir">&larr; Previous</span><span class="ttl">Database Performance</span></a>
+    <a class="nxt" href="0006-concurrency-and-runtime.html"><span class="dir">Next &rarr;</span><span class="ttl">Concurrency and Runtime</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 06 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

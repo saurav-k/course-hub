@@ -1,0 +1,526 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 7: Concurrency and Runtime - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 07 &middot; Concurrency and Runtime</div>
+  <h1>Concurrency and Runtime</h1>
+  <p class="paper-meta">
+    <span class="pill">9 topics</span>
+    The bugs that only appear under load, and the runtime behaviour that turns a healthy service into a slow one.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Everything in this chapter is invisible at 100 requests per second and unavoidable at 10,000. That makes it the chapter most likely to bite a team that scaled <em>successfully</em>.</li>
+      <li><b>Optimistic and pessimistic locking are not a taste question.</b> There is a conflict probability at which one overtakes the other, and you can derive it from your own lock overhead in two lines of algebra.</li>
+      <li>A lock held across a network partition or a stop-the-world pause <b>is not a lock</b>. The only thing that restores safety is a <b>fencing token</b> that the storage layer checks on every write.</li>
+      <li>Garbage collection, memory leaks, and cold starts are all the same shape of problem: a cost that is amortised invisibly at low traffic and lands on the tail percentile at high traffic.</li>
+    </ul>
+  </div>
+
+  <h2>1. Why this chapter is dangerous</h2>
+
+  <p>The failures in the preceding chapters announce themselves. A dependency times out, a replica falls behind, a disk fills up. You get an error, a log line, and a page. The failures in this chapter do not work that way. A lost update produces a perfectly successful HTTP 200 and a balance that is quietly wrong. A data race produces correct output nine hundred and ninety-nine times and garbage on the thousandth. A garbage collection pause produces no error at all, just a p99 that has drifted upward over two quarters until someone notices the graph.</p>
+
+  <p>What unites them is that they are all <em>probabilistic in the level of concurrency</em>. Two things must overlap in time for any of them to fire. At 100 requests per second on a four-core box, the overlap window is so small that a team can run for years without ever seeing one. At 10,000 requests per second the same code executes the same overlap thousands of times a day. Nothing about the code changed. The arrival rate changed, and the arrival rate is the term that was hiding in the exponent all along.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  R["Incoming requests"] --> A["Application layer<br/>threads, goroutines, workers"]
+  A --> S["Shared mutable state<br/>rows, counters, caches"]
+  A --> RT["Language runtime<br/>heap, allocator, collector"]
+  A --> P["Platform<br/>containers, functions, VMs"]
+  S --> F1["Lost updates<br/>Deadlocks<br/>Lock contention"]
+  RT --> F2["GC pauses<br/>Memory leaks<br/>OOM kills"]
+  P --> F3["Cold starts<br/>Connection storms"]
+  F1 --> T["Tail latency and<br/>silent corruption"]
+  F2 --> T
+  F3 --> T
+  </div><figcaption>The three layers where concurrency and runtime failures live, and the single symptom they all arrive as. <b>None of these produce an error at the point of failure; they all surface as a corrupted value or a bad tail percentile much later.</b> That delay between cause and symptom is the entire reason this material is hard to debug in production.</figcaption></figure>
+
+  <p>The other thing worth saying up front: the correct answer at 100 requests per second is often <em>do nothing</em>. Reaching for a distributed lock because two requests might theoretically overlap on a table with four writes a day is how teams end up operating a five-node quorum to protect a row nobody contends for. Every mechanism in this chapter costs latency, operational surface, or both. The engineering skill is knowing the arrival rate at which the cost flips from wasteful to mandatory, and being able to compute it rather than feel it.</p>
+
+  <h2>2. Guarding shared state</h2>
+
+  <h3 id="optimistic-locking">Optimistic locking</h3>
+
+  <p>Optimistic locking assumes conflict is rare and checks for it only at the moment of writing. You read a record along with a version marker, do your work without holding anything, and then write with a condition attached: apply this change only if the version is still what I read. If another writer got there first the condition fails, your write is rejected, and you start over. Kung and Robinson introduced the idea in 1981 and their framing is still the clearest one. A transaction runs in three phases, a read phase in which all writes go to local copies, a validation phase in which the system establishes that the changes will not cause a loss of integrity, and a write phase in which the local copies are made global. Their stated motivation was that lock maintenance is an overhead not present in the sequential case, that even read-only queries must generally take locks, and that there are no general-purpose deadlock-free locking protocols for databases that always provide high concurrency. Because no locks are taken, the method is deadlock-free by construction, though as the authors note, starvation becomes possible instead. <em>Source: <a href="https://www.eecs.harvard.edu/~htk/publication/1981-tods-kung-robinson.pdf">Kung and Robinson, "On Optimistic Methods for Concurrency Control" (ACM TODS, 1981)</a>.</em></p>
+
+  <p>The modern shape of this is a conditional write. Amazon DynamoDB documents it directly: a conditional write succeeds only if the item attributes meet one or more expected conditions, and conditions are checked against the most recently updated version of the item. AWS uses a two-user worked example in its own documentation. Alice and Bob both update the same price with unconditional writes and Bob's request succeeds while Alice's earlier update is lost. With a condition expression attached, Bob's write fails instead of silently overwriting. A failed condition returns a <code>ConditionalCheckFailedException</code>, and note the cost detail that surprises people: DynamoDB still consumes write capacity when the condition evaluates to false. Failed optimistic attempts are not free. <em>Source: <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/WorkingWithItems.html">AWS, "Working with items and attributes in DynamoDB"</a>.</em></p>
+
+  <p>Relational databases give you the same thing without a version column if you ask for a strong enough isolation level. PostgreSQL states that in Repeatable Read, if a concurrent updater commits first, the transaction is rolled back with <code>could not serialize access due to concurrent update</code>, and that applications using this level must be prepared to retry transactions due to serialization failures. That sentence is the whole operational contract of optimistic concurrency: the database will tell you that you lost, and retrying is your job. <em>Source: <a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL, "Transaction Isolation"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Read
+  Read: Read phase
+  Read: Load record plus version, work on a local copy
+  Read --> Validate
+  Validate: Validation phase
+  Validate: Is the version still what we read?
+  Validate --> Write: version unchanged
+  Validate --> Backoff: version moved
+  Write: Write phase
+  Write: Local copy becomes global
+  Write --> [*]
+  Backoff: Abort and back off
+  Backoff: All work in the read phase is discarded
+  Backoff --> Read: retry
+  </div><figcaption>The three phases Kung and Robinson describe, with the retry edge that production systems actually pay for. <b>An aborted transaction discards every unit of work done in the read phase, which is why the wasted-work multiplier is the number that decides whether optimism is affordable.</b> Nothing is ever blocked, so the cost shows up as CPU and capacity burned on attempts that never commit.</figcaption></figure>
+
+  <p><b>A named example.</b> Retail inventory during a limited-drop sale. A catalogue of a million products backed by DynamoDB conditional writes on a stock counter is the textbook fit: any two shoppers almost never touch the same item, so almost every conditional write succeeds on the first attempt and the system never blocks. Without the condition you get exactly AWS's Alice-and-Bob case at scale, which in retail means overselling: two checkouts each read stock of one, each decrement to zero, and the retailer has sold an item twice.</p>
+
+  <p><b>The arithmetic: where optimism stops paying.</b> Let <code>p</code> be the probability that a given attempt loses validation and must be retried. If retries are independent, the expected number of attempts per successful commit is a geometric mean, and every failed attempt burns the full body of the transaction.</p>
+
+  <div class="math">
+    attempts_per_commit = 1 / (1 - p)<br>
+    work_optimistic = T / (1 - p)<br>
+    work_pessimistic = T * (1 + L)
+    <span class="gloss">p is the probability one attempt conflicts and must be retried. T is the cost of the transaction body, the useful work. L is lock overhead expressed as a fraction of that body: acquiring, holding, and releasing the lock, including the wait. Optimistic work is the body repeated until one attempt survives validation. Pessimistic work is the body once, plus the lock tax.</span>
+  </div>
+
+  <p>Set the two equal and solve for the conflict probability at which they cross:</p>
+
+  <div class="math">
+    1 / (1 - p*) = 1 + L<br>
+    p* = L / (1 + L)
+    <span class="gloss">p* is the crossover conflict probability. Below it, optimistic locking does less total work; above it, taking the lock is cheaper. The only input you need is your own lock overhead L.</span>
+  </div>
+
+  <p>Assume lock acquisition and release costs ten per cent of the transaction body, so <code>L = 0.10</code>. Then <code>p* = 0.10 / 1.10 = 0.0909</code>, about nine per cent. Below a nine per cent conflict rate, retry. Above it, lock. Now convert that into a rate you can actually measure. If a transaction's read window is <code>W</code> seconds and other writes to the same key arrive at <code>&lambda;<sub>key</sub></code> per second, the chance that at least one of them commits inside your window is <code>1 - e<sup>-&lambda;W</sup></code>, which for small values is approximately <code>&lambda;<sub>key</sub> &times; W</code>.</p>
+
+  <div class="math">
+    p ≈ λ_key * W<br>
+    λ_key* = p* / W = 0.0909 / 0.020 = 4.5 writes per second, on one key
+    <span class="gloss">λ_key is the write rate against a single contended key, not against the service. W is the read window, here assumed to be 20 milliseconds between reading the version and attempting the write. λ_key* is the write rate on that one key at which optimistic locking stops being the cheaper choice.</span>
+  </div>
+
+  <p>Four and a half writes per second <em>on a single key</em>. That number is why the same design is simultaneously right and catastrophically wrong in the same service. Ten thousand requests per second spread across a million products is 0.01 writes per second per key, four hundred times under the crossover, and optimism is obviously correct. Ten thousand requests per second onto one flash-sale item is 10,000 writes per second on one key, giving <code>p ≈ 1 - e<sup>-200</sup></code>, indistinguishable from certainty. At that point <code>1/(1-p)</code> is astronomically large: the service does nothing but retry, and no request ever commits. The assumptions here are the ten per cent lock overhead and the twenty millisecond read window; measure both in your own system, because the crossover moves linearly with each.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> a version column and a retry loop is the whole design, and you will rarely see a retry fire. At <b>1,000 requests per second</b> the aggregate rate is still fine but hot keys start to exist, so you need per-key conflict metrics rather than a service-wide retry rate; a service-wide two per cent retry rate can hide one key sitting at ninety. At <b>10,000 requests per second</b> you must have a plan for the hot key specifically, which is usually one of three things: shard the counter so the contended key becomes many keys, move that one path to pessimistic locking, or serialise it through a queue so writes become sequential by construction.</p>
+
+  <p><b>Trade-off and failure mode.</b> The trade-off is wasted work in exchange for never blocking. The failure mode is a retry storm: contention rises, retries rise, retries add load, contention rises further. This is a positive feedback loop and it converges on zero useful throughput. Two defences matter. Bound the retries, so a request fails fast rather than looping, and back off with jitter between attempts, so the losers of one round do not all collide again in the next round. Unjittered retries synchronise the contenders, which is the worst possible outcome.</p>
+
+  <h3 id="pessimistic-locking">Pessimistic locking</h3>
+
+  <p>Pessimistic locking assumes conflict is likely and takes exclusive ownership before doing any work. You acquire the lock, read, modify, write, and release. Anyone else who wants the same row waits. The mechanism is a lock manager inside the database that tracks which transaction holds what and blocks conflicting requests. PostgreSQL documents that <code>FOR UPDATE</code> causes the rows retrieved by the <code>SELECT</code> to be locked as though for update, preventing them from being locked, modified, or deleted by other transactions until the current transaction ends. It also offers weaker variants, <code>FOR NO KEY UPDATE</code>, <code>FOR SHARE</code>, and <code>FOR KEY SHARE</code>, so you can block exactly what needs blocking rather than everything. <em>Source: <a href="https://www.postgresql.org/docs/current/explicit-locking.html">PostgreSQL, "Explicit Locking"</a>.</em></p>
+
+  <p>The detail that catches people is that row locks are usually index locks. MySQL's InnoDB documents a record lock as a lock on an index record, a gap lock as a lock on the gap between index records, and a next-key lock as the combination of the two, which is the default in Repeatable Read. The practical consequence is severe: if your <code>SELECT ... FOR UPDATE</code> has no usable index, InnoDB locks far more than the rows you meant to lock, and a query you believed took one row lock has quietly serialised a range. <em>Source: <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-locking.html">MySQL, "InnoDB Locking"</a>.</em></p>
+
+  <p><b>A named example.</b> A payments ledger. When you debit an account you must read the balance, check it covers the amount, and write the new balance, and the check is only meaningful if nothing changes underneath it. <code>SELECT balance FROM accounts WHERE id = ? FOR UPDATE</code> inside the transaction is the standard answer, and it is the right one: in payments, contention on a single account is genuinely common, an aborted retry is expensive to reason about, and correctness is worth more than throughput. Without the lock you get the lost update in the next topic, which in a ledger means money invented or destroyed.</p>
+
+  <p><b>The arithmetic: hold time sets your ceiling.</b> An exclusive lock permits exactly one holder, so the concurrency inside the critical section is one. Little's Law, which says that the average number of items in a system equals the arrival rate times the average time each spends in it, pins the ceiling immediately.</p>
+
+  <div class="math">
+    L = λ * W  with L = 1  →  λ_max = 1 / H
+    <span class="gloss">L is the number of transactions inside the critical section, which for an exclusive lock is exactly one. λ is the rate of lock acquisitions per second. W here is the time each holder spends inside, which is the lock hold time H. λ_max is therefore the absolute throughput ceiling of that one lock.</span>
+  </div>
+
+  <p>A 2 millisecond hold gives a ceiling of 500 acquisitions per second. A 20 millisecond hold, which is what you get the moment someone puts an HTTP call to a fraud service inside the transaction, gives a ceiling of 50 per second. That single decision costs you a factor of ten, and no amount of application replicas recovers it, because the ceiling is a property of the lock and not of your fleet.</p>
+
+  <p>Worse, you do not get to run near the ceiling. Treat the lock as a single-server queue and utilisation is <code>&rho; = &lambda;H</code>, with mean waiting time <code>W<sub>q</sub> = &rho;H / (1 - &rho;)</code>.</p>
+
+  <div class="math">
+    ρ = λ * H       W_q = ρ * H / (1 - ρ)
+    at λ = 400/s, H = 2 ms:  ρ = 0.80,  W_q = 0.80 * 2 / 0.20 = 8 ms
+    at λ = 475/s, H = 2 ms:  ρ = 0.95,  W_q = 0.95 * 2 / 0.05 = 38 ms
+    <span class="gloss">ρ is the fraction of time the lock is held, between 0 and 1. H is the hold time. W_q is the average time a request spends waiting for the lock before it gets in. The formula assumes a single-server queue with random arrivals, which is a rough but useful model for one hot row.</span>
+  </div>
+
+  <p>A nineteen per cent increase in arrival rate, from 400 to 475, multiplies the queue wait by nearly five. That is the knee, and it is why a service that looked fine on Tuesday falls over on Wednesday after a small traffic increase. The relationship between utilisation and waiting is not linear, and lock utilisation is the term nobody graphs.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> take the lock and stop thinking about it; even a sloppy 20 millisecond hold leaves you at four per cent utilisation. At <b>1,000 requests per second</b> hold time becomes the design constraint, and the rule is that no network call, no queue publish, and no external service ever happens between acquire and release. Do the slow work before you take the lock, take the lock to validate and commit, release. At <b>10,000 requests per second</b> a single global lock is finished as a design; you need lock partitioning so that different keys use different locks, and you should be reading the wait time on each partition as a first-class metric.</p>
+
+  <p><b>Trade-off and failure mode.</b> The trade-off is throughput and latency for certainty. The failure modes are three. Deadlock, covered below. Convoy, where every request queues behind one slow holder and the queue never drains. And the one that actually takes production down: an orphaned lock, where the holder dies without releasing, and every subsequent request blocks forever. That is why lock wait timeouts exist, and why a lock with no timeout is a latent outage.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">One product identifier takes 6 writes per second during a sale. Your read window between loading the version and writing is 20 ms, and lock overhead is about 10 per cent of the transaction body. What does the arithmetic say?</div>
+    <button class="q-opt">About three percent conflicts, which is below the optimistic crossover point</button>
+    <button class="q-opt">About twelve percent conflicts, which is above the optimistic crossover point</button>
+    <button class="q-opt">About three percent conflicts, which is above the optimistic crossover point</button>
+    <button class="q-opt">About twelve percent conflicts, which is below the optimistic crossover point</button>
+    <div class="q-fb">Conflict probability is roughly the key write rate times the read window: 6 &times; 0.020 = 0.12, so twelve per cent. The crossover is L/(1+L) = 0.10/1.10 = 0.0909, about nine per cent, so twelve per cent sits above it and the lock is now the cheaper option. The two "three percent" options miscompute the product, which is the common error of using the service-wide request rate instead of the per-key write rate. The "twelve percent, below" option gets the conflict rate right but compares it against the wrong threshold, and concluding "below" here would leave you retrying roughly one attempt in eight forever.</div>
+  </div>
+
+  <h3 id="distributed-locks">Distributed locks</h3>
+
+  <p>A distributed lock is mutual exclusion across processes that share no memory and no clock, coordinated through an external service. This is the topic where confident wrong advice is most common, so it is worth being precise about what is actually guaranteed.</p>
+
+  <p>Start with the distinction Martin Kleppmann draws, because it decides everything that follows. You take a lock for one of two reasons. For <b>efficiency</b>, where the lock saves you from doing the same work twice and a failure costs you a duplicate email or a wasted computation. Or for <b>correctness</b>, where the lock prevents concurrent processes from corrupting state and a failure costs you data loss. If your reason is efficiency, a simple lock with an expiry is fine and you should not spend another minute on this section. If your reason is correctness, the rest of this section is mandatory. <em>Source: <a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">Kleppmann, "How to do distributed locking" (2016)</a>.</em></p>
+
+  <p>Redis documents the canonical algorithm, Redlock, and states its three intended properties: mutual exclusion, so only one client holds a lock at any moment; deadlock freedom, so a lock is eventually always acquirable even if the holder crashes or is partitioned; and fault tolerance, so clients can acquire and release as long as a majority of nodes are up. The algorithm assumes N independent Redis masters with no replication between them, with N = 5 given as a reasonable value. The client timestamps the attempt, tries to set the same key and the same random value on all N in parallel with a short per-node timeout, and considers the lock held only if it acquired a majority and the total elapsed time is less than the lock validity time. The remaining validity is the original validity minus the elapsed acquisition time. Releases are conditional on the random value matching, so a client cannot delete a lock another client now holds. <em>Source: <a href="https://redis.io/docs/latest/develop/clients/patterns/distributed-locks/">Redis, "Distributed Locks with Redis"</a>.</em></p>
+
+  <p>Redis is also explicit about why a single master with a replica cannot work: replication is asynchronous, so a client can take the lock on the master, the master can crash before the write reaches the replica, the replica can be promoted, and a second client can then take the same lock. Redis calls this out in its own documentation as a safety violation. If you have implemented a distributed lock as <code>SET key value NX PX 30000</code> against a Redis primary with a replica, you have implemented that race.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant W1 as Worker 1
+  participant LK as Lock service
+  participant ST as Storage
+  participant W2 as Worker 2
+  W1->>LK: acquire lock, TTL 30s
+  LK-->>W1: granted
+  W1->>ST: read object
+  Note over W1: Stop-the-world pause<br/>longer than the TTL
+  LK-->>LK: TTL expires, lock auto-released
+  W2->>LK: acquire lock, TTL 30s
+  LK-->>W2: granted
+  W2->>ST: read object
+  W2->>ST: write new value
+  ST-->>W2: ok
+  Note over W1: Pause ends. Worker 1 has<br/>no idea it lost the lock.
+  W1->>ST: write stale value
+  ST-->>W1: ok
+  Note over ST: Worker 2's write is gone.<br/>Both writes were accepted.
+  </div><figcaption>A lock that expires while its holder is paused stops being a lock, and the storage layer has no way to know. <b>Worker 1's write is accepted after its lease is gone, silently destroying Worker 2's committed work, and every single step here returned success.</b> The pause can be garbage collection, a page fault, CPU starvation on a noisy neighbour, or a stop signal from an operator; none of them are exotic.</figcaption></figure>
+
+  <p>Kleppmann's fix is a <b>fencing token</b>: a number that increases every time a client acquires the lock, handed to the client at acquisition and passed with every write. The storage server remembers the highest token it has seen and rejects any write carrying a lower one. This moves the safety guarantee out of the lock service, where it depends on timing, and into the storage layer, where it depends only on ordering. His specific criticism of Redlock is that it has no facility for generating such a token, and that its safety rests on assumptions of bounded network delay, bounded process pauses, and bounded clock error rather than on a guarantee that holds regardless of delay.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant W1 as Worker 1
+  participant LK as Lock service
+  participant ST as Storage
+  participant W2 as Worker 2
+  W1->>LK: acquire
+  LK-->>W1: granted, token = 41
+  Note over W1: Long pause. Lease expires.
+  W2->>LK: acquire
+  LK-->>W2: granted, token = 42
+  W2->>ST: write, token = 42
+  ST->>ST: 42 > highest seen 41, accept
+  ST-->>W2: ok
+  Note over W1: Pause ends, still believes<br/>it holds the lock
+  W1->>ST: write, token = 41
+  ST->>ST: 41 < highest seen 42, reject
+  ST-->>W1: rejected, stale token
+  Note over ST: State is correct. The stale<br/>writer learns it lost.
+  </div><figcaption>The same pause, with a monotonically increasing token checked at the storage layer. <b>Safety no longer depends on any timing assumption, because a write is judged by its position in an order rather than by whether a lease happened to still be valid.</b> Note where the check lives: the lock service cannot enforce this, only the resource being protected can.</figcaption></figure>
+
+  <p>This is not a new idea, and the strongest evidence for it is that Google's Chubby, a lock service running in production for years before the Redlock debate, ships exactly this mechanism. Chubby's paper states the problem in the same terms: a process holding a lock may issue a request and then fail, another process may acquire the lock and act, and if the first request later arrives it may be acted on without the protection of the lock and on inconsistent data. Chubby's answer is a <b>sequencer</b>, an opaque byte-string describing the state of the lock immediately after acquisition, containing the lock name, the mode it was acquired in, and the lock generation number, which is a per-node counter that increases each time the lock goes from free to held. The client passes the sequencer to the server it is talking to, and that server is expected to test whether the sequencer is still valid and reject the request if not. Chubby also offers a weaker fallback for servers that do not support sequencers, called <b>lock-delay</b>: when a lock becomes free because the holder failed or became unreachable, rather than because it was released cleanly, the server refuses to hand it out for a configured delay, capped at one minute. The paper describes this as imperfect but as protection against everyday problems caused by message delays and restarts. <em>Source: <a href="https://www.usenix.org/legacy/event/osdi06/tech/full_papers/burrows/burrows_html/">Burrows, "The Chubby lock service for loosely-coupled distributed systems" (OSDI 2006)</a>.</em></p>
+
+  <p><b>Represent the debate fairly.</b> Salvatore Sanfilippo, Redis's creator, answered Kleppmann publicly and his objections deserve to be stated rather than waved away. His argument on fencing tokens is that a Redlock's large random value can serve as a check-and-set token against the resource without requiring a linearizable store, and that in most situations where you reach for a distributed lock, a design that needs a perfectly ordered token to stay correct has already lost. On clocks, he treats large jumps as an operational failure rather than an algorithmic one, observing that an administrator who resets system time arbitrarily also corrupts other consensus systems, and suggesting monotonic time APIs as the mitigation. On the timing model, his central defence is that Redlock rechecks elapsed time after obtaining the majority, which he summarises as: whatever delay happens in the network or in the processes involved, after acquiring the majority the client checks again that it is not out of time. <em>Source: <a href="http://antirez.com/news/101">Sanfilippo, "Is Redlock safe?"</a>.</em></p>
+
+  <p>Where does that leave a practitioner? With the honest observation that Redis's own documentation now sides with the conservative reading. Its consistency disclaimer says you should implement fencing tokens, that this is especially important for processes that can take significant time, and that this applies to any distributed locking system. It also states plainly that Redis does not use a monotonic clock for TTL expiration, so a wall-clock shift may result in a lock being acquired by more than one process. Both of Kleppmann's core concerns are conceded in the vendor's own docs. The defensible position is therefore: use a distributed lock for efficiency freely, and for correctness only with a fencing token enforced at the resource.</p>
+
+  <p><b>A named example.</b> Chubby itself, used to elect the master of the Google File System. This is the archetypal correct use: coarse-grained, low-volume, and a case where two masters would be catastrophic. The generation number in the sequencer is what stops a deposed master, resuming after a long pause, from issuing an order that the file servers still honour.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> you almost certainly should not have a distributed lock at all. If the contended state lives in one database, a database transaction gives you mutual exclusion with none of this risk, and reaching for Redis instead is how a team acquires a distributed systems problem it did not need. At <b>1,000 requests per second</b> distributed locks become genuinely useful for cross-service coordination, and this is where the fencing decision has to be made deliberately, because the pause window is now wide enough to be hit weekly rather than yearly. At <b>10,000 requests per second</b> the lock service is a shared dependency on your hottest path, and its own availability, its own tail latency, and its own capacity all become your problem. The usual and better move at this tier is to design the lock away: partition the work so each key has exactly one owner, and coordination becomes routing rather than locking.</p>
+
+  <p><b>Trade-off and failure mode.</b> The trade-off is a network round trip and a hard dependency, bought in exchange for coordination that a single database cannot provide. The failure modes are the two the sources above spend all their time on: the lock service is unavailable, in which case you must decide in advance whether to block or proceed unlocked, and both answers are dangerous; and the lock is held by someone who no longer believes what you believe about time. Only the second one corrupts data silently.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">A worker holds a lock with a 30 second lease, is paused by the runtime for 45 seconds, and wakes up still believing it holds the lock. A second worker has already acquired the lock and written. What actually prevents corruption?</div>
+    <button class="q-opt">Setting a far longer lease so the paused worker finishes</button>
+    <button class="q-opt">Running five separate nodes so that a clear majority agrees</button>
+    <button class="q-opt">Having the storage reject writes bearing a stale fencing token</button>
+    <button class="q-opt">Checking the lease is still valid right before every write</button>
+    <div class="q-fb">Only an ordering check at the resource is safe, because it does not depend on any assumption about how long a pause can last. A longer expiry just moves the threshold and trades safety for a longer stall after a genuine crash, since there is no pause length you can prove will never be exceeded. A five-node majority protects against nodes failing, not against a client being paused, which is precisely Kleppmann's criticism of Redlock and which Redis now concedes in its own consistency disclaimer. Checking just before the write loses to the same race one instruction later: the pause can land between the check and the write.</div>
+  </div>
+
+  <h2>3. When timing decides correctness</h2>
+
+  <h3 id="race-conditions">Race conditions</h3>
+
+  <p>A race condition is a situation where the result depends on the relative timing of operations that the system does not order. The canonical database instance is the <b>lost update</b>: two transactions read the same value, both compute a new value from it, and both write, so the second overwrites the first and one update disappears with no error anywhere. PostgreSQL documents the mechanism precisely for Read Committed, noting that a transaction can see an inconsistent snapshot in which it sees the effects of concurrent updates on the row it is trying to update but not on other rows, and that this can lead to lost updates. The remedy is either a stronger isolation level, where the database detects the conflict and raises a serialization failure that you retry, or explicit locking. <em>Source: <a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL, "Transaction Isolation"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as Request A
+  participant DB as Database
+  participant B as Request B
+  A->>DB: SELECT balance WHERE id=7
+  DB-->>A: balance = 100
+  B->>DB: SELECT balance WHERE id=7
+  DB-->>B: balance = 100
+  Note over A,B: Both now hold the same stale<br/>value and neither knows it
+  A->>DB: UPDATE balance = 100 - 10
+  DB-->>A: 1 row updated
+  B->>DB: UPDATE balance = 100 - 30
+  DB-->>B: 1 row updated
+  Note over DB: Balance is 70, not 60.<br/>The 10 debit vanished.<br/>Both requests returned success.
+  </div><figcaption>The lost update, the race condition that costs real money. <b>Neither request failed, neither log line is suspicious, and the only evidence is that the ledger no longer balances.</b> The read-modify-write cycle is the shape to look for: any time your code computes a new value from a value it read earlier, you are exposed unless the write is conditional or the read was locked.</figcaption></figure>
+
+  <p>In-process races are the same failure in a different medium. Go's memory model defines a read-write data race as a read and a write to the same location, at least one of them non-synchronising, unordered by happens-before. The guidance is blunt: programs that modify data being simultaneously accessed by multiple goroutines must serialise such access, using channel operations or the <code>sync</code> and <code>sync/atomic</code> packages. The consequences of ignoring that are worse than most engineers assume. The model guarantees that a single-word read observes some value actually written, but explicitly states that races on multiword data structures can lead to inconsistent values that do not correspond to any single write, and that such races can in turn lead to arbitrary memory corruption. A racy map or slice is not "occasionally wrong". It is undefined. <em>Source: <a href="https://go.dev/ref/mem">The Go Memory Model</a>.</em></p>
+
+  <p><b>A named example.</b> A digital wallet. A user taps "pay" twice in two seconds on a flaky mobile connection, both requests reach two different application instances, and both read a balance of 100. Without a conditional write or a row lock, the account is debited once instead of twice and the platform absorbs the difference. This is the single most common correctness bug in fintech, and it is why every serious payments API is built around idempotency keys: an idempotency key converts a retry into a lookup, which removes the read-modify-write cycle entirely rather than trying to synchronise it.</p>
+
+  <p><b>The arithmetic: why this is a scale problem.</b> Take a read-modify-write window of <code>W</code> seconds and a per-key write rate of <code>&lambda;<sub>key</sub></code>. The probability that a given operation is raced is <code>1 - e<sup>-&lambda;W</sup></code>. This is the same expression as the optimistic crossover, which is not a coincidence: they are the same phenomenon measured from opposite ends.</p>
+
+  <div class="math">
+    P(race) = 1 - e^(-λ_key * W),   W = 0.020 s
+    λ_key = 0.05/s  →  1 - e^-0.001  = 0.001,   1 in 1,000
+    λ_key = 0.5/s   →  1 - e^-0.01   = 0.00995, 1 in 100
+    λ_key = 5/s     →  1 - e^-0.1    = 0.0952,  1 in 10
+    <span class="gloss">λ_key is writes per second against one key, W is the width of the read-modify-write window in seconds, and P(race) is the chance that another write lands inside your window. Each line multiplies the per-key rate by ten, which is what happens to a hot key when the service grows from 100 to 1,000 to 10,000 requests per second.</span>
+  </div>
+
+  <p>A hundredfold traffic increase turns a one-in-a-thousand event into a one-in-ten event. At the low end, a bug firing once per thousand writes on a key written twice an hour is one incident every three weeks, which reads as a mystery rather than a pattern. At the high end it is ten per cent of your traffic and it is on the incident channel within an hour. The code did not change. The exponent did.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> races exist but fire so rarely that they show up as unexplained support tickets, and the honest engineering answer is to fix the read-modify-write shape now while it is cheap, not to wait for evidence. At <b>1,000 requests per second</b> you need the race detector in continuous integration and a conditional write or a lock on every balance-like field. Go's detector is documented as costing 5 to 10 times the memory and 2 to 20 times the execution time, and as only finding races that happen at runtime, so it cannot find races in code paths that are not executed; that means it belongs in tests run under a realistic workload, not only in unit tests. At <b>10,000 requests per second</b> assume that every unsynchronised path is firing continuously, and design the races out with single-writer ownership, immutable messages, and idempotency keys rather than trying to synchronise your way to safety. <em>Source: <a href="https://go.dev/doc/articles/race_detector">Go, "Data Race Detector"</a>.</em></p>
+
+  <p><b>Trade-off and failure mode.</b> Eliminating races costs coordination, which costs latency and throughput, which is the entire subject of the two locking topics above. The failure mode is uniquely nasty because it is silent and non-reproducible: the request succeeded, the logs are clean, the test suite passes, and the only artefact is a number that is wrong. Reconciliation jobs that compare a derived total against its source of truth are how mature teams detect these, because they detect the corruption rather than the code.</p>
+
+  <h3 id="deadlocks">Deadlocks</h3>
+
+  <p>A deadlock is a cycle of waiting: each participant holds a resource another needs and none will release until it acquires. MySQL defines it as a situation in which multiple transactions are unable to proceed because each holds a lock needed by another, so none of them ever releases the lock it holds. Four conditions must hold simultaneously for a deadlock to be possible, a result usually credited to Coffman, Elphick and Shoshani in 1971: mutual exclusion on the resource, hold-and-wait, no preemption, and a circular wait. Break any one and deadlock becomes impossible, which is why the practical advice always reduces to breaking the circular wait through consistent lock ordering. <em>Source: <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-deadlocks.html">MySQL, "Deadlocks in InnoDB"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  subgraph Cycle["The circular wait"]
+    direction LR
+    T1["Transaction 1<br/>holds lock on ORDER 7"] -->|"waits for"| L2["Lock on<br/>INVENTORY 9"]
+    L2 --> T2["Transaction 2<br/>holds lock on INVENTORY 9"]
+    T2 -->|"waits for"| L1["Lock on<br/>ORDER 7"]
+    L1 --> T1
+  end
+  Cycle --> D{"Detector finds<br/>the cycle"}
+  D -->|"picks a victim"| V["Transaction 2<br/>rolled back"]
+  D -->|"survivor proceeds"| S["Transaction 1<br/>commits"]
+  V --> R["Application must retry<br/>the whole transaction"]
+  </div><figcaption>A wait-for cycle between two transactions that touched the same two tables in opposite orders, and how the database resolves it. <b>The database breaks the cycle by destroying one transaction, which means deadlock handling is always application work: something must retry the victim.</b> A service that treats a deadlock error as a fatal 500 has converted a recoverable event into a user-visible failure.</figcaption></figure>
+
+  <p>Databases handle deadlocks by detecting the cycle and killing a participant. InnoDB documents that when deadlock detection is enabled, which is the default, it detects the condition and rolls back one of the transactions, the victim, and that if detection is disabled it falls back on <code>innodb_lock_wait_timeout</code> instead. PostgreSQL documents the same resolution, automatically detecting deadlocks and aborting one of the transactions so the others can complete. Both vendors give the same prevention advice, and it is worth quoting the shape of it: PostgreSQL says the best defence is to ensure that all applications using the database acquire locks on multiple objects in a consistent order, and adds that the first lock acquired on an object should be the most restrictive mode that will be needed for it. MySQL's list is the same idea from the other side: keep transactions small and short, use the same order of operations across transactions, index the columns used in <code>SELECT ... FOR UPDATE</code> and <code>UPDATE ... WHERE</code>, and implement retry logic. MySQL also makes a point people get wrong: the possibility of deadlock is not affected by isolation level, because isolation level changes read behaviour while deadlocks come from writes. <em>Source: <a href="https://www.postgresql.org/docs/current/explicit-locking.html">PostgreSQL, "Explicit Locking"</a>.</em></p>
+
+  <p><b>A named example.</b> E-commerce order processing. One code path processes a refund by locking the order row and then the inventory row. Another processes a restock by locking inventory first and then the order. Both are correct in isolation and both were written by different teams in different quarters. Under low traffic they never overlap. Under load they overlap constantly and the deadlock rate climbs with the square of the request rate, because a deadlock needs two conflicting transactions to be in flight at once.</p>
+
+  <p><b>The arithmetic: why deadlocks scale quadratically.</b> If path A holds its first lock for <code>H</code> seconds before requesting the second, and path B arrives at rate <code>&lambda;<sub>B</sub></code>, then the chance that a given A transaction overlaps a B transaction in the dangerous window is roughly <code>&lambda;<sub>B</sub>H</code>. The rate of deadlocks is the rate of A transactions times that probability.</p>
+
+  <div class="math">
+    deadlock_rate ≈ λ_A * λ_B * H
+    λ_A = λ_B = 2/s,  H = 0.010 s  →  2 * 2 * 0.010 = 0.04/s   ≈ 3,500 per day
+    λ_A = λ_B = 0.2/s, H = 0.010 s →  0.2 * 0.2 * 0.010 = 0.0004/s ≈ 35 per day
+    <span class="gloss">λ_A and λ_B are the arrival rates of the two conflicting code paths in transactions per second. H is how long the first lock is held before the second is requested, the window in which a cycle can form. The product is quadratic in traffic, so a tenfold traffic increase gives a hundredfold deadlock increase.</span>
+  </div>
+
+  <p>That quadratic term is the whole story. Ten times the traffic gives a hundred times the deadlocks, which is why deadlocks are famously a problem that appears all at once. Note also that the rate is linear in <code>H</code>: halving the time you hold the first lock before requesting the second halves your deadlock rate, which is why "acquire both locks as close together as possible" is real advice and not folklore.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> deadlocks are a curiosity you see in the error log once a month, and a retry loop is a complete solution. At <b>1,000 requests per second</b> you need a documented lock ordering convention that reviewers actually enforce, plus deadlock rate as a dashboard metric, because the quadratic growth means the graph is your early warning. At <b>10,000 requests per second</b> retry loops are no longer sufficient, because retrying a deadlocked transaction into a heavily contended system produces more deadlocks; the design answer is to stop having transactions that hold multiple locks, usually by splitting them into single-key operations connected by an outbox or a queue.</p>
+
+  <p><b>Trade-off and failure mode.</b> Consistent lock ordering costs discipline and a certain amount of unnatural code, since the natural order for a business operation is rarely the canonical order. The failure mode when it goes wrong is a deadlock storm: the rate crosses the point where retries generate more conflicts than they resolve, and throughput collapses to near zero while the CPU sits idle. That idle CPU is the diagnostic signature. A service that is failing while doing no work is almost always waiting on something.</p>
+
+  <h2>4. The runtime you did not write</h2>
+
+  <h3 id="memory-leaks">Memory leaks</h3>
+
+  <p>A memory leak is memory that is still reachable but will never be used again. In a manually managed language it is memory you forgot to free. In a garbage-collected language it is subtler and more common: the collector is working perfectly and refusing to collect objects because your code still holds a reference. Oracle's troubleshooting guide names this exactly, saying that for a long-lived application the message may indicate that the application is unintentionally holding references to objects, which prevents the objects from being garbage collected, and calling that the Java language equivalent of a memory leak. The usual culprits are a cache with no eviction policy, a listener registry nobody unregisters from, a thread-local on a pooled thread, and a static collection that only ever grows. <em>Source: <a href="https://docs.oracle.com/en/java/javase/21/troubleshoot/troubleshooting-memory-leaks.html">Oracle, "Troubleshoot Memory Leaks"</a>.</em></p>
+
+  <p>The runtime warns you before it dies, and the warning is specific enough to be worth memorising. Oracle documents that after a garbage collection, if the application spends more than approximately 98 per cent of its time performing garbage collection while recovering less than 2 per cent of the heap, and has done so for the last five consecutive collections, an <code>OutOfMemoryError</code> with the detail message <code>GC Overhead limit exceeded</code> is thrown. That is not a memory error, it is a liveness error: the process is alive, responding to health checks, and doing essentially nothing but collecting garbage. Long before the heap is technically full, the service is effectively down.</p>
+
+  <p>In a container the ending is more abrupt. The Linux cgroup v2 memory controller documents that if a cgroup's memory usage reaches <code>memory.max</code> and cannot be reduced, the OOM killer is invoked in the cgroup. Kubernetes surfaces the same mechanism, documenting that memory limits are enforced by the kernel with OOM kills, that terminations only happen when the kernel detects memory pressure, and therefore that memory limits are enforced reactively: a container may use more memory than its limit, and if it does, it may get killed. That is the crucial asymmetry with CPU. A container over its CPU limit gets throttled and slows down. A container over its memory limit gets killed, mid-request, with no unwind and no chance to flush anything. <em>Source: <a href="https://docs.kernel.org/admin-guide/cgroup-v2.html">Linux kernel, "Control Group v2"</a>, and <a href="https://kubernetes.io/docs/concepts/configuration/manage-resources-containers/">Kubernetes, "Resource Management for Pods and Containers"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Healthy
+  Healthy: Healthy
+  Healthy: Live set flat after each collection
+  Healthy --> Creeping: a reference is retained
+  Creeping: Creeping
+  Creeping: Post-collection live set rises slowly
+  Creeping: Hidden by the sawtooth on the heap graph
+  Creeping --> Thrashing: headroom nearly gone
+  Thrashing: Thrashing
+  Thrashing: Collector runs constantly, frees almost nothing
+  Thrashing: Service alive, health checks green, throughput near zero
+  Thrashing --> Killed: heap exhausted or cgroup limit reached
+  Killed: Terminated
+  Killed: OutOfMemoryError, or OOM kill by the kernel
+  Killed --> Healthy: restart resets the clock
+  Creeping --> Healthy: a deploy restarts the process
+  </div><figcaption>The life of a leak, including the two exits that hide it. <b>A routine deploy resets the live set, so any leak with a fuse longer than your release cadence is invisible in normal operation and only detonates during a code freeze or a holiday.</b> Note that the thrashing state passes health checks, which is why liveness probes based on a TCP connect do not catch this.</figcaption></figure>
+
+  <p><b>A named example.</b> A streaming platform's connection gateway holding a map from session identifier to subscriber state. Sessions are added on connect and removed on a clean disconnect. Mobile clients on cellular networks frequently do not disconnect cleanly. The map grows by the number of ungraceful disconnects per day, forever. At a hundred concurrent users the leak is a rounding error; at a hundred thousand it is the reason the gateway is restarted every night by a cron job nobody wants to admit exists.</p>
+
+  <p><b>The arithmetic: time to failure, and why you cannot see it.</b> Take a container limit of 2 GiB, a heap capped at 1536 MiB, a live set after collection of 600 MiB, and a leak rate of 8 MiB per hour.</p>
+
+  <div class="math">
+    headroom      = 1536 - 600 = 936 MiB
+    time_to_death = 936 / 8 = 117 hours = 4.9 days
+    <span class="gloss">headroom is the space between the current live set and the heap ceiling, in MiB. The leak rate of 8 MiB per hour is the growth in the live set measured after each collection, not the growth in total heap usage. time_to_death is how long until the heap cannot accommodate the live set.</span>
+  </div>
+
+  <p>Now the detection problem. Over a four-hour observation window the leak adds 32 MiB. Meanwhile the heap graph is swinging by hundreds of megabytes between collections as garbage accumulates and is reclaimed. A 32 MiB signal inside a several-hundred-megabyte sawtooth is invisible to the eye and to most alerting rules. This is why the metric that matters is <em>live set after collection</em>, not heap used. Plot the troughs, not the curve. Against the troughs, 8 MiB per hour is a clean straight line and the leak is obvious within a day.</p>
+
+  <p>The second observation is the uncomfortable one. If you deploy every three days, a 4.9-day fuse never fires, and the leak is genuinely invisible until the week you stop deploying. Frequent deployment is a real operational virtue and it is also a mask. A team that ships continuously and then goes into a two-week change freeze for a peak trading period has arranged for its leaks to detonate at the worst possible moment, which is exactly when they happen.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the leak rate is proportional to work done, so the fuse is long and a weekly restart genuinely is a legitimate mitigation; do not let anyone shame you out of it. At <b>1,000 requests per second</b> the fuse shortens tenfold to roughly twelve hours, which is inside a single day and therefore inside your on-call rotation, so you need the post-collection live set on a dashboard with a trend alert. At <b>10,000 requests per second</b> the fuse is around an hour and this is no longer a monitoring problem but a design one: every cache needs a bounded size and an eviction policy at construction time, and any unbounded collection on a request path should fail code review.</p>
+
+  <p><b>Trade-off and failure mode.</b> Bounding every cache costs hit rate and therefore latency, and choosing the bound requires knowing your working set, which is real work. The failure mode is a crash loop: the container is killed, restarts, refills its cache, and is killed again, with the restarts now synchronised across the fleet because the leak rate is roughly uniform. Correlated restarts turn a memory problem into an availability problem.</p>
+
+  <h3 id="garbage-collection">Garbage collection</h3>
+
+  <p>Garbage collection is the runtime reclaiming memory whose objects are no longer reachable. Every collector makes the same three-way trade between throughput, latency, and footprint, and you cannot have all three. Go's guide states the relationship in an exact formula. The target heap is the live heap plus a multiple of the live heap and roots set by <code>GOGC</code>, and the guide is explicit that doubling <code>GOGC</code> doubles heap memory overhead and roughly halves the CPU cost of collection. That is the throughput-versus-footprint axis in one sentence, and it is a dial you control. <code>GOMEMLIMIT</code> adds a soft ceiling, and to avoid a death spiral where the collector runs continuously trying to hold an impossible limit, the runtime caps collection at roughly 50 per cent of CPU time over a rolling window. <em>Source: <a href="https://go.dev/doc/gc-guide">A Guide to the Go Garbage Collector</a>.</em></p>
+
+  <div class="math">
+    Target heap = Live heap + (Live heap + GC roots) * GOGC / 100
+    live 8 MiB, roots 2 MiB, GOGC=100 → 8 + 10 = 18 MiB target
+    live 8 MiB, roots 2 MiB, GOGC=50  → 8 + 5  = 13 MiB target
+    <span class="gloss">Live heap is the memory still reachable at the last collection. GC roots covers goroutine stacks and global pointers. GOGC is the growth percentage before the next collection triggers. A lower GOGC means a smaller heap and more frequent collections; a higher GOGC means a larger heap and fewer collections.</span>
+  </div>
+
+  <p>On the latency axis, the JVM's collectors give the clearest published targets, because OpenJDK states them as explicit goals. ZGC's original proposal set out the goal that GC pause times should not exceed 10 ms, across heaps from a few hundred megabytes to many terabytes, with no more than a 15 per cent throughput reduction compared to G1. Generational ZGC tightened that goal to pause times not exceeding 1 millisecond, and its motivation section makes the comparison directly: ZGC's pause times are consistently measured in microseconds, while the pause times of the default collector, G1, range from milliseconds to seconds. That range is the number to hold on to, because "seconds" is a p99 budget in its entirety. <em>Source: <a href="https://openjdk.org/jeps/439">JEP 439: Generational ZGC</a>, building on <a href="https://openjdk.org/jeps/333">JEP 333: ZGC</a>.</em></p>
+
+  <p><b>A named example.</b> Discord's Read States service, which tracks which messages each user has read. Discord reported latency and CPU spikes roughly every two minutes in their Go implementation, and identified the cause as the collector needing to scan a very large LRU cache on every cycle even when little memory was actually ready to be freed. They describe trying to tune the collection percentage and shrinking the cache; the smaller cache reduced the spikes but raised 99th percentile latency through cache misses, which is the throughput-versus-latency trade appearing as an unsolvable choice. They ultimately moved the service to a runtime without a garbage collector. The lesson is not "rewrite in Rust". It is that when your live set is large and long-lived, the collector's work is proportional to the thing you cannot shrink, and tuning runs out of room. <em>Source: <a href="https://discord.com/blog/why-discord-is-switching-from-go-to-rust">Discord, "Why Discord is switching from Go to Rust"</a>.</em></p>
+
+  <p><b>The arithmetic: pauses against a p99 budget.</b> Two quantities decide whether a pause is visible: how often a request collides with one, and how much the pause adds when it does. If pauses occur at rate <code>r</code> per second, each lasting <code>P</code> seconds, and a request occupies <code>D</code> seconds, the request is hit if a pause starts during it or was already running when it began.</p>
+
+  <div class="math">
+    P(hit) ≈ r * (D + P)
+    to keep pauses out of the p99:  r * (D + P) < 0.01
+    with D = 0.040 s and P = 0.200 s:  r < 0.01 / 0.240 = 0.042/s, one pause every 24 s
+    with D = 0.040 s and P = 0.001 s:  r < 0.01 / 0.041 = 0.244/s, one pause every 4 s
+    <span class="gloss">r is collection pauses per second. P is the length of one pause. D is how long a request is in flight. P(hit) is the fraction of requests that overlap a pause. The 0.01 threshold is the p99: if more than one per cent of requests are hit, the pause is inside your 99th percentile by definition. The 200 ms and 1 ms pause lengths are assumptions chosen to sit inside the ranges OpenJDK states for G1 and for Generational ZGC.</span>
+  </div>
+
+  <p>Work an example end to end. Budget: 200 ms at p99. The service itself takes 150 ms at p99, leaving 50 ms of headroom. With a 200 ms pause once per second, <code>P(hit) = 1 &times; 0.240 = 24%</code>, far above one per cent, so the pause lands inside the p99 and adds up to 200 ms. Your p99 becomes about 350 ms and the budget is gone, blown by a factor of four over its headroom. With a 1 ms pause at the same frequency, <code>P(hit)</code> is still 4.1 per cent and still inside the p99, but the addition is 1 ms against 50 ms of headroom, which is two per cent of the headroom and invisible. This is the key insight and it is easy to get backwards: at production request rates you usually cannot make collections rare enough to dodge them, so <em>pause magnitude is the variable that matters, not pause frequency</em>. Chasing a lower collection rate by enlarging the heap often makes things worse, because for a non-concurrent collector a bigger heap means a longer pause when it finally happens.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the default collector with default settings is correct and tuning is premature; the pause is real but few enough requests are in flight for it to matter. At <b>1,000 requests per second</b> pause length enters your latency budget explicitly, so measure it, subtract it from the budget, and pick a collector against the remainder rather than against a benchmark. At <b>10,000 requests per second</b> essentially every pause hits some in-flight request, so a low-pause concurrent collector is not a tuning choice but a requirement, and the remaining lever is allocation rate: object pooling, value types, and buffer reuse reduce collector work at the source, which is the only reduction that does not trade against something else.</p>
+
+  <p><b>Trade-off and failure mode.</b> Low-pause collectors buy latency with throughput and footprint, which OpenJDK quantified as a goal of no more than 15 per cent throughput reduction against G1. The failure mode is the death spiral Go's guide names: the live set grows until the collector is running continuously, at which point the runtime caps it and memory exceeds the limit anyway. The system does not degrade gracefully, it falls off a cliff, and everything before the cliff looks like a slightly elevated CPU graph.</p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">Your p99 budget is 200 ms, the service itself takes 150 ms at p99, requests are in flight for 40 ms, and the collector pauses for about 200 ms roughly once a second. Which change actually keeps you inside budget?</div>
+    <button class="q-opt">Raise the heap so collections run less often each minute</button>
+    <button class="q-opt">Add more application threads so the queued requests drain faster</button>
+    <button class="q-opt">Lower the request duration so fewer requests overlap a pause</button>
+    <button class="q-opt">Switch to a collector whose pause target is one millisecond</button>
+    <div class="q-fb">At this request rate you cannot make pauses rare enough to dodge, so magnitude is the only lever that works: a 1 ms pause is invisible against 50 ms of headroom even when it hits. Raising the heap reduces frequency but for a non-concurrent collector it lengthens each pause, so you trade a frequent stall for a rarer but longer one, which is worse at the tail. More threads do not help because a stop-the-world pause stops every thread by definition, so the queue does not drain during it. Shortening request duration barely moves the needle: even halving it to 20 ms takes P(hit) from 24 per cent only to 22 per cent, nowhere near the one per cent needed, and it does nothing about the 200 ms that gets added when a hit occurs.</div>
+  </div>
+
+  <h3 id="thread-safety">Thread safety</h3>
+
+  <p>A piece of code is thread-safe if it behaves correctly when called concurrently from multiple threads, with no coordination required from the caller. The mechanism is that concurrent access to shared mutable state must be ordered by something the runtime recognises as a synchronisation event. Go's memory model formalises this as happens-before, built from sequenced-before within a goroutine and synchronized-before across them, and gives the specific guarantees: a send on a channel is synchronized before the completion of the corresponding receive, and for any mutex, the nth call to <code>Unlock</code> is synchronized before the mth call to <code>Lock</code> returns, for n less than m. Programs without data races get the property called DRF-SC, meaning that in the absence of data races Go programs behave as if all the goroutines were multiplexed onto a single processor. That single sentence is why thread safety is worth the effort: it lets you reason sequentially about concurrent code. <em>Source: <a href="https://go.dev/ref/mem">The Go Memory Model</a>.</em></p>
+
+  <p>The memory model also contains the best piece of engineering advice in any specification: if you must read the rest of this document to understand the behaviour of your program, you are being too clever, and do not be clever. Thread safety achieved by reasoning about memory ordering is thread safety that will not survive its author changing teams.</p>
+
+  <p>There are exactly four ways to make state safe under concurrency, and picking the right one is most of the skill. <b>Do not share it</b>, by giving each worker its own copy or by confining the state to a single owner. <b>Do not mutate it</b>, by making it immutable so any number of readers are trivially safe. <b>Serialise access to it</b> with a mutex, which is correct and reintroduces every contention problem from the pessimistic locking topic. Or <b>make the operations atomic</b>, using hardware compare-and-swap primitives, which is fastest and by far the easiest to get subtly wrong.</p>
+
+  <p><b>A named example.</b> A real-time bidding server in ad tech. Each incoming bid request is scored against campaign budgets held in an in-memory map that a background thread refreshes from the database. Reads happen tens of thousands of times per second, writes once every few seconds. A plain map here is a data race with an enormous read side, and Go's memory model is explicit that a racy multiword structure can produce values corresponding to no single write and can lead to arbitrary memory corruption. The right shapes are a read-write mutex, or better, an immutable snapshot that the refresher swaps in atomically, so readers never synchronise with anything at all.</p>
+
+  <p><b>The arithmetic: what a mutex costs you at the tail.</b> Reuse Little's Law from the pessimistic locking topic. A mutex is a lock, so its ceiling is <code>1/H</code> and its waiting time follows the same utilisation curve. If a shared counter is guarded by a mutex held for 200 nanoseconds, the ceiling is 5 million operations per second and nobody will ever notice. If the critical section grows to 50 microseconds because someone added a log line that formats a string inside it, the ceiling collapses to 20,000 per second.</p>
+
+  <div class="math">
+    λ_max = 1 / H
+    H = 200 ns  →  λ_max = 5,000,000/s   invisible at any realistic load
+    H = 50 µs   →  λ_max = 20,000/s      a ceiling you can actually hit
+    at λ = 16,000/s and H = 50 µs: ρ = 0.80, W_q = 0.80 * 50 / 0.20 = 200 µs
+    <span class="gloss">H is the mutex hold time. λ_max is the maximum acquisitions per second that one mutex can sustain. ρ is the fraction of time the mutex is held. W_q is the mean wait to acquire it. A 250-fold increase in hold time produces a 250-fold reduction in ceiling, because the relationship is exactly inverse.</span>
+  </div>
+
+  <p>The lesson generalises: a mutex is not slow, but whatever you do while holding one becomes serial, and serial work has a hard ceiling that adding machines cannot raise.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> put a mutex around anything shared and move on; the contention is unmeasurable and the clarity is worth more. At <b>1,000 requests per second</b> hold time matters, so shrink critical sections, never do input or output inside one, and prefer a read-write lock where reads dominate. At <b>10,000 requests per second</b> a single mutex on a hot path is a bottleneck no matter how short the section, and the answers are sharding the state so different keys use different locks, per-core or per-worker state that is aggregated periodically, and immutable snapshots swapped atomically so the read path takes no lock at all.</p>
+
+  <p><b>Trade-off and failure mode.</b> Every safety mechanism costs either memory, in the copying approaches, or serialisation, in the locking approaches. The failure mode is that the absence of a mechanism is undetectable by testing: the race detector, as its own documentation says, only finds races that happen at runtime and cannot find races in code paths that are not executed. A green test suite is evidence about the paths the tests took, not about the code. That is why review conventions and language-level ownership rules do more for thread safety in practice than any tool does.</p>
+
+  <h3 id="cold-starts">Cold starts</h3>
+
+  <p>A cold start is the latency of creating an execution environment before any of your code can run. AWS documents the Lambda lifecycle as three phases. The <b>Init</b> phase starts extensions, bootstraps the runtime, and runs the function's static code, and is limited to 10 seconds unless provisioned concurrency or SnapStart is in use. The <b>Invoke</b> phase runs the handler. The <b>Shutdown</b> phase cleans up. AWS is direct about the cost distribution: cold starts typically occur in under 1 per cent of invocations, and the duration of a cold start varies from under 100 ms to over 1 second. It also notes that cold starts are typically more common in development and test functions than in production workloads, precisely because those are invoked less frequently. That last sentence contains the entire scaling insight for this topic. <em>Source: <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-runtime-environment.html">AWS, "Understanding the Lambda execution environment lifecycle"</a>.</em></p>
+
+  <p>Underneath this is a virtualisation problem that AWS solved and published. The Firecracker paper reports that with the provided minimal Linux guest kernel configuration, it offers memory overhead of less than 5 MB per container, boots to application code in less than 125 ms, and allows creation of up to 150 microVMs per second per host. Those numbers set the floor: the platform's own contribution to a cold start is around 125 ms, and everything above that is your dependencies, your framework, and your connection setup. <em>Source: <a href="https://www.usenix.org/conference/nsdi20/presentation/agache">Agache et al., "Firecracker: Lightweight Virtualization for Serverless Applications" (NSDI 2020)</a>.</em></p>
+
+  <p>Two mitigations exist and they are not equivalent. Provisioned concurrency pre-initialises environments and keeps them ready, which AWS describes as the recommended solution when you need predictable start times and the lowest possible latency. SnapStart takes a different route: initialisation happens when you publish a version, Lambda snapshots the memory and disk state of the initialised environment, encrypts and caches it, and later resumes new environments from that snapshot rather than initialising from scratch. AWS describes the result as reducing latency from several seconds to as low as sub-second in optimal scenarios. The compatibility catch is worth knowing because it is a correctness issue rather than a performance one: if initialisation generates unique content, that content is baked into the snapshot and reused across every environment restored from it, which AWS calls out for unique identifiers, secrets, and entropy used for pseudorandomness. A random seed captured in a snapshot is the same seed on every instance. <em>Source: <a href="https://docs.aws.amazon.com/lambda/latest/dg/snapstart.html">AWS, "Improving startup performance with Lambda SnapStart"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Init
+  Init: Init
+  Init: Extension init, runtime init, function static code
+  Init: Capped at 10 seconds
+  Init --> Invoke
+  Invoke: Invoke
+  Invoke: Your handler runs, bounded by the function timeout
+  Invoke --> Frozen
+  Frozen: Frozen
+  Frozen: Environment retained, ready for reuse
+  Frozen --> Invoke: another request arrives in time
+  Frozen --> Shutdown: idle too long, or periodic recycling
+  Shutdown: Shutdown
+  Shutdown: Extensions notified, then the process ends
+  Shutdown --> [*]
+  Init --> Invoke: warm path skips straight back here
+  </div><figcaption>The execution environment lifecycle, with the one edge that decides your latency. <b>Every request that finds a frozen environment pays nothing, and every request that does not pays the entire Init phase, so the cold start rate is really a question about the gap between requests.</b> AWS also notes that environments are terminated every few hours for runtime updates regardless of traffic, so no environment is permanent.</figcaption></figure>
+
+  <p><b>A named example.</b> A healthcare claims-status API. Traffic is bursty and low: a few hundred lookups spread across a working day, with long gaps. This is the worst possible profile for a function-based deployment, because almost every request arrives after the previous environment has been reclaimed. The same code behind the same API at ten thousand requests per second would have a cold start rate near zero.</p>
+
+  <p><b>The arithmetic: the cold start fraction is a function of the gap, not the volume.</b> Model arrivals as random with rate <code>&lambda;</code> and assume an idle environment is reclaimed after <code>t<sub>idle</sub></code> seconds. An environment survives to serve the next request only if that request arrives within the idle window, so the probability of a cold start is the probability that the gap exceeded it.</p>
+
+  <div class="math">
+    P(cold) = e^(-λ * t_idle)
+    λ = 1/3600 (one per hour),  t_idle = 300 s  →  e^-0.083 = 0.92   about 92% cold
+    λ = 1/60   (one per minute), t_idle = 300 s  →  e^-5     = 0.0067 about 0.7% cold
+    λ = 1/6    (ten per minute), t_idle = 300 s  →  e^-50    ≈ 0      effectively never cold
+    <span class="gloss">λ is the arrival rate in requests per second. t_idle is how long an idle environment is kept before being reclaimed, assumed here to be 300 seconds because AWS does not publish this value. P(cold) is the fraction of requests that must pay the Init phase. Note that traffic volume enters only through the gap between requests.</span>
+  </div>
+
+  <p>Now put latency on it. Assume a warm invocation of 40 ms and a cold start that adds 800 ms, which sits inside the range AWS documents.</p>
+
+  <div class="math">
+    mean_latency = 40 + P(cold) * 800
+    one per hour:   40 + 0.92  * 800 = 776 ms   19x the warm figure
+    one per minute: 40 + 0.0067 * 800 = 45 ms    13% above warm
+    ten per minute: 40 + 0       * 800 = 40 ms    unchanged
+    <span class="gloss">mean_latency is the average across all invocations in milliseconds. The 40 ms warm figure and the 800 ms cold start penalty are assumptions; substitute your own measured values, since the structure of the result does not depend on the specific numbers.</span>
+  </div>
+
+  <p>The same function, the same code, the same configuration, is a 776 ms API at one request per hour and a 40 ms API at ten requests per minute. Note also that the 0.7 per cent figure at one request per minute is consistent with AWS's statement that cold starts typically occur in under 1 per cent of invocations, though that consistency is a sanity check on the model rather than evidence for the assumed idle window. And because AWS bills for the Init phase, the low-traffic case is roughly nineteen times the compute cost per request as well, which is the opposite of what people expect from a pay-per-use platform.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> cold starts are already almost gone through sheer arrival rate, and the residual comes from scale-up and from the periodic recycling AWS documents. At <b>1,000 requests per second</b> the steady state is warm but every scale-up event creates a burst of new environments simultaneously, so cold starts cluster exactly when traffic is rising, which is exactly when you can least afford them. At <b>10,000 requests per second</b> the cold start problem inverts entirely: individual cold starts are noise, but a thousand environments initialising at once will open a thousand database connections at once, and the failure is no longer latency but a connection storm against a downstream that has a connection limit. For the model-serving version of the same problem, see <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#cold-starts">cold starts in the AI System Design course</a>, where the initialisation being amortised is a multi-gigabyte weight load rather than a framework, and <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">time to first token</a>, which is the same "the user waits for setup" problem in a different medium.</p>
+
+  <p><b>Trade-off and failure mode.</b> Provisioned concurrency removes cold starts by paying for capacity whether or not it is used, which is the trade the platform existed to avoid; SnapStart is cheaper but imposes the uniqueness constraint above and supports a limited set of runtimes. The failure mode at low traffic is a latency profile so bimodal that percentiles stop being informative: your p50 is 40 ms, your p99 is 900 ms, and no single number describes the service. The failure mode at high traffic is the thundering herd of initialisations during a scale-up, which is a downstream capacity problem wearing a startup problem's clothes.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A 40 ms function is invoked about once per hour. Assume an idle execution environment is reclaimed after five minutes. Roughly what share of invocations pay the full cold start?</div>
+    <button class="q-opt">Around ninety percent, because the environment expires between the calls</button>
+    <button class="q-opt">Around one percent, because the environment survives between two calls</button>
+    <button class="q-opt">Around ten percent, because the platform holds a spare environment</button>
+    <button class="q-opt">Around fifty percent, because the platform alternates cold with warm</button>
+    <div class="q-fb">P(cold) = e^(-&lambda; &times; t_idle) = e^(-300/3600) = e^-0.083 = 0.92, so about ninety-two per cent. The one per cent answer is AWS's published figure across all invocations of all functions, which is dominated by high-traffic production functions; AWS says in the same document that infrequently invoked functions are exactly where cold starts concentrate. The ten per cent answer assumes the platform keeps a spare environment warm for you, which is what provisioned concurrency does and what on-demand concurrency explicitly does not. The fifty per cent answer assumes some alternation between cold and warm, but with an hour-long gap against a five-minute idle window there is nothing to alternate with: the environment is always already gone.</div>
+  </div>
+
+  <h2>5. Scale drill: one checkout service, three tiers</h2>
+
+  <p>Take a single system and walk it. A retailer's checkout service, backed by PostgreSQL for orders and DynamoDB for inventory counters, deployed as containers with a small set of functions handling asynchronous fulfilment. The catalogue has a million items. Once a month the retailer runs a limited drop, where a few thousand units of one item are sold in ten minutes.</p>
+
+  <p><b>At 100 requests per second.</b> Almost nothing in this chapter applies and the correct engineering decision is to say so out loud. Inventory uses <a href="#optimistic-locking">optimistic locking</a> with a conditional write, and the conflict rate is around 0.01 writes per second per key, four hundred times below the crossover. Orders use a database transaction; you have no <a href="#distributed-locks">distributed lock</a> and you need none. <a href="#deadlocks">Deadlocks</a> appear in the log perhaps monthly and a retry handles them. The default collector is fine, because with 40 ms requests at 100 per second you have four requests in flight and a pause hits few of them. The fulfilment functions cold-start often, but they are asynchronous and nobody is waiting. Total concurrency engineering required: a version column, a retry loop, and a bounded cache.</p>
+
+  <p><b>At 1,000 requests per second.</b> Three things change simultaneously. First, hot keys begin to exist even though the aggregate is comfortable, so the <a href="#optimistic-locking">retry rate metric must become per-key</a>, because a service-wide two per cent hides one key at ninety per cent. Second, <a href="#pessimistic-locking">lock hold time</a> becomes a design constraint rather than an implementation detail: the payment authorisation call must move outside the transaction, taking the hold from 200 ms to 3 ms and the ceiling from 5 to 333 per second, and moving it out means the balance check and the debit now need a conditional write so the <a href="#race-conditions">lost update</a> does not return through the back door. Third, the <a href="#deadlocks">deadlock rate grows quadratically</a>, so the refund path and the restock path must agree on a lock order and that agreement needs to be written down. On the runtime side, <a href="#garbage-collection">pause length now enters the latency budget</a> explicitly and <a href="#memory-leaks">the leak fuse shortens</a> from five days to twelve hours, which moves leaks from invisible to on-call.</p>
+
+  <p><b>At 10,000 requests per second, and during the drop.</b> Every mechanism inverts. The drop puts the entire write rate onto one inventory key, so the conditional write has a conflict probability indistinguishable from one and the <a href="#optimistic-locking">optimistic path stops committing at all</a>. The fix is not a better lock, it is to remove the contention: shard the counter into a hundred sub-counters, or place the drop behind a queue so writes to that key become sequential. If you instead reach for a <a href="#distributed-locks">distributed lock</a> on the hot key, you have built a serialiser with a network round trip inside it, and the ceiling from Little's Law is a few hundred per second against a demand of ten thousand. <a href="#thread-safety">Mutexes</a> on the in-process campaign cache now need sharding or an immutable snapshot. <a href="#garbage-collection">Every collection pause hits an in-flight request</a>, so pause magnitude, not frequency, is the only lever. <a href="#memory-leaks">The leak fuse is about an hour</a>, so unbounded collections must be caught in review rather than in monitoring. And the fulfilment functions scale from ten concurrent environments to a thousand in under a minute, so <a href="#cold-starts">a thousand cold starts open a thousand database connections at once</a>, which is the incident that actually happens. The right answer is a connection proxy in front of the database, and it needs to be there before the drop, not after it.</p>
+
+  <p>Read that progression again and notice what changed. Not the code. Not the correctness of any single decision. Only the arrival rate, appearing in a probability, a ceiling, or a quadratic. Every one of these transitions is computable in advance from numbers you already have.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit that pays off most in this chapter is refusing to answer any concurrency question without a rate attached. "Should we use optimistic or pessimistic locking" has no answer; "we see six writes per second on our hottest key with a twenty millisecond read window" has exactly one. Pick a contended resource in a system you know, measure its per-key write rate and its hold time, and run it through the crossover formula and Little's Law. Then bring me the numbers and I will argue with your assumptions, which is where the real learning is.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html">Kleppmann's "How to do distributed locking"</a> and then <a href="http://antirez.com/news/101">Sanfilippo's reply</a>, in that order and in full. They disagree about a real thing, both arguments are careful, and reading a genuine technical disagreement between two people who have each built the systems in question is worth more than any summary of it. Then read section 2.4 of <a href="https://www.usenix.org/legacy/event/osdi06/tech/full_papers/burrows/burrows_html/">the Chubby paper</a>, which describes sequencers and lock-delay, and notice that Google shipped the fencing mechanism years before the argument happened. For the runtime half of the chapter, <a href="https://go.dev/doc/gc-guide">A Guide to the Go Garbage Collector</a> is the clearest published explanation of the three-way trade between throughput, latency, and footprint that every collector makes.</p>
+
+  <div class="pager">
+    <a href="0005-distributed-data.html"><span class="dir">&larr; Previous</span><span class="ttl">Distributing Data</span></a>
+    <a class="nxt" href="0007-scale-latency-and-cost.html"><span class="dir">Next &rarr;</span><span class="ttl">Scale, Latency and Cost</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 07 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
