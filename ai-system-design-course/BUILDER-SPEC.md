@@ -12,7 +12,9 @@ Read `MISSION.md` and `NOTES.md` first. Read `lessons/0000-llm-basics.html` in f
 4. **Never invent numbers.** If a figure is not in a source you can link, describe the effect qualitatively. Cost figures in particular must be framed as assumptions, not facts.
 5. **Concept-only.** The learner is a Principal engineer with twelve years of distributed-systems experience. Do not re-teach queues, caches, or replication. Teach what is different.
 6. **Interview framing.** Every chapter ends with an `Interview drill` section: the questions actually asked, each with the trap named.
-7. Self-contained HTML with the same `<head>`, spine nav, and `../assets/course.js` at the end of body.
+7. Self-contained HTML with the same `<head>` and spine nav. The course runs on the shared design
+   system, so a lesson links `../../assets/hub.css` and loads `../../assets/hub.js` then `../outline.js`
+   from the head. There is no end-of-body script tag any more.
 
 ## Required section skeleton
 
@@ -28,7 +30,7 @@ Read `MISSION.md` and `NOTES.md` first. Read `lessons/0000-llm-basics.html` in f
 
 ## Quizzes
 
-Use the widget documented in `assets/course.js`. **Every option must be the same length in words and as close as possible in characters.** A visibly longer correct answer leaks the answer and destroys the retrieval practice, which is the entire point.
+Use the widget documented in the header of the shared `assets/hub.js`. **Every option must be the same length in words and as close as possible in characters.** A visibly longer correct answer leaks the answer and destroys the retrieval practice, which is the entire point.
 
 Feedback in `.q-fb` must explain why the wrong answers are wrong, not merely restate the right one.
 
