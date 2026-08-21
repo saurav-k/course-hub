@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Three checks, all deterministic and offline:
+Four checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
-3. Every relative ``href``/``src`` in every page resolves to a file on disk.
+3. Every course ``outline.js`` names exactly the lessons that are on disk.
+4. Every relative ``href``/``src`` in every page resolves to a file on disk.
 
 Exit code 0 means the site is publishable. Exit code 1 lists every problem.
 """
 
 from __future__ import annotations
 
+import json
 import re
 import sys
 from dataclasses import dataclass
@@ -22,6 +24,10 @@ REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 LINK_PATTERN: re.Pattern[str] = re.compile(r'(?:href|src)\s*=\s*"([^"]+)"', re.IGNORECASE)
 
 EXTERNAL_PREFIXES: tuple[str, ...] = ("http://", "https://", "//", "#", "mailto:", "data:", "javascript:")
+
+OUTLINE_ASSIGNMENT: re.Pattern[str] = re.compile(
+    r"window\.COURSE_OUTLINE\s*=\s*(?P<payload>\{.*\})\s*;", re.DOTALL
+)
 
 
 @dataclass(frozen=True)
@@ -65,10 +71,18 @@ def course_directories() -> list[Path]:
 
 
 def html_pages() -> list[Path]:
+    """Every page the site actually publishes.
+
+    Dot-directories are tool state, never site content: ``.git`` obviously, but
+    also ``.lavish``, ``.vscode`` and anything else a contributor's tooling
+    leaves in the tree. Scanning them turns a local scratch file into a failed
+    pull request, so they are skipped by rule rather than by name.
+    """
     return sorted(
         page
         for page in REPO_ROOT.rglob("*.html")
-        if ".git" not in page.parts and "node_modules" not in page.parts
+        if not any(part.startswith(".") for part in page.relative_to(REPO_ROOT).parts)
+        and "node_modules" not in page.parts
     )
 
 
@@ -110,6 +124,50 @@ def check_lessons_are_registered() -> list[Problem]:
     return problems
 
 
+def outline_lessons(manifest: Path) -> set[str] | None:
+    """Return the lesson file names the manifest declares, or None if unreadable."""
+    match = OUTLINE_ASSIGNMENT.search(manifest.read_text(encoding="utf-8"))
+    if match is None:
+        return None
+    try:
+        payload = json.loads(match.group("payload"))
+    except json.JSONDecodeError:
+        return None
+    return {
+        lesson["href"].split("/")[-1]
+        for section in payload.get("sections", [])
+        for lesson in section.get("lessons", [])
+    }
+
+
+def check_outlines_match_disk() -> list[Problem]:
+    problems: list[Problem] = []
+
+    for course in course_directories():
+        manifest = course / "outline.js"
+        lessons_dir = course / "lessons"
+        if not manifest.is_file() or not lessons_dir.is_dir():
+            continue
+
+        declared = outline_lessons(manifest)
+        if declared is None:
+            problems.append(
+                Problem(relative(manifest), "no readable window.COURSE_OUTLINE assignment")
+            )
+            continue
+
+        on_disk = {lesson.name for lesson in lessons_dir.glob("*.html")}
+        for missing in sorted(on_disk - declared):
+            problems.append(
+                Problem(relative(manifest), f"outline is stale: lessons/{missing} is not in it")
+            )
+        for ghost in sorted(declared - on_disk):
+            problems.append(
+                Problem(relative(manifest), f"outline names lessons/{ghost}, which is not on disk")
+            )
+    return problems
+
+
 def check_local_links_resolve() -> list[Problem]:
     problems: list[Problem] = []
 
@@ -130,6 +188,7 @@ def main() -> int:
     problems = (
         check_courses_are_registered()
         + check_lessons_are_registered()
+        + check_outlines_match_disk()
         + check_local_links_resolve()
     )
 
