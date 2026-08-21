@@ -141,6 +141,40 @@ Announcements move and get rewritten, so prefer an archived snapshot and record 
 - OpenAI, *Introducing ChatGPT*, November 2022. <https://openai.com/index/chatgpt/>
 - Open Source Initiative, *The Open Source AI Definition*. <https://opensource.org/ai>
 
+## Added while writing lessons 0019 to 0026
+
+Every entry below was opened and read before it appeared in a lesson.
+The papers were read as PDFs, not as abstracts, because most of the numbers quoted live in the body.
+
+### Papers cited in lessons 0019 to 0026 and not already listed above
+
+- Cho, van Merrienboer, Bahdanau and Bengio, *On the Properties of Neural Machine Translation: Encoder-Decoder Approaches*, submitted 3 September 2014. The measured decline with sentence length, and the 27.81 against 33.08 for Moses. <https://arxiv.org/abs/1409.1259>
+- Graves, Wayne and Danihelka, *Neural Turing Machines*, October 2014. <https://arxiv.org/abs/1410.5401>
+- Weston, Chopra and Bordes, *Memory Networks*, October 2014. <https://arxiv.org/abs/1410.3916>
+- He, Zhang, Ren and Sun, *Deep Residual Learning for Image Recognition*, December 2015. The residual connection that goes into the Transformer block. <https://arxiv.org/abs/1512.03385>
+- Ba, Kiros and Hinton, *Layer Normalization*, July 2016. The other housekeeping device in that block. <https://arxiv.org/abs/1607.06450>
+- Kalchbrenner, Espeholt, Simonyan, van den Oord, Graves and Kavukcuoglu, *Neural Machine Translation in Linear Time* (ByteNet), October 2016. <https://arxiv.org/abs/1610.10099>
+- Radford, Narasimhan, Salimans and Sutskever, *Improving Language Understanding by Generative Pre-Training*, OpenAI, 11 June 2018. No arXiv version exists; read from the copy OpenAI hosts. <https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf>
+- Wang, Roberts, Hesslow, Le Scao, Chung, Beltagy, Launay and Raffel, *What Language Model Architecture and Pretraining Objective Work Best for Zero-Shot Generalization?*, April 2022. The controlled comparison that finally tested the 2018 fork. <https://arxiv.org/abs/2204.05832>
+
+### Non-paper sources cited in lessons 0019 to 0026
+
+- OpenAI, *Introducing OpenAI*, 11 December 2015, read from the Internet Archive snapshot of 16 December 2015. Carries the verbatim funder list and the "$1 billion committed" sentence with its own caveat. <https://web.archive.org/web/20151216181949/https://openai.com/blog/introducing-openai/>
+- OpenAI, *OpenAI technical goals*, 20 June 2016, read from the Internet Archive snapshot of 28 January 2017. The four goals, including the verbatim wording of goal three. <https://web.archive.org/web/20170128072829/https://openai.com/blog/openai-technical-goals/>
+- NVIDIA, *NVIDIA CEO Delivers World's First AI Supercomputer in a Box to OpenAI*, 15 August 2016, read from the Internet Archive snapshot of 30 August 2016. The live URL now redirects to a category page. Carries the Sutskever and Karpathy quotations, and never uses the words donate or gift. <https://web.archive.org/web/20160830013708/https://blogs.nvidia.com/blog/2016/08/15/first-ai-supercomputer-openai-elon-musk-deep-learning/>
+- NVIDIA, *NVIDIA Launches World's First Deep Learning Supercomputer*, 5 April 2016. The DGX-1 specifications. <https://nvidianews.nvidia.com/news/nvidia-launches-world-s-first-deep-learning-supercomputer>
+- Google Cloud, *Google supercharges machine learning tasks with TPU custom chip*, 19 May 2016. The announcement, and the admission that the chips had been in data centres for over a year. <https://cloud.google.com/blog/products/gcp/google-supercharges-machine-learning-tasks-with-custom-chip>
+- Silver et al., *Mastering the game of Go with deep neural networks and tree search*, Nature 529, 28 January 2016. Received 11 November 2015. <https://doi.org/10.1038/nature16961>
+- The Hugging Face `transformers` repository, whose GitHub record dates its creation to 29 October 2018 under the name `pytorch-pretrained-BERT`. <https://github.com/huggingface/transformers>
+- The arXiv metadata API, used for the submission timestamps in lesson 0023 rather than trusting a secondary source for them. <https://export.arxiv.org/api/query?id_list=1706.03762,1706.03741>
+
+### Sourcing notes from this range
+
+- The Transformer paper's v1 submission timestamp is **12 June 2017, 17:57:34 UTC**, and the Christiano preference paper's is **12 June 2017, 17:23:59 UTC**. Both come from the arXiv metadata record.
+- The seq2seq paper and the Cho properties paper disagree about whether the fixed vector hurt on long sentences. Sutskever's team reported that reversal removed the problem for their model; Cho's team measured a rapid decline in theirs. State both; Bahdanau's controlled comparison is what settled it.
+- Neither ULMFiT nor ELMo used a Transformer. ULMFiT's language model is an AWD-LSTM, described in its own section 3 as a regular LSTM with no attention; ELMo's is two bidirectional LSTM layers. Check before describing either.
+- `xychart-beta` renders in this design system but is not themed by `hub.js`, clips its axis labels and needs a legend for two series, so charts in this range are HTML tables instead. `stateDiagram-v2` clips its node and edge labels in this font, on first load and on reload, so this range uses flowcharts, sequence diagrams and timelines only.
+
 ## Reference works
 
 - Jurafsky and Martin, *Speech and Language Processing*, 3rd edition draft. <https://web.stanford.edu/~jurafsky/slp3/>
