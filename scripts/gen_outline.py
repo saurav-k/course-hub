@@ -102,6 +102,15 @@ def main(argv: list[str]) -> int:
     if not index_path.is_file():
         print(f"no such course index: {index_path}")
         return 1
+    if (REPO_ROOT / course / "routes.js").is_file():
+        # A routed course reads one pool of lessons along several named routes,
+        # so its outline.js derives the outline from the active route instead of
+        # declaring one. Overwriting it with a generated literal would delete the
+        # mechanism, and the course index it would be generated from holds four
+        # overlapping outlines rather than one.
+        print(f"{course} ships routes.js: its outline.js is hand-written and route-aware, refusing")
+        return 1
+
     out = REPO_ROOT / course / "outline.js"
     out.write_text(render(course, index_path.read_text(encoding="utf-8")), encoding="utf-8")
     print(f"wrote {out.relative_to(REPO_ROOT)}")
