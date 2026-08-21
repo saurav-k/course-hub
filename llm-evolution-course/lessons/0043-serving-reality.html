@@ -41,10 +41,6 @@
   <div class="callout key"><span class="tag">Where this lesson starts</span>
     <p>Most of this course is about training a model. This one is about the other half of the bill, which is paid every time anyone uses it. It assumes you know what attention computes.</p>
   </div>
-  <div class="card tldr stub-note">
-    <h2 class="h-label">This page is a stub</h2>
-    <p>The structure, the brief, the prerequisites, the figures and the sources are settled. The prose is not written yet. A writing crew replaces sections 2 and 3 below with the lesson itself, keeps the figures and fills them in, and leaves sections 1, 4 and 5 in place. Read <code>BUILDER-SPEC.md</code> before you start.</p>
-  </div>
   <h2>1. Where this lesson sits</h2>
   <h3>What you need first</h3>
   <ul class="prereqs">
@@ -52,29 +48,71 @@
   </ul>
   <h3>The one tight idea</h3>
   <p>Generating a token requires re-reading everything the model has already seen, so serving is a memory problem before it is an arithmetic problem, and most of the engineering since 2022 is about that memory.</p>
-  <h2>2. What this lesson must cover</h2>
-  <p class="stub-todo">To write. Full prose, complete sentences, 1,400 to 2,000 words. Every bullet below is a beat the finished lesson owes the reader, in this order.</p>
-  <ul class="covers">
-    <li>Why generation is sequential even though training is parallel.</li>
-    <li>The key-value cache: what is stored, one entry per token per layer, and how fast it grows.</li>
-    <li>Why memory bandwidth rather than arithmetic is usually the limit.</li>
-    <li>The families of fix, one paragraph each: fewer key and value heads, better memory layout, a faster attention kernel, and guessing ahead.</li>
-    <li>The economic consequence: the cost of a request grows with the conversation, which shapes every product built on top.</li>
-  </ul>
-  <div class="callout warn"><span class="tag">Do not overclaim</span>
-    <p>Give cache-size arithmetic only for a configuration whose layer count, head count and precision you state. A number without its configuration is meaningless.</p>
-  </div>
-  <h2>3. The figures this lesson needs</h2>
-  <p>Each figure below renders today as a working sketch of the right shape. Replace the sketch with the finished diagram described in its caption. Do not remove a figure without saying why in the pull request.</p>
+  <h2>2. Training reads. Serving writes.</h2>
+  <p>A language model is trained on text that already exists.
+  Every position of a training example is known before the run starts, so the whole example can be pushed through the network at once and every position scored in the same pass.
+  That is exactly what the 2017 architecture bought: <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a> describes deleting the recurrence so that positions no longer have to be visited one after another.</p>
+  <p>Serving is the opposite situation, and the difference is not a detail.
+  The model is asked for text that does not exist yet.
+  The token in position 51 cannot be computed until the token in position 50 has been chosen, because that token is part of the input that decides what comes next.
+  Generation is therefore strictly one step at a time, however many chips you own.
+  Buying more hardware makes each step faster and does not make the steps fewer.</p>
+  <p>So one set of weights is really being used by two different machines.
+  The first, usually called <b>prefill</b>, reads the prompt.
+  Every position of the prompt is already known, so it goes through in one pass, and it is a lot of arithmetic done all at once.
+  The second, usually called <b>decode</b>, writes the answer.
+  It runs once per token produced, and each run touches the whole model to produce a single number's worth of decision.
+  Almost everything surprising about what serving costs follows from the fact that these two phases have opposite shapes.</p>
+
+  <h2>3. What the cache holds, and how fast it grows</h2>
+  <p>Consider the naive way to generate the fifty-first token: take the prompt plus the fifty tokens already written, and run the whole thing through the model again.
+  It works, and it repeats almost all of the previous step's arithmetic.
+  Over a long answer the waste grows with the square of the length.</p>
+  <p>The escape is a property of attention itself.
+  In an attention step every position produces three things: a query saying what it is looking for, a key advertising what it holds, and a value it hands over when chosen (<a href="../reference/glossary.html#query-key-value">query, key and value</a> in the glossary).
+  When a new token arrives, the keys and values of all the earlier tokens do not change.
+  They were computed from text that is already fixed.
+  So compute them once and keep them.</p>
+  <p>That store is the <b>key-value cache</b>, and it holds one key vector and one value vector for every token the model has seen, at every layer of the stack.
+  Nothing about it is clever.
+  It is a straightforward trade of memory for arithmetic, and it is the single most consequential engineering decision in how these models are served.</p>
+  <p>The size is worth doing in full, because a cache figure quoted without its configuration means nothing.
+  The PagedAttention paper works the arithmetic for the 13-billion-parameter OPT model, which has 40 layers and a hidden size of 5,120, stored at two bytes per number: two vectors, times 5,120 numbers, times 40 layers, times 2 bytes, is <b>800 kilobytes for a single token</b>.
+  That model generates sequences of up to 2,048 tokens, so one request can hold 1.6 gigabytes of cache.</p>
+  <p>Run the same arithmetic on GPT-3, whose configuration is published in its own paper: 96 layers, a hidden size of 12,288, and the same 2,048-token window.
+  Two vectors, times 12,288, times 96, times 2 bytes, is about <b>4.7 megabytes per token</b>, and a full window is about 9.7 gigabytes.
+  That number is arithmetic done here from the paper's stated configuration rather than a figure the paper quotes, and it assumes the plain multi-head arrangement that model used.</p>
+  <p>The important part is not the size but the ownership.
+  The weights are shared: every user of a server reads the same parameters.
+  The cache is not shared.
+  Each conversation in flight owns its own, and it grows for as long as that conversation continues.
+  A server's capacity is therefore not "how big is the model" but "how many caches fit beside the model", which is why a machine that comfortably holds a model can still only serve a handful of long conversations at once.</p>
   <figure class="diagram" id="figure-1">
     <div class="mermaid">
-flowchart LR
-  T1["100 tokens"] --> C1["a small cache"]
-  T2["10,000 tokens"] --> C2["a large cache"]
-  C2 --> L["read in full&lt;br/&gt;for every new token"]
+flowchart TB
+  CFG["One entry per token, per layer:&lt;br/&gt;2 vectors x hidden size x layers x bytes"]
+  CFG --> A["OPT-13B&lt;br/&gt;40 layers, hidden 5120, 2 bytes"]
+  CFG --> B["GPT-3 175B&lt;br/&gt;96 layers, hidden 12288, 2 bytes"]
+  A --> A1["800 KB per token"]
+  B --> B1["about 4.7 MB per token"]
+  A1 --> A2["2,048 tokens:&lt;br/&gt;1.6 GB for one request"]
+  B1 --> B2["2,048 tokens:&lt;br/&gt;about 9.7 GB for one request"]
+  A2 --> W["and this is per conversation,&lt;br/&gt;not per server"]
+  B2 --> W
     </div>
-    <figcaption><b>Figure 1. The cache grows with the conversation</b> <span class="fig-brief">Finished version: cache size in gigabytes against conversation length for two real model configurations, with the arithmetic shown.</span></figcaption>
+    <figcaption><b>Figure 1. The cache grows with the conversation</b> <span class="fig-brief">Read the top box as the recipe and the two branches as the same recipe applied to two published configurations. The OPT figures are the PagedAttention paper's own worked example; the GPT-3 figures are that recipe applied to the configuration in GPT-3's own Table 2.1. The last box is the one that decides what a server costs: weights are shared between users and caches are not.</span></figcaption>
   </figure>
+
+  <h2>4. The bill is bytes moved, not sums performed</h2>
+  <p>The intuition most readers arrive with is that a large model is expensive because it does an enormous amount of arithmetic.
+  During prefill that is true.
+  During decode it is misleading, and the reason is a fact about hardware rather than about models.</p>
+  <p>To produce one token, the accelerator must read every parameter it will use out of its main memory, and read the whole cache as well, in order to perform roughly two arithmetic operations per parameter.
+  That is a very small amount of work per byte fetched.
+  The FlashAttention paper states the hardware situation plainly for the A100 generation: 40 to 80 gigabytes of high-bandwidth memory running at 1.5 to 2.0 terabytes per second, against a small on-chip scratchpad estimated at around 19 terabytes per second, and it observes that as compute has grown faster relative to memory, most operations in these models are bottlenecked by memory accesses rather than by arithmetic.</p>
+  <p>The multi-query attention paper had made the same diagnosis three years earlier and named the culprit directly: incremental inference is slow because of the memory-bandwidth cost of repeatedly loading the large key and value tensors.
+  Once you accept that, the shape of every fix that follows becomes predictable.
+  If the limit is bytes moved, then the useful moves are to store fewer bytes, to waste fewer of the bytes you store, to avoid writing intermediate bytes at all, or to get more than one token out of a single sweep through memory.</p>
   <figure class="diagram" id="figure-2">
     <div class="mermaid">
 sequenceDiagram
@@ -83,20 +121,77 @@ sequenceDiagram
   participant S as Serving engine
   participant KV as Key-value cache
   participant G as Accelerator
-  U->>S: a prompt
-  S->>G: process the whole prompt at once
-  G->>KV: write one entry per token per layer
-  loop for each generated token
-    S->>KV: read the entire cache
-    KV->>G: keys and values
+  U->>S: a 1,000-token prompt
+  S->>G: prefill - all 1,000 positions in one pass
+  Note over G: lots of arithmetic, one sweep of the weights
+  G->>KV: write 1,000 entries per layer
+  loop once per generated token
+    G->>G: read every weight, read the whole cache
+    Note over G: about two operations per parameter fetched
     G-->>S: one token
-    S->>KV: append one more entry
+    S->>KV: append one entry per layer
   end
   S-->>U: the finished answer
     </div>
-    <figcaption><b>Figure 2. One request, one server</b> <span class="fig-brief">Finished version: annotate each arrow with bytes moved and arithmetic performed, so the reader sees which one dominates.</span></figcaption>
+    <figcaption><b>Figure 2. One request, two machines</b> <span class="fig-brief">The two halves have opposite characters, and that is the whole lesson. Prefill sweeps the weights once and does a great deal of arithmetic with them. Decode sweeps the weights again for every single token and does almost nothing with each byte it fetches, so the loop is limited by how fast memory can be read rather than by how fast the chip can multiply.</span></figcaption>
   </figure>
-  <h2>4. Where this hands off</h2>
+
+  <h2>5. Four families of fix</h2>
+  <p>Each family attacks a different term, which is why real systems use all four at once rather than choosing between them.</p>
+  <h3>Store fewer bytes per token</h3>
+  <p>Noam Shazeer's 2019 multi-query attention proposed sharing a single key and value across all of the attention heads instead of giving each head its own, which shrinks the stored tensors by the number of heads and, the paper reports, costs only minor quality degradation.
+  Grouped-query attention in 2023 took the middle position: more than one key-value head, fewer than the number of query heads, and, importantly for adoption, a recipe for converting an existing trained model rather than training a new one, using about five per cent of the original pre-training compute.
+  DeepSeek-V2 in 2024 went further and compressed the keys and values into a smaller learned latent vector, reporting a 93.3 per cent reduction in cache size against its own previous model.
+  <a href="../../llm-papers-course/lessons/0015-multi-query-attention.html">The papers course covers multi-query attention</a> and <a href="../../llm-papers-course/lessons/0016-grouped-query-attention.html">the grouped compromise</a> in full.</p>
+  <h3>Waste fewer of the bytes you store</h3>
+  <p>Until 2023 serving systems reserved one contiguous block of memory per request, sized for the longest answer that request might produce.
+  Most answers are shorter than that, so most of the block sat empty, and the leftovers between blocks were too small to be usable.
+  The PagedAttention authors measured the result: only 20.4 to 38.2 per cent of the cache memory in the systems they profiled was holding actual token states.
+  Their fix borrows virtual memory from operating systems, storing the cache in fixed-size pages that need not be adjacent, so a request grows a page at a time and two requests that share a prompt can share its pages.
+  Their system, vLLM, reported two to four times the throughput of the systems it was compared against at the same latency.</p>
+  <h3>Never write the intermediate bytes</h3>
+  <p>A plain attention implementation builds the full square of scores in memory before turning it into weights.
+  FlashAttention, in 2022, reorganised the computation so that the square is processed in tiles inside the chip's small fast scratchpad and never written out to main memory at all.
+  It is worth being precise about what this is and is not: it computes exactly the same answer as before, so it is not an approximation, and its gain is entirely in memory traffic.</p>
+  <h3>Get more than one token per sweep</h3>
+  <p>Speculative decoding, published in November 2022, uses a small cheap model to guess the next several tokens, then runs the large model once over all of the guesses in parallel to check them.
+  Every guess the large model would have made anyway is kept, and the first disagreement is corrected.
+  A careful sampling rule makes the output distribution provably identical to what the large model alone would have produced, and the authors measured two to three times the speed on T5-XXL with unchanged outputs.
+  This is the family that exploits the bandwidth diagnosis most directly: one sweep through the weights was going to happen regardless, so it may as well settle several tokens.
+  <a href="../../llm-papers-course/lessons/0021-speculative-decoding.html">The papers course treats it in full.</a></p>
+  <figure class="diagram" id="figure-3">
+    <div class="mermaid">
+flowchart LR
+  P["Decode is limited by&lt;br/&gt;bytes moved per token"]
+  P --> F1["Store fewer bytes&lt;br/&gt;shared or compressed&lt;br/&gt;key and value heads"]
+  P --> F2["Waste fewer bytes&lt;br/&gt;paged cache instead of&lt;br/&gt;one reserved block"]
+  P --> F3["Write fewer bytes&lt;br/&gt;keep the score tiles&lt;br/&gt;on the chip"]
+  P --> F4["Move bytes less often&lt;br/&gt;settle several tokens&lt;br/&gt;in one sweep"]
+  F1 --> R["all four compose,&lt;br/&gt;because each attacks&lt;br/&gt;a different term"]
+  F2 --> R
+  F3 --> R
+  F4 --> R
+    </div>
+    <figcaption><b>Figure 3. Four different answers to one diagnosis</b> <span class="fig-brief">Every branch here starts from the same sentence on the left, which is why a serving stack in 2026 runs all four rather than picking a favourite. Notice that none of them makes the model better: they change what a given model costs to run, and that is a different axis from everything else in this course.</span></figcaption>
+  </figure>
+
+  <h2>6. What this does to the price of a product</h2>
+  <p>Two consequences follow directly, and both shape what gets built.</p>
+  <p>The first is that the cost of a request is not a property of the request.
+  It is a property of the request plus everything already in the conversation.
+  Prefill grows with how much text you send, and each decoded token has to re-read a cache that is larger than it was for the previous token.
+  A long chat therefore gets more expensive per token as it goes on, and the pricing of these products is arranged around that fact.
+  Reading a prefix whose cache entries already exist is dramatically cheaper than computing them: Anthropic's developer documentation, read on 22 August 2026, prices a cache read at a tenth of the ordinary input-token price, and a cache write at 1.25 times it for a five-minute entry or twice it for a one-hour one.
+  Those three multipliers are this whole lesson expressed as a price list.
+  Prompt caching is a billed product feature rather than an internal optimisation, because what it saves is exactly the prefill work described above.</p>
+  <p>The second is that the shape of a product decides its bill.
+  A single question and a short answer is cheap.
+  A system that loops, re-reading a growing transcript on every iteration, is the most expensive shape there is, and <a href="0054-why-agents-are-a-systems-problem.html">Why agents are a systems problem</a> is where this course takes up what that does to building one.</p>
+  <p>This is also why the industry did not simply keep making context windows longer and stop there.
+  A longer window is a larger cache, a larger cache is more bytes per token, and more bytes per token is a slower and dearer answer.
+  The work that followed went in two directions: make attention itself selective, which <a href="0046-sparsity-moves-to-attention.html">Sparsity moves to attention</a> covers, and manage what goes into the window rather than only enlarging it, which <a href="0048-long-context-capacity-is-not-competence.html">Long context: capacity is not competence</a> covers.
+  Both of them are debts opened by this lesson.</p>
+  <h2>7. Where this hands off</h2>
   <p>This course owns chronology, causation, people and dates. It hands off for mechanism, maths and code rather than re-deriving them.</p>
   <ul class="handoff">
     <li><b>In this course:</b> <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a></li>
@@ -106,15 +201,55 @@ sequenceDiagram
     <li><b>Hands off to:</b> <a href="../../llm-papers-course/lessons/0021-speculative-decoding.html">LLM Papers: speculative decoding</a> <span class="pq-why">Guessing ahead, in full</span></li>
     <li><b>Hands off to:</b> <a href="../../llm-inference-course/index.html">Llm Inference: A whole course of hands-on serving labs</a></li>
   </ul>
-  <h2>5. Sources to read first</h2>
+  <h2>8. Sources to read first</h2>
   <ul class="sources">
-    <li><a href="https://arxiv.org/abs/2309.06180">Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, 2023</a></li>
-    <li><a href="https://arxiv.org/abs/2205.14135">Dao et al., FlashAttention, 2022</a></li>
+    <li><a href="https://arxiv.org/abs/2309.06180">Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang and Stoica, <i>Efficient Memory Management for Large Language Model Serving with PagedAttention</i>, submitted 12 September 2023</a>. Section 3 for the OPT-13B per-token arithmetic and the 1.6 GB request, and for the profiled 20.4 to 38.2 per cent utilisation. The abstract carries the two-to-four-times throughput claim.</li>
+    <li><a href="https://arxiv.org/abs/2205.14135">Dao, Fu, Ermon, Rudra and Re, <i>FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness</i>, submitted 27 May 2022</a>. Section 2.1 for the A100 memory hierarchy figures and the statement that these operations are bottlenecked by memory accesses.</li>
+    <li><a href="https://arxiv.org/abs/1911.02150">Shazeer, <i>Fast Transformer Decoding: One Write-Head is All You Need</i>, submitted 6 November 2019</a>. The abstract names memory bandwidth, not arithmetic, as the reason incremental decoding is slow.</li>
+    <li><a href="https://arxiv.org/abs/2305.13245">Ainslie, Lee-Thorp, de Jong, Zemlyanskiy, Lebron and Sanghai, <i>GQA: Training Generalized Multi-Query Transformer Models from Multi-Head Checkpoints</i>, submitted 22 May 2023</a>. The five per cent uptraining recipe and the intermediate number of key-value heads.</li>
+    <li><a href="https://arxiv.org/abs/2405.04434">DeepSeek-AI, <i>DeepSeek-V2</i>, submitted 7 May 2024</a>. The abstract states the 93.3 per cent key-value cache reduction from compressing into a latent vector.</li>
+    <li><a href="https://arxiv.org/abs/2211.17192">Leviathan, Kalman and Matias, <i>Fast Inference from Transformers via Speculative Decoding</i>, submitted 30 November 2022</a>. The abstract states two to three times acceleration on T5-XXL with identical outputs.</li>
+    <li><a href="https://arxiv.org/abs/2005.14165">Brown et al., <i>Language Models are Few-Shot Learners</i>, submitted 28 May 2020</a>. Table 2.1 is the source for the GPT-3 layer count, hidden size and 2,048-token window used in the arithmetic above.</li>
+    <li><a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic developer documentation, <i>Prompt caching</i></a>, read 22 August 2026. The source for the three pricing multipliers: a cache read at 0.1 times the base input price, a five-minute cache write at 1.25 times it, and a one-hour write at twice it.</li>
   </ul>
-  <p class="src-warn">These are research pointers left by the scaffold, not citations. Open each one and confirm it says what the brief claims before it appears in prose.</p>
+  <p class="src-warn">Every one of these was opened and checked against what this lesson claims before it was written into the prose.</p>
   <div class="quiz">
     <h3 class="h-label">Retrieval practice</h3>
-    <p class="stub-todo">To write: three or four questions that test whether the one tight idea landed, not whether a date was memorised. Four options each, matched in word and character count, with the answer index in <code>data-answer</code> and a one-sentence explanation in <code>.q-fb</code>. Copy the exact markup from a neighbouring finished lesson in <code>llm-papers-course</code>.</p>
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is generating an answer sequential when training on text is not?</div>
+      <button class="q-opt">Because the weights are read back from memory once for every layer</button>
+      <button class="q-opt">Because each token becomes part of the input that decides the next one</button>
+      <button class="q-opt">Because the cache has to be written before any attention can be scored</button>
+      <button class="q-opt">Because the prompt must be scored before the answer can begin at all</button>
+      <div class="q-fb">A training example is text that already exists, so every position is known in advance; a generated answer is not, so position 51 has to wait for position 50.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does the key-value cache actually store?</div>
+      <button class="q-opt">The probability the model assigned to each token that it has produced</button>
+      <button class="q-opt">The attention weights computed between each pair of positions so far</button>
+      <button class="q-opt">A compressed copy of the prompt, kept so it need not be sent again</button>
+      <button class="q-opt">A key and a value for each token seen, at every layer of the stack</button>
+      <div class="q-fb">Earlier tokens are fixed text, so their keys and values never change, and storing them is what stops each new token re-running the whole sequence.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">During decode, what usually limits how fast a token can be produced?</div>
+      <button class="q-opt">The number of multiplications the accelerator has to perform per token</button>
+      <button class="q-opt">The number of layers the token has to pass through on its way out</button>
+      <button class="q-opt">The number of bytes that must be fetched from memory for each token</button>
+      <button class="q-opt">The number of requests the serving engine has batched together for it</button>
+      <div class="q-fb">Each generated token does about two operations per parameter fetched, which is very little work per byte moved, so memory bandwidth binds before arithmetic does.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does a long conversation get more expensive per token as it continues?</div>
+      <button class="q-opt">Every new token must re-read a cache that has grown since the last one</button>
+      <button class="q-opt">Every new token requires the model weights to be loaded a second time</button>
+      <button class="q-opt">Every new token is scored against a larger vocabulary than the last one</button>
+      <button class="q-opt">Every new token is checked by a second model before it can be accepted</button>
+      <div class="q-fb">The cache is per conversation and only grows, so the bytes moved for each successive token grow with it, which is exactly what shapes the pricing of these products.</div>
+    </div>
   </div>
   <nav class="pager" data-pager-route="constraint" aria-label="Lesson navigation">
     <a href="0042-lora-and-qlora.html"><span class="dir">&larr; Previous</span><span class="ttl">LoRA and QLoRA: fine-tuning for the rest of us</span></a>

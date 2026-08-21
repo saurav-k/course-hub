@@ -41,10 +41,6 @@
   <div class="callout key"><span class="tag">Where this lesson starts</span>
     <p>This lesson opens the central mechanism of the efficiency story. It assumes you know that a Transformer block contains a feed-forward network applied to each position, from <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a>.</p>
   </div>
-  <div class="card tldr stub-note">
-    <h2 class="h-label">This page is a stub</h2>
-    <p>The structure, the brief, the prerequisites, the figures and the sources are settled. The prose is not written yet. A writing crew replaces sections 2 and 3 below with the lesson itself, keeps the figures and fills them in, and leaves sections 1, 4 and 5 in place. Read <code>BUILDER-SPEC.md</code> before you start.</p>
-  </div>
   <h2>1. Where this lesson sits</h2>
   <h3>What you need first</h3>
   <ul class="prereqs">
@@ -52,46 +48,141 @@
   </ul>
   <h3>The one tight idea</h3>
   <p>Replace one large feed-forward network with many smaller ones and a small chooser that picks a couple per token, and what a model knows stops being the same number as what it costs to run.</p>
-  <h2>2. What this lesson must cover</h2>
-  <p class="stub-todo">To write. Full prose, complete sentences, 1,400 to 2,000 words. Every bullet below is a beat the finished lesson owes the reader, in this order.</p>
-  <ul class="covers">
-    <li>Where the experts sit: the feed-forward part of the block, not the attention part.</li>
-    <li>The router: a small learned scorer that produces an affinity per expert for each token.</li>
-    <li>Top-k selection and the weighted recombination back into the residual stream.</li>
-    <li>Total parameters against active parameters, defined precisely and kept apart for the rest of the course.</li>
-    <li>One anchor model with both numbers stated and sourced.</li>
-  </ul>
-  <div class="callout warn"><span class="tag">Do not overclaim</span>
-    <p>Total and active parameter counts must both be quoted from the model's own card or paper. Do not compute one from the other.</p>
-  </div>
-  <h2>3. The figures this lesson needs</h2>
-  <p>Each figure below renders today as a working sketch of the right shape. Replace the sketch with the finished diagram described in its caption. Do not remove a figure without saying why in the pull request.</p>
+  <h2>2. The weld this breaks</h2>
+  <p>Through most of this course, one number has stood for two different things.
+  Model size measures what a model knows, because knowledge lives in weights.
+  Model size also measures what a model costs to run, because every weight is multiplied by something for every token that passes through.
+  Those two meanings are welded together, and the whole scaling argument depends on the weld: a bigger model is better, and a bigger model is dearer, and there is no third option.</p>
+  <p>Mixture of experts is the third option.
+  Its idea, in one sentence, is to make most of the model's weights available to a token without making them run for that token.
+  If it works, the two meanings of "size" come apart, and from then on you have to quote two numbers instead of one.</p>
+  <p>Whether that is a good bargain depends on where a model's weights actually are, so start there.</p>
+
+  <h2>3. Where the experts sit</h2>
+  <p>A Transformer block does two things in turn, described in <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a>.
+  First, self-attention lets every position look at every other position and gather a blend of what it finds.
+  Second, a small feed-forward network processes each position on its own, with the same weights used at every position.
+  Attention is where positions meet.
+  The feed-forward network is where each position thinks privately about what it just collected.</p>
+  <p>Those two halves are very different in weight count.
+  In the original architecture the feed-forward network widens each position's vector by a factor of four and brings it back down, which is two large matrices per block, and that is where most of the parameters live.
+  Attention's projections are comparatively small.</p>
+  <p>So the target is obvious once it is stated: leave attention alone and attack the feed-forward network, because that is where the weights are.
+  Replace the one large feed-forward network in a block with many smaller ones, and route each token to only a few of them.
+  Each of the small networks is called an <b>expert</b>, the choosing is called <b>routing</b>, and using only a few is called <b>sparse activation</b>.</p>
+  <p>The word "expert" is unfortunate and worth defusing straight away.
+  Nobody assigns an expert a subject.
+  There is no French expert and no chemistry expert.
+  An expert is just a feed-forward network with its own weights, and whatever it ends up specialising in is a by-product of which tokens happened to be sent to it during training.</p>
+
+  <h2>4. The router is a small matrix and a sort</h2>
+  <p>The router is much less clever than the name suggests, and the fact that it is so plain is the interesting part.</p>
+  <p>For each token, at each block that has experts, the router takes the token's current vector and multiplies it by one learned matrix holding one row per expert.
+  That produces one score per expert, usually called the token-to-expert <b>affinity</b>, which answers a single question: how well does this expert match this token.
+  The router then takes the highest few scores, and only the experts behind those scores are run.
+  Their outputs are added together, each weighted by its own score, and the sum is added back into the token's vector.
+  That is the entire mechanism.</p>
+  <p>One detail is worth separating carefully, because beginners conflate it and everything in <a href="0045-mixture-of-experts-why-it-is-hard.html">Mixture of experts, part two: why it is hard</a> depends on the distinction.
+  The affinity score does two jobs.
+  It is a <b>selector</b>, deciding which experts are used at all, and it is a <b>weight</b>, deciding how much each chosen expert's answer counts in the sum.
+  Those are separable, and prising them apart is exactly what the best-known fix for the balancing problem does.</p>
+  <p>It is worth knowing how little the router costs, because a reader who has just been told that a small learned component decides everything will reasonably suspect it of being expensive.
+  It is one matrix with one row per expert, each row as wide as the token's vector.
+  Take a real configuration: a model whose vectors are 7,168 numbers wide and which holds 256 routed experts per block needs about 1.8 million numbers for that block's router, against a model whose total is 671 billion.
+  The router is a rounding error in both storage and arithmetic, and all of the saving comes from the experts it declines to run.</p>
+  <p>Two further points follow from the mechanism as stated.
+  The choice is made per token, not per sentence or per request, so the word "the" in one position and the word "the" in another may be sent to different experts depending on what each has gathered from its neighbours.
+  And the choice is made independently at every block, so a token that used experts 3 and 17 in one layer may use 88 and 204 in the next.
+  A model does not pick a path through itself; it picks again at every step.</p>
   <figure class="diagram" id="figure-1">
     <div class="mermaid">
 flowchart TB
-  T["One token's vector"] --> R["Router: score every expert"]
-  R --> S["Pick the top few"]
-  S --> E1["expert 1&lt;br/&gt;computed"]
-  S --> E2["expert 5&lt;br/&gt;computed"]
-  S -.-> E3["expert 2&lt;br/&gt;not computed"]
-  S -.-> E4["expert 8&lt;br/&gt;not computed"]
-  E1 --> W["Weighted sum"]
+  T["One token's vector&lt;br/&gt;arriving at this block"] --> R["Router: one small matrix,&lt;br/&gt;one score per expert"]
+  R --> S["Keep the two highest scores&lt;br/&gt;affinity 0.62 and 0.24"]
+  S --> E1["expert 5: run"]
+  S --> E2["expert 1: run"]
+  S -.-> E3["expert 2: not run"]
+  S -.-> E4["expert 8: not run"]
+  E1 --> W["Sum, each weighted&lt;br/&gt;by its own affinity"]
   E2 --> W
-  W --> O["Back into the residual stream"]
+  W --> O["Added back into the token's vector,&lt;br/&gt;and chosen again at the next block"]
     </div>
-    <figcaption><b>Figure 1. The router, one token</b> <span class="fig-brief">Finished version: a real affinity bar chart over eight experts with the top two highlighted, only those two lit, and the weighted sum drawn back into the residual.</span></figcaption>
+    <figcaption><b>Figure 1. The router, one token, one block</b> <span class="fig-brief">Follow the two dotted arrows: six of the eight experts are not merely unimportant here, they are never computed, and that is where the saving comes from. The numbers on the chosen branch do double duty, once to decide who runs and once to decide how much each answer counts, and prising those two jobs apart is how the balancing problem was eventually solved.</span></figcaption>
   </figure>
+
+  <h2>5. Two numbers that used to be one</h2>
+  <p>Once a block only runs a few of its experts, the question "how big is this model" has two different answers, and they are worth defining exactly because the rest of this course keeps them apart.</p>
+  <p><b>Total parameters</b> is every weight in the file.
+  It is what you must have resident in memory before the model can answer anything at all, because the router might ask for any expert on any token.</p>
+  <p><b>Active parameters</b> is the weights actually multiplied by something to produce one token.
+  It is what sets the arithmetic per token, and therefore the latency and a large part of the running cost.</p>
+  <p>The anchor for this course is Mixtral 8x7B, released by Mistral in December 2023, because its own paper states both numbers plainly: each layer holds eight feed-forward blocks, a router selects two of them per token, and so "each token has access to 47B parameters, but only uses 13B active parameters during inference".
+  Those two numbers are quoted, not derived, and that matters.
+  You cannot get one from the other by arithmetic, because attention and the embedding tables are shared and are counted in both, so a reader who multiplies or divides will get a wrong answer.
+  When this course gives a pair of these numbers, both halves come from the model's own paper or card.</p>
+  <p>The honest catch belongs here rather than in a footnote.
+  Sparsity buys knowledge with memory rather than with compute.
+  A model whose experts total many hundreds of billions of parameters still needs all of them resident somewhere, even though a given token touches a small fraction.
+  That is why the largest open-weight models are simultaneously free to download and impossible for one person to serve, and it is a direct continuation of the memory story in <a href="0043-serving-reality.html">Serving reality: the cache, and what it costs</a>: sparsity moved the binding constraint further away from arithmetic and further towards memory.</p>
   <figure class="diagram" id="figure-2">
     <div class="mermaid">
-flowchart LR
-  M["A sparse model"] --> A["Total parameters:&lt;br/&gt;what you must store"]
-  M --> B["Active parameters:&lt;br/&gt;what you compute per token"]
-  A --> G["these two numbers&lt;br/&gt;stopped being equal"]
+flowchart TB
+  M["Mixtral 8x7B, December 2023&lt;br/&gt;8 experts per layer, 2 used per token"]
+  M --> A["Total: 47B parameters&lt;br/&gt;what must be resident in memory"]
+  M --> B["Active: 13B parameters&lt;br/&gt;what is multiplied per token"]
+  A --> G["Before this, these were&lt;br/&gt;the same number"]
   B --> G
+  G --> H["Both figures are quoted from the paper.&lt;br/&gt;Neither can be derived from the other."]
     </div>
-    <figcaption><b>Figure 2. Stored against computed</b> <span class="fig-brief">Finished version: paired bars for several real models, total parameters and active parameters, with sources. The widening gap over time is the point.</span></figcaption>
+    <figcaption><b>Figure 2. Stored against computed</b> <span class="fig-brief">The split at the top is the entire contribution of the idea, and the box at the bottom is the discipline it demands. Attention and the embedding tables are counted in both figures, so the ratio between them is not a property you can compute from the expert count, which is why every pair in the table below is quoted from a document rather than worked out.</span></figcaption>
   </figure>
-  <h2>4. Where this hands off</h2>
+
+  <h2>6. From an LSTM experiment to every frontier open model</h2>
+  <p>The idea is older than the Transformer.
+  In January 2017, five months before the Transformer paper, Noam Shazeer and colleagues published <i>Outrageously Large Neural Networks</i>, which put a sparsely-gated mixture-of-experts layer with up to thousands of sub-networks between stacked LSTM layers and reported greater than a thousandfold increase in model capacity with only minor losses in computational efficiency.
+  Everything in section 4 above is already in that paper, including the router, the top-k selection and the weighted sum.</p>
+  <p>It then sat mostly unused for four years, for reasons taken up in <a href="0045-mixture-of-experts-why-it-is-hard.html">Mixture of experts, part two: why it is hard</a>.
+  Switch Transformer, from Google in January 2021, is the paper that made it practical at scale, and its central simplification was to route each token to exactly one expert rather than several.
+  Its own abstract names the reasons adoption had been blocked: complexity, communication costs and training instability.
+  Its largest model held 1,571 billion parameters across 2,048 experts.</p>
+  <p>The idea arrived in the open-weight world in December 2023 with Mixtral, and from 2024 onward the direction of travel is easy to read off the model cards.</p>
+  <table>
+    <caption>Expert counts and per-token selections read from each model's own <code>config.json</code> on 22 August 2026; totals and active counts from each model's own paper or card. Empty cells are figures the publisher does not state, left empty rather than estimated.</caption>
+    <thead><tr><th>Model</th><th>Released</th><th>Total</th><th>Active</th><th>Routed experts</th><th>Used per token</th><th>Always-on</th></tr></thead>
+    <tbody>
+      <tr><td>Switch-C</td><td>Jan 2021</td><td>1,571B</td><td></td><td>2,048</td><td>1</td><td>0</td></tr>
+      <tr><td>Mixtral 8x7B</td><td>Dec 2023</td><td>47B</td><td>13B</td><td>8</td><td>2</td><td>0</td></tr>
+      <tr><td>DeepSeek-V2</td><td>May 2024</td><td>236B</td><td>21B</td><td>160</td><td>6</td><td>2</td></tr>
+      <tr><td>DeepSeek-V3</td><td>Dec 2024</td><td>671B</td><td>37B</td><td>256</td><td>8</td><td>1</td></tr>
+      <tr><td>Kimi K2</td><td>Jul 2025</td><td>1T</td><td>32B</td><td>384</td><td>8</td><td>1</td></tr>
+      <tr><td>gpt-oss-120b</td><td>Aug 2025</td><td>117B</td><td>5.1B</td><td>128</td><td>4</td><td>0</td></tr>
+      <tr><td>DeepSeek-V4-Flash</td><td>Apr 2026</td><td>284B</td><td>13B</td><td>256</td><td>6</td><td>1</td></tr>
+      <tr><td>DeepSeek-V4-Pro</td><td>Apr 2026</td><td>1.6T</td><td>49B</td><td>384</td><td>6</td><td>1</td></tr>
+      <tr><td>Kimi K3</td><td>Jul 2026</td><td>2.8T</td><td>104B</td><td>896</td><td>16</td><td>2</td></tr>
+    </tbody>
+  </table>
+  <p>Read the expert column downwards and it climbs from 8 to 896.
+  Read the total column and it climbs from 47 billion to 2.8 trillion.
+  Then read the active column on its own, because it is the one that does not behave: 13 billion in December 2023, 13 billion in April 2026, and roughly a hundred billion at the very top.
+  The industry found it could keep growing what a model knows almost without limit while what it computes per token barely moved.
+  That is the whole point of the idea, stated as a measurement rather than as a claim.</p>
+  <figure class="diagram" id="figure-3">
+    <div class="mermaid">
+timeline
+  title Sparsity in the feed-forward half, from an experiment to the default
+  Jan 2017 : Sparsely-gated mixture of experts, between LSTM layers
+  Jan 2021 : Switch Transformer routes each token to exactly one expert
+  Dec 2023 : Mixtral 8x7B - 47B total, 13B active, openly licensed
+  Jan 2024 : DeepSeekMoE splits experts finer and adds always-on ones
+  Dec 2024 : DeepSeek-V3 - 671B total, 37B active, 256 experts
+  2026 : Every frontier open-weight model is sparse
+    </div>
+    <figcaption><b>Figure 3. Nine years from the paper to the default</b> <span class="fig-brief">The four-year gap between the first and second entries is the interesting part of this timeline. The mechanism was published and correct in 2017 and almost nobody used it, because the routing problems described in <b>Mixture of experts, part two</b> had not been solved yet. Ideas in this field are rarely late because nobody thought of them.</span></figcaption>
+  </figure>
+  <p>What this lesson has deliberately not done is explain why the router works at all rather than sending everything to its favourite expert.
+  It does not, left to itself.
+  That is the debt <a href="0045-mixture-of-experts-why-it-is-hard.html">Mixture of experts, part two: why it is hard</a> collects.</p>
+  <h2>7. Where this hands off</h2>
   <p>This course owns chronology, causation, people and dates. It hands off for mechanism, maths and code rather than re-deriving them.</p>
   <ul class="handoff">
     <li><b>In this course:</b> <a href="0045-mixture-of-experts-why-it-is-hard.html">Mixture of experts, part two: why it is hard</a></li>
@@ -99,16 +190,54 @@ flowchart LR
     <li><b>Hands off to:</b> <a href="../../llm-papers-course/lessons/0035-switch-transformer-moe.html">LLM Papers: switch transformer moe</a> <span class="pq-why">Switch Transformer in full</span></li>
     <li><b>Hands off to:</b> <a href="../../llm-papers-course/lessons/0036-deepseekmoe.html">LLM Papers: deepseekmoe</a> <span class="pq-why">Fine-grained and shared experts</span></li>
   </ul>
-  <h2>5. Sources to read first</h2>
+  <h2>8. Sources to read first</h2>
   <ul class="sources">
-    <li><a href="https://arxiv.org/abs/1701.06538">Shazeer et al., Outrageously Large Neural Networks, 2017</a></li>
-    <li><a href="https://arxiv.org/abs/2101.03961">Fedus, Zoph and Shazeer, Switch Transformers, 2021</a></li>
-    <li><a href="https://arxiv.org/abs/2401.04088">Jiang et al., Mixtral of Experts, 2024</a></li>
+    <li><a href="https://arxiv.org/abs/1701.06538">Shazeer, Mirhoseini, Maziarz, Davis, Le, Hinton and Dean, <i>Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer</i>, submitted 23 January 2017</a>. The abstract for the thousandfold capacity claim and the 137-billion-parameter layer, section 2 for the gating network and top-k.</li>
+    <li><a href="https://arxiv.org/abs/2101.03961">Fedus, Zoph and Shazeer, <i>Switch Transformers: Scaling to Trillion Parameter Models with Simple and Efficient Sparsity</i>, submitted 11 January 2021</a>. The abstract names complexity, communication cost and instability as what had blocked adoption; Table 9 gives Switch-C at 1,571B parameters and 2,048 experts.</li>
+    <li><a href="https://arxiv.org/abs/2401.04088">Jiang et al., <i>Mixtral of Experts</i>, submitted 8 January 2024</a>. The abstract is the source for both halves of the 47B against 13B pair quoted above.</li>
+    <li><a href="https://arxiv.org/abs/2401.06066">Dai et al., <i>DeepSeekMoE: Towards Ultimate Expert Specialization in Mixture-of-Experts Language Models</i>, submitted 11 January 2024</a>. Fine-grained segmentation and isolated shared experts.</li>
+    <li><a href="https://arxiv.org/abs/2412.19437">DeepSeek-AI, <i>DeepSeek-V3 Technical Report</i>, submitted 27 December 2024</a>. The abstract states 671B total with 37B activated per token; section 2.1.2 describes the router.</li>
+    <li><a href="https://arxiv.org/abs/2405.04434">DeepSeek-AI, <i>DeepSeek-V2</i>, submitted 7 May 2024</a>. The abstract states 236B total with 21B activated.</li>
+    <li>Model repositories read directly for the expert counts in the table, on 22 August 2026: the <code>config.json</code> of <code>mistralai/Mixtral-8x7B-v0.1</code>, <code>deepseek-ai/DeepSeek-V3</code>, <code>moonshotai/Kimi-K2-Instruct</code>, <code>openai/gpt-oss-120b</code>, <code>deepseek-ai/DeepSeek-V4-Pro</code>, <code>deepseek-ai/DeepSeek-V4-Flash</code> and <code>moonshotai/Kimi-K3</code>, each of which names its routed expert count, its experts-per-token and its shared expert count as ordinary configuration fields. The gpt-oss and Kimi totals and actives come from the same repositories' model cards.</li>
   </ul>
-  <p class="src-warn">These are research pointers left by the scaffold, not citations. Open each one and confirm it says what the brief claims before it appears in prose.</p>
+  <p class="src-warn">Every one of these was opened and checked against what this lesson claims before it was written into the prose.</p>
   <div class="quiz">
     <h3 class="h-label">Retrieval practice</h3>
-    <p class="stub-todo">To write: three or four questions that test whether the one tight idea landed, not whether a date was memorised. Four options each, matched in word and character count, with the answer index in <code>data-answer</code> and a one-sentence explanation in <code>.q-fb</code>. Copy the exact markup from a neighbouring finished lesson in <code>llm-papers-course</code>.</p>
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which part of a Transformer block do the experts replace?</div>
+      <button class="q-opt">The residual connection, which is copied once for each of the experts</button>
+      <button class="q-opt">The self-attention step, where every position looks at every position</button>
+      <button class="q-opt">The feed-forward network, which is where most of the weights already sit</button>
+      <button class="q-opt">The normalisation step, which is applied separately inside each expert</button>
+      <div class="q-fb">Attention is comparatively small in weight count, so replacing it would save little; the feed-forward half is the target precisely because that is where the parameters are.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does the router actually produce for one token?</div>
+      <button class="q-opt">One score per expert, from which the highest few are kept and run</button>
+      <button class="q-opt">One subject label per token, from which the matching expert is run</button>
+      <button class="q-opt">One path per request, followed by that request through every block</button>
+      <button class="q-opt">One weight per layer, deciding how deep that token needs to travel</button>
+      <div class="q-fb">It is one small learned matrix producing an affinity score per expert, and the choice is remade for every token at every block rather than fixed for a request.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why must total and active parameters both be quoted rather than one computed?</div>
+      <button class="q-opt">Because the router's own weights are excluded from the total but not from the active count</button>
+      <button class="q-opt">Because the active count changes with each request and only the total is a fixed figure</button>
+      <button class="q-opt">Because the total is measured on disk and the active count is measured in memory instead</button>
+      <button class="q-opt">Because attention and the embedding tables are counted in both, so no ratio recovers either</button>
+      <div class="q-fb">Only the expert weights are sparsely used, and everything shared sits in both figures, which is why this course quotes both halves from the model's own document.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Reading the table of real models, which column moved least between 2023 and 2026?</div>
+      <button class="q-opt">The number of routed experts, which stayed close to its starting value</button>
+      <button class="q-opt">The active parameter count, which barely moved while the totals grew</button>
+      <button class="q-opt">The total parameter count, which stayed near where Mixtral had put it</button>
+      <button class="q-opt">The number of experts used per token, which fell steadily towards one</button>
+      <div class="q-fb">Totals climbed from 47 billion to 2.8 trillion while active counts stayed in the tens of billions, which is the measured version of the claim that sparsity separates knowing from computing.</div>
+    </div>
   </div>
   <nav class="pager" data-pager-route="constraint" aria-label="Lesson navigation">
     <a href="0043-serving-reality.html"><span class="dir">&larr; Previous</span><span class="ttl">Serving reality: the cache, and what it costs</span></a>

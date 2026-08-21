@@ -41,10 +41,6 @@
   <div class="callout key"><span class="tag">Where this lesson starts</span>
     <p><a href="0044-mixture-of-experts-the-router.html">Mixture of experts, part one: the router</a> describes the mechanism as if it simply works. This lesson is about why it does not, and it assumes you know what a router and an expert are.</p>
   </div>
-  <div class="card tldr stub-note">
-    <h2 class="h-label">This page is a stub</h2>
-    <p>The structure, the brief, the prerequisites, the figures and the sources are settled. The prose is not written yet. A writing crew replaces sections 2 and 3 below with the lesson itself, keeps the figures and fills them in, and leaves sections 1, 4 and 5 in place. Read <code>BUILDER-SPEC.md</code> before you start.</p>
-  </div>
   <h2>1. Where this lesson sits</h2>
   <h3>What you need first</h3>
   <ul class="prereqs">
@@ -52,46 +48,134 @@
   </ul>
   <h3>The one tight idea</h3>
   <p>A router that is trained only to be useful will send almost everything to a few experts, so every practical system needs something that stops the router eating itself, and three generations of that fix are the real story.</p>
-  <h2>2. What this lesson must cover</h2>
-  <p class="stub-todo">To write. Full prose, complete sentences, 1,400 to 2,000 words. Every bullet below is a beat the finished lesson owes the reader, in this order.</p>
-  <ul class="covers">
-    <li>Routing collapse described as a feedback loop: a chosen expert improves, so it is chosen more.</li>
-    <li>Generation one, an auxiliary loss plus a capacity limit, and the cost it imposes: dropped tokens.</li>
-    <li>Generation two, finer-grained experts plus always-on shared experts.</li>
-    <li>Generation three, a bias term adjusted by a control loop, which balances selection without distorting the weights.</li>
-    <li>Why balancing matters for hardware as well as for quality.</li>
-  </ul>
-  <div class="callout warn"><span class="tag">Do not overclaim</span>
-    <p>Do not present the third generation as final. Say what it fixed, and that the balancing problem has not been declared solved.</p>
-  </div>
-  <h2>3. The figures this lesson needs</h2>
-  <p>Each figure below renders today as a working sketch of the right shape. Replace the sketch with the finished diagram described in its caption. Do not remove a figure without saying why in the pull request.</p>
+  <h2>2. The router eats itself</h2>
+  <p>A sparse layer holds many small feed-forward networks, called experts, and a small learned scorer, called a router, which picks a few of them for each token.
+  <a href="0044-mixture-of-experts-the-router.html">Mixture of experts, part one: the router</a> describes that mechanism, and describes it as though it simply works.
+  Nothing in it does any work to keep the experts busy in roughly equal amounts, and left alone it will not.</p>
+  <p>The failure is a feedback loop, and it is short enough to state in four steps.
+  Suppose that early in training, for no better reason than the random numbers the router started with, one expert is picked slightly more often than its neighbours.
+  It therefore receives more tokens, so it receives more of the training signal, so it improves faster.
+  Being better, it now matches more tokens, so the router picks it more.
+  Go round that loop enough times and a layer with two hundred and fifty-six experts is really a layer with six, and the other two hundred and fifty have barely been trained at all.</p>
+  <p>This is called <b>routing collapse</b>, and it is not a recent discovery.
+  It is in the 2017 paper that introduced the sparsely-gated layer, stated as plainly as anyone has stated it since: the gating network tends to converge to a state where it always produces large weights for the same few experts, and the imbalance is self-reinforcing, because the favoured experts are trained more rapidly and are therefore selected even more.
+  That paper credits the same observation to earlier work in 2013 and 2015.</p>
+  <p>Everything else in this lesson is a response to those two sentences.
+  Three generations of response, each of which fixed something and broke something else, and the sequence of what broke is the actual history.</p>
   <figure class="diagram" id="figure-1">
     <div class="mermaid">
-flowchart LR
-  A["An expert is picked slightly more"] --> B["It gets more training signal"]
-  B --> C["It becomes better"]
-  C --> D["The router picks it even more"]
+flowchart TB
+  A["An expert is picked&lt;br/&gt;slightly more often"] --> B["It sees more tokens,&lt;br/&gt;so more training signal"]
+  B --> C["It gets better than&lt;br/&gt;its neighbours"]
+  C --> D["The router now has&lt;br/&gt;a real reason to prefer it"]
   D --> A
+  D --> E["Meanwhile the unused experts&lt;br/&gt;are never trained,&lt;br/&gt;so they never become worth using"]
     </div>
-    <figcaption><b>Figure 1. Routing collapse</b> <span class="fig-brief">Finished version: expert utilisation histograms at three points in training, from even to collapsed, using published or reproduced numbers.</span></figcaption>
+    <figcaption><b>Figure 1. Routing collapse</b> <span class="fig-brief">The four boxes that close back on themselves are the problem, and the branch hanging off the last one is why it cannot correct itself. Nothing in it is a bug: at every step the router is doing exactly what it was trained to do, which is to pick the expert that gives the best answer right now. That is what makes it a design problem rather than an implementation one.</span></figcaption>
   </figure>
+
+  <h2>3. Generation one: punish imbalance, and cap the queue</h2>
+  <p>The first family of fixes reached scale with GShard in June 2020, which trained a sparse translation model past 600 billion parameters, and with Switch Transformer in January 2021. It has two halves that are often confused with each other.</p>
+  <p>The first half is an <b>auxiliary loss</b>.
+  Alongside the ordinary training objective, which measures how wrong the model's predictions were, you add a second term that measures how uneven the routing was, and you train against the sum.
+  Switch Transformer's version multiplies, for each expert, the fraction of tokens it received by the average router probability it was given, and adds those products up.
+  The paper's own gloss is that it encourages uniform routing because it is minimised under a uniform distribution, so pushing it down pushes the routing towards evenness.
+  The intuition is enough here; the papers course derives it in <a href="../../llm-papers-course/lessons/0035-switch-transformer-moe.html">its Switch Transformer lesson</a>.</p>
+  <p>The second half is a hard cap called the <b>capacity factor</b>.
+  Each expert is given a fixed-size buffer, computed as the tokens in a batch divided by the number of experts, multiplied by a factor slightly greater than one to leave slack.
+  If more tokens want an expert than fit in its buffer, the surplus does not wait.
+  It is <b>dropped</b>: the token skips the feed-forward computation entirely and passes straight to the next layer along the residual connection.</p>
+  <p>Read that again, because it is genuinely strange.
+  A first-generation sparse model routinely produces tokens that were never processed by any expert in a given layer, purely because they arrived in an unlucky batch.
+  Switch Transformer's authors are candid about the trade: a bigger buffer drops fewer tokens and wastes more memory and computation on slack, and they report that keeping the drop rate low matters for how well these models scale.
+  This is what the first generation cost, and it is what the next two generations were trying to stop paying.</p>
+
+  <h2>4. Generation two: smaller experts, and some that always run</h2>
+  <p>DeepSeekMoE, published in January 2024, made two changes, and neither of them is a balancing mechanism.
+  Both are about <b>specialisation</b>, and they improve balance as a side effect of making the routing problem easier.</p>
+  <p>The first change is granularity.
+  Instead of eight large experts with two chosen, use many more, much smaller experts and choose proportionally more of them.
+  The arithmetic per token is unchanged, because each expert is correspondingly smaller, but the number of distinct combinations the router can assemble grows enormously.
+  The paper works the example itself: sixteen experts choosing two gives 120 possible combinations, while splitting each of those sixteen into four and choosing eight of the resulting sixty-four gives 4,426,165,368.
+  A router with that many combinations available does not need to force one expert to cover several unrelated things.</p>
+  <p>The second change is a small number of <b>shared experts</b> that every token uses, with no routing decision at all.
+  The observation behind it is that some of what a feed-forward network does is common to almost every token, and in a routed-only design every expert has to learn that common part separately.
+  Isolating it in an always-on expert stops the redundancy and frees the routed experts to be genuinely different from each other.
+  The paper reports its 2-billion-parameter model matching a comparable GShard model of 2.9 billion with 1.5 times fewer expert parameters and computation.</p>
+  <p>What generation two did not do is remove the auxiliary loss.
+  A finer, better-specialised set of experts still collapses if nothing stops it.
+  The balancing term was still there, and it still had the same drawback, which is what the third generation attacked.</p>
+
+  <h2>5. Generation three: nudge the queue without distorting the answer</h2>
+  <p>The complaint against the auxiliary loss is not that it fails.
+  It is that it works by making the model worse.
+  The balancing term and the prediction term are added together and optimised at once, so gradients that exist only to please the scheduler flow into the same weights that are trying to predict text.
+  DeepSeek-V3's report states the consequence in one clause: too large an auxiliary loss will impair the model performance.</p>
+  <p>The fix, published by Wang and colleagues in August 2024 and used at scale in DeepSeek-V3 that December, is small enough to describe completely.
+  Keep one extra number per expert, a bias.
+  Add that bias to the affinity scores <b>only when deciding which experts make the top few</b>, and never when computing the weight that multiplies an expert's output.
+  Then, after each training step, look at how much traffic each expert actually received, and adjust: lower the bias of an overloaded expert by a small fixed step, raise the bias of an underloaded one by the same step.</p>
+  <p>The report is explicit about the separation, and it is worth quoting because it is the whole idea: "Note that the bias term is only used for routing. The gating value, which will be multiplied with the FFN output, is still derived from the original affinity score."</p>
+  <p>This is a control loop rather than a loss term, and that is the point.
+  A loss term is an argument the balancing objective has with the prediction objective inside the gradient.
+  A bias adjusted after the fact is a nudge applied to the queue, outside the gradient entirely, and it leaves the answer the model produces exactly as the affinity scores said it should be.
+  Recall from <a href="0044-mixture-of-experts-the-router.html">Mixture of experts, part one: the router</a> that the affinity score does two jobs, selecting and weighting; this fix changes the first job and leaves the second untouched.</p>
+  <p>The reported result is that no tokens are dropped, in training or in inference, which is the first-generation cost paid off.
+  Two caveats belong here rather than in a footnote.
+  DeepSeek-V3 still keeps a sequence-wise balancing loss as a safety net against extreme imbalance inside a single sequence, with a coefficient its report describes as extremely small, so the auxiliary loss was reduced to a backstop rather than removed.
+  And balance during training is not balance during serving, because production traffic is not the training distribution.
+  Labs handle serving imbalance with deployment tricks such as replicating hot experts, and mostly do not document them.
+  Nobody has declared expert balancing solved.</p>
   <figure class="diagram" id="figure-2">
     <div class="mermaid">
 sequenceDiagram
   autonumber
-  participant G1 as Auxiliary loss and capacity
-  participant G2 as Fine-grained plus shared experts
-  participant G3 as Bias-term control loop
-  G1->>G1: penalise imbalance, cap each expert
-  G1-->>G2: cost: tokens are dropped
-  G2->>G2: more, smaller experts, some always on
-  G2-->>G3: cost: still needs a balancing loss
-  G3->>G3: shift selection without changing the weights
+  participant G1 as Gen 1 - loss plus capacity
+  participant G2 as Gen 2 - finer and shared
+  participant G3 as Gen 3 - bias control loop
+  G1->>G1: add a balancing term to the loss, cap each expert's buffer
+  G1-->>G2: cost - surplus tokens are dropped and skip the layer
+  G2->>G2: many more, smaller experts, plus a few that always run
+  G2-->>G3: cost - still needs the balancing term, so still distorts the weights
+  G3->>G3: bias the selection after each step, leave the output weights alone
+  Note over G3: reported - no tokens dropped, and a tiny safety-net loss retained
     </div>
-    <figcaption><b>Figure 2. Three generations of fix</b> <span class="fig-brief">Finished version: for each generation give the mechanism, what it costs, and what it broke that the next one repaired.</span></figcaption>
+    <figcaption><b>Figure 2. Three generations, and what each one cost</b> <span class="fig-brief">Read the two hand-off arrows rather than the three boxes: each generation is defined by the price the previous one was paying. That is the normal shape of progress in this field, and it is why the third row is written as what it fixed rather than as a solution.</span></figcaption>
   </figure>
-  <h2>4. Where this hands off</h2>
+
+  <h2>6. Why balance is a hardware problem as well</h2>
+  <p>So far the argument for balancing has been about quality: untrained experts are wasted capacity.
+  There is a second argument, and in practice it is often the louder one.</p>
+  <p>A model with hundreds of experts does not fit on one accelerator, so the experts are spread across many.
+  Every sparse layer therefore involves sending each token's vector to whichever machines hold its chosen experts, computing, and sending the results back.
+  That happens twice per sparse layer, for every token, across the network between machines.</p>
+  <p>Now imagine the collapse from section 2 in that setting.
+  If most tokens want experts that happen to live on one machine, that machine has a queue and every other machine is idle waiting for it.
+  Parallelism across two hundred and fifty-six experts delivers the throughput of one.
+  Balancing is not a nicety here; it is the difference between a cluster working and a cluster mostly waiting.</p>
+  <p>This is why DeepSeek-V3 adds <b>node-limited routing</b>, which caps how many machines any single token may be sent to, chosen by which machines hold its best-scoring experts.
+  Bounding the shuffle is what lets the communication be overlapped with computation instead of stalling it.
+  It is also a good example of a constraint shaping a design: that model was trained on export-restricted hardware with reduced interconnect bandwidth, and its architecture reads as a set of answers to that specific limitation.</p>
+  <p>One last correction to a natural intuition, from Switch Transformer's own results, because it cuts the other way from what most readers expect.
+  Sparse models are more prone to training instability than dense ones, and the obvious guess is that the sparsest model is the least stable.
+  The paper reports the opposite: its largest and sparsest model, at 1.6 trillion parameters and 2,048 experts, showed no training instability at all, while a smaller model with nearly ten times the arithmetic per sequence was sometimes unstable.
+  Instability tracked how much computation each token received, not how sparse the model was.</p>
+  <figure class="diagram" id="figure-3">
+    <div class="mermaid">
+flowchart TB
+  T["A batch of tokens arrives&lt;br/&gt;at one sparse layer"] --> R["Router picks experts&lt;br/&gt;for each token"]
+  R --> M1["Machine A&lt;br/&gt;holds experts 1 to 64"]
+  R --> M2["Machine B&lt;br/&gt;holds experts 65 to 128"]
+  R --> M3["Machine C&lt;br/&gt;holds experts 129 to 192"]
+  M1 --> Q["Collapsed routing:&lt;br/&gt;most tokens want Machine A"]
+  M2 --> Q
+  M3 --> Q
+  Q --> S["A queues, B and C idle,&lt;br/&gt;and the whole step waits for A"]
+  S --> F["so the fix is also a scheduling fix,&lt;br/&gt;not only a quality fix"]
+    </div>
+    <figcaption><b>Figure 3. Why a cluster cares about balance</b> <span class="fig-brief">This picture is the reason balancing got attention from systems engineers rather than only from researchers. An imbalanced router does not merely leave experts untrained: it converts an expensive parallel machine into a slow serial one, twice per sparse layer, for every token generated.</span></figcaption>
+  </figure>
+  <h2>7. Where this hands off</h2>
   <p>This course owns chronology, causation, people and dates. It hands off for mechanism, maths and code rather than re-deriving them.</p>
   <ul class="handoff">
     <li><b>In this course:</b> <a href="0044-mixture-of-experts-the-router.html">Mixture of experts, part one: the router</a></li>
@@ -99,15 +183,53 @@ sequenceDiagram
     <li><b>Hands off to:</b> <a href="../../llm-papers-course/lessons/0035-switch-transformer-moe.html">LLM Papers: switch transformer moe</a> <span class="pq-why">The auxiliary loss and capacity factor</span></li>
     <li><b>Hands off to:</b> <a href="../../llm-papers-course/lessons/0036-deepseekmoe.html">LLM Papers: deepseekmoe</a> <span class="pq-why">Fine-grained and shared experts</span></li>
   </ul>
-  <h2>5. Sources to read first</h2>
+  <h2>8. Sources to read first</h2>
   <ul class="sources">
-    <li><a href="https://arxiv.org/abs/2101.03961">Fedus, Zoph and Shazeer, Switch Transformers, 2021</a></li>
-    <li><a href="https://arxiv.org/abs/2401.06066">Dai et al., DeepSeekMoE, 2024</a></li>
+    <li><a href="https://arxiv.org/abs/1701.06538">Shazeer et al., <i>Outrageously Large Neural Networks</i>, submitted 23 January 2017</a>. Section 4, "Balancing Expert Utilization", is the origin of the self-reinforcing description quoted above.</li>
+    <li><a href="https://arxiv.org/abs/2101.03961">Fedus, Zoph and Shazeer, <i>Switch Transformers</i>, submitted 11 January 2021</a>. Section 2.2 for the expert-capacity formula and for dropped tokens passing through the residual connection, section 2.2 again for the load-balancing loss, and section 5.6 for the Switch-C against Switch-XXL instability comparison.</li>
+    <li><a href="https://arxiv.org/abs/2006.16668">Lepikhin et al., <i>GShard: Scaling Giant Models with Conditional Computation and Automatic Sharding</i>, submitted 30 June 2020</a>. The abstract states the scaling of a sparse translation model past 600 billion parameters on 2,048 accelerators.</li>
+    <li><a href="https://arxiv.org/abs/2401.06066">Dai et al., <i>DeepSeekMoE</i>, submitted 11 January 2024</a>. The abstract states the fine-grained segmentation, the isolated shared experts, and the 2B-against-2.9B result with 1.5 times fewer expert parameters and computation.</li>
+    <li><a href="https://arxiv.org/abs/2408.15664">Wang, Chen, Xie, Zhao, Wu and Dai, <i>Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts</i>, submitted 28 August 2024</a>. The bias-per-expert control loop, four months before it was used at scale.</li>
+    <li><a href="https://arxiv.org/abs/2412.19437">DeepSeek-AI, <i>DeepSeek-V3 Technical Report</i>, submitted 27 December 2024</a>. Section 2.1.2 for the verbatim statement that the bias term is only used for routing, for the complementary sequence-wise loss with an extremely small coefficient, for node-limited routing, and for the claim that no tokens are dropped in training or inference.</li>
   </ul>
-  <p class="src-warn">These are research pointers left by the scaffold, not citations. Open each one and confirm it says what the brief claims before it appears in prose.</p>
+  <p class="src-warn">Every one of these was opened and checked against what this lesson claims before it was written into the prose.</p>
   <div class="quiz">
     <h3 class="h-label">Retrieval practice</h3>
-    <p class="stub-todo">To write: three or four questions that test whether the one tight idea landed, not whether a date was memorised. Four options each, matched in word and character count, with the answer index in <code>data-answer</code> and a one-sentence explanation in <code>.q-fb</code>. Copy the exact markup from a neighbouring finished lesson in <code>llm-papers-course</code>.</p>
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does an unconstrained router collapse onto a few experts?</div>
+      <button class="q-opt">Because the router is initialised to prefer whichever experts sit earliest</button>
+      <button class="q-opt">Because a chosen expert trains faster, so the router has reason to choose it</button>
+      <button class="q-opt">Because the tokens routed to an expert leave every other expert's own batch</button>
+      <button class="q-opt">Because an expert that is never chosen is deleted from the layer at once</button>
+      <div class="q-fb">It is a feedback loop rather than a bug: at every step the router correctly prefers whichever expert currently answers best, and that preference is what made it best.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What happens to a token that overflows its chosen expert's buffer?</div>
+      <button class="q-opt">It is held back and processed in the next batch, once the buffer has drained</button>
+      <button class="q-opt">It is sent to the expert that scored second, which always has spare capacity</button>
+      <button class="q-opt">It skips that layer's expert computation and passes on through the residual</button>
+      <button class="q-opt">It is split in half and the two halves are processed by two other experts</button>
+      <div class="q-fb">Dropped tokens are a real and deliberate part of first-generation sparse training, and paying that cost down is what the later generations were for.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What makes the bias-term fix different from an auxiliary balancing loss?</div>
+      <button class="q-opt">It changes which experts are picked without changing how their outputs are weighted</button>
+      <button class="q-opt">It changes how the outputs are weighted without changing which experts are picked</button>
+      <button class="q-opt">It changes the number of experts a token may use, rather than which ones it uses</button>
+      <button class="q-opt">It changes the order the experts are visited, rather than the scores they receive</button>
+      <div class="q-fb">The affinity score does two jobs, selecting and weighting, and the bias is added to the first job only, so balancing stops competing with prediction inside the gradient.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why do systems engineers care about routing balance, separately from quality?</div>
+      <button class="q-opt">Because an idle expert still consumes memory bandwidth on the machine holding it</button>
+      <button class="q-opt">Because the router must be replicated onto every machine that holds an expert</button>
+      <button class="q-opt">Because unbalanced routing forces the batch to be split into far smaller pieces</button>
+      <button class="q-opt">Because experts live on different machines, so a hot expert stalls all the others</button>
+      <div class="q-fb">Every sparse layer shuffles tokens across machines twice, so an imbalanced router turns parallel hardware into a queue behind one node.</div>
+    </div>
   </div>
   <nav class="pager" data-pager-route="constraint" aria-label="Lesson navigation">
     <a href="0044-mixture-of-experts-the-router.html"><span class="dir">&larr; Previous</span><span class="ttl">Mixture of experts, part one: the router</span></a>
