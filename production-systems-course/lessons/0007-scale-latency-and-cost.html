@@ -1,0 +1,471 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 08: Scale, Latency and Cost - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 08 &middot; Scale, Latency and Cost</div>
+  <h1>Scale, Latency and Cost</h1>
+  <p class="paper-meta">
+    <span class="pill">9 topics</span>
+    The numbers the business asks about, and the numbers that actually predict whether the system stays up.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Little's Law</b> converts a rate and a duration into a concurrency, and concurrency is what you actually buy. Every capacity plan in this chapter is one multiplication away from it.</li>
+      <li><b>The mean is a lie your dashboard tells you.</b> A mean can sit flat to within half a percent while the 99th percentile doubles, because the mean is dominated by the requests nobody complains about.</li>
+      <li><b>Tails amplify with fan-out.</b> A one-percent chance of a slow leaf becomes a 63 percent chance of a slow user request once you fan out to a hundred leaves, and that arithmetic is unforgiving.</li>
+      <li><b>Latency explodes near saturation, and autoscaling arrives late.</b> Queueing delay scales with one over one minus utilisation, and a three-minute instance boot cannot answer a thirty-second spike.</li>
+    </ul>
+  </div>
+
+  <h2>1. Three numbers, and the one that predicts outages</h2>
+
+  <p>Every conversation about scale involves three quantities and people routinely confuse them. <b>Offered load</b> is the rate at which work arrives, measured in requests per second. <b>Service capacity</b> is the rate at which the system can complete work, in the same units. <b>Utilisation</b> is the ratio of the two. The business asks about the first, the invoice is denominated in the second, and the third is the one that tells you whether tonight goes badly.</p>
+
+  <p>The reason utilisation is the predictive number is that response time is not a linear function of it. Load can double while latency barely moves, and then rise another ten percent and latency triples. This chapter derives that curve rather than asserting it, because the derivation is what lets you defend a capacity number in a room full of people who would prefer a smaller one.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  A["Offered load<br/>lambda, requests<br/>per second"] --> C["Utilisation rho<br/>= lambda / capacity"]
+  B["Service capacity<br/>requests<br/>per second"] --> C
+  C --> D["Queueing delay<br/>grows as 1 / (1 - rho)"]
+  D --> E["Response time W"]
+  E --> F["Concurrency<br/>L = lambda x W"]
+  A --> F
+  F --> G["Threads, connections,<br/>instances, invoices"]
+  G -. "buying capacity<br/>lowers rho" .-> B
+  </div><figcaption>The three quantities and the loop that connects them. Load and capacity set utilisation, utilisation sets queueing delay, delay sets response time, and response time multiplied back by load gives the concurrency you must actually provision. <b>The loop is circular, which is why capacity planning that starts from requests per second alone always underestimates.</b></figcaption></figure>
+
+  <h3>Little's Law, worked at all three tiers</h3>
+
+  <p>John Little proved in 1961 that for any queueing system in steady state, the average number of items in the system equals the average arrival rate multiplied by the average time each item spends there. The 50th anniversary retrospective is emphatic about how few assumptions this needs: it holds under non-stationary arrivals, and it holds "independent of queue discipline", so first-in-first-out, last-in-first-out, and priority scheduling all obey it. That generality is why it is the only formula in this chapter you can apply without apologising.</p>
+
+  <div class="math">
+    L = &lambda; &times; W
+    <span class="gloss">L is the average number of requests inside the system at any instant, which is what a thread pool, a connection pool, or a fleet must physically hold. &lambda; is the average arrival rate in requests per second. W is the average time a request spends inside the system, in seconds, measured from arrival to completion.</span>
+  </div>
+
+  <p>Take a request that takes 80 ms end to end, so W = 0.08 s, and apply the law at the application tier across the three scale points this course uses throughout.</p>
+
+  <div class="math">
+    L<sub>100</sub> = 100 &times; 0.08 = 8 &nbsp;&nbsp; L<sub>1000</sub> = 1000 &times; 0.08 = 80 &nbsp;&nbsp; L<sub>10000</sub> = 10000 &times; 0.08 = 800
+    <span class="gloss">L with a subscript is the average number of requests in flight at that offered load. The three subscripts are the three scale tiers in requests per second. 0.08 is the 80 ms average response time expressed in seconds.</span>
+  </div>
+
+  <p>Now turn concurrency into hardware. Assume an application instance that runs 64 worker threads and that one thread serves one request at a time. At 100 requests per second the whole service fits inside a single instance eight threads deep. At 1,000 requests per second you need 80 threads, so two instances. At 10,000 requests per second you need 800 threads, which is <code>800 / 64 = 12.5</code>, rounded up to 13 instances before you have added any redundancy or headroom at all.</p>
+
+  <p>The dangerous part of that arithmetic is that W is not a constant. If a downstream dependency slows and W rises from 80 ms to 400 ms while arrivals stay at 10,000 per second, then <code>L = 10000 &times; 0.4 = 4000</code> and you now need <code>4000 / 64 = 62.5</code>, rounded up to 63 instances. <b>A fivefold latency regression is a fivefold fleet requirement.</b> This is the mechanism behind almost every incident where a slow dependency takes down a service that was never dependent on it for correctness.</p>
+
+  <p>Apply the same law at the data tier. Suppose every request issues two database queries averaging 5 ms each. The queries are the items and the database is the system, so <code>&lambda;<sub>db</sub></code> is twice the request rate and <code>W<sub>db</sub></code> is 0.005 s.</p>
+
+  <div class="math">
+    L<sub>db</sub> = (2 &times; &lambda;) &times; 0.005
+    <span class="gloss">L<sub>db</sub> is the average number of database connections actively executing a query, which is the floor for your connection pool size. The factor 2 is the number of queries each request makes. &lambda; is the request rate in requests per second. 0.005 is the 5 ms average query time in seconds.</span>
+  </div>
+
+  <p>At 100 requests per second that is <code>200 &times; 0.005 = 1</code> busy connection. At 1,000 it is 10. At 10,000 it is 100. The tier lesson is sharp: a connection pool of 20 is generous at 100 requests per second, adequate at 1,000, and a hard throughput ceiling at 10,000 no matter how many application instances you add behind it. Connection pools are the most common place where a service that scaled fine from 100 to 1,000 falls over on the way to 10,000.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph T1["Edge tier"]
+    E1["lambda = 10000 per second<br/>W = 2 ms<br/>L = 20 in flight"]
+  end
+  subgraph T2["Application tier"]
+    A1["lambda = 10000 per second<br/>W = 80 ms<br/>L = 800 in flight<br/>= 13 instances at 64 threads"]
+  end
+  subgraph T3["Data tier"]
+    D1["lambda = 20000 queries per second<br/>W = 5 ms<br/>L = 100 busy connections"]
+  end
+  T1 --> T2 --> T3
+  A1 -. "W rises to 400 ms" .-> A2["L = 4000 in flight<br/>= 63 instances"]
+  </div><figcaption>The same law applied three times down the stack, with the arrival rate and the residence time changing at every hop. <b>Each tier has its own W, so each tier has its own concurrency, and the tier with the smallest pool is the one that sets your real capacity.</b> The dotted branch shows what a latency regression at one tier does to the fleet size at that tier.</figcaption></figure>
+
+  <h2>2. Adding and removing capacity</h2>
+
+  <h3 id="autoscaling">Autoscaling</h3>
+
+  <p>Autoscaling is a closed control loop that observes a utilisation or throughput signal, compares it against a target, and adjusts the number of running units. The mechanism is worth stating precisely because the defaults are where the surprises live. The Kubernetes HorizontalPodAutoscaler computes <code>desiredReplicas = ceil(currentReplicas &times; currentMetricValue / desiredMetricValue)</code>, runs that loop on a control interval whose "default interval is 15 seconds", and skips any adjustment where the ratio sits within a tolerance that is "0.1 by default". Its shipped defaults scale up with no stabilisation window at all but apply a 300-second stabilisation window on the way down, deliberately asymmetric because removing capacity you turn out to need is far more expensive than keeping capacity you did not. AWS Application Auto Scaling states the same asymmetry in plain words: a target tracking policy "is more aggressive in adding capacity when utilization increases than it is in removing capacity when utilization decreases". <em>Source: <a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">Kubernetes HorizontalPodAutoscaler</a>.</em></p>
+
+  <p><b>A named example.</b> Amazon's Dynamo-backed e-commerce services show why the loop exists at all. The Dynamo paper reports latencies that "exhibit a clear diurnal pattern which is a result of the diurnal pattern in the incoming request rate", noting a significant difference in request rate between daytime and night. A retail platform that provisions for the daily peak pays for that peak through the night. Without autoscaling the choice is to overpay permanently or to be under-provisioned every afternoon. <em>Source: <a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf">Dynamo: Amazon's Highly Available Key-value Store (DeCandia et al., SOSP 2007)</a>.</em></p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> autoscaling is usually a liability rather than an asset. A fleet that small is two or three instances, the control loop's rounding dominates the signal, and the money saved is a few dollars a day against the risk of a scale-in during a traffic dip. Run a fixed fleet and schedule capacity changes if the pattern is predictable. At <b>1,000 requests per second</b> autoscaling starts paying, because the peak-to-trough ratio on a real diurnal curve is often three or four to one and the fleet is now large enough that the loop's rounding is a small fraction of it. At <b>10,000 requests per second</b> it is mandatory, and the interesting engineering moves from whether to scale to what to scale on. Scaling on CPU at this size lags user-visible pain by minutes, so you scale on a request-rate or queue-depth signal that leads CPU, and you keep scheduled scaling underneath the reactive policy so the loop starts each morning from roughly the right place.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Autoscaling trades a standing capital cost for a response delay, and the delay is the whole risk. The classic failure is oscillation, where a scale-in drives utilisation back above target and triggers a scale-out, which is exactly why both major implementations damp the scale-in path. The second failure is scaling on a signal that is itself a symptom of the fault: if requests are slow because a database is struggling, adding application instances adds connections and makes the database worse. The third is scaling into a quota, where the loop calculates a correct desired capacity and the platform refuses to launch it.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  state "Steady state at target utilisation" as Steady
+  state "Metric breach observed" as Breach
+  state "Alarm confirmed over evaluation window" as Alarm
+  state "Instances launching" as Launch
+  state "Instance booting and warming" as Boot
+  state "Health checks passing" as Health
+  state "In service, carrying traffic" as Serving
+  state "Scale-in blocked by stabilisation window" as Damped
+
+  [*] --> Steady
+  Steady --> Breach : load rises above target
+  Breach --> Alarm : 60 s metric period
+  Alarm --> Launch : controller loop, 15 s
+  Launch --> Boot : about 180 s boot and app start
+  Boot --> Health : about 30 s health checks
+  Health --> Serving
+  Serving --> Steady : utilisation back at target
+  Steady --> Damped : load falls below target
+  Damped --> Steady : 300 s window expires
+  </div><figcaption>The scale-out path from breach to serving traffic, with each stage's contribution to the delay. The Kubernetes control interval and the 300-second scale-down stabilisation window are documented defaults; the boot and health-check times are stated assumptions for a typical container image. <b>The sum of the stages, not the fastest one, is the number your spike has to survive.</b></figcaption></figure>
+
+  <h4>Autoscaling lag versus the ramp rate of the traffic</h4>
+
+  <p>Add up the stages in that diagram with concrete assumptions: metrics published at a one-minute granularity, so 60 s to see the breach; a 15 s controller loop; 180 s to boot the instance and start the application; 30 s of health checks before the load balancer will route to it.</p>
+
+  <div class="math">
+    T<sub>lag</sub> = 60 + 15 + 180 + 30 = 285 s
+    <span class="gloss">T<sub>lag</sub> is the total delay from the moment load exceeds target until new capacity is serving traffic, in seconds. The four terms are, in order, the metric publication period, the autoscaling control loop interval, the instance boot plus application start time, and the health-check settling time. Only the first two are vendor defaults; the last two are stated assumptions you must measure for your own image.</span>
+  </div>
+
+  <p>Now give it a spike. Assume each instance is provisioned to carry 96 requests per second at an 80 percent utilisation target, so its saturation throughput is 120. A baseline of 1,000 requests per second needs <code>ceil(1000 / 96) = 11</code> instances, whose absolute ceiling is <code>11 &times; 120 = 1320</code> requests per second. Traffic then goes from 1,000 to 4,000 requests per second over 30 seconds, which is a perfectly ordinary marketing push or a competitor's outage.</p>
+
+  <div class="math">
+    Deficit = (4000 &minus; 1320) &times; 285 = 2680 &times; 285 = 763,800 requests
+    <span class="gloss">4000 is the new arrival rate in requests per second. 1320 is the maximum the existing 11 instances can complete per second. 2680 is the shortfall per second. 285 is the autoscaling lag in seconds from the previous calculation. The product is the total number of requests that arrive during the lag with no capacity to serve them.</span>
+  </div>
+
+  <p>Three quarters of a million requests must be queued, shed, or failed before the first new instance takes traffic. Queueing them is not an option: at 80 ms each they represent over 16 hours of work. <b>The only correct answers are standing headroom, pre-initialised capacity, and load shedding, and no autoscaling configuration change fixes it.</b> Standing headroom for the full 4,000 requests per second means 42 instances rather than 11, which at the m7g.large on-demand list price of $0.0816 per hour is $3.43 per hour instead of $0.90, about $1,820 a month for insurance. Pre-initialised capacity is the middle path, and AWS ships it as warm pools, described as a way "to decrease latency for your applications that have exceptionally long boot times". <em>Source: <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-warm-pools.html">Amazon EC2 Auto Scaling warm pools</a>.</em></p>
+
+  <p>The comparison with a function platform is instructive. That same 4,000 requests per second at 80 ms needs <code>4000 &times; 0.08 = 320</code> concurrent execution environments, and AWS Lambda documents a concurrency scaling rate of "1,000 execution environment instances every 10 seconds" per function. Three hundred and twenty environments is well inside a single ten-second step. The serverless platform absorbs the spike that the instance fleet cannot, and that, not the price per request, is the honest argument for it.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant U as Traffic
+  participant LB as Balancer
+  participant F as Fleet, 11
+  participant AS as Autoscaler
+  participant N as New nodes
+  U->>LB: t=0s, ramp 1000 to 4000 rps
+  LB->>F: forward all
+  F-->>LB: t=30s, capped at 1320 rps
+  Note over F: backlog grows<br/>2680 per second
+  U->>LB: t=60s, breach visible
+  LB->>AS: above target
+  AS->>AS: t=75s, compute capacity
+  AS->>N: t=75s, launch 31 nodes
+  N-->>N: t=255s, boot complete
+  N-->>LB: t=285s, health checks pass
+  LB->>N: traffic spreads
+  Note over LB,N: 763,800 requests arrived<br/>with no capacity to serve them
+  </div><figcaption>The same spike drawn against wall-clock time. The autoscaler behaves correctly at every step and still delivers capacity 255 seconds after the ramp finished. <b>Autoscaling is a cost-optimisation mechanism, not a spike-absorption mechanism, and treating it as the latter is how teams discover the difference during an incident.</b></figcaption></figure>
+
+  <h3 id="horizontal-scaling">Horizontal Scaling</h3>
+
+  <p>Horizontal scaling adds more units of the same size and spreads work across them. The mechanism is partitioning: either the work is stateless and any unit can serve any request, or the state is sharded so each unit owns a slice of the keyspace. It is the only form of scaling with no ceiling imposed by a vendor's largest machine, and it is the only form that also buys you redundancy, because a fleet of thirteen instances survives losing one and a single large instance does not.</p>
+
+  <p>The reason it does not scale linearly is that units are not independent. Neil Gunther's universal scalability law captures this as a rational function whose denominator has two penalty terms.</p>
+
+  <div class="math">
+    C(p) = p / (1 + &sigma;(p &minus; 1) + &kappa;p(p &minus; 1))
+    <span class="gloss">C(p) is the throughput with p units relative to the throughput of one unit. p is the number of units. &sigma; is the contention coefficient, the fraction of work that must serialise, such as a shared lock, a single coordinator, or one database. &kappa; is the coherency coefficient, the cost of keeping p copies of state consistent with each other, which grows with the number of pairs of units. Both coefficients must be fitted to measured data, never guessed.</span>
+  </div>
+
+  <p>Gunther proves this form is "equivalent to the synchronous throughput bound for a machine-repairman with state-dependent service rate", and notes that Amdahl's law is the special case where &kappa; is zero. The practical consequence is the maximum at <code>p* = sqrt((1 &minus; &sigma;) / &kappa;)</code>: when &kappa; is greater than zero, throughput does not merely plateau, it peaks and then declines. Adding servers past that point makes the system slower. <em>Source: <a href="https://arxiv.org/abs/0808.1431">"A General Theory of Computational Scalability Based on Rational Functions" (Gunther, 2008)</a>.</em></p>
+
+  <p><b>A named example.</b> Dynamo was designed for e-commerce with "incremental scalability" as an explicit principle, defined in the paper as the ability to "scale out one storage host at a time, with minimal impact on both operators of the system and the system itself", paired with symmetry so that "there should be no distinguished node or nodes that take special roles". Those two properties are what keep &sigma; small: no coordinator means no serialised path through a single machine. Without them, an Amazon shopping cart at holiday peak would be bounded by whatever the busiest special node could do. <em>Source: <a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf">Dynamo (DeCandia et al., SOSP 2007)</a>.</em></p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> horizontal scaling is about availability, not throughput. You run two or three instances because one instance is a single point of failure, and the second instance is bought with an availability argument, not a capacity one. At <b>1,000 requests per second</b> the stateless tier scales out cleanly and the contention term is usually invisible, but the shared database begins to show up in &sigma;: it is the one component every instance still funnels through. At <b>10,000 requests per second</b> you are provisioning 13 or more application instances against the Little's Law number computed above, and the design question is no longer the application tier at all. It is whether the data tier can be partitioned, because an unpartitioned database is a &sigma; you cannot reduce by adding application instances.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Horizontal scaling trades simplicity for elasticity: you inherit distributed failure modes, partial failures, cross-instance consistency, and a fan-out tail problem that section 4 spends most of its time on. The characteristic failure is the hidden serialiser, where the team adds instances, sees throughput flatten, adds more, and sees it fall. That is a non-zero &kappa; announcing itself. The fix is to find and remove the shared thing, which is usually a lock, a leader election, a sequence generator, or a cache invalidation broadcast, and it is always more work than adding another instance.</p>
+
+  <h3 id="vertical-scaling">Vertical Scaling</h3>
+
+  <p>Vertical scaling makes one unit bigger: more vCPUs, more memory, faster storage. Its mechanism is that nothing about the application changes. There is no partitioning to design, no consistency protocol to reason about, and no fan-out tail to manage, which makes it by far the cheapest scaling decision in engineering time. Kubernetes ships the same idea for pods through the VerticalPodAutoscaler, an add-on that "allows you to create CustomResourceDefinitions for your workloads which define how and when to scale the resources of the managed replicas", though the documentation is explicit that as of Kubernetes 1.36 "VPA does not support resizing pods in-place". <em>Source: <a href="https://kubernetes.io/docs/concepts/workloads/autoscaling/">Kubernetes autoscaling workloads</a>.</em></p>
+
+  <p><b>A named example.</b> Enterprise resource planning databases in retail and manufacturing are the canonical vertical workload, and AWS built an instance family for them. The EC2 High Memory u-6tb1 instances offer "6,144" GiB of memory across 448 logical processors, described as hyperthreads on 224 cores. An organisation running a large in-memory ERP database does not shard it across a hundred commodity instances; it buys the largest single machine and accepts the ceiling, because the software's transactional model assumes one address space. <em>Source: <a href="https://aws.amazon.com/ec2/instance-types/high-memory/">Amazon EC2 High Memory instances</a>.</em></p>
+
+  <p>The economics are deceptively clean. Comparing two sizes in the same family in US East, the m7i.large is $0.1008 per hour for 2 vCPUs and the m7i.xlarge is $0.2016 per hour for 4. Price is exactly linear in cores. Throughput is not, and the scalability law above tells you by how much. Take a workload with a contention coefficient of 0.03 and a coherency coefficient of 0.0001, both of which have to be measured rather than assumed.</p>
+
+  <div class="math">
+    C(2) = 2 / (1 + 0.03 + 0.0002) = 1.94 &nbsp;&nbsp; C(16) = 16 / 1.474 = 10.86 &nbsp;&nbsp; C(64) = 64 / 3.293 = 19.43
+    <span class="gloss">C(p) is the throughput at p cores relative to one core. The denominators are 1 + &sigma;(p &minus; 1) + &kappa;p(p &minus; 1) evaluated at p = 2, 16 and 64 using &sigma; = 0.03 and &kappa; = 0.0001. The two coefficients are assumptions for this worked example and must be fitted to your own measurements.</span>
+  </div>
+
+  <p>Two cores deliver 97 percent efficiency, sixteen deliver 68 percent, and sixty-four deliver 30 percent. Because price is linear and throughput is not, the cost per unit of delivered throughput is the denominator itself: 1.03 at two cores, 1.47 at sixteen, and 3.29 at sixty-four. <b>The 64-core machine costs 3.2 times as much per unit of work as the 2-core machine.</b> Worse, the peak sits at <code>p* = sqrt(0.97 / 0.0001) = 98.5</code> cores, past which throughput falls with every core you add.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> vertical scaling is almost always the right first move. Doubling one instance is a configuration change; sharding a database is a quarter of work. At <b>1,000 requests per second</b> it is still viable for the data tier and increasingly wasteful for the stateless tier, where two small instances cost the same as one large one and also survive a hardware failure. At <b>10,000 requests per second</b> vertical scaling has usually stopped being an option for the application tier, both because of the efficiency curve above and because a single instance carrying 10,000 requests per second is an availability incident waiting for a kernel panic. It often remains the answer for the primary database, right up until it is not, at which point you have a migration rather than a scaling exercise.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Vertical scaling trades a hard ceiling and zero redundancy for enormous simplicity. It fails in two ways. The first is that you run out of instance sizes and discover that the next step is a re-architecture you have not budgeted. The second is quieter and more common: the resize requires a restart, so every vertical scaling event is a planned outage or a failover, and teams that scale vertically under pressure tend to do it during the incident that made it necessary.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">A stateless service doubles its instance count from 16 to 32 and measured throughput rises by only nine percent. Which reading fits the evidence best?</div>
+    <button class="q-opt">The instances are undersized, so buy larger machines instead now</button>
+    <button class="q-opt">The load generator saturated, so measure with a heavier fleet</button>
+    <button class="q-opt">A shared serialised resource dominates, so find and remove it</button>
+    <button class="q-opt">The health checks are failing, so registered capacity sits idle</button>
+    <div class="q-fb">Nine percent from a doubling is a large contention coefficient asserting itself, and the scalability law says larger machines will not help because the serialised fraction is unchanged by unit size. A saturated load generator is worth ruling out but would usually show flat throughput with falling client-side utilisation, not a small consistent gain. Idle instances from failed health checks would show as a missing half of the fleet in the routing metrics, which is trivially checked first.</div>
+  </div>
+
+  <h3 id="serverless-limits">Serverless Limits</h3>
+
+  <p>Serverless platforms remove capacity planning and replace it with quotas. The mechanism is that the provider owns the fleet and hands you a concurrency allocation instead of instances, so every question about capacity becomes a question about a documented limit. AWS Lambda's are precise and worth carrying in your head: a default of 1,000 concurrent executions per account per region, a maximum function timeout of "900 seconds (15 minutes)", memory from "128 MB to 10,240 MB", a synchronous invocation payload of "6 MB each for request and response", and the note that "At 1,769 MB, a function has the equivalent of one vCPU". <em>Source: <a href="https://docs.aws.amazon.com/lambda/latest/dg/gettingstarted-limits.html">AWS Lambda quotas</a>.</em></p>
+
+  <p>The limit that actually bites is the one people do not read. Lambda enforces "a requests per second limit that's equal to 10 times your account concurrency", so a default account is capped at 10,000 requests per second regardless of how short the functions are. AWS works the example itself: a 20 ms function at 30,000 requests per second computes to a concurrency of only 600, comfortably under the 1,000 limit, and still throttles, because the requests-per-second ceiling binds first. <em>Source: <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html">Understanding Lambda function scaling</a>.</em></p>
+
+  <p><b>A named example.</b> The same documentation names the cross-service version of this trap in ad tech and payments webhook ingestion, where a gateway fronts a function: "API Gateway has a default throttle limit of 10,000 requests per second, whereas Lambda has a default concurrency limit of 1,000. Because of this mismatch, it's possible to have more incoming requests from API Gateway that Lambda can handle." A campaign that ramps traffic past the mismatch loses events at the function tier while the gateway happily accepts them.</p>
+
+  <p><b>The three tiers.</b> Using the 80 ms request from section 1, at <b>100 requests per second</b> the concurrency is <code>100 &times; 0.08 = 8</code>, which is a rounding error against every quota and serverless is close to a pure win. At <b>1,000 requests per second</b> concurrency is 80, still comfortable, but cold starts now appear on enough requests to show in the tail and the answer is provisioned concurrency, which AWS notes "incurs additional charges". At <b>10,000 requests per second</b> concurrency is 800, still inside the default 1,000, but the account is sitting exactly on the 10,000 requests-per-second ceiling. <b>You hit the rate limit before the concurrency limit, and the account-level quota increase is now a prerequisite of the launch, not an operational detail.</b></p>
+
+  <p><b>The trade-off and the failure mode.</b> Serverless trades control for elasticity and pays a premium per unit of work, which the next topic quantifies. The failure mode is that limits are shared and mostly invisible until crossed. Concurrency is an account-and-region pool, so an unrelated batch job can starve a customer-facing function unless you set reserved concurrency, and the documentation is direct that reserved concurrency means "no other function can use that concurrency" in both directions. The second failure is the quota you did not request in time, because an increase is a support process with a lead time, not a slider.</p>
+
+  <h2>3. Paying for it</h2>
+
+  <h3 id="cost-optimization">Cost Optimization</h3>
+
+  <p>Cost optimisation is the discipline of moving spend toward delivered work. The AWS Well-Architected cost optimisation pillar defines the goal as a workload that "fully utilizes all resources, achieves an outcome at the lowest possible price point, and meets your functional requirements", and organises the practice around expenditure awareness, cost-effective resources, and managing demand and supply. The mechanism that matters for this chapter is the second one: provisioned capacity is billed per unit of time whether or not it does anything, and consumption capacity is billed per unit of work. Those two cost curves cross, and the crossing point is computable. <em>Source: <a href="https://docs.aws.amazon.com/wellarchitected/latest/cost-optimization-pillar/welcome.html">AWS Well-Architected Cost Optimization Pillar</a>.</em></p>
+
+  <p>Work it through with published list prices. Lambda in US East charges "$0.20 per one million requests" plus "$0.0000166667 per GB-s" of on-demand duration. Take the 80 ms request from section 1, running at 512 MB.</p>
+
+  <div class="math">
+    c<sub>fn</sub> = (0.5 &times; 0.08 &times; 0.0000166667) + (0.20 / 1,000,000) = 0.000000667 + 0.000000200 = $0.000000867
+    <span class="gloss">c<sub>fn</sub> is the cost of one function invocation in dollars. 0.5 is the memory allocation in GB. 0.08 is the request duration in seconds, so their product is the GB-seconds consumed. 0.0000166667 is the published price per GB-second. The second term is the published per-request charge of $0.20 per million, expressed per single request.</span>
+  </div>
+
+  <p>That is $0.867 per million requests. Now the provisioned side. An m7g.large is $0.0816 per hour on-demand for Linux in US East, and assume it sustains 100 requests per second at the utilisation target, which is a stated assumption you must load-test rather than inherit.</p>
+
+  <div class="math">
+    c<sub>inst</sub> = 0.0816 / (100 &times; 3600) = 0.0816 / 360,000 = $0.000000227
+    <span class="gloss">c<sub>inst</sub> is the cost of one request served by a fully loaded instance, in dollars. 0.0816 is the published on-demand hourly price. 100 is the assumed sustained requests per second. 3600 converts an hour to seconds, so the denominator is the number of requests the instance serves in the hour it is billed for.</span>
+  </div>
+
+  <p>At saturation the function costs 3.8 times as much per request. But the instance is billed for the whole hour regardless, so the honest comparison is at what volume the fixed hourly charge equals the variable per-request charge.</p>
+
+  <div class="math">
+    R* = 0.0816 / 0.000000867 = 94,153 requests per hour = 26.2 requests per second
+    <span class="gloss">R* is the break-even request volume per hour. 0.0816 is the instance's fixed hourly price in dollars. 0.000000867 is the function's cost per request in dollars. Dividing the fixed cost by the variable rate gives the volume at which the two bills are equal. Dividing by 3600 converts it to requests per second.</span>
+  </div>
+
+  <p>Since the instance's assumed capacity is 100 requests per second, break-even sits at 26.2 percent average utilisation. <b>Below roughly a quarter utilisation, serverless is cheaper; above it, provisioned capacity is cheaper, and the gap widens linearly from there.</b> That single number replaces a great many opinions.</p>
+
+  <p><b>A named example.</b> The same argument in a different currency governs AI inference, where the unit is the token rather than the request. The AI system design course works the token economics in its <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#cost-per-query">cost per query</a> and <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#gpu-utilization">GPU utilisation</a> sections, and the structure is identical: a per-call API price competing with a reserved accelerator whose fixed hourly cost only pays off above a utilisation threshold. If you can do the crossover for requests you can do it for tokens.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> and a diurnal curve, average utilisation of a provisioned fleet is often below the 26 percent break-even, so serverless genuinely wins on cash and wins decisively on engineering time. Concretely: 360,000 requests an hour on functions is $0.31 an hour, while three small instances for capacity and redundancy are $0.24. At <b>1,000 requests per second</b> steady traffic puts you well past break-even and the arithmetic starts favouring instances, though burst-heavy traffic can still favour functions. At <b>10,000 requests per second</b> the gap is decisive: functions cost $31.20 an hour, or about $22,500 a month, while 143 instances running at a 70 percent target cost $11.67 an hour, or about $8,400 a month. <b>The $14,000 monthly difference is roughly one engineer, which is exactly the comparison you should make out loud rather than assuming the cheaper infrastructure is the cheaper system.</b></p>
+
+  <p><b>The trade-off and the failure mode.</b> Cost optimisation trades headroom for money, and headroom is what absorbs spikes and instance failures. The failure mode is optimising the utilisation target upward without re-reading section 4: at 95 percent utilisation the invoice looks excellent and the queueing delay is four times what it was at 80 percent. The second failure is optimising the wrong denominator. Spend per instance-hour is easy to measure and nearly meaningless; spend per successful request, tracked over time, is the only number that tells you whether an optimisation actually optimised anything.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  Q1{"Average utilisation of the<br/>equivalent instance?"}
+  Q1 -- "below 26 percent" --> S["Consumption pricing wins<br/>$0.867 per million requests<br/>billed only for work done"]
+  Q1 -- "above 26 percent" --> P["Provisioned capacity wins<br/>$0.227 per million requests<br/>billed for the whole hour"]
+  Q1 -- "spiky, unpredictable" --> B["Split the traffic:<br/>provisioned baseline<br/>plus consumption overflow"]
+  S --> R["Re-check the crossover<br/>whenever price, duration,<br/>or memory changes"]
+  P --> R
+  B --> R
+  P -. "do not chase utilisation<br/>past the queueing knee" .-> W["See utilisation<br/>and queueing delay"]
+  </div><figcaption>The crossover decision reduced to one measured quantity, average utilisation of the capacity you would otherwise buy. <b>The break-even is a property of your request duration and memory footprint, so it moves whenever either changes and must be recomputed rather than remembered.</b> The dotted branch is the constraint that stops the provisioned answer from being pushed to its logical extreme.</figcaption></figure>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your function costs $0.867 per million requests and the equivalent instance costs $0.0816 per hour. Traffic is a steady 10 requests per second. What follows?</div>
+    <button class="q-opt">Functions are cheaper here, since load sits far below break-even</button>
+    <button class="q-opt">Instances are cheaper here, because per-request price is always lower</button>
+    <button class="q-opt">Costs are identical here, given both bills scale with traffic</button>
+    <button class="q-opt">Nothing follows here, because request duration is not yet specified</button>
+    <div class="q-fb">Ten requests per second is 36,000 an hour, which costs about $0.031 on functions against a fixed $0.0816 for the instance, so functions win by well over half. The second option confuses the price at saturation with the price at this load, which is the exact error the break-even calculation exists to prevent. The third is wrong because an instance bill does not scale with traffic at all. The fourth is wrong because the duration is already baked into the quoted per-request price.</div>
+  </div>
+
+  <h2>4. Measuring it</h2>
+
+  <h3 id="latency">Latency</h3>
+
+  <p>Latency is the time to service one request, and the Google SRE book makes it the first of its four golden signals alongside traffic, errors, and saturation. The mechanism worth internalising is that latency is a distribution, not a number, and that it decomposes: every observed latency is service time plus queueing time plus network time plus whatever the dependencies contributed. The SRE book adds a detail teams routinely miss, which is to distinguish the latency of successful requests from the latency of failed ones, because fast errors flatter your average and hide the failure. <em>Source: <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE Book, Monitoring Distributed Systems</a>.</em></p>
+
+  <p>When you need a metric definition precise enough to argue about, the IETF has already done the work. RFC 2681 defines round-trip delay in terms of wire times rather than application timestamps, and defines both a percentile and a median form of the metric rather than a mean, which tells you how the measurement community settled this question decades ago. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc2681.html">RFC 2681, A Round-trip Delay Metric for IPPM</a>.</em></p>
+
+  <h4>Why utilisation, not load, sets latency</h4>
+
+  <p>Here is the derivation the opening section promised. For an M/M/1 queue, a single server with Poisson arrivals and exponential service times, the stationary number in system is geometric with mean <code>&rho; / (1 &minus; &rho;)</code>, where <code>&rho; = &lambda; / &mu;</code> must be strictly less than one for a stationary distribution to exist at all. Apply Little's Law to convert that count into a time.</p>
+
+  <div class="math">
+    W = L / &lambda; = (&rho; / (1 &minus; &rho;)) / (&rho;&mu;) = S / (1 &minus; &rho;)
+    <span class="gloss">W is the average response time including queueing. L is the average number in system. &lambda; is the arrival rate. &mu; is the service rate. &rho; is utilisation, equal to &lambda; divided by &mu;. S is the raw service time with no queueing, equal to one divided by &mu;. The final form says response time is the service time divided by the idle fraction of the server.</span>
+  </div>
+
+  <p>Put a 10 ms service time through it. At 50 percent utilisation W is 20 ms; at 70 percent, 33 ms; at 80 percent, 50 ms; at 90 percent, 100 ms; at 95 percent, 200 ms; at 99 percent, 1,000 ms. The slope is what matters. Differentiating gives <code>S / (1 &minus; &rho;)&sup2;</code>, so the marginal cost of one extra percentage point of utilisation is 1.1 ms at 70 percent and 40 ms at 95 percent, a factor of 36. <b>That factor is the entire reason a 70 to 80 percent utilisation target is conventional: it is where the curve is still nearly flat, so a traffic surprise costs you milliseconds instead of seconds.</b> <em>Source: <a href="https://www.columbia.edu/~ww2040/Whitt_CTMCnotes121312.pdf">Ward Whitt, Continuous-Time Markov Chains, Example 4.3 on the M/M/1 queue</a>.</em></p>
+
+  <p>Real servers are not M/M/1, and the model overstates the delay at low utilisation and understates the variance at high utilisation. What survives contact with reality is the shape: a hyperbolic blow-up as utilisation approaches one. The Google SRE book describes the same phenomenon from the operational side, observing that with a queue ten times the thread count and a 100 ms handling time, "if the queue is full, then a request will take 1.1 seconds to handle, most of which time is spent on the queue", and recommending queue lengths at "50 percent or less" of the thread pool so the server rejects early instead of accumulating latency. <em>Source: <a href="https://sre.google/sre-book/addressing-cascading-failures/">Google SRE Book, Addressing Cascading Failures</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  A["rho = 0.50<br/>W = 20 ms"] --> B["rho = 0.70<br/>W = 33 ms"]
+  B --> C["rho = 0.80<br/>W = 50 ms"]
+  C --> D["rho = 0.90<br/>W = 100 ms"]
+  D --> E["rho = 0.95<br/>W = 200 ms"]
+  E --> F["rho = 0.99<br/>W = 1000 ms"]
+  B -. "one more point<br/>costs 1.1 ms" .-> G["Flat region:<br/>safe range"]
+  E -. "one more point<br/>costs 40 ms" .-> H["Knee region:<br/>one surprise<br/>ends you"]
+  </div><figcaption>Response time against utilisation for a 10 ms service time under the M/M/1 idealisation, computed from W = S divided by one minus rho. Between 50 and 80 percent the whole cost is 30 ms; between 95 and 99 percent it is 800 ms. <b>The last few percent of utilisation are the most expensive capacity you will ever fail to buy.</b></figcaption></figure>
+
+  <p><b>A named example.</b> Dean and Barroso open their paper on the industry's operating premise that "Systems that respond to user actions very quickly (within 100 milliseconds) feel more fluid and natural to users than those that take longer", which is why web search treats 100 ms as an engineering constant rather than a preference. <em>Source: <a href="https://research.google/pubs/the-tail-at-scale/">"The Tail at Scale" (Dean and Barroso, CACM 2013)</a>.</em></p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> latency is dominated by your own code and its dependencies, because with 8 requests in flight there is essentially no queueing anywhere. At <b>1,000 requests per second</b> queueing appears at whichever component is closest to saturation, usually a connection pool or a single-threaded downstream, and the fix is capacity at that one place rather than optimisation everywhere. At <b>10,000 requests per second</b> latency is a fleet-wide statistical property: the slowest instance in the fleet, the least fortunate garbage collection, and the unluckiest network path all show up in the numbers that users experience, and no single-machine profiler will find them.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Buying latency means buying idle capacity, and the M/M/1 curve prices exactly how much. The failure mode is optimising the mean, which the next two topics dismantle, and the second is measuring latency only at the server. Server-side latency excludes queueing in the load balancer, connection setup, and the client's own network, so a service can hold a clean 50 ms internally while users experience 400 ms.</p>
+
+  <h3 id="throughput">Throughput</h3>
+
+  <p>Throughput is the completion rate: work finished per unit time, measured at the exit rather than the entrance. Distinguishing it from arrival rate is not pedantry, because in a saturated system they differ and the difference is the requests you are dropping. The mechanism connecting throughput to everything else is Little's Law again, read in the other direction: with concurrency fixed by a thread pool or a connection pool, throughput is that concurrency divided by the residence time, so anything that raises W lowers throughput even though nothing about the code changed. <em>Source: <a href="https://people.cs.umass.edu/~emery/classes/cmpsci691st/readings/OS/Littles-Law-50-Years-Later.pdf">John D. C. Little, "Little's Law as Viewed on Its 50th Anniversary", Operations Research 59(3), 2011</a>, restating the 1961 proof of L = &lambda;W.</em></p>
+
+  <div class="math">
+    X = L / W
+    <span class="gloss">X is throughput in completions per second. L is the fixed concurrency limit, such as the number of worker threads or the size of a connection pool. W is the average time each unit of work occupies one of those slots, in seconds. The formula is Little's Law rearranged, and it says a bounded pool converts a latency regression directly into a throughput regression.</span>
+  </div>
+
+  <p>Take the 64-thread instance from section 1. At W = 80 ms its throughput ceiling is <code>64 / 0.08 = 800</code> requests per second. If a dependency slows and W becomes 400 ms, the ceiling falls to <code>64 / 0.4 = 160</code> requests per second, a five-fold throughput collapse from a pure latency change. <b>This is why "the service got slow" and "the service ran out of capacity" are usually the same incident described from two sides.</b></p>
+
+  <p><b>A named example.</b> AWS documents this identity for functions rather than threads, defining function concurrency as "average requests per second times average request duration in seconds" and working it: at 5,000 requests per second and a 200 ms average duration, "Concurrency = (5,000 requests/second) * (0.2 seconds/request) = 1,000". The platform is Little's Law wearing a different name, and the number it produces is billed. <em>Source: <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-concurrency.html">Understanding Lambda function scaling</a>.</em></p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> throughput is never the binding constraint and measuring it is mostly a sanity check that you are completing what you accept. At <b>1,000 requests per second</b> you must start measuring throughput per component rather than for the service as a whole, because the aggregate number hides the one pool that is already at its ceiling. At <b>10,000 requests per second</b> throughput becomes a budget you allocate: you decide in advance which traffic classes get capacity when there is not enough, because the alternative is that the allocation is made for you by whichever client retries hardest.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Throughput and latency trade against each other through batching. Larger batches raise throughput and raise latency; smaller batches do the reverse. The failure mode is measuring throughput without measuring what happened to the requests that did not complete. A system shedding 30 percent of its load can post a stable, healthy-looking throughput line indefinitely, which is why throughput must always be read next to an error rate and never alone.</p>
+
+  <h3 id="p99-latency">P99 Latency</h3>
+
+  <p>The 99th percentile is the value below which 99 percent of observations fall, and it is the standard way to describe a plausible worst case without letting a single outlier define it. The Google SRE book is unusually direct about why the mean fails: "Averaging request latencies may seem attractive, but obscures an important detail: it's entirely possible for most of the requests to be fast, but for a long tail of requests to be much, much slower." It recommends collecting "request counts bucketed by latencies" so the distribution survives aggregation, and observes that "a high-order percentile, such as the 99th or 99.9th, shows you a plausible worst-case value, while using the 50th percentile also known as the median emphasizes the typical case". <em>Source: <a href="https://sre.google/sre-book/service-level-objectives/">Google SRE Book, Service Level Objectives</a>.</em></p>
+
+  <h4>The mean stays flat while the tail doubles</h4>
+
+  <p>Here is a concrete distribution that makes the point unarguable. Two releases, 1,000 requests each.</p>
+
+  <div class="math">
+    mean<sub>1</sub> = (980 &times; 50 + 20 &times; 400) / 1000 = (49,000 + 8,000) / 1000 = 57.0 ms
+    <span class="gloss">mean<sub>1</sub> is the average latency of release one. 980 requests completed in 50 ms and 20 completed in 400 ms. The numerator is the total time spent across all requests in milliseconds and the denominator is the request count.</span>
+  </div>
+
+  <div class="math">
+    mean<sub>2</sub> = (985 &times; 46 + 15 &times; 800) / 1000 = (45,310 + 12,000) / 1000 = 57.3 ms
+    <span class="gloss">mean<sub>2</sub> is the average latency of release two. 985 requests completed in 46 ms and 15 completed in 800 ms. The arithmetic is identical to the previous equation with the new counts and durations.</span>
+  </div>
+
+  <p>The mean moved from 57.0 ms to 57.3 ms, a change of half a percent that no alert would fire on. The median actually improved, from 50 ms to 46 ms, so a median-based dashboard reports a win. Now sort each sample and read the 990th value. In release one, requests 981 through 1000 took 400 ms, so the 99th percentile is 400 ms. In release two, requests 986 through 1000 took 800 ms, so the 99th percentile is 800 ms. <b>The mean moved 0.5 percent, the median improved, and the tail doubled.</b> Fifteen users in every thousand now wait four fifths of a second, and every one of them is a support ticket.</p>
+
+  <p>The mechanism behind the illusion is that a mean is a weighted average dominated by the 98.5 percent of requests that were never the problem. Making the fast requests four milliseconds faster paid for making the slow requests four hundred milliseconds slower. That is a terrible trade and the mean cannot see it.</p>
+
+  <h4>Two ways teams get percentiles wrong anyway</h4>
+
+  <p>The first is averaging percentiles across instances, which is not a valid operation. Suppose instance A serves 1,000 requests all at 100 ms, so its 99th percentile is 100 ms, and instance B serves 10 requests all at 5,000 ms, so its 99th percentile is 5,000 ms. Averaging the two gives 2,550 ms. The true 99th percentile of the combined 1,010 requests is the 1,000th sorted value, which is 100 ms. <b>The averaged figure is wrong by a factor of 25 and wrong in the alarming direction, which is how teams end up chasing a tail that does not exist.</b> The correct operation is to aggregate the histogram buckets and compute the quantile from the merged distribution, which is exactly what Prometheus does: its <code>histogram_quantile</code> "calculates the &phi;-quantile from a classic histogram or from a native histogram" by interpolating within buckets, and the documentation warns that with classic histograms "it is easy to accidentally pick lower or upper values that are very far away from any bucket boundary, leading to large margins of error". <em>Source: <a href="https://prometheus.io/docs/prometheus/latest/querying/functions/#histogram_quantile">Prometheus histogram_quantile</a>.</em></p>
+
+  <p>The second is reading a percentile from too few samples. A one-minute window at 10 requests per second holds 600 observations, of which exactly 6 sit above the 99th percentile, so the reported figure is the opinion of six requests and will jump wildly between windows. The same window at 10,000 requests per second holds 600,000 observations with 6,000 above the line, and the estimate is stable. <b>The 99th percentile of a low-traffic endpoint is noise wearing a decimal point, and the fix is a longer window, not a bigger dashboard.</b></p>
+
+  <p><b>A named example.</b> Amazon states its position without hedging: "at Amazon, SLAs are expressed and measured at the 99.9th percentile of the distribution", chosen over an even higher percentile after "a cost-benefit analysis which demonstrated a significant increase in cost to improve performance that much". The paper adds that "Amazon's engineering and optimization efforts are not focused on averages", and reports a typical requirement that "99.9% of the read and write requests execute within 300ms". It also gives the measured gap: in production, "the 99.9th percentile latencies are around 200 ms and are an order of magnitude higher than the averages". An order of magnitude, in a system built by people who care about this, in e-commerce. <em>Source: <a href="https://www.allthingsdistributed.com/files/amazon-dynamo-sosp2007.pdf">Dynamo (DeCandia et al., SOSP 2007)</a>.</em></p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the 99th percentile is 6 requests a minute and is genuinely noisy, so measure it over an hour and set the objective on the 95th. At <b>1,000 requests per second</b> the 99th percentile is stable within a minute and becomes the right primary objective. At <b>10,000 requests per second</b> the 99th percentile is 100 requests every second, which is a continuous stream of unhappy users rather than a statistical curiosity, and the 99.9th becomes the number the business should be told about.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Chasing higher percentiles gets expensive fast, which is precisely the cost-benefit argument Amazon made when it stopped at 99.9. The characteristic failure is setting an objective on a percentile you cannot measure honestly: a p99.99 objective on an endpoint serving 100 requests per second requires roughly three hours of traffic per meaningful sample, so the objective is unfalsifiable and therefore useless.</p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">After a deploy, mean latency moves from 57.0 ms to 57.3 ms, the median improves from 50 ms to 46 ms, and the 99th percentile moves from 400 ms to 800 ms. What happened?</div>
+    <button class="q-opt">Overall performance improved, because two of three numbers got better</button>
+    <button class="q-opt">Measurement noise appeared, since these three numbers can never disagree</button>
+    <button class="q-opt">Traffic volume dropped sharply, which lifted the reported tail figure</button>
+    <button class="q-opt">Typical requests improved slightly, while the slow ones exactly doubled</button>
+    <div class="q-fb">A mean is dominated by the overwhelming majority of fast requests, so a four millisecond gain across 98.5 percent of traffic can fully fund a four hundred millisecond loss on the rest. The first option counts metrics rather than users, and the users who matter are the ones in the tail. The second is wrong because these three statistics measure different parts of one distribution and routinely move in opposite directions. The third is wrong because a percentile is a position in a sorted sample, so shrinking the sample does not raise it.</div>
+  </div>
+
+  <h3 id="tail-latency">Tail Latency</h3>
+
+  <p>Tail latency is the behaviour of the slow end of the distribution, and its defining property is that it amplifies with fan-out. Dean and Barroso's mechanism is that a request served by many machines in parallel inherits the worst of them: "Variability in the latency distribution of individual components is magnified at the service level." They give the causes as global resource sharing, background maintenance activities such as log compaction and garbage collection, multiple layers of queueing, plus hardware effects including power capping and solid-state garbage collection that "can increase read latency by a factor of 100 with even a modest level of write activity". <em>Source: <a href="https://research.google/pubs/the-tail-at-scale/">"The Tail at Scale" (Dean and Barroso, CACM 2013, pages 74 to 80)</a>.</em></p>
+
+  <h4>The fan-out arithmetic</h4>
+
+  <p>The paper's central example: "consider a system where each server typically responds in 10ms but with a 99th-percentile latency of one second. If a user request is handled on just one such server, one user request in 100 will be slow." Now fan out. If leaf responses are independent, the probability that every one of n leaves stays fast is the per-leaf fast probability raised to the n.</p>
+
+  <div class="math">
+    P(slow request) = 1 &minus; (1 &minus; p)<sup>n</sup>
+    <span class="gloss">P(slow request) is the probability that the user-visible request is slow. p is the probability that any single leaf server is slow, so 0.01 for a one-percent tail. n is the fan-out, meaning the number of leaf servers a single user request must wait for. The formula assumes leaf latencies are independent, which real systems violate in the direction that makes things worse.</span>
+  </div>
+
+  <div class="math">
+    n = 5: 1 &minus; 0.99<sup>5</sup> = 4.9% &nbsp;&nbsp; n = 10: 1 &minus; 0.99<sup>10</sup> = 9.6% &nbsp;&nbsp; n = 100: 1 &minus; 0.99<sup>100</sup> = 63.4%
+    <span class="gloss">Each line raises the per-leaf fast probability of 0.99 to the power of the fan-out and subtracts the result from one. 0.99 to the hundredth power is 0.366, so 63.4 percent of user requests touch at least one slow leaf. The paper's own figure for this case is 63 percent.</span>
+  </div>
+
+  <p>The paper states the conclusion directly: "If a user request must collect responses from 100 such servers in parallel, then 63% of user requests will take more than one second." <b>A one-percent problem became a two-in-three problem purely by fanning out, with no component having gotten any worse.</b> The paper's second example shows the effect survives even excellent components: with only one request in 10,000 exceeding a second, "a service with 2,000 such servers will see almost one in five user requests taking more than one second", which is <code>1 &minus; 0.9999<sup>2000</sup> = 18.1</code> percent.</p>
+
+  <p>Run it backwards to size the requirement. To keep a 99th-percentile service promise with a fan-out of 100, each leaf must satisfy <code>0.99 = (1 &minus; p)<sup>100</sup></code>, giving <code>p = 1 &minus; 0.99<sup>1/100</sup> = 0.0001005</code>. <b>Every leaf must hold its 99.99th percentile to let the service hold its 99th.</b> That is the single most useful number in this chapter, because it explains why tail work at scale is done by changing the request pattern rather than by tuning the leaves.</p>
+
+  <p><b>A named example.</b> Table 1 of the same paper reports measurements from a real Google service in web search, where "root servers distribute a request through intermediate servers to a very large number of leaf servers". The 99th-percentile latency for a single random request measured at the root is 10 ms, the 99th percentile for all requests to finish is 140 ms, and the 99th percentile for 95 percent of requests to finish is 70 ms, "meaning that waiting for the slowest 5% of the requests to complete is responsible for half of the total 99%-percentile latency". A fourteen-fold amplification between one leaf and the whole fan-out, measured in production.</p>
+
+  <p>The paper's own remedy is to change the request pattern. Hedged requests issue "the same request to multiple replicas and use the results from whichever replica responds first", deferring the second send until the first has been outstanding longer than the 95th-percentile expected latency, which "limits the additional load to approximately 5% while substantially shortening the latency tail". The reported result is worth memorising: reading 1,000 keys spread across 100 servers, "sending a hedging request after a 10ms delay reduces the 99.9th-percentile latency for retrieving all 1,000 values from 1,800ms to 74ms while sending just 2% more requests." Tied requests extend this with faster cancellation to shrink the window in which two servers duplicate work.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant R as Root
+  participant L2 as Leaves 1-99
+  participant L3 as Leaf 100
+  U->>R: one query
+  R->>L2: 99 sub-queries
+  R->>L3: sub-query
+  L2-->>R: 10 ms each
+  Note over R,L3: each leaf is slow<br/>with probability 0.01
+  L3-->>R: 1000 ms, unlucky
+  Note over R: waiting for the slowest makes<br/>63.4 percent of queries slow
+  R->>L3: hedge after 10 ms
+  L3-->>R: replica answers, 12 ms
+  R-->>U: bounded by the hedge,<br/>not by the outlier
+  </div><figcaption>Tail amplification and its remedy in one flow. The root cannot answer until the slowest of its hundred leaves answers, so a one-percent per-leaf tail becomes a 63.4 percent service-level tail. <b>The fix is not to make the leaves faster but to stop waiting for the unlucky one, by racing a second copy of the request against it.</b> Dean and Barroso report this cutting a 99.9th-percentile latency from 1,800 ms to 74 ms for about 2 percent extra load.</figcaption></figure>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the fan-out is usually one or two and tail amplification is negligible, so spend your attention on the mean path. At <b>1,000 requests per second</b> a fan-out of five to ten is common and the arithmetic above already costs you 5 to 10 percent of requests, which is enough to justify per-dependency timeouts and a bounded number of parallel calls. At <b>10,000 requests per second</b> with a fan-out of 100, tail amplification is the dominant term in your latency budget and nothing else you do matters as much. This is where hedged and tied requests, request-level deadlines propagated to every leaf, and returning partial results earn their complexity. This connects directly to the agent engineering course's treatment of <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">time to first token and inter-token latency</a>, where the same amplification appears across sequential model calls rather than parallel leaves.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Every tail remedy spends resources on duplicated work, which is why the paper is careful to bound the extra load at roughly 2 to 5 percent. The failure mode is hedging without cancellation, where the duplicate requests are never cancelled, the effective load rises, utilisation rises, and the queueing curve from section 4 turns your tail remedy into a tail cause. The second failure is assuming independence. Correlated slowness, a shared switch, a synchronised garbage collection, a cache-wide invalidation, breaks the arithmetic in the worse direction: the formula gives a floor, not a ceiling.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A service fans a request out to 100 leaves, each with a one percent chance of being slow. Which change most reduces the fraction of slow user requests?</div>
+    <button class="q-opt">Add more leaf servers so that each one handles a lighter share</button>
+    <button class="q-opt">Race a second copy against any leaf exceeding its expected time</button>
+    <button class="q-opt">Raise the client timeout so slow leaves get a chance to finish</button>
+    <button class="q-opt">Report the mean leaf latency so the dashboards look far calmer</button>
+    <div class="q-fb">Hedging bounds the wait by the faster of two attempts, which is what Dean and Barroso measured cutting a 99.9th percentile from 1,800 ms to 74 ms for about two percent extra load. Adding leaves raises the fan-out and makes the amplification worse, since the exponent is the number of servers you must wait for. Raising the timeout changes when you give up, not how often a leaf is slow, so the tail is unchanged and the failure just arrives later. The last option changes the reporting rather than the system.</div>
+  </div>
+
+  <h2>5. Scale drill: an order-status API for a parcel carrier</h2>
+
+  <p>One system, three tiers, and what changes at each. The service answers "where is my parcel", reads from a shipment store, and fans out to a small number of carrier partner services for the last-mile leg. Assume an 80 ms target response time throughout.</p>
+
+  <ul>
+    <li><b>At 100 requests per second.</b> Little's Law gives 8 requests in flight, so one instance with 64 threads is eight percent busy and you run three for availability rather than capacity. The database pool needs 1 busy connection, so 20 is generous. Autoscaling is off; a fixed fleet is simpler and the savings are not worth the oscillation risk. Serverless is genuinely cheaper here at about $0.31 an hour against $0.24 for three small instances, and cheaper still once you price the operational time. Measure the 95th percentile over an hour, because the 99th is only six requests a minute and will swing on noise. Fan-out to two partners costs about 2 percent tail amplification, which nobody will notice.</li>
+    <li><b>At 1,000 requests per second.</b> Concurrency is 80, so two instances carry it and four give you the 70 percent utilisation target with room to lose one. The database pool needs 10 busy connections and the pool becomes something you size deliberately rather than inherit. Autoscaling now pays, because the diurnal curve is three or four to one, but you scale on request rate rather than CPU because CPU lags. The 99th percentile becomes the primary objective and is stable within a minute. Fan-out to five partners costs 4.9 percent of requests, which is now large enough to justify per-partner deadlines and a bounded parallel call count.</li>
+    <li><b>At 10,000 requests per second.</b> Concurrency is 800, so 13 instances at saturation and 143 at a 70 percent target, costing about $8,400 a month against about $22,500 on functions. The database needs 100 busy connections, which is the number that decides whether the shipment store gets partitioned this quarter. Autoscaling is mandatory and insufficient: the 285-second lag means a 30-second spike must be met with standing headroom and load shedding, not with the control loop. The 99.9th percentile is now the number the business hears. And if the partner fan-out reaches 100, 63.4 percent of requests touch a slow leaf, so hedging with cancellation stops being an optimisation and becomes the design.</li>
+  </ul>
+
+  <p>The through-line is that every one of those decisions came from two multiplications and one division. That is the whole method.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is refusing to accept a capacity number that has not been through Little's Law. Take a service you actually run, measure its arrival rate and its mean response time this week, multiply them, and compare the result against the thread pool, connection pool, and instance count it is currently given. Then do it again with the response time doubled, because that is the number that decides whether next quarter's dependency regression is an incident or a shrug. Bring me your arithmetic and I will argue with your assumptions, which is where the real learning is.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://research.google/pubs/the-tail-at-scale/">Dean and Barroso, "The Tail at Scale" (CACM, 2013)</a>. It is seven pages, it is entirely concrete, and it permanently changes how you read a latency dashboard. Pair it with <a href="https://people.cs.umass.edu/~emery/classes/cmpsci691st/readings/OS/Littles-Law-50-Years-Later.pdf">Little's own 50th-anniversary retrospective</a> for how few assumptions L = &lambda;W actually needs, and with the <a href="https://sre.google/sre-book/service-level-objectives/">SRE book's chapter on service level objectives</a> for turning percentiles into commitments you can be held to.</p>
+
+  <div class="pager">
+    <a href="0006-concurrency-and-runtime.html"><span class="dir">&larr; Previous</span><span class="ttl">Concurrency and Runtime</span></a>
+    <a class="nxt" href="0008-delivery-and-deployment.html"><span class="dir">Next &rarr;</span><span class="ttl">Delivery and Deployment</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 08 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

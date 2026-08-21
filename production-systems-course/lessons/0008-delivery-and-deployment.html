@@ -1,0 +1,411 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 9: Delivery and Deployment - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 09 &middot; Delivery and Deployment</div>
+  <h1>Delivery and Deployment</h1>
+  <p class="paper-meta">
+    <span class="pill">13 topics</span>
+    How code gets from a laptop into production without taking the site down, and how it gets back out again when it was wrong.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>A deployment strategy is a <b>risk-management decision</b>, not a tooling preference. The right one depends almost entirely on how fast you can detect a bad release.</li>
+      <li>Blast radius is arithmetic: <b>request rate times exposed fraction times error rate times time-to-recovery</b>. Shrinking the exposed fraction is worth far more than shrinking any other term.</li>
+      <li>A canary is a statistical test, and at low traffic it does not have the power to find a small regression. Say that out loud rather than letting a passing canary mean nothing.</li>
+      <li><b>Rollback is not universal.</b> A migration that already ran is not undone by redeploying the previous container. Expand-contract is the price of keeping rollback real.</li>
+    </ul>
+  </div>
+
+  <h2>1. The shape of the problem</h2>
+
+  <p>Every topic in this chapter serves one goal: change production without breaking it, and get back to a known-good state quickly when you do. The pipeline half of that is about proof, speed, and repeatability. The deployment half is about exposure, which is to say, how many users experience the bad version before you notice and act.</p>
+
+  <p>The number that ties both halves together is <b>time to detect</b>. If you can spot a bad release in thirty seconds, almost any strategy works and the cheapest one wins. If your only signal is a customer complaint two hours later, no rollout mechanism will save you, and the honest engineering answer is to fix detection before you fix deployment. Keep that dependency in mind as each strategy goes past, because it is the thing that actually chooses between them.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  A["Commit on trunk"] --> B["Build once<br/>one immutable artifact"]
+  B --> C["Test stages<br/>promote, never rebuild"]
+  C --> D["Registry<br/>addressed by digest"]
+  D --> E["Deploy strategy<br/>choose exposure"]
+  E --> F["Observe<br/>compare against control"]
+  F -- "healthy" --> G["Promote to 100%"]
+  F -- "regressed" --> H["Reduce exposure<br/>roll back or flag off"]
+  H -. "state already changed?" .-> I["Fix forward<br/>under incident pressure"]
+  </div><figcaption>The delivery path builds one artifact and promotes it, rather than rebuilding at each stage, so what ships is provably what was tested. <b>The only branch that matters is the one at the bottom: whether the release changed durable state, because that is the branch where rollback stops working.</b></figcaption></figure>
+
+  <h2>2. Getting a change through the gate</h2>
+
+  <h3 id="ci-cd">CI/CD</h3>
+  <p>Continuous integration is the practice of merging every change into trunk at least daily and proving it with an automated build and test run. Continuous delivery extends that proof to a deployable artifact, and continuous deployment removes the last human gate. The mechanism is a pipeline that builds exactly once, produces one immutable artifact, and then promotes that same artifact through progressively more expensive stages rather than rebuilding at each one. DORA's framing is worth memorising: if something takes a lot of time and energy, you should do it more often, which forces you to make it less painful. The same guidance warns that automated tests should give feedback in a few minutes, and that suites running longer than roughly ten minutes stop being run.</p>
+
+  <p>Google's own release process, documented in the SRE book, is the reference example: builds are hermetic, meaning they are insensitive to what happens to be installed on the build machine, and some teams operate a "push on green" model that deploys every build passing its tests. The industry cost of getting this wrong is clearest in advertising and search, where revenue is per-minute and a slow pipeline directly lengthens the window in which a revenue-losing bug is live.</p>
+
+  <p>The arithmetic that matters here is batch size, because batch size is what determines how hard a failed deploy is to diagnose. If merged changes arrive at a steady rate and the pipeline serialises them, everything that arrives during a run rides along on the next one.</p>
+
+  <div class="math">changes per deploy = 1 + (lambda * T)
+    <span class="gloss">lambda is the rate at which merged changes arrive, in changes per hour. T is the pipeline duration in hours. The 1 is the change that triggered this run; everything that lands while it is in flight is batched into the following deploy.</span></div>
+
+  <p>Take a team of eight engineers merging eight changes across an eight-hour day, so lambda is 1 change per hour. A 90-minute pipeline gives 1 + (1 * 1.5) = 2.5 changes per deploy. Cutting the pipeline to 45 minutes gives 1 + 0.75 = 1.75. That is a 30 percent reduction in the number of suspects behind every failed deploy, bought purely with pipeline speed, and it compounds: fewer suspects means faster diagnosis, which means shorter time to recovery, which is the term that bounds blast radius later in this chapter.</p>
+
+  <p>At <b>100 requests per second</b> a single pipeline on one runner is fine, and a twenty-minute run costs nobody anything real. At <b>1,000</b> you have more engineers than one serial pipeline can absorb, so you need parallel test shards, a merge queue, and a hard rule that the pipeline stays close to ten minutes. At <b>10,000</b> the pipeline is itself a production system: it needs capacity planning, an availability target, an owner, and a documented emergency path for the change that must land while the pipeline is red.</p>
+
+  <p>The trade-off is that continuous delivery buys small batches at the price of test-suite discipline. The failure mode is the flaky test. Once the pipeline is unreliable, engineers learn to re-run rather than investigate, and the signal that the entire delivery system depends on quietly stops meaning anything. A trunk that is red half the time is worse than having no pipeline, because it still blocks everyone while proving nothing. <em>Source: <a href="https://dora.dev/capabilities/continuous-integration/">DORA, Continuous Integration</a> and <a href="https://sre.google/sre-book/release-engineering/">Google SRE Book, Release Engineering</a>.</em></p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Changes merge at one per hour, your pipeline takes ninety minutes, and each run deploys whatever queued behind it. What is the real effect?</div>
+    <button class="q-opt">Each deploy carries about two or three changes, widening the suspect set</button>
+    <button class="q-opt">Each deploy carries just one change, keeping the suspect set at one</button>
+    <button class="q-opt">Each deploy carries about ten or twelve changes, flooding the suspect set</button>
+    <button class="q-opt">Each deploy carries no queued changes, since batching never affects the set</button>
+    <div class="q-fb">Batch size is 1 + (1 change per hour * 1.5 hours) = 2.5. One change per deploy would only hold if the pipeline finished before the next merge landed, which it does not. Ten or twelve would need an arrival rate roughly seven times higher. The last option denies that queueing happens at all, which is exactly what a serialised pipeline forces. The practical consequence is diagnostic: a failed deploy now has two or three suspects rather than one.</div>
+  </div>
+
+  <h2>3. What you actually ship</h2>
+
+  <h3 id="docker">Docker</h3>
+  <p>A container image is a stack of filesystem layers plus a configuration blob, tied together by a manifest and addressed by content hash. The OCI Image Format Specification defines exactly that: an image consists of "an image manifest, an image index (optional), a set of filesystem layers, and a configuration", and the manifest carries "the content-addressable identity of one or more filesystem layer changeset archives". Content addressing is the property that matters for delivery rather than the property people usually talk about. A digest is the bytes. It lets you prove that the artifact which passed staging and the artifact running in production are the same thing, instead of assuming it because the tag matches.</p>
+
+  <p>Every mainstream registry and orchestrator consumes this format, which is the point of the specification: to enable interoperable tools for building, transporting, and preparing an image to run. In e-commerce, where a checkout service is rebuilt many times a day and rolled back under time pressure, that interoperability is what lets the rollback target be named precisely rather than approximately.</p>
+
+  <p>Layer sharing also decides how expensive a rollout is in bytes. Suppose a service ships an 800 MB base layer and a 20 MB application layer, deployed as 40 replicas across 10 nodes. If the base layer is already cached on every node, the rollout moves 40 * 20 MB = 800 MB. If the release also bumps the base image, every node must pull the new base once, so the rollout moves 10 * 820 MB = 8.2 GB across node links, roughly ten times more, and rollout duration grows with it. Base-image churn is therefore a deployment-latency decision, not just a security-patching decision.</p>
+
+  <p>At <b>100 requests per second</b> tag-based deploys are fine and nobody will notice image size. At <b>1,000</b> you should be pinning by digest rather than tag, because a mutable tag makes "roll back to the previous version" ambiguous. At <b>10,000</b> pull time is a first-class term in how fast you can scale out or roll back, so image slimming and layer ordering become capacity work.</p>
+
+  <p>The trade-off is that layers give you cheap incremental shipping in exchange for a cache you must reason about carefully. The failure mode is the moving tag. If production runs <code>service:latest</code>, then "roll back to the previous tag" can resolve to a different digest than the one that was actually running, and you have deployed a third unknown version in the middle of an incident. <em>Source: <a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">OCI Image Format Specification</a> and <a href="https://docs.docker.com/build/cache/">Docker build cache</a>.</em></p>
+
+  <h3 id="kubernetes">Kubernetes</h3>
+  <p>Kubernetes turns deployment into a declaration plus a reconciliation loop. You update the pod template on a Deployment, the controller creates a new ReplicaSet, and it "gradually scales it up while scaling down the old ReplicaSet, ensuring Pods are replaced at a controlled rate". Two defaults in that machinery are worth committing to memory because they govern recovery: <code>progressDeadlineSeconds</code> defaults to 600, after which a stuck rollout is marked failed, and <code>revisionHistoryLimit</code> defaults to 10, which is how many old ReplicaSets are retained so a rollback has somewhere to go.</p>
+
+  <p>A logistics fleet-tracking backend is a good mental example: dozens of stateless services, each independently versioned, each needing to be replaced while vehicles keep reporting positions. Without a controlled-rate replacement mechanism, every deploy is a coordinated restart and every restart is a gap in tracking data.</p>
+
+  <p>At <b>100 requests per second</b> Kubernetes is usually more machinery than the problem needs, and a managed application platform is cheaper in both money and attention. At <b>1,000</b> it starts earning its keep through readiness gating, per-service autoscaling, and uniform rollout control across many services. At <b>10,000</b> the control plane's own limits become part of your capacity plan: node pool headroom, registry pull bandwidth, and how long a single large Deployment takes to converge all bound how fast you can roll forward or back.</p>
+
+  <p>The trade-off is a uniform deployment interface bought with a large operational surface area. The failure mode that bites hardest is a readiness probe that reports healthy before the process can actually serve, for example one that checks the HTTP port is open but not that the connection pool is warm. The rollout then proceeds happily, replacing working pods with pods that accept traffic and fail it, and the mechanism designed to prevent an outage delivers one instead. <em>Source: <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">Kubernetes Deployments</a> and the <a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/">Deployment v1 API reference</a>.</em></p>
+
+  <h2>4. Describing the target</h2>
+
+  <h3 id="infrastructure-as-code">Infrastructure as Code</h3>
+  <p>Infrastructure as code means describing the target environment in version-controlled text and having a tool make reality match it. AWS puts the mechanism plainly for CloudFormation: a template "describes all your resources and their properties", a stack provisions them as a single unit, and because templates are text files "you simply track differences in your templates to track changes to your infrastructure, similar to the way developers control revisions to source code". The reproducibility claim follows directly: describe the resources once, then provision the same resources repeatedly across regions.</p>
+
+  <p>A healthcare provider with data-residency obligations is the clearest case. The same stack must exist in several regions, each provably identical in configuration and each rebuildable from source, because the alternative is an auditor asking how you know the two regions enforce the same encryption settings and the honest answer being that you clicked carefully.</p>
+
+  <p>At <b>100 requests per second</b> a single stack applied occasionally is fine, and hand-editing is survivable. At <b>1,000</b> environments multiply and drift between staging and production becomes the leading cause of "it worked in staging", so the code must be the only path to change. At <b>10,000</b> infrastructure as code is the only realistic way to rebuild a region, which turns disaster recovery from a document into a code path you can actually exercise.</p>
+
+  <p>The trade-off is that you give up quick console fixes in return for reviewable, repeatable change. The failure mode is drift: somebody resolves an incident by changing a setting in the console, nobody backports it, and the next apply silently reverts the fix, so the incident returns attached to an unrelated deployment. <em>Source: <a href="https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/Welcome.html">AWS CloudFormation User Guide</a>.</em></p>
+
+  <h3 id="terraform">Terraform</h3>
+  <p>Terraform's distinguishing mechanism is its state file. HashiCorp is explicit: "The primary purpose of Terraform state is to store bindings between objects in a remote system and resource instances declared in your configuration." Terraform uses that state "to map real world resources to your configuration, keep track of metadata, and to improve performance for large infrastructures", and it refreshes state against real infrastructure before operations, which is how drift is surfaced. The documentation is equally explicit about the risk: do not store state anywhere that lacks locking and secure access control, because that can result in data loss or exposure of secrets held in the file.</p>
+
+  <p>The state lock is also a throughput constraint that teams discover late. Suppose twelve engineers each run three applies a day against one state file, and each plan-and-apply cycle holds the lock for six minutes.</p>
+
+  <div class="math">lock occupancy = (engineers * applies per day * minutes per apply) / working minutes
+    <span class="gloss">Occupancy is the fraction of the working day during which the single state lock is held by somebody. Working minutes is the length of the overlapping working day in minutes.</span></div>
+
+  <p>That gives (12 * 3 * 6) / 480 = 216 / 480 = 0.45, so the lock is held 45 percent of the working day. Queueing delay does not grow linearly with occupancy; it grows sharply as occupancy approaches one, so 45 percent is the warning sign rather than the emergency. The fix is to split the state before you get there, not after.</p>
+
+  <p>At <b>100 requests per second</b> one state file and one lock is correct and nobody ever waits. At <b>1,000</b> split state per environment and per bounded domain, or the lock becomes your deployment bottleneck. At <b>10,000</b> state should be partitioned by blast radius, so that no single apply is able to touch both the database and the load balancer in front of it.</p>
+
+  <p>The trade-off is one authoritative map of your infrastructure at the cost of that map being a single point of failure. The failure mode is divergence: state and reality drift apart, and the next plan proposes to destroy something that is currently serving traffic. That plan is technically correct and operationally catastrophic, which is why plan output is a review artifact and not a formality. <em>Source: <a href="https://developer.hashicorp.com/terraform/language/state">Terraform state</a>.</em></p>
+
+  <h3 id="helm-charts">Helm Charts</h3>
+  <p>A Helm chart is, in the project's own words, "a collection of files that describe a related set of Kubernetes resources". The structure is fixed: <code>Chart.yaml</code> for metadata, <code>values.yaml</code> for defaults, <code>templates/</code> for Go-templated manifests, and <code>charts/</code> for dependencies, with user-supplied values overriding chart defaults. Every chart must carry a version number following SemVer 2. The delivery consequence is that your deployable unit is no longer just an image. It is the triple of chart version, values, and image digest, and reproducing a release means recording all three.</p>
+
+  <p>Ad tech is a natural example, where the same bidder service ships to several regions with different capacity, different rate limits, and different downstream endpoints. Templating turns those into values rather than into forked manifests that slowly diverge.</p>
+
+  <p>At <b>100 requests per second</b> raw manifests are fine and easier to read than templates. At <b>1,000</b> templating pays for itself the moment one service ships to three environments. At <b>10,000</b> the risk inverts into values sprawl: twelve services times three environments is thirty-six values files, and the one change that matters hides among them, so rendered-manifest diffing belongs in the pipeline as a review gate.</p>
+
+  <p>The trade-off is reuse bought with indirection. The failure mode is an upgrade that changes a chart default you never explicitly set, so the rendered manifest changes even though nothing in your repository did. That is why the reviewable artifact must be the rendered output rather than the template, and why chart versions get pinned exactly like application dependencies. <em>Source: <a href="https://helm.sh/docs/topics/charts/">Helm, Charts</a>.</em></p>
+
+  <h2>5. Making the pipeline fast and honest</h2>
+
+  <h3 id="build-caching">Build Caching</h3>
+  <p>A build cache keys work by a hash of its declared inputs and reuses the previous output when the key matches. Bazel's remote cache stores two things: "The action cache, which is a map of action hashes to action result metadata" and "A content-addressable store (CAS) of output files", so "if your build is reproducible, the outputs from one machine can be safely reused on another machine". Docker's layer cache works at coarser granularity, where "each instruction in this Dockerfile translates to a layer" and, critically, "if a layer changes, all other layers that come after it are also affected". The two share one requirement: the key must capture everything that can change the output.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  A["Change pushed"] --> B["Hash declared inputs"]
+  B --> C{"Key in remote cache?"}
+  C -- "hit" --> D["Fetch outputs from CAS<br/>about 3 min"]
+  C -- "miss" --> E["Execute action<br/>about 20 min"]
+  E --> F["Upload outputs<br/>keyed by action hash"]
+  D --> G["Test and package"]
+  F --> G
+  H["Base image or toolchain bump"] -. "invalidates every downstream key" .-> C
+  I["Undeclared input<br/>PATH, local tool, clock"] -. "wrong hit: ships untested bytes" .-> D
+  </div><figcaption>A cache lookup converts a twenty-minute build into a three-minute fetch whenever the input hash matches. <b>The two dotted arrows are the whole risk surface: a base-layer bump invalidates everything at once, and an undeclared input produces a hit that is fast and wrong.</b></figcaption></figure>
+
+  <p>The economics are straightforward once you write them down. Assume a cold build takes 20 minutes of runner time, a fully cached build takes 3 minutes, and a CI runner costs 0.008 US dollars per minute. Both the times and the price are stated assumptions here, not vendor figures.</p>
+
+  <div class="math">expected build minutes = (h * T_hit) + ((1 - h) * T_miss)
+    <span class="gloss">h is the cache hit rate as a fraction between 0 and 1. T_hit is the wall-clock time of a build that hits the cache. T_miss is the wall-clock time of a build that must execute the work.</span></div>
+
+  <p>With no cache, every build is 20 minutes, so 1,000 builds cost 20,000 runner-minutes, or 160 dollars. At a 70 percent hit rate the expectation is (0.7 * 3) + (0.3 * 20) = 2.1 + 6 = 8.1 minutes, so 1,000 builds cost 8,100 runner-minutes, or 64.80 dollars. At 90 percent it is (0.9 * 3) + (0.1 * 20) = 2.7 + 2 = 4.7 minutes, or 37.60 dollars. Note the shape: the first seventy points of hit rate buy 11.9 minutes per build, and the next twenty points buy only 3.4 more. Caching has strongly diminishing returns, and past a certain point the cache-hit path itself becomes the floor.</p>
+
+  <p>At <b>100 requests per second</b>, which usually means a small team, a local cache on a persistent build machine is enough. At <b>1,000</b> your runners are ephemeral and every one starts cold, so a shared remote cache is the only thing that keeps hit rates high. At <b>10,000</b> correctness becomes the dominant concern rather than speed, because a cache shared across hundreds of engineers is a supply-chain surface.</p>
+
+  <p>The trade-off is wall-clock time and money bought with a correctness dependency. There are two failure modes and the quiet one is worse. The loud one is the invalidation stampede, where a base-image bump invalidates everything simultaneously and a pipeline that normally takes five minutes takes twenty for everybody at once. The quiet one is the incorrect hit: Bazel's own documentation warns that it does not track tools outside the workspace, so two users with different compilers can share a cache entry despite producing different outputs. That ships bytes nobody built from your source. <em>Source: <a href="https://bazel.build/remote/caching">Bazel remote caching</a>.</em></p>
+
+  <h3 id="dependency-hell">Dependency Hell</h3>
+  <p>Semantic Versioning names the problem precisely: "Dependency hell is where you are when version lock and/or version promiscuity prevent you from easily and safely moving your project forward." Version lock comes from pinning so tightly that you cannot upgrade anything without a cascade of coordinated releases. Version promiscuity comes from ranges so loose that you assume compatibility you have not earned. SemVer's contribution is a contract on the version number itself: MAJOR for incompatible API changes, MINOR for backward-compatible additions, PATCH for backward-compatible fixes. Lockfiles then make a build reproducible, which is a different problem from making an upgrade safe, and confusing the two is the usual mistake.</p>
+
+  <p>The scale of the treadmill is easy to underestimate. Take a service with 40 direct dependencies, each averaging 8 transitive dependencies of its own. That is 40 + (40 * 8) = 360 packages by depth two alone, before depth three exists. If the average package cuts a release every 30 days, then 360 / 30 = 12 releases a day touch some node of your tree. Those numbers are illustrative assumptions, not measurements, but the order of magnitude is the point: no human upgrade cadence keeps up, so the pipeline has to be the thing that absorbs it.</p>
+
+  <p>At <b>100 requests per second</b> you pin, you lock, and you upgrade when something forces you to. At <b>1,000</b> you need scheduled automated upgrade pull requests with the pipeline as the gate, because that release rate exceeds any manual process. At <b>10,000</b> you need a single internal registry of vetted versions plus a stated policy for how fast a security patch must traverse the fleet, since the answer will be audited.</p>
+
+  <p>The trade-off is that pinning buys reproducibility and pays for it in accumulated upgrade debt. The failure mode is deferred and then acute: an emergency security patch turns out to require a major-version bump you postponed for two years, so the one-line fix is actually a two-week migration, and you are attempting it during an active incident. <em>Source: <a href="https://semver.org/">Semantic Versioning 2.0.0</a>.</em></p>
+
+  <h2>6. Controlling exposure</h2>
+
+  <p>The remaining topics are four answers to one question: when a new version is wrong, how many users find out? Everything else about them, including cost, complexity, and speed, follows from that answer.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph BG["Blue-green"]
+    B1["100% on blue"] --> B2["Green built and warmed<br/>double capacity held"]
+    B2 --> B3["Switch all traffic at once"]
+    B3 --> B4["Rollback = flip routing back<br/>seconds"]
+  end
+  subgraph CN["Canary"]
+    C1["100% on old"] --> C2["1% to new<br/>compare against control"]
+    C2 --> C3["Promote in stages<br/>5%, 25%, 100%"]
+    C3 --> C4["Rollback = drop the canary<br/>tiny blast radius"]
+  end
+  subgraph RL["Rolling"]
+    R1["N replicas on old"] --> R2["Replace in batches<br/>mixed versions serve"]
+    R2 --> R3["Converge to all new"]
+    R3 --> R4["Rollback = another rolling update<br/>minutes"]
+  end
+  </div><figcaption>The three strategies differ in what they spend to reduce exposure. <b>Blue-green buys the fastest rollback with double capacity and accepts full exposure at the moment of cutover; canary buys the smallest blast radius with time and measurement machinery; rolling buys no extra capacity and pays with a long mixed-version window and a slow rollback.</b></figcaption></figure>
+
+  <h3 id="feature-flags">Feature Flags</h3>
+  <p>A feature flag decouples deploying code from releasing behaviour. The code ships dark, and a separate control decides who sees it. The OpenFeature specification standardises the shape of that control, defining a flag evaluation API, an evaluation context, providers that supply values, and hooks for custom logic during evaluation, with conformance stated in MUST terms. Mechanically the important detail is that a well-built flag SDK evaluates against a locally held rules snapshot which it polls or streams, so a flag check is an in-process decision rather than a network call on the request path.</p>
+
+  <p>Gaming is the obvious industry case: a new matchmaking algorithm ships to everyone as inert code, is enabled for one region, and is switched off in seconds if queue times regress, with no build, no deploy, and no rollout to wait for.</p>
+
+  <p>That speed is the whole argument, and it is quantifiable. If the SDK polls its rules every 60 seconds, the worst-case time to disable a feature is roughly 60 seconds plus evaluation propagation. Compare that with a rollback path of build, publish, and roll out, which was 6 minutes in the worked example later in this chapter. The flag is an order of magnitude faster because it changes data, not artifacts.</p>
+
+  <p>At <b>100 requests per second</b> a configuration value plus a restart is honestly sufficient, and a flag platform is overhead. At <b>1,000</b> a flag service earns its place, because the ability to disable a feature without a deploy starts saving real incident minutes. At <b>10,000</b> evaluation must be local and must have a defined value when the flag service is unreachable, since a per-request remote lookup would add 10,000 calls per second of pure new dependency in the hot path.</p>
+
+  <p>The trade-off is an instant off switch bought with combinatorial state. The failure mode is flag debt. Twenty long-lived boolean flags describe 2^20, or 1,048,576, nominal configurations, and your test suite exercises approximately one of them. Most of those combinations are unreachable in practice, but you cannot say which without reading every call site, which is precisely the property that makes stale flags dangerous. Flags need owners and expiry dates, and removing them is part of the feature, not cleanup. <em>Source: <a href="https://openfeature.dev/specification/">OpenFeature Specification</a>.</em></p>
+
+  <h3 id="blue-green-deployments">Blue-Green Deployments</h3>
+  <p>Blue-green runs two identical environments and shifts traffic between them. AWS describes the mechanism and its payoff directly: blue-green deployments "provide releases with near zero-downtime and rollback capabilities", the green environment is staged and validated in parallel, and "if you discover the green environment is not operating as expected, there is no impact on the blue environment. You can route traffic back to it". The reason rollback is fast is that it is a routing change rather than a rebuild, so recovery time is bounded by DNS or load-balancer propagation rather than by your pipeline.</p>
+
+  <p>Banking and payments favour this shape for exactly that reason. A card-authorisation service can be validated on green with synthetic traffic, cut over during a low-volume window, and reverted in seconds if authorisation rates move.</p>
+
+  <p>The cost question deserves honest arithmetic, because "double the infrastructure" is usually stated too loosely. Assume 40 stateless instances at 0.10 US dollars per instance-hour, both stated assumptions. Steady state is 40 * 720 = 28,800 instance-hours per month, or 2,880 dollars.</p>
+
+  <div class="math">extra cost = N * C * H * D
+    <span class="gloss">N is the instance count of one environment. C is the cost per instance-hour. H is the number of hours the second environment is kept running per deployment. D is the number of deployments per month.</span></div>
+
+  <p>If green only overlaps blue for one hour per cutover across 20 deploys a month, the extra is 40 * 0.10 * 1 * 20 = 80 dollars, a 2.8 percent surcharge on 2,880. That is nothing. But if you keep blue warm for 24 hours after each deploy so rollback stays instant, the extra is 40 * 0.10 * 24 * 20 = 1,920 dollars, a 67 percent surcharge. The cutover is cheap; the standing safety net is not. Deciding how long to hold the old environment is therefore a direct trade of money against recovery time, and it should be a written number rather than a habit.</p>
+
+  <p>At <b>100 requests per second</b> doubling a small fleet is trivially affordable and this is often the simplest correct choice. At <b>1,000</b> it is still affordable, and the binding constraint moves to the data tier, which you do not duplicate. At <b>10,000</b> doubling a large fleet is real money and may collide with account or region quotas, so you either shorten the overlap window or move to canary.</p>
+
+  <p>The trade-off is the fastest rollback available in exchange for double capacity and full exposure at the instant of cutover. The failure mode is the shared database. Blue and green point at the same data, so a schema or data change is entirely outside the protection of the traffic switch, which is why the AWS whitepaper spends its attention on the data tier. A blue-green deployment protects your stateless tier and tells you nothing about your stateful one. <em>Source: <a href="https://docs.aws.amazon.com/whitepapers/latest/blue-green-deployments/introduction.html">AWS, Blue/Green Deployments on AWS</a>.</em></p>
+
+  <h3 id="canary-releases">Canary Releases</h3>
+  <p>A canary exposes the new version to a small fraction of production traffic and compares its metrics against a control group running the old version. Google's SRE Workbook sets out the design constraints: a canary "should be sizeable and last long enough to be representative of the overall deployment", and "the higher the processing rate, the less time is required to get a representative sample". It also warns against the naive approach of comparing before and after in time, because "time is one of the biggest sources of change in observed metrics", which is why you compare canary against a concurrent control rather than against yesterday. The guidance is to pick few metrics, "perhaps no more than a dozen", each clearly attributable to the change, to stage the canary from small to large, and to run only one canary at a time.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant LB as Load balancer
+  participant CTL as Control fleet (old)
+  participant CAN as Canary fleet (new)
+  participant M as Metrics pipeline
+  participant D as Deploy controller
+  D->>CAN: Start 1% of replicas on new version
+  LB->>CTL: 99% of traffic
+  LB->>CAN: 1% of traffic
+  CAN-->>M: Error rate, latency, saturation
+  CTL-->>M: Same metrics, same interval
+  Note over M: Compare concurrently,<br/>never against yesterday
+  M-->>D: Canary error rate 0.21% vs control 0.10%
+  D->>D: Is n large enough to call it?
+  alt Sample sufficient and regressed
+    D->>LB: Drop canary to 0%
+    D->>CAN: Terminate new replicas
+  else Sample sufficient and clean
+    D->>LB: Promote to 5%, then 25%, then 100%
+  else Sample insufficient
+    D->>D: Hold. Do NOT record a pass
+  end
+  </div><figcaption>The canary is evaluated against a concurrent control on the same metric interval, which removes time-of-day and traffic-mix effects from the comparison. <b>The third branch is the one teams skip: when the sample is too small to resolve the regression, the correct outcome is "unknown", not "passed".</b></figcaption></figure>
+
+  <p>How small a regression a canary can actually catch is a statistical power question, and it is worth doing the arithmetic rather than trusting the dashboard. Treat the control fleet as large enough that its error rate is known, and test whether the canary's rate is higher.</p>
+
+  <div class="math">n = ( (z_a * sqrt(p0 * (1 - p0))) + (z_b * sqrt(p1 * (1 - p1))) )^2 / (p1 - p0)^2
+    <span class="gloss">n is the number of canary requests required. p0 is the baseline error rate. p1 is the error rate you want to be able to detect. z_a is the normal quantile for the false-positive rate you accept, 1.645 for a one-sided 5 percent test. z_b is the quantile for the power you want, 0.842 for 80 percent power, meaning an 80 percent chance of catching a real regression of that size.</span></div>
+
+  <p>Take a baseline error rate of 0.1 percent and ask to detect a rise to 0.2 percent, an increase of 0.1 percentage points. Then sqrt(0.001 * 0.999) = 0.0316 and sqrt(0.002 * 0.998) = 0.0447. The numerator is ((1.645 * 0.0316) + (0.842 * 0.0447))^2 = (0.0520 + 0.0376)^2 = 0.0896^2 = 0.00803. Dividing by (0.001)^2 = 0.000001 gives n = 8,030 canary requests. Now convert that into wall-clock time at a 1 percent canary:</p>
+
+  <ul>
+    <li><b>10,000 requests per second:</b> the canary sees 100 per second, so 8,030 / 100 = 80 seconds. Comfortable.</li>
+    <li><b>1,000 requests per second:</b> the canary sees 10 per second, so 8,030 / 10 = 803 seconds, about 13.4 minutes. Workable but it sets a floor on your deploy cadence.</li>
+    <li><b>100 requests per second:</b> the canary sees 1 per second, so 8,030 seconds, about 2.2 hours. Nobody runs a 2.2-hour canary on every deploy.</li>
+  </ul>
+
+  <div class="callout warn"><b>Be honest about this.</b> At 100 requests per second, a ten-minute 1 percent canary sees 600 requests. At the baseline rate you expect 600 * 0.001 = 0.6 errors; at the regressed rate you expect 1.2. You will observe zero, one, or two errors either way, and those outcomes are indistinguishable. That canary has essentially no power to detect a 0.1 point error-rate increase. It can still catch a crash loop, a failed startup, or a 500-storm, which are large effects, and that is a genuinely useful thing to catch. What it cannot do is tell you the release is clean. Reporting "canary passed" from 600 requests is reporting the absence of evidence as evidence of absence.</div>
+
+  <p>At <b>100 requests per second</b>, then, a percentage canary is close to theatre for subtle regressions; stage by instance, watch for hard failures, and consider blue-green with a held-warm old environment instead. At <b>1,000</b> a canary in the 5 to 10 percent range held for fifteen minutes can resolve regressions that matter. At <b>10,000</b> one percent is plenty and the binding constraint flips from statistics to metric pipeline lag: if metrics aggregate over 60-second windows, the canary cannot be shorter than several of those windows regardless of how many requests it has seen.</p>
+
+  <p>The trade-off is the smallest blast radius per unit of confidence, bought with time and a real measurement pipeline. The failure mode is a canary that is not representative: canary instances with a warm cache, or newer hardware, or receiving only internal traffic, will pass while the fleet-wide rollout fails. The canary must differ from the control in exactly one way, the version, or the comparison means nothing. <em>Source: <a href="https://sre.google/workbook/canarying-releases/">Google SRE Workbook, Canarying Releases</a>.</em></p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Your service handles 100 requests per second. A 1 percent canary runs for ten minutes. What is the honest read on detecting a 0.1 point rise in error rate?</div>
+    <button class="q-opt">The canary sees enough traffic to prove that this regression exists</button>
+    <button class="q-opt">The canary sees far too little traffic to resolve this difference</button>
+    <button class="q-opt">The canary needs a shorter window and a much stricter threshold</button>
+    <button class="q-opt">The canary needs a smaller fraction and a much longer duration</button>
+    <div class="q-fb">Six hundred requests give an expected 0.6 errors at baseline against 1.2 if regressed, which no threshold can separate. The first option asserts proof from a sample roughly thirteen times too small. A shorter window makes the sample smaller, so the third option moves in the wrong direction on the term that matters. A smaller fraction also shrinks the sample; the longer duration in the fourth option helps, but pairing it with a smaller fraction cancels the gain. The real options at this scale are a much larger canary fraction, a much longer window, or accepting that the canary only catches gross failures.</div>
+  </div>
+
+  <h3 id="rolling-deployments">Rolling Deployments</h3>
+  <p>A rolling deployment replaces instances in batches, so the fleet migrates from old to new without a second environment. Kubernetes parameterises this with two knobs whose defaults are both 25 percent: <code>maxSurge</code>, the number of pods that may exist above the desired count, and <code>maxUnavailable</code>, the number that may be missing. The API reference specifies the rounding, which matters when you compute capacity: the absolute number for maxSurge is "calculated from percentage by rounding up", and for maxUnavailable "by rounding down".</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Desired40Old: 40 replicas, version 1
+  Desired40Old --> Progressing: pod template updated
+  Progressing --> MixedFleet: surge to 50 total, floor of 30 available
+  MixedFleet --> MixedFleet: batch replaced, readiness gate per pod
+  MixedFleet --> Complete: all 40 on version 2
+  MixedFleet --> Stalled: readiness never passes
+  Stalled --> Failed: progressDeadlineSeconds 600 elapses
+  Failed --> RollingBack: operator or automation triggers undo
+  RollingBack --> MixedFleet: previous ReplicaSet scales back up
+  Complete --> [*]
+  </div><figcaption>A rolling update is a state machine bounded by three numbers: the surge ceiling, the availability floor, and the progress deadline that converts a stuck rollout into a failed one. <b>Note that rolling back re-enters the mixed-fleet state, so recovery costs another full rollout rather than a single switch.</b></figcaption></figure>
+
+  <p>The capacity arithmetic is where rolling deployments quietly cause outages. Take 40 replicas serving 10,000 requests per second, so 250 requests per second per pod, and assume a pod saturates at 300.</p>
+
+  <div class="math">available floor = N - maxUnavailable ; total ceiling = N + maxSurge ; peak per-pod load = R / (N - maxUnavailable)
+    <span class="gloss">N is the desired replica count. R is the total request rate. The floor is the fewest pods that may be serving at any moment during the rollout; the ceiling is the most that may exist, which is what your quota must cover.</span></div>
+
+  <p>With the defaults, maxSurge is ceil(0.25 * 40) = 10 and maxUnavailable is floor(0.25 * 40) = 10. So the fleet ranges between 30 and 50 pods, and the availability floor is 30, which is 75 percent of capacity. Peak per-pod load becomes 10,000 / 30 = 333 requests per second, which is above the 300 saturation point. The rollout itself causes the incident, and nothing about the new version was wrong. Setting maxUnavailable to 0 with maxSurge at 25 percent fixes it, at the cost of needing quota and node headroom for 50 pods rather than 40.</p>
+
+  <p>Duration follows from the batch structure. Four batches of 10, at 40 seconds per pod to pass readiness, is roughly 4 * 40 = 160 seconds plus termination grace. For all 160 of those seconds both versions are serving live traffic, which is the constraint people forget.</p>
+
+  <p>At <b>100 requests per second</b> the defaults are fine, and with 4 replicas a 25 percent maxUnavailable is one pod. At <b>1,000</b> set maxUnavailable to 0 and keep surge headroom, because 25 percent of your capacity is now a number that shows up in latency. At <b>10,000</b> the rollout is a capacity event in its own right: model it against peak traffic rather than average, and stagger it across availability zones so a rollout and a zone failure cannot coincide.</p>
+
+  <p>The trade-off is no extra standing capacity and no big-bang cutover, paid for with a long mixed-version window and a slow rollback, since rolling back is simply another rolling update. The failure mode is mixed-version incompatibility: a changed message format, a changed cache key, or a column that version two reads and version one does not write will misbehave for the entire window, and the bug will look intermittent because it depends on which pod served the request. <em>Source: <a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/">Kubernetes Deployment v1 API reference</a>.</em></p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Forty pods each serve 250 requests per second and saturate at 300. A rolling update runs with the Kubernetes defaults in force. What actually happens?</div>
+    <button class="q-opt">Capacity holds steady and the rollout finishes without any impact</button>
+    <button class="q-opt">Capacity falls to thirty pods and each pod exceeds saturation</button>
+    <button class="q-opt">Capacity climbs to fifty pods and every pod sits underloaded</button>
+    <button class="q-opt">Capacity holds steady but the rollout stalls without any progress</button>
+    <div class="q-fb">maxUnavailable defaults to 25 percent, rounded down, so 10 of 40 pods may be gone at once, leaving 30. Ten thousand requests per second across 30 pods is 333 each, above the 300 saturation point. Capacity does not hold steady, so the first and fourth options are both wrong on the same fact, and nothing here stalls the rollout. The third option confuses the surge ceiling with the availability floor: 50 is the maximum that may exist, not the minimum that is serving, and surge pods are not ready instantly. The fix is maxUnavailable set to 0, which requires headroom for 50 pods.</div>
+  </div>
+
+  <h2>7. Getting back out</h2>
+
+  <h3 id="rollbacks">Rollbacks</h3>
+  <p>A rollback returns production to the last known-good artifact. In Kubernetes that is <code>kubectl rollout undo</code>, which scales the previous ReplicaSet back up, and it works because old ReplicaSets are retained up to <code>revisionHistoryLimit</code>, default 10. That covers your code completely and your state not at all, and the gap between those two sentences is where most bad incidents live.</p>
+
+  <p>Start with why rollback speed matters so much, because the arithmetic makes the case better than any argument.</p>
+
+  <div class="math">bad requests = R * f * e * (T_detect + T_decide + T_execute)
+    <span class="gloss">R is the total request rate. f is the fraction of traffic exposed to the bad version. e is the fraction of exposed requests that the bad version fails. The three T terms are the seconds spent noticing, deciding, and actually executing the recovery.</span></div>
+
+  <p>Take a service at 10,000 requests per second where the bad build fails 5 percent of what it touches. Deploy straight to 100 percent, detect in 4 minutes, decide in 2, and execute a rolling rollback in 6: that is 720 seconds, and 10,000 * 1.0 * 0.05 * 720 = 360,000 failed requests. Now hold a warm blue environment so execution drops to 1 minute: 420 seconds gives 210,000. Now instead run a 1 percent canary and catch it 5 minutes in: 10,000 * 0.01 * 0.05 * 300 = 1,500 failed requests. The canary path is roughly 240 times better than the straight-to-100 path, and note where the leverage came from. Reducing execution time by five minutes bought a 42 percent improvement. Reducing the exposed fraction from 1.0 to 0.01 bought two orders of magnitude. Exposure dominates, detection is next, and execution speed matters least, which is the opposite of the order most teams optimise in.</p>
+
+  <p>Now the part that is harder than it sounds. Rollback restores the artifact. It does not restore anything the release already did to durable state.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant D as Deploy pipeline
+  participant DB as Database
+  participant V2 as Service v2
+  participant V1 as Service v1 (rolled back)
+  participant U as User
+  D->>DB: Run migration: ADD COLUMN region NOT NULL
+  DB-->>D: Migration applied, schema at v2
+  D->>V2: Roll out v2 containers
+  V2->>DB: INSERT with region populated
+  Note over V2: Latency regression detected
+  D->>V1: kubectl rollout undo
+  V1-->>D: Previous ReplicaSet healthy
+  Note over V1,DB: Code is at v1. Schema is still at v2.
+  U->>V1: Create order
+  V1->>DB: INSERT without region column
+  DB--)V1: ERROR null value violates not-null constraint
+  V1--)U: 500
+  Note over D,U: Rollback "succeeded" and writes are now failing
+  </div><figcaption>The container rolled back cleanly and every health check passed, because the pods are running the old image exactly as intended. <b>The schema did not roll back, so old code is now writing against a constraint it has never heard of, and the mechanism you relied on for recovery has produced a second outage on top of the first.</b></figcaption></figure>
+
+  <p>The fix is expand-contract, also known as parallel change, which Martin Fowler's site describes as "a pattern to implement backward-incompatible changes to an interface in a safe manner" in three phases. <b>Expand</b>: augment the interface so it supports both the old and the new versions, which here means adding the column as nullable with a default and deploying code that tolerates both shapes. <b>Migrate</b>: update all clients to the new version incrementally, backfilling data as you go. <b>Contract</b>: remove the old version once nothing depends on it. The value, in the pattern's own words, is that "your code can be released in any of these three phases".</p>
+
+  <p>That last point translates into a hard operational rule. You may only contract once you no longer need to roll back past that point. Every schema change therefore carries an implicit statement of the release in which it becomes irreversible, and the professional move is to make that statement explicit in the change description rather than discovering it at three in the morning.</p>
+
+  <p>At <b>100 requests per second</b> rollback is "redeploy the previous artifact", a few minutes of failures is survivable, and expand-contract is good hygiene rather than a hard requirement. At <b>1,000</b> rollback must be a single automated action with a rehearsed runbook, and expand-contract becomes policy rather than preference, because a manual schema reversal under pressure is how data gets lost. At <b>10,000</b> rollback should trigger automatically on an error-budget burn signal, and every migration is reviewed for which release makes it one-way.</p>
+
+  <p>The trade-off is that rollback is the cheapest recovery mechanism you have and also the least universal. The failure mode is the one in the diagram: a rollback that succeeds mechanically and fails semantically, leaving old code on new data. Your only remaining path is to fix forward under incident pressure, which is precisely the situation rollback existed to prevent. <em>Source: <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/#rolling-back-a-deployment">Kubernetes, Rolling Back a Deployment</a> and <a href="https://martinfowler.com/bliki/ParallelChange.html">Parallel Change (expand and contract)</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  A["Release 1: EXPAND<br/>add nullable column<br/>write both shapes"] --> B["Release 2: MIGRATE<br/>backfill data<br/>read new, still write both"]
+  B --> C["Release 3: still MIGRATE<br/>read and write new only<br/>old column untouched"]
+  C --> D["Release 4: CONTRACT<br/>drop old column<br/>add NOT NULL"]
+  A -. "rollback safe" .-> Z["Previous version<br/>runs unchanged"]
+  B -. "rollback safe" .-> Z
+  C -. "rollback safe to release 2" .-> Z
+  D -. "ROLLBACK NO LONGER SAFE" .-> Y["Old code cannot<br/>satisfy new constraint"]
+  </div><figcaption>Expand-contract spreads one incompatible change across four releases so that each individual deployment is reversible. <b>The single arrow to the right is the whole point: the contract step is the moment rollback stops working, so it must be a deliberate, separately reviewed release rather than a tidy-up bundled into a feature.</b></figcaption></figure>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A release added a NOT NULL column and the migration already ran. You roll the containers back to the previous image. What is the resulting state?</div>
+    <button class="q-opt">The old image runs fine because the schema reverted along with it</button>
+    <button class="q-opt">The old image starts but its inserts omit the new required column</button>
+    <button class="q-opt">The old image starts and the database quietly fills that column in</button>
+    <button class="q-opt">The old image fails to start because the schema check blocks it</button>
+    <div class="q-fb">Rolling back the deployment restores the container image and nothing else, so the schema stays where the migration left it. The first option assumes migrations reverse with the artifact, which they do not; that coupling has to be built deliberately and almost never is. The third would only hold if the column had a server-side default, which a bare NOT NULL addition does not provide. The fourth is tempting but wrong in the dangerous direction: the pods pass every health check and start normally, so the rollout looks successful, and the failure only appears on the write path. Expand-contract exists so that the write path stays valid under both versions.</div>
+  </div>
+
+  <h2>8. Scale drill</h2>
+
+  <p>Take one named system and walk it across the tiers: a <b>card authorisation API at a payments processor</b>. It answers "approve or decline" in under 300 milliseconds, it writes an authorisation record on every call, and a failed authorisation is a lost sale that the merchant notices.</p>
+
+  <p><b>At 100 requests per second.</b> A single pipeline on one runner, a twenty-minute build, and no remote cache. Deploy blue-green, because doubling a small fleet is nearly free and it gives you the fastest rollback available. Do not attempt a percentage canary: at this rate a ten-minute 1 percent canary sees 600 requests, which cannot resolve anything subtle, so validate on green with synthetic transactions instead and keep blue warm for an hour. Migrations should already be expand-contract, but a mistake here is recoverable by hand. Time to detect is likely minutes, driven by alerting on authorisation rate. Blast radius on a bad full cutover, at 5 percent errors and 10 minutes to recover, is 100 * 1.0 * 0.05 * 600 = 3,000 failed authorisations.</p>
+
+  <p><b>At 1,000 requests per second.</b> The pipeline is now a shared resource, so it needs parallel shards, a merge queue, and a remote build cache to hold the run near ten minutes. Blue-green still works but the data tier is the constraint, and doubling capacity is starting to be a line item. A 5 to 10 percent canary held for fifteen minutes now has enough sample to resolve a meaningful regression, so canary becomes the default and blue-green becomes the fallback for changes a canary cannot evaluate. Rolling updates need maxUnavailable pinned to 0, since 25 percent of this fleet is real capacity. Feature flags earn their place: an authorisation rule change ships dark and is enabled per issuer. Expand-contract is now policy.</p>
+
+  <p><b>At 10,000 requests per second.</b> The pipeline has an availability target and an owner. Deploys are canaried at 1 percent, which needs only about 80 seconds to reach the sample size computed earlier, so the binding constraint is metric aggregation lag rather than statistics. Blue-green is reserved for changes where a canary is meaningless, because doubling this fleet is expensive and may hit quota. Rolling updates are modelled against peak and staggered across zones. Rollback is automated on error-budget burn, and every schema change carries a written statement of the release in which it becomes irreversible. The blast-radius arithmetic that justifies all of this: straight to 100 percent with a twelve-minute recovery is 360,000 failed authorisations, while a 1 percent canary caught in five minutes is 1,500.</p>
+
+  <p>Notice what changed and what did not. The strategy changed at every tier. Expand-contract did not, because it is the only one of these practices whose value does not depend on traffic volume. Related cost and latency reasoning for model-backed services appears in the sibling courses, in <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#cold-starts">cold starts</a> and <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#cost-kill-switches">cost kill switches</a>, where the same "how fast can you turn it off" question reappears in a different costume.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is computing blast radius before choosing a strategy. Pick a service you actually work on, write down its request rate, the fraction you would expose on a deploy, an honest guess at how long you would take to notice, and how long a rollback takes today. Multiply it out. Most people are surprised by which term dominates, and that surprise is usually the argument for the change they have been failing to get funded. Bring me your numbers and I will push on the detection estimate, because that is the one everybody flatters.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://sre.google/workbook/canarying-releases/">"Canarying Releases" in the Google SRE Workbook</a>. It is the most honest published treatment of why a canary that looks fine may be telling you nothing, and it makes the metric-selection and representativeness arguments better than any vendor documentation. Pair it with <a href="https://martinfowler.com/bliki/ParallelChange.html">Parallel Change</a>, which is short, and which is the single pattern that keeps rollback from being a lie.</p>
+
+  <div class="pager">
+    <a href="0007-scale-latency-and-cost.html"><span class="dir">&larr; Previous</span><span class="ttl">Scale, Latency and Cost</span></a>
+    <a class="nxt" href="0009-observability-and-operations.html"><span class="dir">Next &rarr;</span><span class="ttl">Observability and Operations</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 09 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

@@ -1,0 +1,590 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 3: Asynchronous and Event-Driven Systems - Production Systems</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 03 &middot; Asynchronous and Event-Driven Systems</div>
+  <h1>Asynchronous and Event-Driven Systems</h1>
+  <p class="paper-meta">
+    <span class="pill">10 topics</span>
+    Where you stop making the caller wait, and start owing an answer to work nobody is watching.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Every asynchronous design answers one question: <b>who owns a unit of work between the moment it is accepted and the moment it is finished</b>, and what happens to it if that owner dies mid-flight.</li>
+      <li><b>Little's Law</b> is the only equation you need to size any of it. Items in the system equal arrival rate times time spent inside, and it holds for consumers, partitions, and webhook handlers alike.</li>
+      <li>Distributed atomicity is a choice between <b>blocking</b> and <b>compensating</b>. Two-phase commit buys atomicity with availability; a saga buys availability by giving up isolation and owing you an undo path.</li>
+      <li>A queue converts an outage into a backlog. That is progress only if you have arithmetic for how the backlog drains, and an <b>alert on the rate at which work is failing</b> rather than on the depth it has already reached.</li>
+    </ul>
+  </div>
+
+  <h2>1. Accepted, but not yet done</h2>
+
+  <p>A synchronous call has a beautiful property: the work and the caller live and die together. If the process handling a request crashes, the caller sees a connection error, retries, and nothing is lost that the caller does not know about. The instant you return <code>202 Accepted</code> and finish the work later, you have created a new category of object in your system, one that has no equivalent in a request-response design. It is a unit of work that has been promised to a user, is not finished, and is currently owned by something that might die.</p>
+
+  <p>Every topic in this chapter is a different answer to that ownership question. A message queue answers it with a lease and a redelivery timer. A saga answers it with a durable log of what has already been done and an undo for each step. A dead letter queue answers it by admitting that some work will never succeed and needs a place to sit where a human can find it. A leader election answers it by making sure only one process believes it owns the job at a time.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  subgraph SYNC["Synchronous: caller holds the risk"]
+    A["Client"] --> B["Service"]
+    B --> C["Payment"]
+    B --> D["Inventory"]
+    B --> E["Email"]
+    C -. "any one of these<br/>is the whole latency" .-> F["Client waits"]
+  end
+  subgraph ASYNC["Asynchronous: the broker holds the risk"]
+    G["Client"] --> H["Intake API"]
+    H --> I["202 Accepted"]
+    H --> J[("Durable log<br/>or queue")]
+    J --> K["Worker pool"]
+    K -. "dies mid-flight" .-> J
+    K --> L["Payment, inventory, email"]
+  end
+  </div><figcaption>The same order, handled two ways. On the left the client's connection is the only record that the work exists, so a crash loses it silently. On the right the broker is the record, and a worker crash simply returns the work to the broker. <b>Asynchrony does not remove the risk of a mid-flight death, it moves ownership of that risk to something durable that you can query.</b></figcaption></figure>
+
+  <p>The cost of that move is that failure stops being visible at the call site. A synchronous system tells the user it failed. An asynchronous system tells the user it succeeded, and then fails quietly two hundred milliseconds later in a worker that nobody is watching. Everything you will build in this chapter, from lease timers to compensating transactions to dead letter alarms, exists to drag that quiet failure back into view.</p>
+
+  <h2>2. Moving work off the request path</h2>
+
+  <h3 id="message-queues">Message queues</h3>
+
+  <p>A message queue is a durable buffer with a lease protocol on top. A producer writes a message and gets an acknowledgement from the broker, not from the eventual consumer. A consumer then <em>leases</em> a message rather than removing it: the broker hands over a copy, starts a timer, and hides the message from every other consumer while that timer runs. If the consumer finishes and explicitly deletes the message, it is gone. If the consumer crashes, is descheduled, or simply takes too long, the timer expires and the message becomes visible again for someone else to pick up. Amazon SQS calls that timer the visibility timeout and defaults it to 30 seconds, with a ceiling of 12 hours from first receipt. AMQP 0-9-1 expresses the same idea as an explicit acknowledgement: <a href="https://www.rabbitmq.com/tutorials/amqp-concepts">RabbitMQ's AMQP 0-9-1 documentation</a> states that if a consumer dies without acknowledging, "the broker will redeliver it to another consumer or, if none are available at the time, the broker will wait until at least one consumer is registered for the same queue before attempting redelivery". <em>Source: <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">Amazon SQS visibility timeout</a>.</em></p>
+
+  <p>That lease is the mechanism, and it has a consequence people skip past. Because the broker cannot distinguish "the consumer died" from "the consumer is slow", redelivery after a lease expiry is unavoidable, which is why SQS documents that in standard queues there is "no absolute guarantee that a message won't be delivered more than once during the visibility timeout period". At-least-once delivery is not a weakness of a particular product. It is what you get whenever a lease can expire on a machine you cannot inspect. Idempotent consumers are therefore not an optimisation in queue-based design, they are the entry fee.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  P["Producers<br/>checkout API"] --> Q[("Main queue")]
+  Q -->|"lease, 30s timer"| C1["Consumer 1"]
+  Q -->|"lease, 30s timer"| C2["Consumer 2"]
+  Q -->|"lease, 30s timer"| C3["Consumer 3"]
+  C1 -->|"delete on success"| OK["Done"]
+  C2 -->|"delete on success"| OK
+  C3 -. "crash or timeout:<br/>lease expires" .-> Q
+  Q -->|"receive count &gt; maxReceiveCount"| DLQ[("Dead letter queue")]
+  DLQ --> AL["Alarm on arrival rate"]
+  DLQ --> RD["Redrive after a fix"]
+  AL --> HU["On-call engineer"]
+  </div><figcaption>The full topology of a working queue. Messages cycle between visible and leased until a consumer deletes them; the receive counter is the only thing that distinguishes a transient failure from a permanent one. <b>The dead letter queue is the escape hatch that stops one poison message from being retried forever, and the arrow that matters most is the one from the dead letter queue to a human.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> E-commerce checkout is the canonical case. An order intake API that writes to a queue returns in single-digit milliseconds and is unaffected by the payment gateway being slow, the warehouse system being under maintenance, or the confirmation email provider rate limiting you. Without the queue, the checkout endpoint's latency is the sum of every downstream it touches and its availability is the product of theirs, so a five-minute wobble in an email provider becomes a five-minute checkout outage during which orders are permanently lost rather than merely delayed.</p>
+
+  <p>The arithmetic that governs all of it is Little's Law, proved by John Little in 1961 and stated by MIT as "L = &lambda;W". It is the most useful equation in production engineering because it needs almost no assumptions: any stable system, any arrival process, any service-time distribution. <em>Source: <a href="https://betterworld.mit.edu/littles-law/">MIT on Little's Law</a>.</em></p>
+
+  <div class="math">
+L = &lambda; &times; W
+<span class="gloss">L is the number of items inside the system at any instant. &lambda; is the long-run arrival rate in items per second. W is the average time an item spends inside. Rearranged, W = L / &lambda; turns a queue depth into a wait time, and L = &lambda; &times; W turns a service time into the number of workers you must run.</span>
+  </div>
+
+  <p>Read it twice, in two directions, because the two readings answer different questions. Applied to the pool of consumers, W is the time a consumer spends on one message and L is the number of consumers busy at any moment. Applied to the queue itself, L is the queue depth and W is how long a newly arrived message waits before anyone touches it.</p>
+
+  <p><b>The three tiers.</b> Assume each message takes 50 milliseconds of consumer time.</p>
+  <ul>
+    <li><b>100 requests per second.</b> Busy consumers = 100 &times; 0.05 = 5. Five workers saturated, so run ten and sit at 50 percent utilisation. At this tier the queue is not there for throughput, it is there for retry and for decoupling deploys. A single queue, a single consumer group, no partitioning, no batching. Honestly, you could do this work inline and survive; you use a queue because you want failures to be retryable, not because you cannot keep up.</li>
+    <li><b>1,000 requests per second.</b> Busy consumers = 1,000 &times; 0.05 = 50. Nobody runs a pool at 100 percent, so at a 70 percent utilisation target you need 50 / 0.7 = 72 consumers. Now the per-message overhead you ignored at the first tier becomes the dominant cost: one receive call and one delete call per message is 2,000 broker round trips per second. Batching ten messages per receive drops that to 200. This is the tier where the naive one-message-at-a-time consumer stops being merely inefficient and starts being the bottleneck.</li>
+    <li><b>10,000 requests per second.</b> Busy consumers = 500, or 715 at 70 percent utilisation. With a batch size of ten, that is 7,150 messages leased at once, which is still comfortably under the roughly 120,000 in-flight message ceiling SQS documents for standard queues, but you are now within one order of magnitude of a hard product limit rather than three. At this tier you shard by tenant or by hash so that one noisy customer cannot occupy the whole pool, you separate fast and slow message classes into different queues so a 5-second message class cannot starve a 20-millisecond one, and you plan capacity against backlog drain rather than steady state.</li>
+  </ul>
+
+  <p>Backlog drain is the calculation that people skip and then regret. Suppose a two-hour downstream outage has left 2,000,000 messages queued, traffic is still arriving at 800 per second, each consumer handles 20 messages per second, and you have promised to be caught up within 30 minutes.</p>
+
+  <div class="math">
+&mu;_required = &lambda;_arrival + Backlog / T_drain
+&mu;_required = 800 + 2,000,000 / 1,800 = 800 + 1,111 = 1,911 msg/s
+n_consumers = 1,911 / 20 = 96, round up to 100
+<span class="gloss">&mu;_required is the total processing rate you need, in messages per second. &lambda;_arrival is the rate at which new work keeps arriving during recovery. T_drain is the recovery deadline in seconds, here 1,800. n_consumers is the required worker count given 20 messages per second each. Assumptions: uniform message cost, and a downstream that can actually absorb 1,911 per second.</span>
+  </div>
+
+  <p>The number to notice is that steady state needed 40 consumers and recovery needs 100. Your autoscaling ceiling, your database connection pool, and your downstream rate limits all have to accommodate the recovery number, not the steady-state number, or the backlog never drains and the outage becomes permanent.</p>
+
+  <p><b>Trade-off and failure mode.</b> A queue trades an immediate, visible failure for a delayed, invisible one, and it trades a latency guarantee for a liveness guarantee. The characteristic failure is not the queue breaking, it is the queue working perfectly while absorbing an outage nobody noticed, until the backlog is so deep that the drain time exceeds the business's tolerance. A queue with no depth alarm and no drain plan is a way of storing an incident for later delivery, at interest.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A queue holds 60,000 messages. Consumers drain 1,500 per second while producers keep publishing 1,200 per second. How long does a message arriving now wait before a consumer picks it up?</div>
+    <button class="q-opt">Forty seconds: sixty thousand divided by fifteen hundred drained</button>
+    <button class="q-opt">Two hundred seconds: sixty thousand divided by three hundred</button>
+    <button class="q-opt">Fifty seconds: sixty thousand divided by twelve hundred published</button>
+    <button class="q-opt">Zero seconds: the drain rate already exceeds arrival rate</button>
+    <div class="q-fb">Little's Law rearranged is W = L / &lambda;, and the &lambda; that matters for a message already in line is the rate at which the queue is being emptied, so 60,000 / 1,500 = 40 seconds. Two hundred seconds is the time for the backlog to reach zero, which is a different question and uses the net surplus of 300 per second. Fifty seconds divides by the publish rate, which does not move anything out of the queue. Zero seconds confuses the backlog shrinking with the queue being empty: the surplus tells you the depth is falling, not that a new arrival goes straight to a consumer.</div>
+  </div>
+
+  <h3 id="pub-sub">Publish and subscribe</h3>
+
+  <p>Publish and subscribe changes the shape of the addressing. A queue is point to point: one message, one consumer, and the producer is implicitly aware that something on the other end will consume it. A topic is one to many: the publisher writes once, and every subscription attached to that topic receives its own independent copy with its own independent cursor, its own backlog, and its own acknowledgement state. Google Cloud describes Pub/Sub as a service that "decouples services producing messages from services processing those messages", and the operative word is decouples: publishers "send events to the Pub/Sub service, without regard to how or when these events are to be processed". RabbitMQ expresses the same topology at the broker level with a <a href="https://www.rabbitmq.com/tutorials/amqp-concepts">fanout exchange</a>, which "routes messages to all of the queues that are bound to it and the routing key is ignored". <em>Source: <a href="https://docs.cloud.google.com/pubsub/docs/overview">Google Cloud Pub/Sub overview</a>.</em></p>
+
+  <p>Two delivery models exist and they fail differently. In pull, the subscriber asks for messages, which means the subscriber controls its own rate and a slow subscriber simply accumulates a backlog. In push, the service posts to an endpoint you own, which means the service controls the rate and a slow subscriber must apply backpressure through error responses and hope the sender's flow control respects it. Pull is the safer default for anything with variable processing cost, for exactly the reason covered in <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#backpressure">backpressure</a>.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  PUB["Publisher<br/>order-events"] --> T{{"Topic"}}
+  T --> S1["Subscription:<br/>fulfilment"]
+  T --> S2["Subscription:<br/>fraud scoring"]
+  T --> S3["Subscription:<br/>analytics warehouse"]
+  T --> S4["Subscription:<br/>customer email"]
+  S1 --> W1["Independent cursor<br/>and backlog"]
+  S2 --> W2["Independent cursor<br/>and backlog"]
+  S3 -. "consumer stuck:<br/>only this backlog grows" .-> W3["Backlog climbing"]
+  S4 --> W4["Independent cursor<br/>and backlog"]
+  </div><figcaption>One publish becomes four deliveries, and each subscription keeps its own position in the stream. A stalled analytics consumer grows its own backlog without touching fulfilment or fraud. <b>Fan-out is what lets you add a consumer without redeploying the producer, and it is also why your delivery volume, not your publish volume, is what you have to size and pay for.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> Ad tech and streaming telemetry are the archetypes, because the same click or play event has to reach billing, fraud, personalisation, and the analytics warehouse, and those four teams ship on completely different schedules. Without a topic in the middle, adding a fifth consumer means changing and redeploying the producer, which means the producer team becomes a scheduling bottleneck for every downstream team. That is not a performance problem, it is an organisational one, and it is the reason pub/sub survives in places where the raw throughput would not have justified it.</p>
+
+  <p>The arithmetic of fan-out is trivial and consistently forgotten: your unit of work is deliveries, not publishes.</p>
+
+  <div class="math">
+Deliveries per second = Publishes per second &times; Subscriptions
+100 &times; 3 = 300      1,000 &times; 6 = 6,000      10,000 &times; 8 = 80,000
+<span class="gloss">Every subscription attached to a topic receives a full copy of every message. Cost, broker CPU, egress bytes, and acknowledgement traffic all scale with the delivery count on the right, not with the publish count on the left.</span>
+  </div>
+
+  <p><b>The three tiers.</b> At <b>100 publishes per second</b> with three subscriptions, 300 deliveries per second is a rounding error and the entire design decision is "use a topic instead of a queue so we can add consumers later". At <b>1,000 publishes per second</b> with six subscriptions, 6,000 deliveries per second is real traffic, and the new problem is that the six subscriptions no longer fail together: you need per-subscription backlog and oldest-unacknowledged-age monitoring, because a subscription can be silently stuck for hours while the topic looks perfectly healthy. At <b>10,000 publishes per second</b> with eight subscriptions, 80,000 deliveries per second means adding a ninth subscription is a 10,000 delivery per second capacity decision that needs review, not a self-service configuration change. This is also the tier where you split hot topics by event type so that a low-value, high-volume event class stops forcing every subscriber to filter it out at their own expense.</p>
+
+  <p><b>Trade-off and failure mode.</b> Fan-out is cheap to add and expensive to run, and it costs you the ability to answer "did everyone get this". The publisher gets an acknowledgement from the broker and learns nothing about the four subscribers, so end-to-end confirmation has to be rebuilt at the application level if you need it. The classic failure is the forgotten subscription: someone creates one during a migration, the consumer is deleted, and the subscription quietly retains every message until it hits a storage quota or an expiry policy, at which point either your bill or your data is the alarm.</p>
+
+  <h3 id="event-driven-architecture">Event-driven architecture</h3>
+
+  <p>Event-driven architecture is the design stance that services should publish facts about what happened rather than issue commands about what should happen next. AWS states it plainly: "Event-driven architecture is a style of building loosely-coupled software systems that work together by emitting and responding to events." The mechanical difference from pub/sub is that pub/sub is a transport and event-driven architecture is a contract: <code>OrderPlaced</code> is a statement about the past that is true regardless of who is listening, whereas <code>SendConfirmationEmail</code> is a command that presumes a specific listener exists and is the caller's business. Once you emit facts, adding a consumer is genuinely additive, because the producer made no assumption you are now violating. <em>Source: <a href="https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-what-is.html">Amazon EventBridge, what is EventBridge</a>.</em></p>
+
+  <p>The second mechanical property is the durable, replayable log. Apache Kafka organises events into topics divided into partitions, and the guarantee it offers is narrower than most people quote: "Kafka guarantees that any consumer of a given topic-partition will always read that partition's events in exactly the same order as they were written." That is per-partition ordering, not per-topic ordering. Events land in a partition by key, so "events with the same event key (e.g., a customer or vehicle ID) are written to the same partition", which is how you get per-customer ordering without a global sequencer. <em>Source: <a href="https://kafka.apache.org/intro">Apache Kafka introduction</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  PR["Producers"] -->|"key = customer id"| TP["Topic: order-events"]
+  subgraph TP2["Partitions, each strictly ordered"]
+    P0["p0: c1, c4, c1, c9"]
+    P1["p1: c2, c7, c2, c2"]
+    P2["p2: c3, c5, c8, c3"]
+  end
+  TP --> P0
+  TP --> P1
+  TP --> P2
+  P0 --> G1["Group A, worker 1"]
+  P1 --> G2["Group A, worker 2"]
+  P2 --> G3["Group A, worker 3"]
+  P0 --> R1["Group B, replay from offset 0"]
+  P1 --> R1
+  P2 --> R1
+  </div><figcaption>Ordering is a property of a partition, not of a topic, and the key is what pins a customer to one partition. A second consumer group can start at offset zero and rebuild its entire state from history without disturbing the first. <b>Partition count is simultaneously your ordering granularity and your hard ceiling on ordered parallelism, which is why choosing it badly is the most expensive early mistake in an event-driven system.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> Logistics is a good example because the same physical event, a parcel being scanned, has to update tracking, trigger customer notification, settle a courier payment, and feed a delivery-time model. Without an event log those are four synchronous calls out of the scanner service, and a slow notification provider delays the scan. With one, the scan writes a fact and returns, and a notification outage becomes a consumer lag graph. What replay buys you is separate and larger: when the delivery-time model is rewritten, the new consumer replays six months of history and is production-ready without anyone building a bespoke backfill pipeline.</p>
+
+  <p>Now the arithmetic that decides partition count, which is Little's Law again with different nouns. Ordering forces each partition to be processed by at most one consumer at a time, so a partition can only ever have one event in flight. That makes the number of partitions the number of events you can have in flight at once.</p>
+
+  <div class="math">
+Partitions_min = &lambda;_events &times; W_handler
+100 &times; 0.05 = 5      1,000 &times; 0.05 = 50      10,000 &times; 0.05 = 500
+<span class="gloss">&lambda;_events is the event arrival rate per second. W_handler is the time one consumer takes to process one event, here 50 milliseconds. The product is the number of events that must be in flight simultaneously, and because per-key ordering allows only one in flight per partition, it is also the minimum partition count. Assumption: keys spread evenly across partitions.</span>
+  </div>
+
+  <p>That assumption at the end is where systems die. Real keys are skewed, so size against the hottest partition, not the mean. Amazon Kinesis publishes the equivalent physical ceiling per shard: "Each shard can support up to 1 MB/sec or 1,000 records/sec write throughput or up to 2 MB/sec or 2,000 records/sec read throughput." At 10,000 events per second across 10 shards with perfectly uniform keys, each shard sees exactly 1,000 records per second, which is precisely the documented limit and therefore already a production incident. If the hottest key is three times the mean, you need enough shards that the hot one stays under the ceiling, which means provisioning against the skew factor and not the average. <em>Source: <a href="https://docs.aws.amazon.com/streams/latest/dev/service-sizes-and-limits.html">Amazon Kinesis Data Streams quotas and limits</a>.</em></p>
+
+  <p><b>The three tiers.</b> At <b>100 events per second</b>, five partitions, one consumer group, and retention set by whatever is cheap. The log is a convenience. At <b>1,000 events per second</b>, fifty partitions, and the first genuinely hard problem appears: you cannot reduce partition count later without breaking key-to-partition mapping, so the number you choose now is close to permanent. This is also where retention becomes a real decision rather than a default. At <b>10,000 events per second</b>, 500 partitions for ordered handling, and replay stops being free:</p>
+
+  <div class="math">
+Volume = 10,000 ev/s &times; 1 KB &times; 604,800 s = 6.05 TB per 7 days
+Events  = 10,000 &times; 604,800 = 6.048 &times; 10^9
+Replay at 30,000 ev/s = 6.048e9 / 30,000 = 201,600 s = 56 hours
+Replay in 4 hours needs 6.048e9 / 14,400 = 420,000 ev/s, or 42&times; normal capacity
+<span class="gloss">604,800 is seven days in seconds. The replay rate assumes a consumer group that can run three times faster than live traffic because it is reading sequentially with no downstream throttle. The last line is the honest one: a four-hour recovery objective on a seven-day log is a 42-fold capacity commitment, not a configuration flag.</span>
+  </div>
+
+  <p><b>Trade-off and failure mode.</b> You trade a call stack for a choreography, and a call stack can be read in a debugger while a choreography can only be read in a trace. The characteristic failures are schema drift, where a producer adds a field meaning and six consumers interpret it differently, and diffuse ownership, where an order can be stuck and no single service is responsible for noticing. The mitigations are a schema registry with compatibility rules, and one service that owns the end-to-end outcome even though no service owns the whole execution.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">You need per-customer ordering for 10,000 events per second, and each event takes 50 milliseconds of consumer time. What is the minimum sensible partition count?</div>
+    <button class="q-opt">Ten, since each partition sustains one megabyte per second written</button>
+    <button class="q-opt">One, since a single partition preserves ordering for every customer</button>
+    <button class="q-opt">Five hundred, since a partition carries only one in-flight message</button>
+    <button class="q-opt">Fifty, since ten thousand events divided by two hundred consumers</button>
+    <div class="q-fb">Ordering allows one in-flight event per partition, so Little's Law gives 10,000 &times; 0.05 = 500 partitions before you even consider key skew. Ten is the byte-throughput answer and ignores that a partition is also a concurrency unit, which is exactly the mistake that produces a stream that is fast on paper and hours behind in practice. One partition does preserve ordering, and caps you at twenty events per second. Fifty divides by an invented consumer count rather than by the handler time, which is the only quantity that actually constrains in-flight work.</div>
+  </div>
+
+  <h2>3. Correctness when the work spans services</h2>
+
+  <h3 id="distributed-transactions">Distributed transactions</h3>
+
+  <p>A distributed transaction is the attempt to keep the ACID promise when the data lives in more than one place. The mechanism is two-phase commit. In the prepare phase the coordinator asks every participant whether it can commit; each participant durably writes enough state to guarantee it could, then votes yes and gives up its right to unilaterally abort. In the commit phase the coordinator collects the votes, makes the decision, and tells everyone. The prepared state is the crux of the whole protocol: a participant that voted yes is holding its locks and cannot release them, cannot abort, and cannot make progress until the coordinator speaks.</p>
+
+  <p>Which is why Gray and Lamport's paper is worth reading before you argue for two-phase commit in a design review. Their statement is blunt: "The classic Two-Phase Commit protocol blocks if the coordinator fails." Their fix, Paxos Commit, replaces the single coordinator with a consensus group that "uses 2F+1 coordinators and makes progress if at least F+1 of them are working", and they observe that classic two-phase commit "is obtained as the special F = 0 case". Two-phase commit is not a protocol that occasionally fails to tolerate coordinator loss. It is formally the zero-fault-tolerance member of the family. <em>Source: <a href="https://arxiv.org/abs/cs/0408036">Gray and Lamport, "Consensus on Transaction Commit"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant C as Coordinator
+  participant P as Payments DB
+  participant I as Inventory DB
+  participant S as Shipping DB
+  C->>P: PREPARE
+  C->>I: PREPARE
+  C->>S: PREPARE
+  P-->>C: VOTE YES, locks held
+  I-->>C: VOTE YES, locks held
+  S-->>C: VOTE YES, locks held
+  Note over P,S: All three are now blocked.<br/>They cannot commit and cannot abort.
+  C--xC: Coordinator crashes here
+  Note over P,S: Locks stay held. Every other<br/>transaction touching these rows queues.
+  C->>P: COMMIT, after recovery
+  C->>I: COMMIT, after recovery
+  C->>S: COMMIT, after recovery
+  </div><figcaption>The window between the last vote and the decision is the whole risk of two-phase commit. Participants have surrendered autonomy and are holding locks on behalf of a coordinator that may never return. <b>Two-phase commit does not fail by losing atomicity, it fails by keeping atomicity perfectly while making the data unavailable to everyone else.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> Banking and payments settlement, where a debit and a credit must both happen or neither, and where the regulator's tolerance for a torn transaction is zero. XA across a ledger and a positions database is a real, current, defensible design in that industry. What breaks without it is not abstract: money leaves one account and does not arrive in another, and the reconciliation cost of a single such event exceeds the engineering cost of the protocol.</p>
+
+  <p>The arithmetic has two parts, and both argue against distributing. First, lock hold time caps throughput on any contended row.</p>
+
+  <div class="math">
+Window = (4 message delays &times; 0.5 ms) + (2 durable writes &times; 5 ms) = 2 + 10 = 12 ms
+Throughput on one contended row = 1 / 0.012 = 83 transactions per second
+<span class="gloss">Four message delays covers prepare out, vote back, commit out, acknowledgement back. 0.5 ms is a one-way hop within an availability zone and 5 ms is a durable write, both stated as assumptions rather than measured facts. The second line is the ceiling for transactions serialised on the same row, because each must wait for the previous window to close.</span>
+  </div>
+
+  <p>Second, availability multiplies rather than averages.</p>
+
+  <div class="math">
+A_transaction = A_participant ^ n
+0.999 ^ 3 = 0.997      Unavailable = 0.003 &times; 43,800 min = 131 min per month
+Compare a single store: 0.001 &times; 43,800 = 44 min per month
+<span class="gloss">A_participant is each store's independent availability and n is the number of participants. 43,800 is minutes in an average month. Assumption: independent failures, which is optimistic, so treat 131 minutes as a floor rather than an estimate.</span>
+  </div>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the correct answer is almost always to not have a distributed transaction: put the tables that must be atomic in one database and use a local transaction. At <b>1,000 requests per second</b> two-phase commit across two stores is survivable if the contended rows are disjoint, and the constraint you will hit first is not throughput but the availability multiplication above, because the transaction is now less available than any of its participants. At <b>10,000 requests per second</b> two-phase commit across services is off the table: the 83-transactions-per-second ceiling on any hot row is three orders of magnitude short, and the coordinator's blocking window turns every coordinator restart into a fleet-wide stall. You either collapse the participants into one partition or you switch to compensation.</p>
+
+  <p><b>Trade-off and failure mode.</b> You buy atomicity with availability and latency. The failure mode is precise and nasty: the coordinator dies between the last vote and the decision, every participant sits in prepared state holding locks, and unrelated traffic that merely touches those rows queues behind them. The blast radius of a coordinator crash is not the transactions in flight, it is every transaction that wants the same data for as long as recovery takes.</p>
+
+  <h3 id="saga-pattern">The saga pattern</h3>
+
+  <p>A saga abandons the global lock. Instead of one atomic transaction across services, you run a sequence of local transactions, each of which commits immediately in its own service, and you write a compensating transaction for each one that semantically undoes it. Microsoft's guidance names the three roles precisely. <b>Compensable transactions</b> "can be undone or compensated for by other transactions with the opposite effect". A <b>pivot transaction</b> is "the point of no return in the saga", after which "compensable transactions are no longer relevant". <b>Retryable transactions</b> "follow the pivot transaction", are idempotent, and "help ensure that the saga can reach its final state". The pivot is the concept that makes sagas designable rather than merely describable: it is the line before which you go backwards and after which you must go forwards. <em>Source: <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/saga">Azure Architecture Center, Saga design pattern</a>.</em> The pattern itself dates to Garcia-Molina and Salem's 1987 paper, which is still the clearest statement of why long-lived transactions should be split rather than held. <em>Source: <a href="https://www.cs.cornell.edu/andru/cs711/2002fa/reading/sagas.pdf">Garcia-Molina and Salem, "Sagas" (1987)</a>.</em></p>
+
+  <p>The worked example this course keeps coming back to is an order that touches payment, inventory, and shipping. Laid out with the roles assigned:</p>
+
+  <table>
+    <thead><tr><th>Step</th><th>Local transaction</th><th>Role</th><th>Compensation</th></tr></thead>
+    <tbody>
+      <tr><td>T1</td><td>Reserve 1 unit of SKU-4471</td><td>Compensable</td><td>C1: release the reservation</td></tr>
+      <tr><td>T2</td><td>Authorize 84.00 on the card</td><td>Compensable</td><td>C2: void the authorization</td></tr>
+      <tr><td>T3</td><td>Capture the authorized funds</td><td><b>Pivot</b></td><td>None, refund is a new business process</td></tr>
+      <tr><td>T4</td><td>Create the shipment record</td><td>Retryable</td><td>None, must eventually succeed</td></tr>
+      <tr><td>T5</td><td>Send the confirmation email</td><td>Retryable</td><td>None, must eventually succeed</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant O as Saga orchestrator
+  participant I as Inventory
+  participant P as Payments
+  participant S as Shipping
+  O->>I: T1 reserve SKU-4471
+  I-->>O: reserved, id R-88
+  O->>P: T2 authorize 84.00
+  P-->>O: declined, insufficient funds
+  Note over O: Failure BEFORE the pivot.<br/>Compensate in reverse order.
+  O->>I: C1 release reservation R-88
+  I-->>O: released
+  O-->>O: saga ends: order rejected
+  Note over O,S: Second run, same order, funds now available
+  O->>I: T1 reserve SKU-4471
+  I-->>O: reserved, id R-91
+  O->>P: T2 authorize 84.00
+  P-->>O: authorized, auth A-12
+  O->>P: T3 capture A-12 (PIVOT)
+  P-->>O: captured
+  O->>S: T4 create shipment
+  S-->>O: 503 carrier API unavailable
+  Note over O,S: Failure AFTER the pivot.<br/>No going back. Retry forward until it succeeds.
+  O->>S: T4 retry with same idempotency key
+  S-->>O: shipment created
+  </div><figcaption>The same saga failing on either side of the pivot, and behaving completely differently as a result. Before the capture, a failure unwinds cleanly by releasing the reservation. After the capture, the money has moved and the only correct behaviour is to drive shipping forward with a stable idempotency key. <b>Naming the pivot transaction is the design work; everything before it needs an undo and everything after it needs a retry that cannot double-apply.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> Travel booking is the sharpest example, because a flight, a hotel, and a car come from three vendors who will never join your transaction manager. Retail order fulfilment is the everyday one. Without a saga, an e-commerce checkout that spans three services either holds distributed locks it cannot afford or leaves the three services to drift apart and be reconciled by a nightly job, which is the same as saying customers discover your inconsistencies before you do.</p>
+
+  <p>The arithmetic worth doing is the one nobody does: how long compensable state stays held, because that is inventory you cannot sell.</p>
+
+  <div class="math">
+Hold = W_step_latency + W_failure_detection + W_compensation
+Fast path:  40 ms + 40 ms + 40 ms = 120 ms
+Gateway timeout path: 40 ms + (3 retries &times; 30 s timeout) + 40 ms = 90.08 s
+Units held per moment at 1,000 orders/s with a 2% failure rate:
+  20 failing orders/s &times; 90.08 s = 1,802 units reserved but unsellable
+<span class="gloss">W_step_latency is one saga step. W_failure_detection is how long you wait before declaring the step failed, dominated here by a payment gateway's timeout budget. The last line is Little's Law once more: arrival rate of failing sagas multiplied by how long each holds a reservation gives the standing inventory locked up at any instant. Assumptions: 2 percent authorization failures, three retries, 30-second timeouts.</span>
+  </div>
+
+  <p>Eighteen hundred units of phantom-unavailable stock is a business problem discovered by an engineer, and it comes entirely from the retry policy, not from the saga design.</p>
+
+  <p><b>The three tiers.</b> At <b>100 orders per second</b> an orchestrator with a state table in your existing database is correct and boring; the whole saga log is 100 &times; 5 steps &times; 2 writes = 1,000 writes per second, which any relational database handles. At <b>1,000 orders per second</b> the saga log is 10,000 writes per second and is now a first-class storage system with its own capacity plan, and you need explicit timeouts on every step because a step with no timeout is a saga that never terminates. At <b>10,000 orders per second</b> the log is 100,000 writes per second, the orchestrator must be sharded by saga identifier, and the orchestrator has become the most important service you own: it is the only thing that knows an order exists between step two and step five.</p>
+
+  <p><b>Trade-off and failure mode.</b> You buy availability by giving up isolation, and Microsoft is refreshingly explicit about the bill: sagas admit "lost updates", "dirty reads", and "fuzzy, or nonrepeatable, reads", with countermeasures including semantic locks, commutative updates, and reread-before-write. The failure mode that keeps people awake is the one the same document names: "Compensating transactions might not always succeed, which can leave the system in an inconsistent state." A compensation that fails needs its own retry, its own dead letter path, and eventually a human, because there is no third level of undo.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Inventory is reserved and the card is authorized. The capture step then fails permanently because the issuer revoked the authorization. What should the saga do next?</div>
+    <button class="q-opt">Retry the capture indefinitely, because capture is the pivot step</button>
+    <button class="q-opt">Void the authorization and release the reservation, in reverse order</button>
+    <button class="q-opt">Roll back all three services with one distributed commit protocol</button>
+    <button class="q-opt">Leave the reservation held and page an on-call operator instead</button>
+    <div class="q-fb">The capture is the pivot, but it did not succeed, so the saga has not crossed the line and both preceding steps are still compensable: unwind in reverse. Retrying forever treats the pivot as if it had committed, which converts a rejected order into an infinite loop holding stock. A distributed commit protocol is exactly what the saga exists to avoid and cannot be applied retroactively to transactions that already committed locally. Paging a human for a routine declined payment leaves the reservation held for the length of a response time and does not scale past the first tier.</div>
+  </div>
+
+  <h2>4. Work that fails, work that repeats, work that arrives uninvited</h2>
+
+  <h3 id="dead-letter-queues">Dead letter queues</h3>
+
+  <p>A dead letter queue is the admission that some messages will never succeed. The mechanism is a counter and a threshold. AWS documents it as a redrive policy: "The <code>maxReceiveCount</code> is the number of times a consumer can receive a message from a source queue before it is moved to a dead-letter queue." Every lease expiry increments the counter, and when it crosses the threshold the broker moves the message aside so the consumer pool stops burning capacity on it. Without that, one message that deterministically crashes its consumer is redelivered forever, and at high redelivery rates it can consume a meaningful slice of your pool. <em>Source: <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">Amazon SQS dead-letter queues</a>.</em></p>
+
+  <p>Two details in that documentation change designs. First, retention is inherited: "For standard queues, the expiration of a message is always based on its original enqueue timestamp", and moving a message to the dead letter queue does not reset it, which is why AWS advises that "it is a best practice to always set the retention period of a dead-letter queue to be longer than the retention period of the original queue". Get this wrong and your failed messages expire before anyone reads them, so the evidence disappears along with the work. Second, ordering: AWS warns "Don't use a dead-letter queue with a FIFO queue if you don't want to break the exact order of messages or operations", because pulling one message out of an ordered stream is by definition a reordering.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Visible: producer sends
+  Visible --> InFlight: consumer receives, count + 1
+  InFlight --> Deleted: consumer succeeds and deletes
+  InFlight --> Visible: lease expires, crash or timeout
+  Visible --> DeadLettered: receive count exceeds maxReceiveCount
+  DeadLettered --> Visible: operator redrives after a fix
+  DeadLettered --> Expired: retention elapses, evidence lost
+  Deleted --> [*]
+  Expired --> [*]
+  </div><figcaption>The lifecycle of one message, with every transition that can lose it. The loop between Visible and InFlight is normal retry; the arrow to DeadLettered is the circuit breaker on that loop. <b>The transition worth designing against is DeadLettered to Expired, because it is the only one that destroys work silently and on a timer you configured yourself.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> A payments provider consuming inbound webhook events is the clearest case. A single event referencing a customer record that was deleted by a bad migration will fail deterministically. Without a dead letter queue that event is retried indefinitely, and because retries are cheapest to implement as immediate ones, it can occupy a consumer continuously. With one, it is moved aside after five attempts, alarmed, inspected, fixed, and redriven.</p>
+
+  <p>The arithmetic has three parts. The lag before anything appears is the first:</p>
+
+  <div class="math">
+T_to_dead_letter = maxReceiveCount &times; VisibilityTimeout
+5 &times; 30 s = 150 seconds
+<span class="gloss">A message reaches the dead letter queue only after every one of its leases has expired. With the SQS default visibility timeout of 30 seconds and a threshold of five, nothing appears for two and a half minutes, so a dead letter alarm is a lagging indicator by construction.</span>
+  </div>
+
+  <p>The second part is the one that reframes what a dead letter queue is for. During a total downstream outage, every message fails, so after that 150-second lag the dead letter queue fills at the full arrival rate: 1,000 messages per second, 3.6 million per hour. That is not a triage queue, it is a second copy of your traffic. A dead letter queue is a mechanism for isolating <em>poison messages</em>, and it degrades into a very expensive mirror the moment failures become systemic. Distinguishing those two cases is the job of the alarm, which is the third part.</p>
+
+  <div class="math">
+Baseline poison rate p = 1 in 100,000 messages
+100 rps  &rarr; 0.001 msg/s &rarr; 3.6 dead-lettered per hour
+1,000 rps &rarr; 0.01  msg/s &rarr; 36 per hour
+10,000 rps &rarr; 0.1  msg/s &rarr; 360 per hour, 6 per minute
+Alarm on rate: fire if arrivals in 5 min exceed 5&times; the trailing baseline
+<span class="gloss">p is the fraction of messages that are genuinely unprocessable, stated as an assumption. The point of the three lines is that the same defect rate produces a hobby at the first tier and a full-time job at the third. Alarming on depth is wrong because depth only ever rises until someone redrives, so it fires forever after the first incident; alarming on arrival rate distinguishes a new problem from an old unfixed one.</span>
+  </div>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the dead letter queue plus a weekly look is genuinely adequate. At <b>1,000</b> you need an automatic alarm on arrival rate and a documented redrive procedure, because 36 per hour will not be noticed by anyone in passing. At <b>10,000</b> you need classification before triage: bucket dead-lettered messages by error signature so that one bad deploy producing 300,000 identical failures is one ticket rather than a queue nobody can face, and you need a redrive that is rate limited so that replaying a backlog does not immediately recreate the outage.</p>
+
+  <p><b>Trade-off and failure mode.</b> A dead letter queue converts an infinite retry loop into a durable backlog that you now own and must staff. The failure mode is organisational rather than technical: the queue fills, nobody owns it, the alarm is muted because it never clears, and months later somebody discovers 40,000 unprocessed messages that expired weeks ago. The technical version of the same failure is the retention misconfiguration above, which destroys the evidence on a schedule.</p>
+
+  <h3 id="cron-jobs">Cron jobs</h3>
+
+  <p>Cron is the oldest scheduling primitive still in daily production use, and the specification is deliberately minimal. POSIX defines a crontab entry as lines of six fields, with the first five being minute [0,59], hour [0,23], day of the month [1,31], month of the year [1,12], and day of the week [0,6] with 0 as Sunday. What the specification conspicuously does not define is anything about reliability: "All references to a <em>cron</em> daemon and to <em>cron</em> <em>files</em> have been omitted." There is no statement about what happens if the machine is down at the scheduled time, no statement about overlapping runs, and no statement about missed windows. Every one of those is left to the implementation, which means every one of those is left to you. <em>Source: <a href="https://pubs.opengroup.org/onlinepubs/9699919799/utilities/crontab.html">POSIX crontab specification</a>.</em></p>
+
+  <p>Google's distributed cron service is the most useful published treatment of what filling those gaps costs. Their central decision is a semantic one: "we favor skipping launches rather than risking double launches, as much as the infrastructure allows", because "recovering from a skipped launch is more tenable than recovering from a double launch". Their examples of why are payroll and newsletters, both of which are trivially harmful to run twice. The service uses Paxos for leadership, and the leader "must immediately stop interacting with the datacenter scheduler" upon losing leadership. <em>Source: <a href="https://sre.google/sre-book/distributed-periodic-scheduling/">Google SRE Book, Distributed Periodic Scheduling with Cron</a>.</em> Kubernetes takes the opposite default and is honest about it: "there are certain circumstances where two Jobs might be created, or no Job might be created. Kubernetes tries to avoid those situations, but does not completely prevent them. Therefore, the Jobs that you define should be <em>idempotent</em>." <em>Source: <a href="https://kubernetes.io/docs/concepts/workloads/controllers/cron-jobs/">Kubernetes CronJob documentation</a>.</em></p>
+
+  <p><b>Where it is load bearing.</b> Financial close and billing runs, an industry where the schedule is contractual. What breaks without careful design is not the job failing to run, which is visible, but the job running twice, which is not. Kubernetes offers a <code>concurrencyPolicy</code> of <code>Forbid</code>, where "if it is time for a new Job run and the previous Job run hasn't finished yet, the CronJob skips the new Job run", precisely because the default of <code>Allow</code> is unsafe for this class of work.</p>
+
+  <p>Now the arithmetic that this chapter promised, which is why a job that outgrows its interval eventually overlaps itself. Let I be the interval and D the duration. Starts happen at a rate of 1/I. Completions happen at a rate of 1/D per concurrent instance. If D &gt; I, each interval starts one run and completes fewer than one, and the difference accumulates.</p>
+
+  <div class="math">
+Concurrency growth per interval = (D - I) / I
+I = 300 s, D = 360 s  &rarr;  (360 - 300) / 300 = 0.2 runs per interval
+Intervals per hour = 3,600 / 300 = 12
+Extra concurrent runs after one hour = 12 &times; 0.2 = 2.4
+<span class="gloss">I is the scheduled interval in seconds and D is how long one run actually takes. The growth term is dimensionless: it is the fraction of a run that fails to finish before the next one starts. Assumption: D stays constant, which is the optimistic case.</span>
+  </div>
+
+  <p>That last assumption is the one that turns a slow job into an outage, because concurrent runs contend for the same rows, the same locks, and the same connection pool, so D is a function of the concurrency it caused. Model the contention as each additional concurrent instance adding a full run's worth of delay:</p>
+
+  <div class="math">
+D_next = D_base &times; (1 + k &times; (N - 1)), with N = ceil(D / I)
+D_base = 310 s, I = 300 s, k = 1.0
+  N = ceil(310/300) = 2   &rarr;  D = 310 &times; 2  = 620 s
+  N = ceil(620/300) = 3   &rarr;  D = 310 &times; 3  = 930 s
+  N = ceil(930/300) = 4   &rarr;  D = 310 &times; 4  = 1,240 s
+<span class="gloss">k is a contention coefficient: k = 1 means each extra concurrent run doubles the work of one run, which is what you get when instances serialise on the same lock. N is the number of instances alive at once. Assumption: k is constant, chosen to show the runaway clearly. The lesson is structural, not numeric: once D crosses I with no concurrency control, the feedback loop has no equilibrium.</span>
+  </div>
+
+  <p><b>The three tiers.</b> Frame these by the volume the job has to chew through, since a nightly job over every order scales with the serving system behind it. Assume 1 millisecond of work per order.</p>
+  <ul>
+    <li><b>100 requests per second</b> is 8.64 million orders per day, so the nightly job takes 8,640 seconds, about 2.4 hours. A single machine, a single crontab line, a lock file. Fine.</li>
+    <li><b>1,000 requests per second</b> is 86.4 million orders per day, so the job takes 86,400 seconds. That is exactly 24 hours. The nightly job now takes a day to process a day, which means it never finishes and is permanently overlapping itself. This is the tier at which the batch job model dies, and it dies suddenly rather than gradually.</li>
+    <li><b>10,000 requests per second</b> is 864 million orders per day, or 240 hours of single-threaded work. The job cannot exist in its old form. The work either becomes continuous stream processing, which is what the earlier sections of this chapter were building toward, or it is sharded into independent partitions with a scheduler that dispatches N parallel windows and tracks their completion individually. At this tier the scheduler itself needs leader election, or a scheduler failover during the window fires everything twice.</li>
+  </ul>
+
+  <p><b>Trade-off and failure mode.</b> Cron is the cheapest scheduling primitive available and the easiest place to hide a non-idempotent operation. The failure modes, in the order you will meet them, are: self-overlap once duration crosses interval; the thundering herd at midnight when forty jobs all scheduled at <code>0 0 * * *</code> hit the same database; the missed window, where the machine was down at 02:00 and nothing tells you the job never ran; and the double fire, where a scheduler failover launches the same job twice and only the accounting team notices.</p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">A job scheduled every five minutes now takes six minutes to run. There is no locking and the scheduler's concurrency policy allows overlap. What does the next hour look like?</div>
+    <button class="q-opt">Nothing changes, because the scheduler queues each run behind another</button>
+    <button class="q-opt">Every scheduled run is skipped, because the previous one continues</button>
+    <button class="q-opt">Runtime falls back automatically once the scheduler detects the overlap</button>
+    <button class="q-opt">Concurrency climbs, reaching about three overlapping runs by hour's end</button>
+    <div class="q-fb">The growth term is (360 - 300) / 300 = 0.2 additional concurrent runs per interval, and there are twelve intervals in an hour, so about 2.4 extra instances accumulate on top of the original, and contention between them usually makes it worse than that. Queueing behind the previous run is what a Forbid or Replace policy would do, and this scheduler was explicitly set to allow overlap. Skipping is likewise the Forbid behaviour, not the Allow behaviour. Nothing in POSIX cron or in Kubernetes CronJob measures runtime and adapts, which is exactly why the specification leaves concurrency to an explicit policy you have to choose.</div>
+  </div>
+
+  <h3 id="webhooks">Webhooks</h3>
+
+  <p>A webhook inverts the direction of an API call. Instead of you polling a provider to ask whether anything happened, the provider POSTs a signed JSON document to a URL you registered when something does. Mechanically it is pub/sub where the transport is HTTP and the subscription is a URL, and the interesting engineering is entirely in the three properties that follow from that transport being someone else's HTTP client: authenticity, retries, and ordering.</p>
+
+  <p>Stripe's documentation is the reference implementation for all three. Authenticity is an HMAC with SHA-256 over a payload built by concatenating the timestamp, a period, and the raw request body; the timestamp is inside the signed material specifically so that "an attacker can't change the timestamp without invalidating the signature", and the libraries "have a default tolerance of 5 minutes between the timestamp and the current time" to bound replay. Retries are generous and long: Stripe "attempts to deliver events to your destination for up to three days with an exponential backoff in live mode". Ordering is explicitly disclaimed: "Stripe doesn't guarantee the delivery of events in the order that they're generated", with the advice to "make sure that your event destination isn't dependent on receiving events in a specific order". Duplicates are expected too, and the prescribed defence is to log processed event identifiers and skip repeats. <em>Source: <a href="https://docs.stripe.com/webhooks">Stripe webhooks documentation</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant PR as Provider
+  participant EP as Your endpoint
+  participant Q as Your queue
+  participant WK as Your worker
+  PR->>EP: POST event evt_1, Stripe-Signature header
+  EP->>EP: verify HMAC, check timestamp within 5 min
+  EP->>Q: enqueue raw event
+  EP-->>PR: 200 OK in under 50 ms
+  Q->>WK: lease evt_1
+  WK->>WK: seen evt_1 before? no, process
+  Note over PR,EP: Now your endpoint has an outage
+  PR->>EP: POST evt_2
+  EP--xPR: 503
+  PR->>EP: retry evt_2 after backoff
+  EP--xPR: 503
+  PR->>EP: retry evt_2, endpoint recovered
+  EP->>Q: enqueue
+  EP-->>PR: 200 OK
+  Note over PR,WK: evt_3 was generated after evt_2<br/>but delivered first. Order is not a guarantee.
+  </div><figcaption>The correct webhook receiver does almost nothing: verify the signature, put the bytes on a queue, and return quickly. Retries mean the same event can arrive more than once and events can arrive out of order relative to when they occurred. <b>The endpoint's only job is to become durable fast, because every millisecond spent processing inline is a millisecond during which the provider might time you out and generate a duplicate.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> Payments, and specifically asynchronous payment methods where a bank confirms hours later. Stripe's own framing is that webhooks help you "respond to asynchronous events, such as when a customer's bank confirms a payment". Without them your only option is polling, and the arithmetic on polling is brutal: to detect a state change within five seconds across 200,000 open payments, you need 200,000 / 5 = 40,000 API calls per second, virtually all returning "no change". The webhook replaces that with one delivery per actual change.</p>
+
+  <p>Two more calculations. First, the receiver's concurrency, which is Little's Law for a third time. If your handler does 300 milliseconds of work inline at 1,000 deliveries per second, you need 1,000 &times; 0.3 = 300 concurrent handlers. If it enqueues in 5 milliseconds instead, you need 1,000 &times; 0.005 = 5. Same traffic, sixty times the footprint, purely from where you chose to do the work. Second, the retry ladder. Stripe publishes the envelope, three days with exponential backoff, but not the exact schedule, so derive it from a stated assumption:</p>
+
+  <div class="math">
+Assume backoff doubles from 1 minute: 1, 2, 4, 8, ... 2^(n-1)
+Cumulative time after n attempts = 2^n - 1 minutes
+Three days = 4,320 minutes  &rarr;  2^n - 1 &ge; 4,320  &rarr;  n &ge; 12.08
+So roughly 13 delivery attempts span the window
+<span class="gloss">n is the number of attempts. The doubling assumption is mine, not Stripe's; Stripe documents only "up to three days with an exponential backoff". The useful conclusion survives any reasonable base: a multi-day retry envelope is only about a dozen attempts, so an outage lasting hours costs you very few of them, and an outage lasting days costs you the event permanently.</span>
+  </div>
+
+  <p><b>The three tiers.</b> At <b>100 deliveries per second</b> you can process inline if the work is genuinely under 50 milliseconds, and dedupe with a unique index on the event identifier. At <b>1,000 deliveries per second</b> inline processing is no longer defensible: enqueue and return, and make deduplication explicit rather than incidental, because retries now overlap with fresh deliveries routinely. At <b>10,000 deliveries per second</b> you need per-tenant concurrency limits so one large customer's event storm cannot starve everyone else, connection reuse so you are not paying for a TLS handshake per delivery, and a deliberate answer to the recovery herd: when your endpoint returns from an hour of 503s, every backed-off event arrives at once, on top of live traffic, in scrambled order.</p>
+
+  <p><b>Trade-off and failure mode.</b> You hand a piece of your availability to someone else's HTTP client and to a retry policy you cannot change. The failure mode is the recovery herd above, and its nastiest property is that ordering is worst exactly when correctness matters most: after an incident, an event generated at 09:00 may land after one generated at 10:00 because the first one used up more backoff. Any handler that treats arrival order as event order will corrupt state during recovery, which is the one time you cannot afford it.</p>
+
+  <h2>5. Who is in charge of the work</h2>
+
+  <h3 id="service-discovery">Service discovery</h3>
+
+  <p>Service discovery answers "where is this service right now" for a set of endpoints that changes continuously. RFC 6763 states the requirements more crisply than most modern documentation: a client needs "the ability to query for services of a certain type in a certain logical domain, and receive in response a list of named instances", then "the ability to efficiently resolve that instance name to the required information a client needs to actually use the service", and finally that "instance names should be relatively persistent". DNS-SD implements those three with three record types: PTR for browsing a service type, SRV for resolving an instance to a host and port, and TXT for metadata. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6763.html">RFC 6763, DNS-Based Service Discovery</a>.</em></p>
+
+  <p>The server-side version is the same shape with a controller keeping the record set fresh. Kubernetes frames the problem exactly as RFC 6763 does: "how do the frontends find out and keep track of which IP address to connect to", given that "Pods are ephemeral resources". A Service is assigned a stable cluster IP and DNS name, and "the controller for that Service continuously scans for Pods that match its selector, and then makes any necessary updates to the set of EndpointSlices for the Service". The client resolves a name that never changes; the mapping underneath is maintained by something else. <em>Source: <a href="https://kubernetes.io/docs/concepts/services-networking/service/">Kubernetes Service concept</a>.</em></p>
+
+  <p><b>Where it is load bearing.</b> Any autoscaled fleet, but gaming backends make the tension vivid: match servers are created and destroyed constantly, and a client holding a stale address does not get a slow response, it gets a connection refused during a live match. Without discovery you are back to static configuration files, which means every scale event is a deploy.</p>
+
+  <p>The arithmetic is a straight trade between staleness and load. Caching is what makes discovery cheap, and it is exactly what makes discovery wrong.</p>
+
+  <div class="math">
+Misdirected requests per removal = (&lambda; / N) &times; TTL
+100 rps, N = 10,  TTL 60 s  &rarr;  10 &times; 60 = 600 failed requests
+1,000 rps, N = 50,  TTL 30 s  &rarr;  20 &times; 30 = 600 failed requests
+10,000 rps, N = 500, TTL 5 s  &rarr;  20 &times; 5  = 100 failed requests
+<span class="gloss">&lambda; is total request rate, N is the instance count, and TTL is how long a cached answer is trusted. &lambda;/N is the share of traffic aimed at the departed instance. Assumption: clients honour the TTL exactly, which real resolver chains often do not, so treat these as lower bounds.</span>
+  </div>
+
+  <div class="math">
+Registry query load = Clients &times; Services / TTL
+500 &times; 20 / 5 = 2,000 queries per second
+Watch-based alternative = Clients &times; Services = 10,000 open watches
+<span class="gloss">Shortening the TTL to cut staleness multiplies the query rate against the registry by the same factor. A watch-based registry converts that recurring query cost into a fixed number of long-lived connections, trading query throughput for connection state and memory.</span>
+  </div>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> a DNS name with a 60-second TTL and a load balancer in front is entirely sufficient, and building anything more is a mistake. At <b>1,000</b> you need health checking integrated with registration so that a process that is running but unhealthy is deregistered, and you need to notice that DNS caching happens at several layers you do not control. At <b>10,000</b> the query load above forces a decision: either accept the registry as a high-throughput system with its own capacity plan, or move to watch-based push updates and accept the connection-state cost instead. This is also the tier where the registry has quietly become a hard dependency of every request path, which leads directly to the failure mode.</p>
+
+  <p><b>Trade-off and failure mode.</b> You trade freshness for load, and there is no setting that gives you both. The failure mode worth designing against is the registry becoming a single point of failure for a system that is otherwise healthy: if a partition makes the registry think every instance is dead, a naive client drains all traffic to nothing while every backend is fine. The defence is to fail static, meaning clients keep serving from their last known good endpoint set when the registry is unreachable rather than treating an empty answer as authoritative. An empty result from a discovery system should be treated as suspicious, never as truth.</p>
+
+  <h3 id="leader-election">Leader election</h3>
+
+  <p>Leader election is how a group of identical processes agrees that exactly one of them is currently responsible for something that must not be done twice. The mechanism is a time-bounded lease granted by a consensus system. In Raft, time is divided into terms, a follower that stops hearing heartbeats becomes a candidate and requests votes, and a candidate that wins a majority becomes leader for that term; randomised election timeouts are what stop every follower from becoming a candidate simultaneously and splitting the vote forever. <em>Source: <a href="https://raft.github.io/raft.pdf">Ongaro and Ousterhout, "In Search of an Understandable Consensus Algorithm" (Raft)</a>.</em></p>
+
+  <p>etcd's operational guidance turns that into numbers you can plan against. The defaults are a 100 ms heartbeat interval and a 1,000 ms election timeout. The heartbeat "should be set around round-trip time between members", specifically 0.5 to 1.5 times the RTT, while the election timeout "should be at least 10 times the round-trip time so it can account for variance in the network", with an upper limit of "50000ms (50s), which should only be used when deploying a globally-distributed etcd cluster". Set the election timeout too low and "etcd may miss heartbeats, causing request timeouts and temporary leader loss", which is to say you get elections caused by nothing but network jitter. <em>Source: <a href="https://etcd.io/docs/v3.5/tuning/">etcd tuning guide</a>.</em></p>
+
+  <p>ZooKeeper's recipes give the other classic construction and one warning that everybody should read twice. Candidates create a znode "with both SEQUENCE|EPHEMERAL flags", the lowest sequence number wins, and to avoid every candidate waking on every change, "it is sufficient to watch for the next znode down on the sequence of znodes", because otherwise a deletion wakes everyone and "causes a spike on the number of operations that ZooKeeper servers have to process". The warning: having the lowest znode "do not imply that the creator of this znode is aware that it is the current leader". Being the leader and knowing you are the leader are different facts, separated by network delay. <em>Source: <a href="https://zookeeper.apache.org/doc/current/recipes.html">Apache ZooKeeper recipes</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Follower
+  Follower --> Candidate: no heartbeat for one election timeout
+  Candidate --> Leader: wins a majority of votes in this term
+  Candidate --> Follower: another node won, higher term seen
+  Candidate --> Candidate: split vote, random backoff, retry
+  Leader --> Follower: sees a higher term, steps down at once
+  Leader --> Stalled: long GC pause, lease expires unnoticed
+  Stalled --> Follower: rejoins, term is stale
+  note right of Stalled
+    Danger window: this node still
+    believes it is leader. Only a
+    fencing token stops its writes.
+  end note
+  </div><figcaption>The state machine every leader-elected system runs, including the transition people forget. A leader that is paused rather than dead does not know it has lost the lease, so it can wake up and act. <b>The fix is never a longer timeout, it is a monotonically increasing term number attached to every write so the storage layer can reject anything carrying a stale one.</b></figcaption></figure>
+
+  <p><b>Where it is load bearing.</b> Google's distributed cron is the cleanest example in this chapter, because it uses leader election to enforce the at-most-once semantics discussed above: one leader launches jobs, and on losing leadership it "must immediately stop interacting with the datacenter scheduler". The industry is internal infrastructure, and what breaks without it is precise: every scheduler replica fires every job, so a three-replica deployment sends the newsletter three times.</p>
+
+  <p>The arithmetic that matters is the size of the failover window and how much traffic falls into it.</p>
+
+  <div class="math">
+Failover window &asymp; election timeout + one election round
+Single-zone etcd defaults: 1,000 ms + ~2 ms &asymp; 1.0 s
+Global cluster, RTT 200 ms: election timeout &ge; 10 &times; 200 = 2,000 ms &rarr; &asymp; 2.4 s
+Requests landing in the window = &lambda;_writes &times; window
+100 rps, 5% writes:    5 &times; 1.0 =    5 requests
+1,000 rps, 5% writes:  50 &times; 1.0 =   50 requests
+10,000 rps, 5% writes: 500 &times; 2.4 = 1,200 requests
+<span class="gloss">The election timeout floor comes from etcd's own guidance of at least ten times the round-trip time. &lambda;_writes is the share of traffic that actually needs the leader. The third line uses the global-cluster window deliberately: a multi-region leader more than doubles the blast radius of every single leader failure, before you have added a single user.</span>
+  </div>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> a single leader with default timeouts is invisible; five affected requests per failover is inside normal retry behaviour. At <b>1,000</b> you need clients that retry across the failover rather than surfacing an error, and you need to stop putting read traffic through the leader so that a failover degrades writes only. At <b>10,000</b> the leader is a throughput ceiling as well as a failure domain, and the answer is to shard leadership: elect a leader per partition rather than per cluster, so a single election affects one shard's writes instead of everyone's. This is also the tier where fencing tokens stop being theoretical, because at 10,000 requests per second a two-second window in which a zombie leader is writing is thousands of corrupt operations.</p>
+
+  <p><b>Trade-off and failure mode.</b> Leadership serialises a decision, which is exactly its value and exactly its cost: you have deliberately created a bottleneck and a single point of failure in exchange for the guarantee that a job runs once. Quorum arithmetic sets the rest: a cluster of n tolerates floor(n/2) failures, so three nodes survive one and five survive two, and even numbers buy nothing. The failure mode is split brain, and it almost never comes from the consensus algorithm being wrong. It comes from a leader that was paused by garbage collection or a hypervisor, whose lease expired while it was frozen, and which resumes execution still believing it holds the lease. Timeouts cannot fix that, because the frozen process cannot observe the timeout. Only a fencing token checked at the point of the write can.</p>
+
+  <h2>6. Scale drill: a food delivery order pipeline</h2>
+
+  <p>One system, three tiers, every decision in this chapter revisited. The system is a food delivery marketplace: a customer places an order, a restaurant accepts it, a courier is assigned, and the customer is notified throughout. Logistics, with payments attached.</p>
+
+  <table>
+    <thead><tr><th>Decision</th><th>100 orders/sec</th><th>1,000 orders/sec</th><th>10,000 orders/sec</th></tr></thead>
+    <tbody>
+      <tr><td>Intake</td><td>Single queue, 10 consumers at 50 ms each, no batching.</td><td>72 consumers at 70% utilisation, batches of 10, separate queues for fast and slow work.</td><td>715 consumers, sharded by city, drain plan sized for 100 consumers of recovery headroom per shard.</td></tr>
+      <tr><td>Fan-out</td><td>3 subscriptions, 300 deliveries/sec. Nobody monitors them individually.</td><td>6 subscriptions, 6,000 deliveries/sec. Per-subscription backlog age alarms become mandatory.</td><td>8 subscriptions, 80,000 deliveries/sec. Adding a subscription is a capacity review, not a config change.</td></tr>
+      <tr><td>Ordering</td><td>One partition per city, ordering is free.</td><td>50 partitions. The choice is now permanent because keys are hashed to partitions.</td><td>500 partitions, sized against the hottest city rather than the mean, with skew headroom on top.</td></tr>
+      <tr><td>Consistency</td><td>Payment and order state in one database, one local transaction.</td><td>Saga with an explicit pivot at payment capture, 10,000 saga-log writes/sec.</td><td>Saga orchestrator sharded by order id, 100,000 saga-log writes/sec, and it is now your most critical service.</td></tr>
+      <tr><td>Failed work</td><td>Dead letter queue plus a weekly look. About 4 messages an hour.</td><td>Alarm on dead-letter arrival rate. About 36 an hour, past what anyone notices in passing.</td><td>360 an hour, bucketed by error signature, with a rate-limited redrive so replay does not recreate the outage.</td></tr>
+      <tr><td>Scheduled work</td><td>Nightly courier settlement, 2.4 hours, one crontab line and a lock file.</td><td>The same job now needs 24 hours to process 24 hours. The batch model is dead; shard it.</td><td>Settlement is continuous stream processing. The scheduler that remains needs leader election.</td></tr>
+      <tr><td>Outbound events</td><td>Restaurant webhooks processed inline, 50 ms each.</td><td>Enqueue and return in 5 ms. Deduplicate on event id, explicitly.</td><td>Per-restaurant concurrency limits, connection reuse, and a designed answer to the post-outage delivery herd.</td></tr>
+      <tr><td>Discovery</td><td>DNS with a 60-second TTL. 600 misdirected requests per instance removal.</td><td>Health-checked registration. Watch out for resolver caching you do not control.</td><td>2,000 registry queries/sec or a move to watches. Clients must fail static when the registry is unreachable.</td></tr>
+      <tr><td>Leadership</td><td>Default 1-second election timeout. Five requests affected per failover.</td><td>Clients retry across failover. Reads move off the leader.</td><td>Leadership sharded per partition, fencing tokens enforced at the storage layer, not in application code.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Read down the last column and one theme repeats: nothing in it is a new technology. Every entry is the same mechanism from the first column with an explicit policy attached, because the thing that actually changes between 100 and 10,000 requests per second is that defaults stop being survivable. At 100 you can leave concurrency, retention, ordering, and staleness unspecified and the system will behave. At 10,000 every one of those must be a number somebody chose and can defend.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit to build from this chapter is asking, of any asynchronous design, "if this process dies right now, who still knows this work exists?" Walk it for a system you already run: pick one request, follow it past the point where the caller got its response, and name the durable record at every hop. Where you cannot name one, you have found the place work goes missing. Then bring me your Little's Law arithmetic for the consumer pool and let me push on the assumptions, because the service time you assume is almost always the p50 when the thing that hurts you is the p99.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://arxiv.org/abs/cs/0408036">Gray and Lamport, "Consensus on Transaction Commit"</a>. It is the paper that shows two-phase commit is not a protocol that occasionally fails under coordinator loss but is formally the zero-fault-tolerance case of a more general algorithm, and understanding that framing is what lets you argue for or against distributed transactions from first principles rather than from folklore. Pair it with the <a href="https://sre.google/sre-book/distributed-periodic-scheduling/">Google SRE Book chapter on distributed cron</a>, which is the best short treatment anywhere of choosing at-most-once over at-least-once and living with the consequences.</p>
+
+  <div class="pager">
+    <a href="0001-resilience-patterns.html"><span class="dir">&larr; Previous</span><span class="ttl">Resilience Patterns</span></a>
+    <a class="nxt" href="0003-protocols-and-real-time.html"><span class="dir">Next &rarr;</span><span class="ttl">Protocols and Real-Time Transport</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 3 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

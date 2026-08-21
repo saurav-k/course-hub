@@ -1,0 +1,457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 4: Protocols and Real-Time Transport - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 04 &middot; Protocols and Real-Time Transport</div>
+  <h1>Protocols and Real-Time Transport</h1>
+  <p class="paper-meta">
+    <span class="pill">9 topics</span>
+    How bytes actually get between two machines, and what each choice costs you in connections, latency, and operational complexity.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Pushing data to a client is a choice between <b>holding a connection open</b> and <b>asking again</b>. Holding costs memory and stickiness; asking costs requests per second, and the request rate is arithmetic you can do in your head.</li>
+      <li>Everything above the socket inherits the socket's failure modes. <b>HTTP/2 multiplexes streams but still rides one ordered TCP byte stream</b>, so one lost packet stalls every stream on that connection. HTTP/3 fixes exactly that and nothing else.</li>
+      <li><b>DNS is a cache with a timer, not a routing system.</b> Your failover time is detection time plus TTL, and lowering the TTL buys speed with query volume.</li>
+      <li>A protocol change and a contract change are different problems. <b>Versioning is a promise you make to callers</b>, and the wire format never enforces it for you.</li>
+    </ul>
+  </div>
+
+  <h2>1. The stack you are actually choosing from</h2>
+
+  <p>Almost every question in this chapter is one question wearing different clothes: who holds state, and for how long. A poll holds nothing and pays for that with repeated requests. A WebSocket holds a socket, a kernel buffer, and a piece of your load balancer's routing table, and pays for that with everything that goes wrong when a connection outlives a deploy. DNS holds an answer in ten thousand caches you do not control. An API version holds a promise to callers you have never met.</p>
+
+  <p>This chapter has unusually good primary sources. Nearly every topic below is defined in an RFC or a living standard, and the specifications are short, readable, and blunt about their own limitations. Read them. A candidate who can say "RFC 9113 says explicitly that TCP head-of-line blocking is not addressed by this protocol" is not reciting trivia, they are quoting the spec authors describing the thing that will page you.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  APP["Application payload<br/>(JSON, protobuf)"]
+  subgraph L7["Application protocols"]
+    H1["HTTP/1.1<br/>long polling, SSE"]
+    H2["HTTP/2<br/>multiplexed streams"]
+    H3["HTTP/3"]
+    WS["WebSocket<br/>(RFC 6455)"]
+    GR["gRPC<br/>(over HTTP/2)"]
+  end
+  subgraph L4["Transport"]
+    TCP["TCP<br/>ordered, reliable"]
+    QUIC["QUIC over UDP<br/>per-stream reliability"]
+  end
+  NAME["DNS<br/>name to address"]
+  IP["IP packets on the wire"]
+  APP --> L7
+  H1 --> TCP
+  H2 --> TCP
+  WS --> TCP
+  GR --> H2
+  H3 --> QUIC
+  TCP --> IP
+  QUIC --> IP
+  NAME -. "resolved before<br/>any connection" .-> L4
+  </div><figcaption>The same payload can leave your process through five different doors, and the door decides your failure modes. <b>Note that gRPC is not a transport at all: it is a calling convention layered on HTTP/2, so it inherits every property of the TCP connection underneath it.</b> DNS sits outside the stack because it runs before the connection exists, which is why DNS problems look like connectivity problems.</figcaption></figure>
+
+  <h2>2. Pushing to a client that is already listening</h2>
+
+  <h3 id="websockets">WebSockets</h3>
+
+  <p>A WebSocket is a full-duplex message channel that starts life as an HTTP request and then stops being HTTP. The client sends a GET carrying an <code>Upgrade: websocket</code> header and a random 16-byte <code>Sec-WebSocket-Key</code>; the server concatenates that key with the fixed GUID <code>258EAFA5-E914-47DA-95CA-C5AB0DC85B11</code>, hashes with SHA-1, base64-encodes it into <code>Sec-WebSocket-Accept</code>, and answers <code>101 Switching Protocols</code>. That absurd-looking GUID dance exists to prove the server actually understands WebSockets rather than being a confused proxy echoing headers. After the 101, the same TCP connection carries binary frames in both directions with no further HTTP involved.</p>
+
+  <p>The framing is deliberately cheap. RFC 6455 section 5.2 defines a base header of two bytes carrying FIN, opcode, the mask bit, and a 7-bit payload length. Payloads up to 125 bytes are described entirely in those two bytes; the value 126 means a 16-bit length follows, and 127 means a 64-bit length follows. Every client-to-server frame must additionally carry a 32-bit masking key, so client frames pay four extra bytes. A server pushing a 40-byte update therefore spends 2 bytes of protocol overhead, against several hundred bytes of HTTP headers for the equivalent poll response.</p>
+
+  <p><b>Named example.</b> Discord's Gateway, in the gaming and messaging industry, is a WebSocket connection per client. The server sends a Hello with a heartbeat interval, the client heartbeats on that interval with jitter, and every event carries a sequence number so that a dropped connection can be repaired by reconnecting to a <code>resume_gateway_url</code> and replaying from the last sequence seen rather than refetching the world. Discord also caps clients at 1000 <code>IDENTIFY</code> calls per 24 hours, which is the operational tell: a full re-identify is expensive enough that they ration it. Without the persistent connection, every client would poll for messages that mostly have not arrived. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6455.html">RFC 6455, The WebSocket Protocol</a>, and <a href="https://docs.discord.com/developers/events/gateway">Discord Gateway documentation</a>.</em></p>
+
+  <p><b>The arithmetic that decides this.</b> Take one million clients that need updates. Compare holding a socket against polling every five seconds.</p>
+
+  <div class="math">
+    polling rate = clients / poll interval = 1,000,000 / 5 s = <b>200,000 requests per second</b><br>
+    overhead bytes = 200,000 &times; 1,100 B = 220 MB/s &asymp; <b>1.76 Gbit/s of pure header traffic</b>
+    <span class="gloss">Clients is the number of connected users. Poll interval is how often each one asks. The 1,100 bytes is my assumption for one empty exchange: roughly 800 bytes of request headers with cookies and a user agent, plus roughly 300 bytes of response headers. Nothing in that 220 MB/s carries any data, because most polls find nothing new.</span>
+  </div>
+
+  <div class="math">
+    socket memory = connections &times; per-connection footprint = 1,000,000 &times; 10 KB = <b>10 GB</b><br>
+    per server at 100,000 connections each = 10 servers &times; 1 GB
+    <span class="gloss">Per-connection footprint is my assumption, not a measured figure: roughly 4 KB of kernel send and receive buffer plus application state for identity, subscriptions, and a write queue. Measure your own; it moves by an order of magnitude depending on buffer tuning and what you keep per session.</span>
+  </div>
+
+  <p>The comparison is not close, and it is not about bandwidth. It is that 200,000 requests per second is a serious tier of infrastructure by itself, while ten machines holding a hundred thousand idle sockets each is a Tuesday. That is the whole case for WebSockets, and it only appears once you multiply.</p>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b> of updates, do not build this. Poll. A WebSocket layer at this tier adds sticky routing, connection draining, and a reconnect storm you will meet during your first deploy, in exchange for latency nobody asked for. At <b>1,000 requests per second</b>, the answer depends on connection count rather than message count: a thousand messages per second spread over five hundred connected users is worth a persistent connection, while the same rate from short-lived batch clients is not. At <b>10,000 requests per second</b> and above, with hundreds of thousands of concurrent clients, persistent connections are mandatory, and so is everything around them: a connection-aware load balancer, backpressure on the server write queue, per-connection message rate limits, and a resume protocol with sequence numbers so that a rolling restart does not turn into a full state refetch by every client at once.</p>
+
+  <p><b>Trade-off and failure mode.</b> You have traded a stateless request path for a stateful one. Every deploy now disconnects everybody, and the failure mode is the reconnect storm: a hundred thousand clients dropped simultaneously, all retrying at once, hitting an authentication path and a state-hydration path that were sized for a trickle. The fixes are jittered exponential backoff on the client, resume-from-sequence instead of full refetch, and draining connections gradually rather than all at once. The second failure mode is silent death. A TCP connection through a NAT or a load balancer can be dead for minutes while both ends believe it is fine, which is exactly why RFC 6455 defines ping and pong frames and why every serious implementation heartbeats.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Handshaking: HTTP GET with Upgrade
+  Handshaking --> Open: 101 Switching Protocols
+  Handshaking --> Failed: 4xx, proxy strips Upgrade
+  Open --> Open: frames both ways
+  Open --> Open: ping / pong keeps NAT alive
+  Open --> Draining: server deploy, close code 1001
+  Open --> Zombie: missed pong, no TCP error
+  Zombie --> Backoff: client detects and closes
+  Draining --> Backoff: client sees clean close
+  Backoff --> Handshaking: jittered retry with resume token
+  Failed --> [*]
+  </div><figcaption>The interesting states in a WebSocket's life are the ones after the connection breaks, not the ones before. <b>Zombie is the state that hurts: the socket looks open to both ends, so nothing errors and nothing retries until a heartbeat times out.</b> Backoff must be jittered, because a synchronised retry from every dropped client is a self-inflicted denial of service.</figcaption></figure>
+
+  <h3 id="long-polling">Long Polling</h3>
+
+  <p>Long polling is the client asking a question the server refuses to answer until it has news. The client issues an ordinary HTTP request; the server holds it open rather than responding empty; when an event occurs or a timeout expires, the server responds; the client immediately issues the next request. It is not a hack bolted onto HTTP, it is a documented pattern with a documented set of problems, catalogued in RFC 6202 alongside its sibling, HTTP streaming.</p>
+
+  <p>RFC 6202 is worth reading precisely because it is honest about the costs. It notes that a long poll's maximum latency exceeds three network transits, that each outstanding request holds server resources, that header overhead is disproportionate for small messages, and that clients should limit themselves to a single long poll shared between tabs and frames rather than one per tab. It recommends timeouts in the range of 30 to 120 seconds and explicit cache suppression, because an intermediary that caches a long poll response turns a live feed into a frozen one.</p>
+
+  <p><b>Named example.</b> HashiCorp Consul's blocking queries, used across infrastructure and logistics platforms for service discovery, are a textbook long poll. A read endpoint returns an <code>X-Consul-Index</code> header describing the current state; the client re-requests with that index and a <code>wait</code> parameter, and the server holds the request until the index changes. The wait defaults to five minutes and is capped at ten. Consul then adds up to one sixteenth of the wait time as random jitter, explicitly to spread out wake-ups and avoid a thundering herd when many clients are blocked on the same key. That jitter is the detail worth stealing: without it, every watcher of a changed key wakes in the same millisecond. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6202.html">RFC 6202, Known Issues and Best Practices for the Use of Long Polling and Streaming in Bidirectional HTTP</a>, and <a href="https://developer.hashicorp.com/consul/api-docs/features/blocking">Consul blocking queries</a>.</em></p>
+
+  <p><b>The arithmetic.</b> Long polling does not eliminate requests, it lowers their rate to one per timeout window per client, plus one per delivered event.</p>
+
+  <div class="math">
+    baseline request rate = clients / timeout = 100,000 / 30 s = <b>3,333 requests per second</b><br>
+    with a 5-second poll instead = 100,000 / 5 = 20,000 requests per second
+    <span class="gloss">Clients is concurrent connected users. Timeout is the server's hold duration before it answers empty. The baseline rate is the traffic you pay when absolutely nothing is happening, purely to keep the channel warm. Raising the timeout from 5 to 30 seconds cuts idle request volume six-fold, at the cost of holding six times as many requests open at any instant.</span>
+  </div>
+
+  <p>That last clause is the trade nobody states out loud. Long polling converts requests per second into concurrent open requests. At a 30-second timeout, all 100,000 clients have a request in flight at all times, so your server is holding 100,000 open requests whether or not you called it a WebSocket. If your framework allocates a thread per request, you are finished at a few thousand.</p>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b>, long polling is the correct answer far more often than engineers admit. It needs no new protocol, works through every proxy, and any HTTP client can speak it. At <b>1,000 requests per second</b>, it works only on an asynchronous server where a held request costs a small object rather than a thread, and only with client-side coordination so one browser holds one poll rather than one per tab. At <b>10,000 requests per second</b>, long polling has become a worse WebSocket: you are paying full HTTP headers per event, holding as many connections as a persistent transport would, and getting higher latency than either. Migrate.</p>
+
+  <p><b>Trade-off and failure mode.</b> The characteristic failure is the gap. Between the server responding and the client issuing its next request there is a window in which the client is not listening, and events that arrive in that window are lost unless the server buffers them against a cursor like Consul's index. Systems that long poll without a cursor lose messages under exactly the load where messages matter most. The second failure is the herd: any event that wakes many blocked clients simultaneously produces a synchronised reconnect burst, which is why jitter is not optional.</p>
+
+  <h3 id="server-sent-events">Server-Sent Events</h3>
+
+  <p>Server-sent events are a one-directional stream from server to client over a single HTTP response that never ends. The server sets <code>Content-Type: text/event-stream</code> and writes UTF-8 text records separated by blank lines, each record built from the fields <code>event</code>, <code>data</code>, <code>id</code>, and <code>retry</code>. The browser side is the <code>EventSource</code> interface, and its defining feature is that reconnection is built into the standard rather than into your code: if the connection drops, the browser reconnects on its own, and it sends a <code>Last-Event-ID</code> request header carrying the last <code>id</code> it saw, so the server can resume from that point. The <code>retry</code> field lets the server dictate the reconnection delay in milliseconds.</p>
+
+  <p>The WHATWG standard is strict on one point that catches people out: "Event streams in this format must always be encoded as UTF-8." There is no binary SSE. If you need to push bytes, you are base64-encoding them and paying 33 percent for the privilege, at which point a WebSocket is the better tool.</p>
+
+  <p><b>Named example.</b> Anthropic's Messages API streams model output over server-sent events when a request sets <code>"stream": true</code>, which is the dominant pattern across the AI industry for token-by-token delivery. The shape fits the problem exactly: the flow is entirely server to client, the payload is text, the client wants each token the instant it exists, and reconnection semantics matter less than time to first byte. This is where transport choice meets latency perception, covered from the model side in <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">time to first token and inter-token latency</a>. <em>Source: <a href="https://html.spec.whatwg.org/multipage/server-sent-events.html">WHATWG HTML Living Standard, Server-sent events</a>, and <a href="https://platform.claude.com/docs/en/docs/build-with-claude/streaming">Anthropic streaming documentation</a>.</em></p>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b>, SSE is the cheapest correct answer for any server-to-client feed: no new protocol on the wire, no new load balancer configuration, and reconnection handled by the browser. At <b>1,000 requests per second</b> the constraint is connection count against HTTP/1.1's per-origin connection limit, which RFC 6202 notes browsers raised to roughly six to eight from the older recommendation of two. A user with your dashboard open in four tabs, each holding an SSE stream, has spent most of their budget for your origin and other requests start queueing. Running SSE over HTTP/2 removes this, because streams multiplex over one connection. At <b>10,000 requests per second</b>, SSE remains viable and is often the right answer for fan-out feeds, but you now need explicit heartbeat comments to keep intermediaries from timing out an idle stream, event ids on everything so resumption works, and a plan for the write-buffer backpressure that appears when a slow client cannot drain as fast as you produce.</p>
+
+  <p><b>Trade-off and failure mode.</b> You gave up the client-to-server direction. Anything the client needs to send goes over a separate ordinary request, which is usually fine and occasionally makes ordering across the two channels genuinely hard to reason about. The classic operational failure is a buffering intermediary: a reverse proxy that accumulates the response instead of forwarding each chunk turns your real-time stream into a batch delivery, and it fails silently because everything still works, just late. RFC 6202 calls this out directly as the main hazard of HTTP streaming. Test through your real proxy chain, not against the origin.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant S as Server
+  Note over C,S: Long polling - request per event, plus one per timeout
+  C->>S: GET /events?index=41
+  S-->>C: 200, event 42 (held 8s)
+  C->>S: GET /events?index=42
+  S-->>C: 200, empty (timeout 30s)
+  C->>S: GET /events?index=42
+  Note over C,S: Server-sent events - one response, never closed
+  C->>S: GET /stream, Accept text/event-stream
+  S-->>C: 200 text/event-stream (stays open)
+  S-->>C: id:43 data:{...}
+  S-->>C: :heartbeat comment
+  S-->>C: id:44 data:{...}
+  Note over C,S: WebSockets - one socket, both directions
+  C->>S: GET /ws, Upgrade: websocket
+  S-->>C: 101 Switching Protocols
+  S-->>C: frame: id 45 (2-byte header)
+  C->>S: frame: ack (masked, 6-byte header)
+  S-->>C: frame: id 46
+  </div><figcaption>The same three events delivered three ways. <b>Long polling pays a full request and response per event and cannot receive anything during the gap between them; SSE pays once and streams forever but only downward; WebSockets pay once and stream both ways.</b> Count the arrows: the transport choice is visible as message count before it is visible as latency.</figcaption></figure>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">An internal dashboard needs server-to-client updates only, must reconnect on its own, and has to survive a corporate proxy chain you do not control. Which transport fits with the least operational cost?</div>
+    <button class="q-opt">Long polling with a thirty second server side timeout</button>
+    <button class="q-opt">Server-sent events on one long lived HTTP response body</button>
+    <button class="q-opt">A WebSocket upgrade that carries message traffic both ways</button>
+    <button class="q-opt">Raw UDP datagrams pushed straight from the origin server</button>
+    <div class="q-fb">SSE gives you automatic reconnection and Last-Event-ID resumption from the standard itself, and it is an ordinary HTTP response so most proxies pass it. Long polling works through proxies too but loses events in the gap between responses unless you build a cursor, and it costs a request per event. A WebSocket is more capability than the requirement asks for, and the Upgrade header is exactly what old corporate proxies strip. UDP is not routable through an HTTP proxy at all and offers no delivery guarantee, so it fails the requirement outright.</div>
+  </div>
+
+  <h2>3. Getting to the right machine in the first place</h2>
+
+  <h3 id="dns">DNS</h3>
+
+  <p>DNS is a distributed, cached, hierarchical key-value lookup that turns a name into an address before any connection exists. A stub resolver on the client asks a recursive resolver; the recursive resolver, if it has nothing cached, walks the hierarchy from a root server to the TLD servers to your authoritative servers, following referrals; the answer comes back and is cached at every layer for the duration of its TTL. RFC 1035 defines the TTL as "the time interval that the resource record may be cached before the source of the information should again be consulted."</p>
+
+  <p>Two mechanical details matter operationally. First, a DNS message over UDP was originally restricted to 512 bytes, with anything longer setting the TC truncation bit and forcing a retry over TCP. EDNS(0) lifted that by letting the requestor advertise a larger payload size in an OPT pseudo-record, and RFC 6891 suggests 4096 octets as a starting point with fallback to 1280 to 1410 and then 512. Second, and more painful: RFC 2181 states plainly that "The TTL specifies a maximum time to live, not a mandatory time to live." A resolver is free to cap your TTL, discard early, or in the case of some long-lived application runtimes, cache an answer for the life of the process regardless of what you published.</p>
+
+  <p><b>Named example.</b> Amazon Route 53 health checks with DNS failover, used by essentially every e-commerce platform on AWS, monitor an endpoint and stop returning its record when it goes unhealthy, routing traffic to a healthy alternative. This is the standard cross-region failover mechanism, and it is also the standard source of the incident report sentence "traffic took six minutes to move." <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc1035.html">RFC 1035, Domain Names - Implementation and Specification</a>, <a href="https://www.rfc-editor.org/rfc/rfc2181.html">RFC 2181, Clarifications to the DNS Specification</a>, <a href="https://www.rfc-editor.org/rfc/rfc6891.html">RFC 6891, Extension Mechanisms for DNS (EDNS(0))</a>, and <a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover.html">Amazon Route 53 health checks</a>.</em></p>
+
+  <p><b>The arithmetic that gets people fired.</b> Your DNS failover time is not your TTL. It is detection plus TTL.</p>
+
+  <div class="math">
+    worst case failover = detection time + TTL<br>
+    detection = interval &times; threshold = 10 s &times; 3 = 30 s<br>
+    worst case = 30 s + 300 s = <b>330 s = 5.5 minutes</b><br>
+    mean case &asymp; 30 s + TTL/2 = 30 + 150 = <b>180 s = 3 minutes</b>
+    <span class="gloss">Interval is how often the health checker probes. Threshold is how many consecutive failures mark the endpoint down. TTL is the published record lifetime. The worst case assumes a resolver cached the answer one instant before you changed it, so it holds the dead address for the full TTL. The mean case assumes cache ages are uniformly distributed, which gives an average remaining life of half the TTL.</span>
+  </div>
+
+  <p>Now price the fix. Lowering the TTL shortens the tail and raises query volume on your authoritative servers in exact proportion.</p>
+
+  <div class="math">
+    authoritative query rate &asymp; distinct caching resolvers / TTL<br>
+    at TTL 300 s: 5,000 / 300 = <b>16.7 queries per second</b><br>
+    at TTL 20 s: 5,000 / 20 = <b>250 queries per second</b> (15&times; more)<br>
+    new worst case = 30 s + 20 s = <b>50 seconds</b>
+    <span class="gloss">Distinct caching resolvers is my assumption of how many recursive resolvers hold your record at once; measure it from your authoritative query logs rather than guessing. Each one re-queries roughly once per TTL. Dropping TTL from 300 to 20 seconds cuts worst-case failover from 5.5 minutes to 50 seconds and multiplies authoritative query load by fifteen.</span>
+  </div>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b>, a 300-second TTL is fine and DNS is not your failover mechanism, a human is. At <b>1,000 requests per second</b>, you want TTLs in the 60-second range on anything that participates in failover, health checks driving record changes automatically, and the recognition that five minutes of a dead region is now thousands of failed requests. At <b>10,000 requests per second</b>, stop relying on DNS for fast failover entirely. Use it to reach a load balancer or anycast address that stays constant, and do the actual failover inside that layer, where you control the timing rather than negotiating with ten thousand caches. Reserve DNS changes for planned, slow migrations.</p>
+
+  <p><b>Trade-off and failure mode.</b> A low TTL is a standing bill you pay every day to shorten an outage you have a few times a year, and it does not even work reliably because RFC 2181 lets resolvers ignore you. The nastiest failure mode is not slow failover, it is a client that caches forever: an application runtime with an infinite DNS cache will keep hammering a decommissioned address long after every resolver on the internet has moved on, and no amount of TTL tuning on your side fixes it. The second failure mode is the negative cache. If a resolver caches an NXDOMAIN during a misconfiguration window, your domain stays broken for those users after you have fixed it.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as Application
+  participant St as Stub resolver
+  participant R as Recursive resolver
+  participant Rt as Root servers
+  participant T as TLD servers (.com)
+  participant Au as Your authoritative servers
+  A->>St: connect to api.example.com
+  St->>R: query A api.example.com (RD=1)
+  alt answer already cached and TTL not expired
+    R-->>St: cached A record, remaining TTL
+  else cache miss, full walk
+    R->>Rt: query api.example.com
+    Rt-->>R: referral to .com nameservers
+    R->>T: query api.example.com
+    T-->>R: referral to ns1.example.com
+    R->>Au: query api.example.com
+    Au-->>R: A 203.0.113.10, TTL 300
+    R->>R: cache for up to 300s (RFC 2181: a maximum)
+    R-->>St: A 203.0.113.10
+  end
+  St-->>A: 203.0.113.10
+  A->>A: now open TCP or QUIC to that address
+  </div><figcaption>A cold resolution costs three sequential round trips before your connection has even started; a warm one costs a single lookup against a nearby cache. <b>The cached branch is the common case, and it is exactly why a record change does not take effect when you make it: the answer already lives in caches you do not operate.</b> Note the last line: DNS finishes before the transport handshake begins, so every millisecond here lands on time to first byte.</figcaption></figure>
+
+  <h3 id="tcp-vs-udp">TCP vs UDP</h3>
+
+  <p>TCP gives you a reliable, ordered byte stream between two endpoints. It establishes state with a three-way handshake in which each side sends its initial sequence number and receives an acknowledgement, numbers every octet so loss and duplication are detectable, retransmits what is not acknowledged, and paces the sender with a receiver-advertised window. Each connection costs a Transmission Control Block on both ends holding sequence variables and buffer pointers, which is why connection count is a capacity dimension and not just a number in a dashboard. UDP gives you almost nothing: an 8-byte header of source port, destination port, length, and checksum, and Postel's blunt statement from 1980 that "delivery and duplicate protection are not guaranteed."</p>
+
+  <p>The interesting modern framing is not "reliable versus unreliable". It is where you want the reliability logic to live. TCP's ordering guarantee is a single ordered byte stream, which is exactly right for a file and exactly wrong for a hundred independent messages, because a gap anywhere blocks everything behind it. UDP's emptiness is what makes it a substrate: QUIC is built on UDP specifically so that reliability and ordering can be implemented per stream, in userspace, without waiting for kernels and middleboxes to be upgraded.</p>
+
+  <p><b>Named example.</b> DNS itself is the canonical UDP application: a single small request, a single small response, and a retry policy in the client, where a connection handshake would double the latency of every lookup for no benefit. In the opposite direction, Google's internet-scale QUIC deployment across Chrome and YouTube, described in the SIGCOMM 2017 paper by Langley and colleagues, put a reliable transport on top of UDP; the authors estimated at publication that 7 percent of internet traffic was QUIC. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9293.html">RFC 9293, Transmission Control Protocol</a>, <a href="https://www.rfc-editor.org/rfc/rfc768.html">RFC 768, User Datagram Protocol</a>, and <a href="https://research.google/pubs/the-quic-transport-protocol-design-and-internet-scale-deployment/">"The QUIC Transport Protocol: Design and Internet-Scale Deployment" (SIGCOMM 2017)</a>.</em></p>
+
+  <p><b>The arithmetic that bites: connections are a bounded resource.</b> A connection is identified by the four-tuple of source address, source port, destination address, and destination port. When one machine opens many connections to one destination, only the source port varies, and ports are finite. RFC 6335 defines the Dynamic or Ephemeral range as 49152 to 65535.</p>
+
+  <div class="math">
+    ephemeral ports = 65535 - 49152 + 1 = <b>16,384</b><br>
+    max concurrent connections, one source IP to one destination IP:port = <b>16,384</b><br>
+    time to exhaustion at 500 new connections/s with 60 s TIME_WAIT = 500 &times; 60 = <b>30,000 &gt; 16,384</b>
+    <span class="gloss">The IANA dynamic range is the standard ephemeral range; operating systems let you widen the local range, but the absolute ceiling is 65,535 ports per source address. TIME_WAIT is the period a closed connection's four-tuple stays reserved. The last line is the failure: at 500 new connections per second held 60 seconds each, you need 30,000 simultaneous four-tuples and you have 16,384, so new connections start failing while the machine looks idle.</span>
+  </div>
+
+  <div class="math">
+    file descriptors needed = connections + listeners + files + margin<br>
+    100,000 sockets + ~200 = <b>RLIMIT_NOFILE must exceed 100,200</b>
+    <span class="gloss">RLIMIT_NOFILE is "a value one greater than the maximum file descriptor number that can be opened by this process"; exceeding it returns EMFILE. Every socket, log file, and open config file consumes one. Raising the hard limit is itself bounded by /proc/sys/fs/nr_open. A server that plans on 100,000 connections and ships with a default soft limit will fail at the default, not at 100,000.</span>
+  </div>
+
+  <p><em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6335.html">RFC 6335, IANA port registry procedures</a>, and <a href="https://man7.org/linux/man-pages/man2/getrlimit.2.html">getrlimit(2), Linux man-pages</a>.</em></p>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b>, use TCP and never think about it. At <b>1,000 requests per second</b>, connection reuse becomes a real design decision: keep-alive and connection pooling are the difference between a handshake per request and a handshake per thousand requests, and this is the tier where ephemeral port exhaustion first appears, usually on a proxy talking to a single backend. At <b>10,000 requests per second</b>, connection lifecycle is a first-class part of the architecture. You are sizing pools deliberately, raising descriptor limits in the process supervisor, spreading outbound connections across source addresses or destinations to escape the 16,384-port ceiling, and considering QUIC to make the handshake cheaper.</p>
+
+  <p><b>Trade-off and failure mode.</b> TCP's cost is state and its failure mode is head-of-line blocking, which the next topic makes concrete. UDP's cost is that you must reimplement everything TCP gives you, and its failure mode is that you will do it worse: naive UDP applications have no congestion control, so under load they contribute to congestion collapse rather than backing off. Choose UDP when you are adopting a designed protocol on top of it, such as QUIC, and not because reliability sounded expensive.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">Your record has a 300 second TTL, and health checks mark an endpoint unhealthy after three failed probes at a 10 second interval. What is the worst case time before clients stop reaching the dead endpoint?</div>
+    <button class="q-opt">Thirty seconds, because the health check drives the switch</button>
+    <button class="q-opt">Three hundred seconds, because the record TTL bounds caching</button>
+    <button class="q-opt">Three hundred thirty seconds, adding detection time to TTL</button>
+    <button class="q-opt">Six hundred seconds, because resolvers double every stated TTL</button>
+    <div class="q-fb">Detection and cache expiry are sequential, not overlapping: the record cannot change until the endpoint is marked down at 30 seconds, and a resolver that cached the old answer an instant before that holds it for the full 300 seconds afterwards. Thirty seconds counts only detection and ignores caching entirely. Three hundred counts only the TTL and assumes detection is instant. Six hundred invents a doubling rule that no specification defines; RFC 2181 says a resolver may shorten a TTL, never that it extends one.</div>
+  </div>
+
+  <h2>4. The HTTP family and the RPC layer above it</h2>
+
+  <h3 id="http2-http3">HTTP/2 and HTTP/3</h3>
+
+  <p>HTTP/2 replaced HTTP/1.1's one-request-per-connection-at-a-time model with binary framing and multiplexed streams: many concurrent, independent, bidirectional exchanges share one TCP connection, header fields are compressed with HPACK, and both streams and the connection have credit-based flow control via WINDOW_UPDATE. RFC 9113 recommends that <code>SETTINGS_MAX_CONCURRENT_STREAMS</code> "be no smaller than 100, so as to not unnecessarily limit parallelism." This eliminated the HTTP/1.1 workarounds of domain sharding and sprite sheets in one move.</p>
+
+  <p>It did not, however, eliminate blocking, and the specification says so in as many words: "TCP head-of-line blocking is not addressed by this protocol." A hundred logically independent streams still ride one ordered TCP byte stream, and TCP will not deliver byte N+1 to the application before byte N. RFC 9114 puts the consequence precisely: with HTTP/2 over TCP, "a lost or reordered packet causes all active transactions to experience a stall regardless of whether that transaction was directly impacted by the lost packet."</p>
+
+  <p>HTTP/3 is HTTP semantics carried over QUIC instead of TCP. QUIC provides ordered byte streams with per-stream flow control and per-stream reliability, and RFC 9000 is explicit that it "does not provide any means of ensuring ordering between bytes on different streams." A lost packet therefore delays only the stream whose data it carried. Two further consequences follow. HPACK had to be replaced by QPACK, because HPACK depends on in-order delivery of compressed field sections and QUIC does not offer that. And because QUIC identifies connections by connection ID rather than by the address four-tuple, a client can migrate networks without reestablishing the connection.</p>
+
+  <p><b>The arithmetic, part one: head-of-line blocking.</b> Assume an 80 ms round trip, 1 percent packet loss, and 100 streams in flight across a 100-packet window.</p>
+
+  <div class="math">
+    expected losses per 100-packet flight = 100 &times; 0.01 = <b>1 packet</b><br>
+    recovery delay &asymp; 1 RTT = <b>80 ms</b><br>
+    HTTP/2 aggregate stall = 80 ms &times; 100 streams = <b>8,000 stream-milliseconds</b><br>
+    HTTP/3 aggregate stall = 80 ms &times; 1 stream = <b>80 stream-milliseconds</b>
+    <span class="gloss">Round trip time is the time for a packet and its acknowledgement. Loss rate is the probability any given packet is dropped. Recovery delay is roughly one round trip because a fast retransmit needs the receiver's duplicate acknowledgements to get back. Stream-milliseconds is stall duration multiplied by the number of streams affected, which is the honest unit here because one packet stalls one stream under HTTP/3 and all of them under HTTP/2. This model deliberately ignores the congestion window reduction that both protocols suffer; it isolates the ordering effect only.</span>
+  </div>
+
+  <p><b>The arithmetic, part two: the handshake.</b> Time to first byte includes getting the connection up.</p>
+
+  <div class="math">
+    HTTP/2: TCP handshake (1 RTT) + TLS 1.3 handshake (1 RTT) = 2 &times; 80 = <b>160 ms</b><br>
+    HTTP/3: combined QUIC handshake (1 RTT) = <b>80 ms</b><br>
+    HTTP/3 with 0-RTT resumption = <b>0 ms before the request goes out</b>
+    <span class="gloss">RTT is the 80 ms round trip assumed above. TCP needs one round trip for its three-way handshake before TLS can start; TLS 1.3 needs one more for a full handshake. QUIC combines the cryptographic and transport handshakes into one exchange, and with a pre-shared key from a previous session it can send application data in the first flight. Every millisecond saved here lands directly on the user's first byte, which matters most on high-latency mobile links.</span>
+  </div>
+
+  <p><b>Named example.</b> Google's QUIC deployment across Chrome and YouTube, in the streaming media industry, is the reference case, and its motivation is exactly the two numbers above: handshake round trips and stall behaviour on lossy mobile networks. The 0-RTT saving carries a caveat you must state in any design review, because RFC 8446 states it plainly: 0-RTT data "is not forward secret" and there are "no guarantees of non-replay between connections." Never put a non-idempotent request in 0-RTT data. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9113.html">RFC 9113, HTTP/2</a>, <a href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114, HTTP/3</a>, <a href="https://www.rfc-editor.org/rfc/rfc9000.html">RFC 9000, QUIC</a>, and <a href="https://www.rfc-editor.org/rfc/rfc8446.html">RFC 8446, TLS 1.3</a>.</em></p>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b>, HTTP/1.1 with keep-alive is entirely adequate and the protocol version is not your bottleneck. At <b>1,000 requests per second</b>, HTTP/2 earns its place at the edge, mostly by collapsing connection count: one connection per client instead of six removes handshake cost, socket memory, and the per-origin connection limit in one step. At <b>10,000 requests per second</b>, add HTTP/3 at the edge for the mobile and lossy-network population specifically, because that is where the head-of-line arithmetic above actually bites, and keep HTTP/2 available because some networks block UDP outright. Internally, between your own services on a reliable data-centre network, the loss rate is low enough that HTTP/3's advantage largely disappears; HTTP/2 remains the sensible default.</p>
+
+  <p><b>Trade-off and failure mode.</b> HTTP/2's own trap is that collapsing to one connection concentrates risk: a single connection now carries all of a client's traffic, so anything that kills it kills everything at once, and any per-connection limit you set is now a limit on the whole client. HTTP/3's cost is operational rather than protocol-level. It runs over UDP, which some corporate and mobile networks block or deprioritise, so you need working fallback; it does more work in userspace, so CPU per byte is typically higher than a kernel TCP stack; and your existing packet-capture, load-balancing, and observability tooling may simply not understand it. Both share the failure mode of connection-level flow control: a single stream that never reads can exhaust the connection window and stall its siblings, which looks exactly like a network problem and is not.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph H2["HTTP/2 over TCP - one ordered byte stream"]
+    P1["pkt 1<br/>stream A"] --> P2["pkt 2<br/>stream B"] --> PX["pkt 3 LOST<br/>stream C"] --> P4["pkt 4<br/>stream D"]
+    PX -.-> BLK["TCP holds pkt 4 in the receive buffer<br/>until pkt 3 is retransmitted"]
+    BLK --> ALL["Streams A, B, D all stall<br/>although none lost a packet"]
+  end
+  subgraph H3["HTTP/3 over QUIC - independent streams"]
+    Q1["pkt 1<br/>stream A"] --> Q2["pkt 2<br/>stream B"] --> QX["pkt 3 LOST<br/>stream C"] --> Q4["pkt 4<br/>stream D"]
+    QX -.-> ONLY["Only stream C waits<br/>for its retransmission"]
+    Q4 --> OK["Streams A, B, D deliver<br/>to the application immediately"]
+  end
+  </div><figcaption>The identical packet loss produces two completely different outcomes because of where the ordering guarantee lives. <b>TCP orders the whole connection, so one gap holds back every stream behind it; QUIC orders each stream separately, so a gap holds back only its own stream.</b> This single difference is the entire practical argument for HTTP/3, and it only pays off where loss is real, which is mobile and long-haul networks rather than your data centre.</figcaption></figure>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A mobile API multiplexes one hundred concurrent streams over a single HTTP/2 connection on a lossy network. Which statement describes the head-of-line blocking behaviour correctly?</div>
+    <button class="q-opt">One lost segment stalls delivery on every multiplexed stream</button>
+    <button class="q-opt">One lost segment stalls only the stream that carried it</button>
+    <button class="q-opt">Header compression removes all stalls caused by packet loss</button>
+    <button class="q-opt">Stream priority weights eliminate stalls caused by packet loss</button>
+    <div class="q-fb">RFC 9113 says outright that TCP head-of-line blocking is not addressed by HTTP/2, and RFC 9114 describes the result: a lost packet stalls all active transactions regardless of which one it belonged to. The second option describes HTTP/3 over QUIC, where per-stream reliability confines the stall. HPACK compresses header fields and changes bytes on the wire, not delivery ordering. Priority influences which stream the server chooses to send next, and has no effect once the bytes are already in flight and one of them is missing.</div>
+  </div>
+
+  <h3 id="grpc">gRPC</h3>
+
+  <p>gRPC is a calling convention layered on HTTP/2, not a transport of its own. Every call is an HTTP/2 POST to a path of the form <code>/Service-Name/MethodName</code> with <code>content-type: application/grpc</code>. The body is a sequence of length-prefixed messages, each preceded by a 1-byte compressed flag and a 4-byte big-endian length, so five bytes of framing per message. The call's outcome arrives in HTTP trailers as <code>grpc-status</code>, and the specification is emphatic that status "must be sent in Trailers even if the status code is OK." Because HTTP/2 streams are bidirectional, the same machinery supports four call shapes: unary, server streaming, client streaming, and bidirectional streaming. Deadlines and cancellation are first-class: a client states how long it will wait, the server can see that deadline, and either side can cancel.</p>
+
+  <p>The payload is normally protocol buffers. The encoding is a tag-length-value scheme where the tag is <code>(field_number &lt;&lt; 3) | wire_type</code> and integers use varints, so a small number costs one or two bytes rather than its decimal text.</p>
+
+  <p><b>The arithmetic.</b> Encode <code>{"user_id":150,"ok":true,"region":"us-east-1"}</code> both ways and count bytes.</p>
+
+  <div class="math">
+    JSON, minified, no whitespace = <b>46 bytes</b><br>
+    protobuf: field 1 int32 150 &rarr; <code>08 96 01</code> = 3 B; field 2 bool true &rarr; <code>10 01</code> = 2 B;<br>
+    field 3 string "us-east-1" &rarr; <code>1a 09</code> + 9 B = 11 B &nbsp;&rArr;&nbsp; <b>16 bytes</b><br>
+    reduction = (46 - 16) / 46 = <b>65 percent smaller</b><br>
+    on the wire with gRPC's 5-byte length prefix = 16 + 5 = <b>21 bytes</b>
+    <span class="gloss">Field numbers and wire types come from the protobuf encoding specification: 08 is field 1 with the varint wire type, and 150 encodes as the two varint bytes 96 01. The 1a is field 3 with the length-delimited wire type, followed by the length 09 and nine ASCII bytes. JSON pays for every field name on every single message; protobuf pays a one-byte tag instead, because the names live in the schema both sides already hold.</span>
+  </div>
+
+  <div class="math">
+    JSON over HTTP/1.1, assume 400 B of request headers = 46 + 400 = 446 B per call<br>
+    saving per call = 446 - 21 = 425 B<br>
+    at 10,000 calls/s: 425 &times; 10,000 = 4.25 MB/s &asymp; <b>34 Mbit/s saved</b><br>
+    at 100 calls/s: 425 &times; 100 = <b>42.5 KB/s saved</b>
+    <span class="gloss">The 400 bytes of headers is my assumption for a typical authenticated internal call carrying a bearer token, trace headers, and a user agent; measure yours. The comparison is deliberately unkind to JSON by putting it on HTTP/1.1, because HTTP/2's HPACK removes most repeated header cost. The point of the last two lines is that the identical optimisation is worth a network link at one tier and worth nothing at another.</span>
+  </div>
+
+  <p><b>Named example.</b> gRPC is the standard internal RPC layer for service meshes and polyglot backends, and its four call shapes cover cases that a request-and-response API models badly: a logistics platform streaming vehicle telemetry upward uses client streaming, and a control plane pushing configuration changes downward uses server streaming, both over the same connection as ordinary unary calls. The schema, not documentation, is the contract, and it is machine-checkable. <em>Source: <a href="https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md">gRPC over HTTP/2 protocol specification</a>, <a href="https://grpc.io/docs/what-is-grpc/core-concepts/">gRPC core concepts</a>, and <a href="https://protobuf.dev/programming-guides/encoding/">Protocol Buffers encoding specification</a>.</em></p>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b>, gRPC's bandwidth saving is irrelevant, as the arithmetic above shows: 42 kilobytes per second is nothing. Adopt it at this tier for the schema and the generated clients, or do not adopt it at all. At <b>1,000 requests per second</b>, the real wins arrive and none of them are bytes: deadline propagation across a call chain, first-class cancellation so an abandoned request stops burning downstream work, and streaming shapes that stop you from building a bespoke polling protocol. At <b>10,000 requests per second</b>, the payload and CPU savings become genuinely material, and so does the accompanying problem: gRPC holds long-lived HTTP/2 connections, so a connection-level load balancer will pin a client to one backend forever and your traffic distribution will be visibly lopsided. You need request-level load balancing, which means either a proxy that understands HTTP/2 or client-side balancing with periodic connection recycling.</p>
+
+  <p><b>Trade-off and failure mode.</b> You have traded human-readable, universally debuggable traffic for compact, schema-checked, tool-dependent traffic. A browser cannot speak raw gRPC and needs a translating proxy. Trailers, which carry the status code, are the least well-supported corner of HTTP/2, so an old intermediary can drop them and turn a successful call into an inscrutable failure. And because protobuf's wire format identifies fields by number rather than by name, reusing a field number for a different type is a silent data-corruption bug rather than a parse error, which is why every protobuf style guide tells you to reserve retired field numbers permanently.</p>
+
+  <h2>5. Changing the contract without breaking the callers</h2>
+
+  <h3 id="api-versioning">API Versioning</h3>
+
+  <p>API versioning is the mechanism by which you change a published interface while existing callers keep working. Three mechanisms dominate, and they are not interchangeable. A major version in the URI path or package name, which is Google's convention: AIP-185 requires a major version "encoded at the end of the protobuf package, and included as the first part of the URI path for REST APIs", exposing only the major number so that <code>v1</code> is a channel rather than a release. A date-based version selected by header, which is Stripe's: the account carries a default version, individual requests override it with a <code>Stripe-Version</code> header, monthly releases are backward compatible, and only named major releases carry incompatible changes. Or media type negotiation, using the <code>Accept</code> header defined in RFC 9110 alongside <code>Vary</code> so caches key correctly on the negotiated result.</p>
+
+  <p>The mechanism is the easy part. The hard part is agreeing what counts as breaking, and AIP-180 is the most useful checklist in print: removing or renaming any component, adding a required field to an existing request, changing a field's type, moving a field into or out of a oneof, changing a resource name format, altering a default value, or changing how a field with a default value is serialised. New enum values in responses get a specific warning, because existing clients may not handle a value they have never seen.</p>
+
+  <p><b>Named example.</b> Stripe, in payments, is the canonical implementation. Your account has a pinned default version, so an integration written years ago keeps receiving the response shape it was built against; you upgrade when you choose, and you can test a new version per request via the header before committing. Webhook endpoints carry their own version independently, which is the detail most teams miss when they copy the pattern: your outbound events are an API too, and pinning them separately is what stops an API upgrade from silently reshaping every webhook payload your customers parse. <em>Source: <a href="https://google.aip.dev/185">AIP-185, API Versioning</a>, <a href="https://google.aip.dev/180">AIP-180, Backwards Compatibility</a>, <a href="https://docs.stripe.com/api/versioning">Stripe API versioning</a>, and <a href="https://www.rfc-editor.org/rfc/rfc9110.html">RFC 9110, HTTP Semantics</a>.</em></p>
+
+  <p><b>Scale tiers.</b> The relevant axis here is callers rather than requests, but the request tiers track it closely enough to be useful. At <b>100 requests per second</b> with a handful of known consumers, version in the path, keep one version live, and coordinate migrations by talking to people. At <b>1,000 requests per second</b> you have consumers you cannot phone, so you need per-version request metrics before you can retire anything: without a dashboard showing which version each caller uses, deprecation is guesswork. At <b>10,000 requests per second</b> with external customers, you need the full apparatus: a published deprecation policy with dates, pinned defaults per account so upgrades are opt-in, separate versioning for webhooks and other outbound payloads, and the acceptance that AIP-185's requirement that versions "must be able to work at the same time within a single client application for a reasonable transition period" means running old code in production for a long time.</p>
+
+  <p><b>Trade-off and failure mode.</b> Every version you publish is a version you operate, test, and patch. The failure mode is not a broken client, it is version sprawl: four live majors, each with its own bug backlog, each blocking the refactor you actually need. The second failure mode is subtler and more common. Teams treat "additive change" as automatically safe and ship a new optional response field, and a caller validating against a closed schema rejects the whole payload. Whether that is a breaking change depends entirely on what tolerance you published, which is why the compatibility contract belongs in your documentation before the first release, not after the first incident.</p>
+
+  <h3 id="semantic-versioning">Semantic Versioning</h3>
+
+  <p>Semantic Versioning 2.0.0 assigns meaning to the three numbers in <code>MAJOR.MINOR.PATCH</code>, and the meaning is defined relative to your declared public API. Rule 6: patch "MUST be incremented if only backward compatible bug fixes are introduced." Rule 7: minor "MUST be incremented if new, backward compatible functionality is introduced to the public API." Rule 8: major "MUST be incremented if any backward incompatible changes are introduced to the public API." Two more rules do disproportionate work. Rule 3 makes releases immutable: "Once a versioned package has been released, the contents of that version MUST NOT be modified." Rule 4 makes the escape hatch explicit: "Major version zero (0.y.z) is for initial development. Anything MAY change at any time." Pre-release identifiers append after a hyphen, which is how <code>2.0.0-rc.1</code> sorts below <code>2.0.0</code>.</p>
+
+  <p>The critical realisation is that semver is a communication protocol, not an enforcement mechanism. Nothing verifies that your minor release is actually compatible. The number is a claim you make, and its entire value is that consumers trust it enough to accept upgrades automatically. Break that trust once, in a patch release, and every consumer who was on an automatic range pins an exact version forever, at which point your careful versioning has bought nothing.</p>
+
+  <p><b>Named example.</b> Package ecosystems are the load-bearing case: dependency ranges such as <code>^2.3.0</code> mean "any 2.x at or above this", so a library's semver claim decides whether thousands of downstream builds pick up your change automatically tonight or never. Google's AIP-185 takes the opposite position for network APIs, exposing only the major version because "v1.4.2" in a URI would be meaningless to a caller who cannot choose a patch level of a running service. That contrast is the lesson: semver fits artifacts a consumer installs and pins, while a hosted API needs the coarser channel model. <em>Source: <a href="https://semver.org/spec/v2.0.0.html">Semantic Versioning 2.0.0</a>, and <a href="https://google.aip.dev/185">AIP-185, API Versioning</a>.</em></p>
+
+  <p><b>The arithmetic of a major bump.</b> A major version is not a number, it is a bill you send to everyone downstream.</p>
+
+  <div class="math">
+    migration cost = consumers &times; effort per consumer<br>
+    40 services &times; 2 engineer-days = <b>80 engineer-days per major release</b><br>
+    at 2 majors per year = <b>160 engineer-days annually spent on your version number</b>
+    <span class="gloss">Consumers is the number of downstream codebases that depend on the artifact. Effort per consumer is my assumption of the read, change, test, and deploy cycle for a mechanical breaking change; a semantic behaviour change costs several times more. The point is not the exact figure, it is that the cost lands on other teams' roadmaps rather than yours, which is precisely why it is easy to underestimate and easy to inflict.</span>
+  </div>
+
+  <p><b>Scale tiers.</b> At <b>100 requests per second</b> with a small internal library, semver is a convention: follow it, but breaking changes are a conversation rather than a process. At <b>1,000 requests per second</b> with many internal consumers, the immutability rule starts earning its keep, because a rebuilt-and-republished version is the source of the "works on my machine" incident that takes a day to diagnose. At <b>10,000 requests per second</b> with external consumers, treat the version number as a public commitment: automated compatibility checks in continuous integration that fail the build when a public signature changes without a major bump, published support windows, and security patches backported to old majors for as long as you promised.</p>
+
+  <p><b>Trade-off and failure mode.</b> Semver's cost is discipline with no enforcement, and its characteristic failure is the accidental breaking change shipped as a patch, which is worse than an announced major because it lands on consumers who explicitly configured themselves to accept it without review. The second failure is version-number theatre: a project on 0.y.z for five years, using rule 4 to avoid ever making a compatibility promise while thousands of people depend on it in production. If people are depending on it, you have made the promise whether you numbered it or not.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Preview: v2 published as preview
+  Preview --> Stable2: v2 declared stable
+  note right of Preview
+    v1 stays fully supported
+    breaking changes still allowed in v2
+  end note
+  Stable2 --> BothLive: v1 and v2 both serving
+  BothLive --> Deprecated1: v1 deprecated, sunset date announced
+  Deprecated1 --> Deprecated1: per-version metrics drive outreach
+  Deprecated1 --> Sunset1: v1 traffic near zero, date reached
+  Sunset1 --> [*]: only v2 remains
+  BothLive --> BothLive: v2 minor and patch releases
+  </div><figcaption>A version retirement is a measured process, not an announcement. <b>The state that decides everything is Deprecated, and you can only leave it safely if you have per-version request metrics telling you who is still calling.</b> Note that the loop on BothLive is where all the ordinary work happens: minor and patch releases inside a live major, which is exactly what semantic versioning exists to let you ship without ceremony.</figcaption></figure>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">You add a new optional field to a JSON response, and one client validates payloads against a closed schema that rejects unknown fields. Under semantic versioning, how should this release be numbered?</div>
+    <button class="q-opt">A patch release, because no existing field was removed</button>
+    <button class="q-opt">A minor release, because the change is purely additive</button>
+    <button class="q-opt">A major release, because strict parsers reject the field</button>
+    <button class="q-opt">A judgment call, because your published contract decides it</button>
+    <div class="q-fb">Semantic versioning defines compatibility against your declared public API, so the answer depends on what you published. If your documentation states that clients must ignore unknown fields, the strict client is out of contract and this is a minor release. If your published schema is closed, you just broke a documented guarantee and it is a major one. The first option is wrong regardless, since new functionality is never a patch under rule 6. The second and third each assert one half of the answer while skipping the only question that resolves it, which is what you promised callers in writing.</div>
+  </div>
+
+  <h2>6. Scale drill: the driver-location feed</h2>
+
+  <p>Take one concrete system in the ride-hailing industry: a feed that shows riders where their assigned driver is, updated roughly once per second while a trip is active. Walk it across the tiers and watch every decision in this chapter change.</p>
+
+  <p><b>At 100 updates per second</b>, that is around 100 concurrent active trips. Poll. A rider's app requests the driver position every two seconds over ordinary HTTP/1.1 with keep-alive, giving 50 requests per second, which is nothing. DNS points at a single load balancer with a 300-second TTL, and failover is a human paging another human. There is no WebSocket layer, no SSE, no gRPC, and no version negotiation beyond <code>/v1/</code> in the path. Anything more is a system you will maintain for years to serve traffic one server could handle.</p>
+
+  <p><b>At 1,000 updates per second</b>, roughly 1,000 concurrent trips, polling starts costing more in headers than in payload, and rider-visible latency of up to two seconds becomes a complaint. Move to server-sent events: the flow is one-directional, the payload is text, and browser reconnection with <code>Last-Event-ID</code> comes free. Serve it over HTTP/2 so a rider with several tabs open does not exhaust the per-origin connection limit. Internally, the location ingestion path from driver devices becomes gRPC client streaming rather than one HTTPS POST per second per driver. DNS TTL drops to 60 seconds with health-check-driven failover, giving a worst case of roughly 90 seconds instead of 5.5 minutes. Version the rider-facing API in the path and start recording per-version request counts, because you now have app versions in the field you cannot upgrade on demand.</p>
+
+  <p><b>At 10,000 updates per second</b>, around 10,000 concurrent trips and hundreds of thousands of connected devices, every earlier choice needs its infrastructure. Driver devices hold WebSockets rather than streaming HTTP, because the channel is genuinely bidirectional once you add trip acceptance and cancellation, and by the earlier arithmetic 200,000 clients polling every 5 seconds would be 40,000 requests per second of mostly empty traffic. That means sticky, connection-aware load balancing, jittered reconnect, resume-by-sequence, and gradual connection draining on deploy. Add HTTP/3 at the mobile edge, where the head-of-line arithmetic is worth 80 milliseconds per loss event across every stream, and keep HTTP/2 for networks that block UDP. Stop using DNS for failover: point at a stable anycast address and fail over inside that layer. Raise <code>RLIMIT_NOFILE</code> well above your per-server connection target, and spread outbound connections so no single source address approaches the 16,384-port ceiling. Give the rider API pinned versions per client build, a published deprecation window, and per-version dashboards, because at this size you cannot ask everyone to upgrade at once. For the cost side of running feeds this size, see <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a>.</p>
+
+  <div class="callout"><b>The pattern to take away.</b> Every tier change in that walk-through was triggered by a number, not by a preference: request rate, connection count, port exhaustion, loss rate, or caller count. If you cannot name the number that would make you change transport, you are choosing by fashion. Write the number down before you write the design.</div>
+
+  <div class="teacher-note"><b>Your teacher.</b> The highest-leverage habit in this chapter is refusing to discuss a transport without first computing the connection count and the request rate. Try it on a system you already run: how many concurrent clients, how often does each one need news, and what is the resulting requests per second if you poll? Bring me those three numbers and I will argue the transport choice with you, including the case against the one you were expecting me to recommend.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://www.rfc-editor.org/rfc/rfc9114.html">RFC 9114, HTTP/3</a>, starting with its introduction, then read the head-of-line blocking discussion in <a href="https://www.rfc-editor.org/rfc/rfc9113.html">RFC 9113, HTTP/2</a>. Reading them in that order, one after the other, is the fastest way to internalise why a protocol can multiplex perfectly and still stall. Pair them with <a href="https://www.rfc-editor.org/rfc/rfc6202.html">RFC 6202</a>, which is the most honest four pages ever written about the cost of pretending HTTP is a push protocol.</p>
+
+  <div class="pager">
+    <a href="0002-async-and-event-driven.html"><span class="dir">&larr; Previous</span><span class="ttl">Asynchronous and Event-Driven Systems</span></a>
+    <a class="nxt" href="0004-database-performance.html"><span class="dir">Next &rarr;</span><span class="ttl">Database Performance</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 4 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

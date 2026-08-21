@@ -1,0 +1,406 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 1: Edge and Traffic Management - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 01 &middot; Edge and Traffic Management</div>
+  <h1>Edge and Traffic Management</h1>
+  <p class="paper-meta">
+    <span class="pill">10 topics</span>
+    The layer traffic hits before it reaches your application, where load is absorbed, shaped, or refused before it becomes expensive.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Every request your origin never sees is free. The whole edge exists to make that number as large as possible, and the arithmetic for it is <b>origin load = requests &times; (1 &minus; hit ratio)</b>.</li>
+      <li><b>Rate limiting</b> is capacity policy expressed as a contract. A token bucket has two numbers, a refill rate and a capacity, and the capacity is the one people forget to size.</li>
+      <li><b>Load balancers and reverse proxies</b> are not the same box wearing two names. One picks a backend; the other terminates, buffers, and re-shapes the connection so a slow client cannot occupy an application thread.</li>
+      <li><b>Refusal is a feature.</b> A WAF that blocks 0.1% of legitimate traffic and a rate limiter tuned for a fair share nobody actually uses both fail in the same direction: they turn an availability win into an availability incident.</li>
+    </ul>
+  </div>
+
+  <h2>1. The shape of the edge</h2>
+
+  <p>Draw the request path of any large system and the first third of it contains no business logic at all. A packet arrives at an address that may be announced from dozens of places at once, is inspected for whether it is even a legitimate connection attempt, is matched against a cache that may answer it outright, is scored against a rule set looking for attack payloads, is counted against a quota, and only then is handed to something that chooses which of your servers will do the work. Each of those stages exists because the stage behind it is more expensive per request than the stage in front of it.</p>
+
+  <p>That cost gradient is the organising idea of this chapter. A request refused by a rate limiter costs a counter increment. A request served from an edge cache costs a memory lookup and some bytes on the wire. A request that reaches your application costs a database connection, a thread, a set of downstream calls, and whatever that fans out into. The ratio between the cheapest and the most expensive stage is commonly three or four orders of magnitude, which is why moving work leftward along this path is the highest-leverage change available to most systems, and why a chapter about proxies is really a chapter about economics.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  U["Client"] --> A["Anycast DNS<br/>and BGP announcement"]
+  A --> B["Volumetric filtering<br/>packet and connection level"]
+  B --> C["CDN / edge PoP<br/>cache lookup"]
+  C -- "hit" --> U
+  C -- "miss" --> D["WAF<br/>payload inspection"]
+  D --> E["API gateway<br/>authn, quota, routing"]
+  E --> F["Load balancer<br/>backend selection"]
+  F --> G["Reverse proxy<br/>terminate, buffer, retry"]
+  G --> H["Application"]
+  H --> I["Database and<br/>downstream services"]
+  </div><figcaption>The edge is a sequence of progressively more expensive filters, and each one exists to protect the one to its right. <b>Cost per request rises by orders of magnitude from left to right, so the design goal is always to answer or refuse as far left as you can.</b> Note that the cache sits before the WAF: a cache hit is never inspected, which is a performance win and a security consideration at the same time.</figcaption></figure>
+
+  <h2>2. Refusing load before it costs anything</h2>
+
+  <h3 id="rate-limiting">Rate limiting</h3>
+
+  <p>A rate limiter converts an open-ended promise into a bounded one. Without it, your capacity plan is a hope about client behaviour; with it, capacity is a contract you enforce. The dominant mechanism is the <b>token bucket</b>: a counter refills at a fixed rate <i>r</i> up to a capacity <i>B</i>, every admitted request removes one token, and a request arriving at an empty bucket is refused. The two parameters mean genuinely different things. The refill rate is the sustained throughput you are promising. The capacity is the burst you are willing to absorb without complaint, and it is the parameter teams routinely leave at a default they never reasoned about.</p>
+
+  <p>The metering standard behind this is older than the web API vocabulary that borrowed it. RFC 2697 specifies a single-rate three-colour marker in exactly these terms, with a committed information rate feeding two buckets sized by a committed burst size and an excess burst size, and a packet is marked green, yellow, or red depending on which bucket can pay for it. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc2697.html">RFC 2697, A Single Rate Three Color Marker</a>.</em> The HTTP surface of the same idea is the 429 status code, which is defined together with the guidance that a response "SHOULD include details explaining the condition, and MAY include a Retry-After header indicating how long to wait before making a new request", and which explicitly declines to define how servers identify users or count requests. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc6585.html">RFC 6585, Additional HTTP Status Codes</a>.</em> That silence is the whole design problem: the protocol gives you a way to say no, and leaves the identity, the window, and the fairness policy entirely to you.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Steady
+  Steady --> Bursting: arrivals exceed refill rate
+  Bursting --> Steady: arrivals fall back below refill rate
+  Bursting --> Throttled: bucket reaches zero
+  Throttled --> Throttled: request refused with 429 and Retry-After
+  Throttled --> Recovering: arrivals drop below refill rate
+  Recovering --> Steady: bucket refills toward capacity
+  Recovering --> Throttled: client retries immediately without backoff
+  </div><figcaption>A token bucket has four operating states, and only two of them are visible to a well-behaved client. <b>The Recovering to Throttled edge is where most production incidents live: a client that retries the instant it is refused consumes every token the bucket earns and never escapes.</b> This is why Retry-After and client-side jitter are part of the rate limiter's design, not an afterthought for the client team.</figcaption></figure>
+
+  <p><b>A named real-world example.</b> Amazon API Gateway meters requests with a token bucket and exposes both halves of it to the operator: a throttling rate that is "the rate, in requests per second, that tokens are added to the token bucket", and a throttling burst that is "the capacity of the token bucket". It applies limits in a defined order, checking per-client and per-method usage-plan limits first, then per-method stage limits, then the account limit for the region, then the platform's own regional limit, and it returns 429 when submissions exceed the configured rate and burst. <em>Source: <a href="https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-request-throttling.html">Amazon API Gateway request throttling</a>.</em> For a multi-tenant payments API this layering is what stops one integrator's runaway retry loop from consuming a shared quota; remove it and the failure mode is not "one tenant is slow" but "every tenant is down because one tenant deployed a bad loop".</p>
+
+  <div class="math">
+    admitted(T) = B + (r &times; T)&nbsp;&nbsp;when the offered rate a &gt; r
+    <span class="gloss">Read as: over a window of T seconds, a client that is trying to go faster than you allow gets the whole bucket <i>B</i> once, plus whatever the bucket refills at rate <i>r</i> during the window. Everything else is refused. The bucket is a one-time allowance per quiet period, not a recurring bonus.</span>
+  </div>
+
+  <p>Work it through. Take a tenant limited to <i>r</i> = 100 requests per second with a bucket capacity <i>B</i> = 200, which offers 500 requests per second for ten seconds. The bucket drains in <i>B</i> / (<i>a</i> &minus; <i>r</i>) = 200 / (500 &minus; 100) = 0.5 seconds. Over the full window the tenant is admitted 200 + (100 &times; 10) = 1,200 requests out of 5,000 offered, so 24% get through and 3,800 receive a 429. Now change only the capacity to 2,000 and the same tenant is admitted 2,000 + 1,000 = 3,000 requests, and your origin absorbs a five-second spike at 500 requests per second before the limit engages. The refill rate set your bill; the capacity set your worst minute.</p>
+
+  <div class="math">
+    per-tenant limit = (fleet capacity / active tenants) &times; overcommit
+    <span class="gloss">Read as: divide the throughput you can actually serve by how many tenants might call at once, then multiply by how much you are willing to oversubscribe because tenants are rarely all busy simultaneously. The overcommit factor is where you decide whether to waste capacity or risk it.</span>
+  </div>
+
+  <p>Suppose a fleet serves 10,000 requests per second and you have 500 registered tenants. The strict fair share is 10,000 / 500 = 20 requests per second each. Set every limit to 20 and the system is safe and mostly idle, because on a normal day perhaps thirty tenants are active and you are refusing them at 20 while 9,400 requests per second of capacity sits unused. Set an overcommit factor of 10 and each tenant gets 200, which matches real usage far better, but now the arithmetic of the bad day is 10,000 / 200 = 50: it takes only fifty tenants saturating their limits at once to consume the entire fleet, and none of them has broken its contract. That is the honest trade. A rate limit is not a safety mechanism unless the sum of the limits is less than your capacity, and almost nobody can afford to set it that way, which is why rate limiting must be paired with <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#load-shedding">load shedding</a> that ignores the contract when the fleet is genuinely in trouble.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> a single in-process counter per instance is correct, and distributed coordination is waste. If you run four instances with a per-instance limit of one quarter of the global budget, the error from uneven hashing is a rounding difference nobody will notice. At <b>1,000 requests per second</b> that approximation starts to break, because traffic per tenant is bursty and unevenly distributed across instances, so one instance refuses a tenant while three others have tokens to spare. This is the tier where teams move to a shared counter in a fast store, accept the added round trip, and start caring about the failure mode when that store is unreachable. At <b>10,000 requests per second</b> a synchronous shared counter on every request is itself a scaling problem, and the mature answer is a two-level scheme: each node holds a local lease on a slice of the global budget, refreshes it asynchronously, and enforces locally between refreshes. You trade exactness for availability, and you should be able to state the size of that error out loud.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Rate limiting costs you accuracy, latency, and a support burden, because every limit eventually blocks a legitimate customer at the worst possible moment. It fails in two directions. Fail closed and an unreachable counter store turns into a full outage, since every request is refused for want of a token nobody can issue. Fail open and the limiter is exactly as useful as no limiter on the day you need it. The genuinely dangerous case is neither: it is a limiter that works perfectly while every refused client retries immediately, converting a throttled load into an amplified one. Refusal must be cheap, and the response must tell the client when to come back.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A tenant is capped at 100 requests per second with a 200-token bucket, and offers 500 requests per second for ten seconds. How many requests are admitted?</div>
+    <button class="q-opt">200 admitted, since the bucket alone bounds total throughput</button>
+    <button class="q-opt">1,200 admitted, since bucket plus refill bounds total throughput</button>
+    <button class="q-opt">1,000 admitted, since the refill alone bounds total throughput</button>
+    <button class="q-opt">5,000 admitted, since the burst allowance bounds total throughput</button>
+    <div class="q-fb">The bucket is spent once and the refill runs for the whole window, so it is 200 + (100 &times; 10) = 1,200. Answering 200 ignores that tokens keep arriving during the ten seconds. Answering 1,000 ignores the initial capacity, which is the parameter that decides how bad the first half-second is. Answering 5,000 describes a limiter that is not engaged at all, which is what you get when the burst capacity is set far above the sustained rate.</div>
+  </div>
+
+  <h2>3. Not paying for the same answer twice</h2>
+
+  <h3 id="caching">Caching</h3>
+
+  <p>A cache is a bet that the same answer will be asked for again before it stops being true. The mechanism is a keyed store in front of an expensive computation, plus a policy for how long an entry may be reused and what happens when it cannot be. HTTP formalises this precisely, and the vocabulary is worth using correctly because it maps onto real deployment choices. A <b>private cache</b> serves a single user and lives in the user agent; a <b>shared cache</b> serves many users and lives in an intermediary, which is why shared caches carry stricter rules and may not store responses carrying an Authorization header unless a directive explicitly permits it. Freshness lifetime comes from <code>s-maxage</code>, <code>max-age</code>, or <code>Expires</code>, and where none is present a cache may assign a heuristic expiration, with the specification encouraging "a heuristic expiration value that is no more than some fraction of the interval since that time". The <code>Age</code> header carries "the cache's estimate of the number of seconds since the origin server generated or validated the response". <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9111.html">RFC 9111, HTTP Caching</a>.</em></p>
+
+  <p>The single most useful equation in this chapter falls straight out of that. If <i>R</i> requests per second arrive and a fraction <i>h</i> of them are answered by the cache, the origin sees the rest.</p>
+
+  <div class="math">
+    origin load = R &times; (1 &minus; h)
+    <span class="gloss">Read as: the work your origin actually does equals total request volume multiplied by the miss ratio. <i>R</i> is what the internet sends you; <i>h</i> is the fraction you answer without waking the application; (1 &minus; <i>h</i>) is the only part you have to build capacity for.</span>
+  </div>
+
+  <p>The shape of this function is why cache tuning has such odd economics. At <i>R</i> = 10,000 requests per second, a hit ratio of 0.90 leaves 1,000 requests per second at the origin. Raising it to 0.95 leaves 500, which is half the origin fleet. Raising it again to 0.98 leaves 200, another 60% cut. Going the other way, a hit ratio that slips from 0.95 to 0.90 does not make your origin 5% busier, it doubles its load, and every capacity model built on the 0.95 figure is now wrong by a factor of two. The corollary is that hit ratio is a production metric with an alarm on it, not a number you measure once during a benchmark. It is also why the arithmetic for a cache outage is brutal: a cold or bypassed cache means the origin briefly receives <i>R</i> rather than <i>R</i> &times; (1 &minus; <i>h</i>), which at <i>h</i> = 0.95 is a twenty-fold instantaneous increase.</p>
+
+  <p><b>A named real-world example.</b> Facebook's memcache tier is the canonical published account of caching as infrastructure rather than as an optimisation. The paper describes using memcached "as a building block to construct and scale a distributed key-value store that supports the world's largest social network", and states that the system "handles billions of requests per second and holds trillions of items to deliver a rich experience for over a billion users around the world". <em>Source: <a href="https://research.facebook.com/publications/scaling-memcache-at-facebook/">Scaling Memcache at Facebook (Nishtala et al., NSDI 2013)</a>.</em> In social and media systems the read amplification is the point: a single profile view fans out into many object reads, and without a cache tier absorbing them the database fleet required is not expensive, it is not constructible. The same logic drives the model-response caches described in <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#response-caching">response caching</a> and <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#semantic-caching">semantic caching</a> for AI workloads, where the expensive computation behind the cache is inference rather than a join.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> an in-process cache in each application instance is usually the right answer and a separate cache tier is premature: you have few instances, duplicated entries are cheap, and the operational cost of another distributed system is real. At <b>1,000 requests per second</b> the in-process approach starts to hurt in a specific way, because each instance independently misses on the same key, so the origin sees the miss traffic multiplied by the instance count and your effective hit ratio is worse than any single instance reports. This is the tier for a shared cache tier and for request collapsing. At <b>10,000 requests per second</b> the cache is a tiered system in its own right, with a local tier absorbing the hottest keys, a shared tier behind it, and a deliberate answer for what happens when the shared tier loses a node, because at this volume a rehash that moves 10% of keys is a 1,000 requests per second step change at the origin.</p>
+
+  <p><b>The trade-off and the failure mode.</b> A cache trades correctness for cost: you are serving an answer that was true a moment ago. The failure modes are well known and worth naming precisely. A <b>stampede</b> happens when a popular key expires and every concurrent request misses simultaneously, converting one origin request into thousands. <b>Synchronised expiry</b> is the same event scheduled by your own TTL policy, when a batch of entries written together expire together. And the quietest failure is a cache that is working but no longer helping, because the key space has grown until the working set no longer fits and the hit ratio has decayed without anything appearing to break.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant C1 as Client A
+  participant C2 as Client B
+  participant E as Edge cache
+  participant O as Origin
+  C1->>E: GET /popular
+  E->>E: entry expired, TTL elapsed
+  E->>O: forward one request
+  C2->>E: GET /popular
+  E-->>C2: serve stale, Cache-Status marks it collapsed
+  Note over E,C2: stale-while-revalidate keeps<br/>Client B off the origin entirely
+  O-->>E: 200 with fresh body and max-age
+  E->>E: store, reset freshness
+  E-->>C1: fresh response
+  </div><figcaption>Request collapsing and stale-while-revalidate together turn an expiry event into exactly one origin request instead of a stampede. <b>Only the request that triggered revalidation waits; every other client is served the slightly stale copy immediately.</b> The <code>collapsed</code> parameter of the Cache-Status header is how you prove in production that this is actually happening rather than merely configured.</figcaption></figure>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">An edge serves 10,000 requests per second at a 90% hit ratio, and origin capacity is 600 requests per second. What is the smallest change that fits?</div>
+    <button class="q-opt">Raise the measured hit ratio to 95%, halving origin load</button>
+    <button class="q-opt">Raise the origin timeout to 30s, queueing the arriving load</button>
+    <button class="q-opt">Raise the client retry count, spreading the arriving load out</button>
+    <button class="q-opt">Raise the TTL jitter window, smoothing the arriving load out</button>
+    <div class="q-fb">Origin load is 10,000 &times; (1 &minus; 0.95) = 500, which fits inside 600, and five percentage points of hit ratio is a smaller change than any capacity purchase. Longer timeouts do not reduce arrivals, they convert an overload into a latency collapse with the same work still queued. More client retries increase arrivals rather than spreading them. TTL jitter is the right fix for synchronised expiry spikes but does nothing about a steady-state miss rate, which is what 90% of 10,000 actually is.</div>
+  </div>
+
+  <h2>4. Spreading whatever is left</h2>
+
+  <h3 id="load-balancing">Load balancing</h3>
+
+  <p>A load balancer answers one question: given a request and a set of healthy backends, which backend gets it? Everything else is consequence. The mechanism splits by layer. An <b>L4</b> balancer forwards packets or flows using addresses and ports, never parses the request, and can therefore be extremely fast and stateless-ish. An <b>L7</b> balancer terminates the connection, reads the request, and can route on path, header, or method, at the cost of doing real protocol work per request. The selection policy is a separate axis from the layer: round robin, weighted least request, and hash-based schemes each make a different bet about what your backends look like.</p>
+
+  <p>Envoy's documented policy set is a good map of the real options. Weighted least request is described as "an O(1) algorithm which selects N random available hosts as specified in the configuration (2 by default) and picks the host which has the fewest active requests", which the documentation credits with "resistance to herding behavior". For hash-based selection it compares ring hash against Maglev directly: Maglev has "substantially faster table lookup build times as well as host selection times (approximately 10x and 5x respectively when using a large ring size of 256K entries)", but it "is not as stable as ring hash when upstream hosts change", with simulations showing "approximately double the keys will move". <em>Source: <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/load_balancing/load_balancers">Envoy supported load balancers</a>.</em> Those two sentences are the whole hash-scheme trade-off: build and lookup speed against churn stability.</p>
+
+  <p><b>A named real-world example.</b> Google's Maglev is a software network load balancer that runs on commodity Linux machines rather than dedicated hardware, and the published description states that a single Maglev machine "can saturate a 10Gbps link with small packets", using consistent hashing and connection tracking "to minimize the negative impact of unexpected faults and failures on connection-oriented protocols". <em>Source: <a href="https://research.google/pubs/maglev-a-fast-and-reliable-software-network-load-balancer/">Maglev: A Fast and Reliable Software Network Load Balancer (Eisenbud et al., NSDI 2016)</a>.</em> The property that matters for search and ads infrastructure is the second one: when a balancer node fails, the surviving nodes must independently agree on where an existing flow belongs, or every in-flight connection breaks. Without consistent hashing that agreement does not exist, and a routine balancer deployment becomes a fleet-wide connection reset.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  R["Router ECMP<br/>hashes flow to one balancer"] --> L1["Balancer 1"]
+  R --> L2["Balancer 2"]
+  R --> L3["Balancer 3"]
+  L1 --> H["Consistent hash table<br/>flow to backend"]
+  L2 --> H
+  L3 --> H
+  H --> B1["Backend A"]
+  H --> B2["Backend B"]
+  H --> B3["Backend C"]
+  L1 -. "connection tracking<br/>overrides hash for<br/>known flows" .-> B1
+  B2 -. "health check fails" .-> H
+  </div><figcaption>Two independent mechanisms keep an existing connection pinned to its backend when the fleet changes. <b>Consistent hashing means any balancer reaches the same answer without talking to the others, and connection tracking overrides the hash for flows that already exist.</b> The upstream router spreading flows across balancers is doing its own hashing, so a balancer failure reshuffles flows at that layer too, which is precisely why the layer below must be deterministic.</figcaption></figure>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> round robin across a handful of backends is genuinely fine, and the interesting question is not the algorithm but whether health checking is fast enough that a dead backend stops receiving traffic within a few seconds. At <b>1,000 requests per second</b> round robin starts to misbehave whenever request cost is uneven, because it balances request count rather than work, and a backend that drew three slow requests keeps receiving its share while it queues. Weighted least request is the standard upgrade here. At <b>10,000 requests per second</b> you are running multiple balancer instances behind ECMP, and the questions become how a balancer restart affects in-flight connections, whether your hash scheme survives an autoscaling event, and whether the balancers themselves are now the single point that needs capacity planning.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Every balancing policy is a bet about backend uniformity, and the failure mode is always the same shape: traffic concentrates somewhere it should not. Hash-based routing gives you affinity and gives you hot spots when the key distribution is skewed. Least-request gives you work-aware balancing and gives you a stampede onto a freshly restarted backend, which reports zero active requests precisely because it is not ready. And the balancer's own health check is a load source: a check every second from forty balancers is forty requests per second per backend before a single customer arrives.</p>
+
+  <h3 id="reverse-proxies">Reverse proxies</h3>
+
+  <p>A reverse proxy is an intermediary that presents itself as the origin to the client and forwards inbound to real servers. HTTP defines the role precisely: "a 'gateway' (a.k.a. 'reverse proxy') is an intermediary that acts as an origin server for the outbound connection but translates received requests and forwards them inbound to another server or servers", which is exactly the opposite of a forward proxy, "a message-forwarding agent that is chosen by the client". <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9110.html">RFC 9110, HTTP Semantics, Section 3.7</a>.</em> The distinction is not pedantry. It tells you who chose the intermediary, and therefore who trusts it and who must be defended from it.</p>
+
+  <p>The mechanism that earns a reverse proxy its place is connection decoupling. nginx documents it plainly: with buffering enabled it "receives a response from the proxied server as soon as possible, saving it into the buffers", spilling to a temporary file when the response does not fit in memory. The consequence is that the upstream connection is released as soon as the response is buffered, regardless of how slowly the client reads it. Its retry behaviour is equally explicit: <code>proxy_next_upstream</code> defaults to retrying on <code>error</code> and <code>timeout</code>, and can only retry "if nothing has been sent to the client yet". <em>Source: <a href="https://nginx.org/en/docs/http/ngx_http_proxy_module.html">nginx ngx_http_proxy_module</a>.</em> That last clause is the honest limit of transparent retries, and it is worth carrying into every design discussion about them.</p>
+
+  <div class="math">
+    concurrency = throughput &times; latency
+    <span class="gloss">Read as Little's Law: the number of requests in flight at any instant equals how many arrive per second multiplied by how long each one takes. Throughput is what the internet sends you; latency is your own service time; the product is how many connections, threads, or slots must exist simultaneously.</span>
+  </div>
+
+  <p>At 10,000 requests per second with a mean upstream service time of 80 ms, in-flight concurrency is 10,000 &times; 0.080 = 800 requests. Over a protocol that carries one request at a time per connection, that is 800 upstream connections busy at every instant, before any headroom for variance. Now add the fan-out. With <i>L</i> proxy instances, <i>U</i> upstream servers, and a keepalive pool of <i>k</i> idle connections per pair, the fleet holds <i>L</i> &times; <i>U</i> &times; <i>k</i> connections: four proxies against sixty backends at <i>k</i> = 32 is 4 &times; 60 &times; 32 = 7,680 connections, and each backend accepts 4 &times; 32 = 128. Grow to forty proxies and two hundred backends and the same <i>k</i> gives 40 &times; 200 &times; 32 = 256,000 connections, with each backend now holding 1,280 inbound sockets purely as idle pool. There is also a hard ceiling nobody discovers until it bites: a source address has a 16-bit port field, so a single proxy IP cannot hold more than roughly 65,000 simultaneous connections to one backend address and port, and the practical limit is lower because the ephemeral range is a subset of that. When you outgrow it the fix is more source addresses or fewer, longer-lived connections, not a bigger machine.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant S as Slow client
+  participant P as Reverse proxy
+  participant A as Application server
+  S->>P: Request over slow, high-latency link
+  P->>A: Forward on pooled keepalive connection
+  A-->>P: Full response, fast
+  P->>P: Buffer response, spill to disk if large
+  Note over P,A: Upstream connection returns to the<br/>pool here, not when the client finishes
+  P-->>S: Drip response at the client's pace
+  S--xP: Client disconnects mid-transfer
+  Note over P: Only proxy resources are lost.<br/>The application thread was freed long ago.
+  </div><figcaption>Buffering converts a slow client from an application problem into a proxy problem. <b>The expensive resource, an application worker holding a database connection, is released as soon as the response is buffered, so client link speed stops determining backend concurrency.</b> Turn buffering off for streaming endpoints and you get the opposite behaviour on purpose, which is correct for server-sent events and wrong for everything else.</figcaption></figure>
+
+  <p><b>A named real-world example.</b> Cloudflare's Pingora is a published account of what the proxy tier actually costs and saves at scale. Cloudflare describes it as the service that proxies traffic between their network and servers on the internet, serving over one trillion requests per day, and reports that its predecessor's connection pools were held per worker process, so a request could only reuse a connection opened by the worker it landed on. Moving to a multi-threaded design with pools shared across threads took the connection reuse ratio for one large customer from 87.1% to 99.92%, which Cloudflare reports as a 160-fold reduction in new connections to that customer's origins, alongside a reported 5 ms improvement in median time to first byte and 80 ms at the 95th percentile. <em>Source: <a href="https://blog.cloudflare.com/how-we-built-pingora-the-proxy-that-connects-cloudflare-to-the-internet/">How we built Pingora, the proxy that connects Cloudflare to the Internet</a>.</em> That is the connection arithmetic above turned into an operating result: identical request volume, identical backends, and two orders of magnitude fewer handshakes purely from where the pool lives. The generic version of the same argument, and the reason the tier exists at all, is that without it a client's link speed sets your backend concurrency, so clients on slow connections occupy application workers that are doing no work.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> one proxy in front of the application is normal, and its real jobs are TLS and buffering rather than distribution. At <b>1,000 requests per second</b> keepalive pool sizing becomes a real parameter, retry policy needs to be idempotency-aware rather than a default, and the proxy tier itself needs to be redundant because it is now a single point of failure with your whole customer base behind it. At <b>10,000 requests per second</b> the connection arithmetic above dominates, the proxy tier is autoscaled independently of the application tier, and connection reuse to upstreams stops being a tuning detail and becomes the difference between working and port exhaustion.</p>
+
+  <p><b>The trade-off and the failure mode.</b> A reverse proxy buys isolation at the price of a hop, a buffer, and a component that can fail on its own. Its characteristic failures are quiet ones: buffers spilling to disk under large responses and turning a CPU-bound tier into an I/O-bound one, a retry policy that duplicates non-idempotent writes because <code>error</code> and <code>timeout</code> look identical from the proxy's side, and header rewriting that silently strips the client address so every downstream log and rate limiter sees the proxy instead of the user.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Ten thousand requests per second arrive with an 80 ms mean upstream service time. What in-flight concurrency must the upstream connection pools sustain?</div>
+    <button class="q-opt">800 in flight, throughput multiplied by service time in seconds</button>
+    <button class="q-opt">125 in flight, throughput divided by service time in seconds</button>
+    <button class="q-opt">80 in flight, the millisecond figure itself treated as count</button>
+    <button class="q-opt">8,000 in flight, throughput multiplied by time in raw milliseconds</button>
+    <div class="q-fb">Little's Law gives 10,000 &times; 0.080 = 800 in flight. Dividing throughput by service time is dimensionally wrong and produces a number with no meaning. Reading 80 straight off the latency figure confuses a duration with a count, and would size your pool ten times too small. The 8,000 answer multiplies by the millisecond figure without converting to seconds, which is the single most common arithmetic slip in capacity work and inflates the pool by a factor of a thousand over the true unit.</div>
+  </div>
+
+  <h3 id="api-gateways">API gateways</h3>
+
+  <p>An API gateway is a reverse proxy that has been given policy responsibilities. It terminates the client connection, authenticates the caller, authorises the operation, meters it against a quota, transforms the request if the backend speaks a different shape, routes it, and records what happened. The mechanism is unremarkable; the design question is which of those responsibilities genuinely belong at the edge and which are being moved there because it is convenient. Authentication and quota belong at the edge, because they are cross-cutting and because enforcing them early is what makes them cheap. Business authorisation usually does not, because the gateway does not know your domain model and will encode a stale copy of it.</p>
+
+  <p>Amazon API Gateway is a useful reference implementation because its policy layering is documented rather than inferred. It defines four categories of throttling setting: platform limits applied across all accounts in a region that customers cannot change, per-account limits across all APIs in an account in a region, per-API and per-stage limits applied at method level, and per-client limits applied through API keys associated with a usage plan. It states plainly that "both throttles and quotas are applied on a best-effort basis and should be thought of as targets rather than guaranteed request ceilings". <em>Source: <a href="https://docs.aws.amazon.com/apigateway/latest/developerguide/api-gateway-request-throttling.html">Amazon API Gateway request throttling</a>.</em> That caveat is the most important sentence in the document. A distributed meter is approximate, and any design that depends on a quota being exact rather than approximately right is built on sand.</p>
+
+  <p><b>A named real-world example.</b> Netflix documents Zuul as an L7 application gateway providing dynamic routing, monitoring, resiliency, and security. <em>Source: <a href="https://github.com/Netflix/zuul">Netflix Zuul</a>.</em> Their own account of how they use it is the more interesting half, because every capability it lists exists only because a single tier sees every request before any service commits to it: surgical routing that diverts one specific customer or device to a separate cluster for debugging, deliberately raising traffic against an origin to stress test its capacity, and routing across cloud regions for redundancy, with traffic shedding and load balancing delegated to companion components rather than reimplemented in each service. <em>Source: <a href="https://github.com/Netflix/zuul/wiki/How-We-Use-Zuul-At-Netflix">How we use Zuul at Netflix</a>.</em> None of those are things an individual service can offer itself. That is the honest argument for a gateway in streaming or anywhere else, and it is stronger than the usual one: the value is not that authentication is tidier in one place, it is that a request you can still redirect is worth considerably more than one you cannot.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> a gateway is frequently premature: with three services, an authentication library and a shared middleware give you the same properties without a new network hop and a new deployment artefact. At <b>1,000 requests per second</b> and a growing service count, the consistency argument wins, because the alternative is that each team implements quota and auth slightly differently and the differences are only visible during an incident. At <b>10,000 requests per second</b> the gateway is itself a tier requiring capacity planning, its own caching for authentication decisions, and a hard answer to what happens when its policy store is unreachable. A gateway that must consult a remote store on every request has inserted that store's availability into your own.</p>
+
+  <p><b>The trade-off and the failure mode.</b> The cost is a hop, a deployment coupling, and a strong pull toward centralising logic that should live in services. The classic failure is the gateway becoming a distributed monolith, where shipping a feature requires a gateway change, a gateway release, and a gateway rollback plan. The operational failure is subtler: gateway policy is configuration, configuration changes bypass the code review and staged rollout that protect application changes, and a one-character quota typo deployed globally is an instant outage with no failing test to catch it.</p>
+
+  <h2>5. Moving the answer closer to the user</h2>
+
+  <h3 id="cdn">CDN</h3>
+
+  <p>A content delivery network is a distributed set of caching servers placed close to users, fronted by request routing that sends each user to a nearby one. The routing is the part people underestimate. Caching is straightforward; deciding which of hundreds of points of presence should serve a particular user, and changing that decision when a PoP fills up or a network path degrades, is the actual system. The IETF's CDN interconnection framework names the pieces formally: a request routing interface split into footprint and capabilities advertisement plus redirection, a metadata interface carrying delivery policy such as geo-blocking, a logging interface for monitoring and billing, and a control interface handling bootstrapping, pre-positioning, and purge. It also defines the relationship between an upstream CDN contracted by the content provider and a downstream CDN selected to actually serve users. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc7336.html">RFC 7336, Framework for CDN Interconnection</a>.</em> Those four interfaces are a good checklist for evaluating any CDN, because a vendor that is excellent at delivery and weak at logging or purge will hurt you in ways the sales demo does not show.</p>
+
+  <div class="math">
+    offload = 1 &minus; (origin requests / total requests)
+    <span class="gloss">Read as: the fraction of demand the CDN absorbed. Count it in requests when your constraint is origin CPU and connections, and in bytes when your constraint is egress bandwidth or bandwidth billing. The two numbers differ whenever your cacheable objects are much larger or much smaller than your uncacheable ones.</span>
+  </div>
+
+  <p>Work the bandwidth side through. Assume 10,000 requests per second for objects averaging 40 KB. Total egress is 10,000 &times; 40 KB = 400 MB per second, which is 3.2 Gbps. At 95% offload the origin serves 500 requests per second and 20 MB per second, or 160 Mbps, which fits comfortably on ordinary origin links. At 80% offload the origin serves 2,000 requests per second and 640 Mbps, a four-fold increase in both from a fifteen-point drop in offload. Assumptions stated: uniform object size, request-count offload equal to byte offload, and no compression difference between hit and miss paths. In a real system you would separate those, but the sensitivity does not change.</p>
+
+  <p><b>A named real-world example.</b> Facebook's photo-serving stack is documented as spanning "browser caches on end-user systems, Edge Caches at ~20 PoPs, an Origin Cache, and for some kinds of images, additional caching via Akamai", over a widely distributed backend storage layer. <em>Source: <a href="https://research.facebook.com/publications/an-analysis-of-facebook-photo-caching/">An Analysis of Facebook Photo Caching (Huang et al., SOSP 2013)</a>.</em> The multi-CDN detail is the interesting one for social and media systems: a second delivery network is bought for coverage and for failure independence, and the price of that is exactly the interconnection problem RFC 7336 describes, because now a purge must reach two systems with different APIs and different completion semantics.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> a CDN is still worth it, but for latency and TLS termination near the user rather than for offload; your origin was never going to struggle with 100 requests per second. At <b>1,000 requests per second</b> the offload becomes financially and operationally material, and the work shifts to making more of your responses cacheable at all, which is usually a cookie and query-string hygiene problem rather than a CDN configuration problem. At <b>10,000 requests per second</b> the CDN is load-bearing infrastructure and the design question becomes what happens when it fails: whether your origin can survive an unfiltered <i>R</i> for the minutes it takes to fail over, and whether a second provider is worth its complexity.</p>
+
+  <p><b>The trade-off and the failure mode.</b> A CDN buys reach and offload in exchange for a third party in your critical path and a cache you do not directly control. The characteristic failure is not the CDN going down, which is rare and loud. It is serving the wrong thing correctly: a mis-scoped cache key that mixes two users' personalised responses, or a stale asset pinned for a week by a TTL nobody remembers setting. Both are invisible to origin monitoring, because from the origin's point of view everything is quiet, which is precisely what a cache is supposed to look like.</p>
+
+  <h3 id="edge-caching">Edge caching</h3>
+
+  <p>Edge caching is the tier of the CDN nearest the user, and it deserves separate treatment because its hit ratio behaves differently from a central cache. An edge PoP sees only the requests routed to it, so its working set is smaller and its per-node hit ratio is lower than a single consolidated cache would achieve on the same total traffic. That is the fundamental tension of edge caching: you trade cache efficiency for proximity. The mitigation is tiering, where a PoP misses to a regional or origin-shield cache rather than to the origin itself, so the miss traffic from many PoPs is deduplicated before it reaches you.</p>
+
+  <p>The published Facebook photo numbers let us do this arithmetic on real data rather than invented data. The study reports traffic served as 65.5% browser cache, 20.0% Edge Cache, 4.6% Origin Cache, and 9.9% backend storage. <em>Source: <a href="https://research.facebook.com/publications/an-analysis-of-facebook-photo-caching/">An Analysis of Facebook Photo Caching (Huang et al., SOSP 2013)</a>.</em> Those are shares of the total, not per-tier hit ratios, so derive the hit ratios yourself. Requests reaching the Edge Cache are 100 &minus; 65.5 = 34.5% of the total, of which the edge served 20.0 points, giving an edge hit ratio of 20.0 / 34.5 = 58.0%. Requests reaching the Origin Cache are 34.5 &minus; 20.0 = 14.5%, of which it served 4.6, an origin-cache hit ratio of 4.6 / 14.5 = 31.7%. What remains is 14.5 &minus; 4.6 = 9.9%, matching the reported backend share. Measured against the traffic that actually left the browser, the two server-side tiers together removed 1 &minus; (9.9 / 34.5) = 71.3% of the load before it reached storage.</p>
+
+  <p>Two lessons fall out of those derived figures. First, a 58% edge hit ratio is nothing like the 95% that CDN marketing implies, because the browser tier already absorbed the easiest repeats and left the edge a harder residual. Second, each successive tier sees a harder workload than the one in front of it, so hit ratios decline as you move inward. Any capacity model that assumes a uniform hit ratio at every tier will over-provision the edge and badly under-provision the origin.</p>
+
+  <p>Proving what actually happened requires the cache to tell you. RFC 9211 defines the <code>Cache-Status</code> header field for exactly this, with <code>hit</code> as "a Boolean that, when true, indicates that the request was satisfied by the cache; that is, it was not forwarded", <code>fwd</code> indicating "that the request went forward towards the origin" with a token explaining why, plus <code>fwd-status</code>, <code>ttl</code>, <code>stored</code>, <code>collapsed</code>, <code>key</code>, and <code>detail</code>. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9211.html">RFC 9211, The Cache-Status HTTP Response Header Field</a>.</em> The <code>fwd</code> token is the one to instrument first, because "missed because it was never stored" and "missed because it expired" call for completely different fixes and are indistinguishable in a plain hit-ratio metric.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Absent: never requested
+  Absent --> Fresh: stored from origin response
+  Fresh --> Fresh: served as hit, Age increases
+  Fresh --> Stale: freshness lifetime elapsed
+  Stale --> Revalidating: conditional request sent to origin
+  Revalidating --> Fresh: 304 Not Modified, freshness reset
+  Revalidating --> Fresh: 200 with new body, entry replaced
+  Stale --> Serving_stale: stale-while-revalidate or stale-if-error
+  Serving_stale --> Revalidating: background refresh
+  Fresh --> Absent: evicted for capacity
+  Stale --> Absent: purged or invalidated
+  </div><figcaption>A cache entry has more states than fresh and stale, and the transitions out of each one have very different costs. <b>Eviction for capacity and purge for correctness both end in Absent, but one is a cost decision made by the cache and the other is a correctness decision made by you.</b> The Serving_stale path is the only one that keeps a client off the origin during revalidation, and it exists only if you asked for it.</figcaption></figure>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> spread across many PoPs, the edge barely caches anything useful, because the per-PoP request rate is too low to keep entries warm before they expire. You are buying TLS proximity, not offload, and you should not be disappointed by the hit ratio. At <b>1,000 requests per second</b> popular objects stay warm at the larger PoPs while the long tail still misses, and tiering to a shield cache is what converts scattered misses into a manageable origin stream. At <b>10,000 requests per second</b> the edge is doing genuine work, and the operational focus moves to cache key cardinality, since every unnecessary query parameter or cookie in the key multiplies the number of entries and quietly destroys the hit ratio you are paying for.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Edge caching trades consistency and control for latency. Its failure mode is geographic and therefore hard to see: an object goes stale, or a key is mis-scoped, in one PoP serving one region, and your aggregate dashboards show nothing while a fraction of your customers see broken behaviour. Regional observability is not a nicety here, it is the only way the failure is visible at all.</p>
+
+  <h3 id="cache-invalidation">Cache invalidation</h3>
+
+  <p>Invalidation is how a cache stops being wrong. HTTP gives you three distinct mechanisms and they solve different problems. <b>Expiry</b> is time-based and requires no coordination: the entry becomes stale on its own. <b>Validation</b> is a conditional request that lets the origin answer "still good" cheaply with a 304 rather than resending a body. <b>Explicit invalidation</b> is a command that removes an entry now. RFC 9111 requires the last of these implicitly at the protocol level, specifying that caches must invalidate the target URI following a non-error response to an unsafe request, and constraining the blast radius: "a cache MUST NOT trigger an invalidation under these conditions if the origin of the URI to be invalidated differs from that of the target URI". <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9111.html">RFC 9111, HTTP Caching, Section 4.4</a>.</em></p>
+
+  <p>The stale-serving extensions are what make invalidation survivable at scale. <code>stale-while-revalidate</code> lets a cache serve a stale response while it revalidates in the background, and <code>stale-if-error</code> lets it serve a stale response when the origin returns 500, 502, 503, or 504. The specification's own examples are worth memorising: <code>Cache-Control: max-age=600, stale-while-revalidate=30</code> means fresh for ten minutes, then serveable stale for a further thirty seconds while revalidation happens asynchronously; <code>Cache-Control: max-age=600, stale-if-error=1200</code> means a stale copy may substitute for an origin error for up to twenty minutes past expiry. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc5861.html">RFC 5861, HTTP Cache-Control Extensions for Stale Content</a>.</em> The second directive is quietly one of the highest-value availability features available to a web system: during an origin outage, every cached URL keeps working for twenty minutes at zero engineering cost.</p>
+
+  <p><b>A named real-world example.</b> Cloudflare documents purge by URL, by cache tag, by hostname, by prefix, and purge-everything, with rate limits that make the operational difference explicit. Single-file purge is documented as "the recommended method", running at 800 URLs per second on the Free plan up to 3,000 URLs per second on Enterprise, with a maximum of 100 URLs per request on lower plans and 500 on Enterprise. Broad purges by hostname, tag, prefix, or everything are limited separately, from 5 requests per minute on Free to 50 per second on Enterprise, all governed by "token bucket rate limiting". <em>Source: <a href="https://developers.cloudflare.com/cache/how-to/purge-cache/">Cloudflare purge cache</a>.</em> Do the arithmetic before you rely on it: a news or e-commerce site that must invalidate 100,000 product URLs after a pricing change needs 100,000 / 3,000 = 33 seconds at the fastest documented single-file rate, and 100,000 / 800 = 125 seconds on the slowest. If your correctness requirement is "prices update within five seconds", per-URL purging cannot meet it and you need cache tags or shorter TTLs instead.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> short TTLs are the whole strategy, and they are the right one, because a 30-second TTL costs you 3,000 origin requests per second-equivalent only if you have that traffic, and you do not. At <b>1,000 requests per second</b> short TTLs start to cost real origin load and you move to longer TTLs plus explicit purge on write, which introduces the first hard problem: purge is now a distributed operation that can partially fail. At <b>10,000 requests per second</b> a per-URL purge fan-out is too slow and too fragile, and the answer is content-addressed URLs for static assets, where a changed asset gets a new URL and invalidation becomes unnecessary, combined with tag-based purge for the dynamic surfaces where it is not.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Invalidation trades cache efficiency for correctness, and every scheme sits somewhere on that line. The distinctive failure is asymmetric: a purge that does not arrive leaves stale content served confidently and indefinitely, with no error anywhere, while an over-broad purge is loud and immediate because it drops the hit ratio to zero and sends the full <i>R</i> at your origin. Teams instrument the second and get surprised by the first. Instrument both: alert on hit ratio collapse, and alert on the age of your oldest served entry.</p>
+
+  <h2>6. Refusing traffic that was never legitimate</h2>
+
+  <h3 id="waf">WAF</h3>
+
+  <p>A web application firewall inspects request content against rules describing attack patterns, and blocks, logs, or scores what matches. The naive model is a blocklist, and the naive model fails, because a rule strict enough to catch real injection attempts also catches the customer whose surname contains an apostrophe. The mature model is <b>anomaly scoring</b>: individual rules contribute points, and only the accumulated total triggers a block. The OWASP Core Rule Set documents this concretely, assigning 5 points for CRITICAL, 4 for ERROR, 3 for WARNING, and 2 for NOTICE, with these scores being "cumulative", and default thresholds of 5 inbound and 4 outbound, which as the configuration notes, means "a single critical rule match will cause the request to be blocked and logged". It also defines four paranoia levels, where PL1 "is advised for beginners, installations covering many different sites and applications, and for setups with standard security requirements" and PL4 "is advised for experienced users protecting installations with very high security requirements". <em>Source: <a href="https://github.com/coreruleset/coreruleset/blob/main/crs-setup.conf.example">OWASP CRS crs-setup.conf.example</a>.</em></p>
+
+  <p>Those numbers make the tuning dial concrete. At the default inbound threshold of 5, one CRITICAL match blocks, and so does any combination reaching five points: two WARNING matches sum to 6 and block, while a NOTICE plus a WARNING sums to 5 and also blocks. Raise the threshold to 10 and a request must accumulate two critical matches, or a broader spread of lesser ones, before it is refused. Raising the threshold and raising the paranoia level pull in opposite directions, which is the intended design: a higher paranoia level enables more rules that will fire more often, and a higher threshold is how you absorb that without blocking real users.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  R["Request"] --> P["Rules evaluated<br/>at active paranoia level"]
+  P --> S1["CRITICAL match<br/>+5"]
+  P --> S2["ERROR match<br/>+4"]
+  P --> S3["WARNING match<br/>+3"]
+  P --> S4["NOTICE match<br/>+2"]
+  S1 --> T["Sum inbound<br/>anomaly score"]
+  S2 --> T
+  S3 --> T
+  S4 --> T
+  T -- "score below threshold" --> A["Pass to application"]
+  T -- "score at or above threshold" --> B["Block and log"]
+  B -. "tune exclusions,<br/>not the whole rule" .-> P
+  </div><figcaption>Anomaly scoring separates detection from decision, so a single noisy rule does not have to be disabled globally to stop it blocking real users. <b>The threshold is the safety valve: at the CRS default of 5 inbound, one critical match blocks, but two warnings at 3 points each also reach 6 and block.</b> The feedback edge is the operational reality, since running a WAF is mostly the work of writing narrow exclusions for known-good traffic.</figcaption></figure>
+
+  <p><b>A named real-world example.</b> Cloudflare's postmortem of its outage on 2 July 2019 is the best-documented account of a WAF failing, and the mechanism is instructive precisely because it is not the false positive everyone expects. A newly deployed cross-site-scripting rule contained a regular expression whose backtracking was catastrophic, and Cloudflare reports CPUs serving HTTP and HTTPS traffic "spiking to nearly 100% usage across the servers in our network". The rule was deployed in simulate mode, so it was not blocking anything. What made it global within seconds was the deployment path: Cloudflare explains that ordinary software releases stage through internal locations, then non-paying customers, then canary sites, but that the WAF deliberately bypasses that process so it can respond quickly to new threats, and records 476 WAF rule change requests handled through the expedited path, roughly one every three hours. The deploy went out at 13:42 UTC, the WAF was globally disabled at 14:07, and service was restored at 14:09. <em>Source: <a href="https://blog.cloudflare.com/details-of-the-cloudflare-outage-on-july-2-2019/">Details of the Cloudflare outage on July 2, 2019</a>.</em> The lesson generalises well past regular expressions. A WAF rule is code shipped through a pipeline deliberately weaker than the one guarding your application, and that tension between shipping a rule fast and shipping it safely is inherent rather than an error someone happened to make. What you buy in exchange is the window between a vulnerability being disclosed and your own patch reaching production, which is the reason to accept the tension instead of avoiding it.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> a WAF is inexpensive to run and the entire cost is human: the tuning effort to stop it blocking your own users. At <b>1,000 requests per second</b> the false-positive arithmetic gets uncomfortable. A 0.1% false-positive rate is 1 blocked legitimate request per second, roughly 86,400 per day, which is a support queue rather than an anomaly. At <b>10,000 requests per second</b> the same rate is 10 per second and 864,000 per day, inspection latency and CPU cost become a capacity line item of their own, and the sensible architecture puts the WAF behind the cache so that hits are never inspected, accepting that cached responses are therefore unprotected by it.</p>
+
+  <p><b>The trade-off and the failure mode.</b> A WAF trades latency, CPU, and false positives for coverage against attacks you have not patched yet. Its failure modes are a matched pair. Tuned too tight, it becomes the outage: a rule update ships, a legitimate request pattern now scores above threshold, and a segment of customers is blocked with a clean 403 that no application error budget records. Tuned too loose, it becomes theatre, passing an audit while blocking nothing an attacker would actually try. Both look identical on a dashboard that only counts blocked requests.</p>
+
+  <h3 id="ddos-protection">DDoS protection</h3>
+
+  <p>Denial of service is resource exhaustion, and the resource determines the defence. RFC 4732 organises the threat by what is being consumed: bandwidth, through congesting links with "non-congestion-controlled traffic"; CPU, through work-amplifying patterns; and state, through "forcing instantiation of connection states". Its recommendations follow the same structure, headed by "Don't Hold State for Unverified Hosts" and "Redundancy and Distributed Service". <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc4732.html">RFC 4732, Internet Denial-of-Service Considerations</a>.</em> That first recommendation is the key to the entire topic: an attacker who can make you allocate memory before proving they exist has found a lever with enormous mechanical advantage.</p>
+
+  <p>The canonical example is TCP SYN flooding, and the arithmetic is startling. A server receiving a SYN allocates memory to track the half-open connection in SYN-RECEIVED state, and the goal of the attack is "to exhaust the backlog of half-open connections associated with a port number". Increasing the backlog is not a fix, because implementations have "not been designed to scale past backlogs of a few hundred". SYN cookies encode the connection state into the SYN-ACK sequence number, requiring "no state at all for connections in SYN-RECEIVED". <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc4987.html">RFC 4987, TCP SYN Flooding Attacks and Common Mitigations</a>.</em></p>
+
+  <div class="math">
+    attack rate to hold the backlog full = backlog size / entry hold time
+    <span class="gloss">Read as: to keep every half-open slot occupied, an attacker only needs to replace entries as fast as they time out. Backlog size is how many the server tracks; hold time is how long the server waits through SYN-ACK retransmissions before giving up on each one.</span>
+  </div>
+
+  <p>Assume a backlog of 1,024 entries and a hold time of 30 seconds while the server retransmits its SYN-ACK. Sustaining the attack requires 1,024 / 30 = 35 packets per second. That is not a botnet; that is one machine on a domestic connection, sending roughly 2 KB per second. Compare it to a volumetric flood aimed at saturating a 10 Gbps link, which needs five million times more traffic to achieve the same denial of service. State exhaustion is cheap for the attacker and expensive for you, which is exactly why "do not hold state for unverified hosts" is the first recommendation rather than a footnote. Assumptions stated: a single listening port, no SYN cookies, and no upstream filtering.</p>
+
+  <p>Spoofing is what makes the source untraceable and the defence hard, and the network-level answer is BCP 38 ingress filtering, where providers filter at the edge so that only packets with source addresses inside the prefixes a customer legitimately uses are accepted. It "dramatically reduces the feasibility of source-address-spoofing attacks originating from within a network" but explicitly "does not preclude an attacker using a forged source address of another host within the permitted prefix filter range", and it cannot stop a flood that uses valid source addresses at all. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc2827.html">RFC 2827 / BCP 38, Network Ingress Filtering</a>.</em> Its usefulness depends on other people deploying it, which is why it has been correct advice for decades and is still not universally deployed.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant A as Spoofed attacker
+  participant N as Provider edge
+  participant S as Server
+  A->>N: SYN with forged source address
+  Note over N: BCP 38 ingress filtering drops<br/>packets from outside the customer prefix
+  A->>S: SYN that passes filtering
+  S->>S: With backlog: allocate SYN-RECEIVED entry
+  S-->>A: SYN-ACK to an address that will never reply
+  Note over S: Entry held through retransmissions,<br/>backlog fills at roughly 35 packets per second
+  S->>S: With SYN cookies: encode state in sequence number
+  S-->>A: SYN-ACK, zero memory allocated
+  Note over S: A real client returns the cookie in its ACK.<br/>A spoofed source never can.
+  </div><figcaption>Two independent defences attack the same flood at different layers, and neither is sufficient alone. <b>Ingress filtering removes the attacker's anonymity but only where it is deployed, while SYN cookies remove the attacker's leverage by refusing to allocate state until the handshake proves the source is real.</b> The cost of the cookie approach is that some TCP options cannot be carried in the encoded state, which is why RFC 4987 prefers a SYN cache as the default.</figcaption></figure>
+
+  <p><b>A named real-world example.</b> Gaming is the industry the published measurements actually point at. Cloudflare's DDoS threat report for the first quarter of 2024 puts Gaming and Gambling at the top of the global target list for HTTP DDoS attacks, reporting that just over seven of every hundred DDoS requests they mitigated were aimed at that industry. The same report gives the attack mix as 37% HTTP DDoS, 33% DNS-based, and the remaining 30% other network-layer floods such as SYN and UDP, and states that roughly one attack in ten exceeded 100,000 requests per second while attacks above one million requests per second occurred in only four per thousand. <em>Source: <a href="https://blog.cloudflare.com/ddos-threat-report-for-2024-q1/">Cloudflare DDoS threat report for 2024 Q1</a>.</em> Those proportions should shape what you build, because a defence tuned only for volumetric floods misses most of what is actually mitigated: the majority is application-layer and DNS traffic that looks like ordinary demand. The architectural consequence for a game specifically, offered here as reasoning rather than as a deployment I can cite, is that long-lived latency-sensitive sessions pinned to particular server addresses hand an attacker a fixed target, which makes keeping real addresses unpublished behind a relay tier worth more than any amount of reactive filtering.</p>
+
+  <p><b>The three scale tiers.</b> At <b>100 requests per second</b> you cannot defend yourself against volumetric attack and should not try; your defence is that your provider's capacity is vastly larger than yours, and your job is to enable SYN cookies, avoid unauthenticated state allocation, and keep your origin address unpublished behind whatever fronts it. At <b>1,000 requests per second</b> application-layer attacks become the realistic threat, because an attacker who sends well-formed expensive requests at a modest rate exhausts you without any traffic anomaly, and the defence is per-identity rate limiting plus making expensive endpoints require authentication. At <b>10,000 requests per second</b> your normal traffic is itself large enough that distinguishing attack from a product launch is genuinely hard, and the design needs anycast to spread a volumetric attack across many sites, always-on filtering rather than reactive, and a documented decision about what you shed first when you cannot serve everything.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Every DDoS defence trades false positives against coverage, and the tighter you tune it, the more likely you are to refuse a real customer during your busiest legitimate minute. The characteristic failure is a self-inflicted one: mitigation triggers on a genuine traffic surge such as a sale or a viral post, blocks the customers you most wanted, and reports success, because from the mitigation system's perspective refusing traffic is what it is for. The second failure is architectural rather than tactical: an origin whose real address has ever been published stays reachable directly for as long as that address lives, and no amount of edge protection helps traffic that never passes through the edge.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A flood of spoofed SYN packets is filling your server's connection backlog at a very low packet rate. Which control actually addresses the mechanism?</div>
+    <button class="q-opt">SYN cookies upstream, because connection state is never allocated</button>
+    <button class="q-opt">Stricter WAF rules upstream, because request bodies are inspected</button>
+    <button class="q-opt">Lower per-tenant limits upstream, because the requests are counted</button>
+    <button class="q-opt">Longer cache lifetimes upstream, because origin work is avoided</button>
+    <div class="q-fb">The attack exhausts state, not bandwidth or application capacity, so the fix is to stop allocating state before the handshake completes. A WAF inspects request bodies that a half-open connection never sends, so it is never reached. Rate limiting counts requests, and these connections never become requests, so the counter stays at zero while the backlog fills. Cache lifetime affects requests that complete a handshake and ask for something, which is the opposite of what is happening here.</div>
+  </div>
+
+  <h2>7. Scale drill: a photo-serving path from 100 to 10,000 requests per second</h2>
+
+  <p>Take the system documented in the Facebook photo caching study and walk its edge decisions down and up the three tiers. The shape is a browser cache, edge caches at roughly twenty points of presence, an origin cache, and a distributed backend store, with additional delivery through a second CDN for some image classes. Assume for the drill that objects average 40 KB and that request-count offload approximates byte offload, both stated assumptions rather than measured facts.</p>
+
+  <p><b>At 100 requests per second.</b> Total egress is 100 &times; 40 KB = 4 MB per second, or 32 Mbps, which any single origin serves without noticing. Spread across twenty PoPs the per-PoP rate is 5 requests per second, far too low to keep a meaningful working set warm, so the edge tier earns its place through TLS proximity and connection termination rather than offload. Rate limiting is a per-instance counter. There is no load balancing decision worth agonising over. A WAF runs in detection-only mode while you learn what your own traffic looks like. The honest summary of this tier is that almost nothing in this chapter is mandatory, and building it all anyway is the most common form of premature scaling.</p>
+
+  <p><b>At 1,000 requests per second.</b> Egress is 320 Mbps and the per-PoP rate is 50 requests per second, enough that popular objects stay warm while the long tail still misses. This is the tier where the tiered-cache design starts paying, because twenty PoPs independently missing on the same object is twenty origin requests unless a shield cache deduplicates them. Using the derived per-tier hit ratios from the published data, an edge hit ratio near 58% leaves roughly 420 requests per second heading inward, which the origin cache reduces by about 32% to roughly 285 requests per second at storage. Rate limiting moves to a shared counter, load balancing moves from round robin to least-request because image sizes make request cost uneven, and cache invalidation shifts from short TTLs to explicit purge because short TTLs now cost real origin traffic.</p>
+
+  <p><b>At 10,000 requests per second.</b> Egress is 3.2 Gbps and every decision above becomes load-bearing. Per-PoP traffic is 500 requests per second, the edge is doing genuine work, and cache key cardinality becomes the metric that decides your origin bill, since a single unnecessary query parameter in the key can halve a hit ratio and therefore double origin load. Rate limiting becomes a leased two-level scheme because a synchronous shared counter cannot take 10,000 lookups per second without becoming the bottleneck it was meant to protect. The proxy tier holds Little's Law concurrency of 10,000 &times; 0.080 = 800 in-flight requests and needs its connection arithmetic checked against the 16-bit port ceiling. The WAF runs behind the cache so that hits are never inspected, and a 0.1% false-positive rate now means 10 blocked customers per second. And the failure planning inverts: the question is no longer how the edge performs, but whether the origin survives losing it, because at a 95% hit ratio a cache bypass sends twenty times the normal load at a fleet sized for one twentieth of it.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">Your published cache tiers report 65.5% browser, 20.0% edge, 4.6% origin cache, 9.9% backend. What is the edge tier's own hit ratio?</div>
+    <button class="q-opt">20.0%, because that share is exactly what the edge served</button>
+    <button class="q-opt">80.0%, because all traffic outside that share missed the edge</button>
+    <button class="q-opt">58.0%, because the edge served 20.0 of the 34.5 reaching</button>
+    <button class="q-opt">65.5%, because the browser tier bounds the edge tier input</button>
+    <div class="q-fb">A tier's hit ratio is measured against the requests that actually reach it, and only 34.5% of the total gets past the browser cache, so 20.0 / 34.5 = 58.0%. Reading 20.0% straight off treats a share of total traffic as a hit ratio, which understates every inner tier. The 80.0% answer inverts that same mistake. And 65.5% is the browser tier's share, which bounds the edge's input volume but says nothing about how much of that input the edge answered.</div>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is computing origin load before you discuss anything else. Take a system you actually run, write down its request rate and its measured hit ratio, multiply out <i>R</i> &times; (1 &minus; <i>h</i>), and compare that number to the capacity you have provisioned. Then ask the uncomfortable follow-up: what does that number become if the cache is bypassed for ten minutes? Bring me your figures and your assumptions and I will push on both, because the assumption you did not write down is always the one that breaks.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://www.rfc-editor.org/rfc/rfc9111.html">RFC 9111, HTTP Caching</a> end to end. It is the one specification in this chapter that touches every other topic, and reading Section 4 on constructing responses from caches and Section 4.4 on invalidation will change how you write cache headers permanently. Pair it with <a href="https://research.facebook.com/publications/an-analysis-of-facebook-photo-caching/">An Analysis of Facebook Photo Caching</a> for a measured, multi-tier system to check your intuitions against, and with <a href="https://www.rfc-editor.org/rfc/rfc4987.html">RFC 4987</a> for the clearest short explanation of why refusing to hold state is the strongest defence you have.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Syllabus</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0001-resilience-patterns.html"><span class="dir">Next &rarr;</span><span class="ttl">Resilience Patterns</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 1 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

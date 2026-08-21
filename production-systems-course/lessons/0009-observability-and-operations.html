@@ -1,0 +1,587 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 10: Observability and Operations - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 10 &middot; Observability and Operations</div>
+  <h1>Observability and Operations</h1>
+  <p class="paper-meta">
+    <span class="pill">12 topics</span>
+    Knowing what your system is doing, and what happens to the humans when it stops doing it.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Monitoring answers questions you knew to ask in advance. Observability is whether you can answer the ones you did not.</b> They are not synonyms and they are not a maturity ladder.</li>
+      <li><b>Cardinality is the constraint that decides which one you have.</b> Cheap aggregate metrics are cheap precisely because they threw away the dimensions you now need.</li>
+      <li>An <b>SLO</b> is a number you will defend under pressure. An <b>error budget</b> is what turns that number into a decision procedure instead of an argument.</li>
+      <li>The second half of this chapter is the half most engineers are weakest on. <b>Alerting, on-call, and postmortems are engineering systems with capacity limits and failure modes</b>, not soft process.</li>
+    </ul>
+  </div>
+
+  <h2>1. The shape of the problem</h2>
+
+  <p>A production system in trouble is a system that is telling you something you cannot hear. Everything in this chapter is an attempt to close that gap, and it splits cleanly in two. The first half is instrumentation: what data leaves the process, in what shape, at what cost. The second half is operational practice: what a human being does when that data says something is wrong at three in the morning. Engineers overwhelmingly invest in the first half and improvise the second, which is exactly backwards, because a perfect signal delivered to an exhausted on-call engineer with no incident structure produces a longer outage than a mediocre signal delivered to a rested one with a runbook.</p>
+
+  <p>Start with the pipeline, because every cost and every limitation in this chapter is a property of one of its stages.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  subgraph P["Producers"]
+    A["Application processes<br/>instrumented at the<br/>library boundary"]
+    B["Infrastructure<br/>hosts, proxies, queues"]
+  end
+  A --> C["Collector<br/>batch, enrich, sample, redact"]
+  B --> C
+  C --> D["Metric store<br/>pre-aggregated<br/>time series"]
+  C --> E["Log store<br/>structured<br/>events"]
+  C --> F["Trace store<br/>sampled<br/>spans"]
+  D --> G["Dashboards"]
+  D --> H["Alert evaluator"]
+  E --> I["Ad hoc query"]
+  F --> I
+  H --> J["Pager"]
+  J --> K["On-call human"]
+  G --> K
+  I --> K
+  K --> L["Incident response<br/>then postmortem"]
+  </div><figcaption>Telemetry leaves the process, is shaped by a collector, and lands in three stores with very different cost curves and very different query powers. <b>The alert path and the investigation path diverge at the collector, and that divergence is the whole monitoring-versus-observability argument.</b> The metric store is cheap because it aggregated the detail away; the log and trace stores kept the detail and pay for it.</figcaption></figure>
+
+  <h2>2. Instrumentation: what leaves the process</h2>
+
+  <h3 id="monitoring">Monitoring</h3>
+
+  <p>Monitoring is, in the Google SRE definition, "collecting, processing, aggregating, and displaying real-time quantitative data about a system, such as query counts and types, error counts and types, processing times, and server lifetimes." The operative word is <em>aggregating</em>. Monitoring works by deciding in advance which dimensions of a system you care about, computing a small number of aggregates over them continuously, and comparing those aggregates to thresholds. That prior decision is the source of both its efficiency and its blindness.</p>
+
+  <p>The mechanism divides into two families. White-box monitoring reads the internals a process chooses to expose and can therefore see a problem forming before users feel it, such as a queue depth climbing or a connection pool nearing exhaustion. Black-box monitoring probes the system the way a user does and can only see problems that are already happening. You need both, and the SRE book is blunt about which one pages: black-box symptoms page, white-box internals explain. The four golden signals give you the default starting set: latency, "the time it takes to service a request"; traffic, "a measure of how much demand is being placed on your system"; errors, "the rate of requests that fail, either explicitly or by policy"; and saturation, "how full your service is."</p>
+
+  <p><b>Named example.</b> Google's own search serving stack is the documented case: the SRE book was written from operating it, and the golden signals are the distillation of which four aggregates actually predicted user pain across that fleet. Strip monitoring out of a search-scale serving tier and you do not merely lose dashboards, you lose the ability to notice a bad binary rollout at all until traffic complaints arrive by a slower channel, by which time the rollout has reached every cell.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> a single scrape target per service and the four golden signals on one dashboard is genuinely sufficient, and building more is waste; at this volume a human can also just read the logs. At <b>1,000 requests per second</b> the shape of the change is that averages start lying to you, because a 1 percent tail is now 10 requests per second of unhappy users hidden inside a healthy-looking mean, so percentile histograms become mandatory rather than nice. At <b>10,000 requests per second</b> monitoring stops being a dashboard and becomes an aggregation topology: per-instance series multiplied across a fleet exceed what a single evaluator can hold, you need federation or a downsampling tier, and the question "which of my 400 instances is slow" is no longer answerable from the aggregate at all.</p>
+
+  <p><b>Trade-off and failure mode.</b> Monitoring buys you cheap, fast, always-on answers to a fixed question set, and pays for it by discarding everything else at collection time. Its characteristic failure is not a false alarm, it is a confident green dashboard during a real outage, because the outage expressed itself along a dimension nobody thought to aggregate. The SRE book's own warning applies here: rules that page "should be simple to understand and represent a clear failure", and elaborate derived monitoring becomes fragile in exactly the conditions where you need it. <em>Source: <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE Book, Chapter 6: Monitoring Distributed Systems</a>.</em></p>
+
+  <h3 id="metrics">Metrics</h3>
+
+  <p>A metric is "a measurement of a service captured at runtime", recorded as a number plus a timestamp plus a set of attributes. The mechanism that makes metrics cheap is aggregation in the client: an instrument accumulates many events into one exported value per interval, so the wire cost and the storage cost scale with the number of distinct <em>series</em>, not with the number of <em>events</em>. OpenTelemetry names the instrument kinds precisely, and picking the wrong one is a common bug. A <b>Counter</b> is "a value that accumulates over time" and only ever goes up, like an odometer. An <b>UpDownCounter</b> "accumulates over time, but can also go down again", which is what a queue length is. A <b>Gauge</b> "measures a current value at the time it is read". A <b>Histogram</b> is "a client-side aggregation of values, such as request latencies", and it is the only one of the four that can answer a percentile question.</p>
+
+  <p>The number that governs everything is cardinality: "the number of unique attribute combinations reported" for a metric. Every distinct combination of label values is a separate stored series with its own memory, CPU, disk and network cost. Prometheus states the operating limit flatly: "try to keep the cardinality of your metrics below 10", and "if you have a metric that has a cardinality over 100 or the potential to grow that large, investigate alternate solutions."</p>
+
+  <p><b>Named example.</b> E-commerce checkout instrumentation is where this goes wrong most reliably. Someone adds <code>customer_id</code> as a label so support can answer "was it slow for this specific buyer", which is a completely reasonable business question and a catastrophic metric label. Here is the arithmetic on a modest schema.</p>
+
+  <div class="math">
+base = endpoints x status_class x region = 20 x 5 x 3 = 300 series<br>
+with customer_id added = 300 x 10,000 = 3,000,000 series per metric<br>
+across the service's 20 metrics = 60,000,000 active series<br>
+versus Prometheus's stated ceiling of 100 series per metric<br>
+overshoot factor = 3,000,000 / 100 = 30,000x
+    <span class="gloss">endpoints is the number of distinct handler paths you label; status_class is the 2xx/3xx/4xx/5xx grouping; region is your deployment footprint; customer_id is the newly added label with 10,000 distinct values. Series counts multiply, they never add, which is why one label can move you five orders of magnitude in a single deploy. The 10,000 customers and the 20-metric schema are my assumptions; the ceiling of 100 is Prometheus's own stated figure.</span>
+  </div>
+
+  <p>The failure is worse than a slow query, because it can be silent. OpenTelemetry's SDK applies a default cardinality limit of 2,000 attribute combinations per metric, and measurements beyond that do not error: they collapse into a single overflow data point marked <code>otel.metric.overflow=true</code>. Your dashboard keeps rendering. It is just no longer describing your system.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> cardinality is a non-issue and you can afford labels you will later regret, which is precisely why the regret is deferred to the tier where it hurts. At <b>1,000 requests per second</b> the emitting cost is still fine but the storage bill starts tracking your label schema rather than your traffic, and this is the tier at which a per-customer or per-URL label added by a well-meaning engineer takes down the metrics backend before it takes down the service. At <b>10,000 requests per second</b> you need an enforced label allowlist in the instrumentation layer, bounded-cardinality attributes only, and a hard rule that unbounded identifiers such as user, request, session and full URL path go to logs and traces, never to metrics.</p>
+
+  <p><b>Trade-off and failure mode.</b> Metrics give you constant-cost-per-series answers regardless of traffic volume, which is unbeatable for alerting and dashboards, in exchange for being unable to answer any question you did not pre-aggregate for. They fail by cardinality explosion, and the dangerous version of that failure is the silent one described above. <em>Source: <a href="https://opentelemetry.io/docs/concepts/signals/metrics/">OpenTelemetry Metrics specification</a> and <a href="https://prometheus.io/docs/practices/instrumentation/">Prometheus instrumentation practices</a>.</em></p>
+
+  <h3 id="logging">Logging</h3>
+
+  <p>A log is "a timestamped text record, either structured (recommended) or unstructured, with optional metadata". Unlike a metric, a log record is emitted per event, so its cost scales linearly with traffic, and unlike a metric it can carry unbounded-cardinality fields at no extra structural penalty. That is the whole trade in one sentence: logs are expensive per event and cheap per dimension, metrics are the reverse.</p>
+
+  <p>Structure is the dividing line between a log store you can query and a log store you can only grep. OpenTelemetry distinguishes structured logs, which have "a defined, consistent schema or typed fields that downstream systems can reliably parse and interpret", from unstructured logs, which are "much more difficult to parse and analyze at scale", and semi-structured logs, which carry key-value pairs "but do not guarantee a stable schema across emitters". The log record's top-level fields are worth memorising because two of them are what make logs useful during an incident: alongside <code>Timestamp</code>, <code>ObservedTimestamp</code>, <code>SeverityText</code>, <code>SeverityNumber</code>, <code>Body</code>, <code>Resource</code>, <code>InstrumentationScope</code> and <code>Attributes</code>, the record carries <code>TraceId</code>, <code>SpanId</code> and <code>TraceFlags</code>. Those three turn a pile of lines into the logs <em>for this one request</em>. The severity numbering itself is old and stable: RFC 5424 fixes the syslog scale from 0, "Emergency: system is unusable", through 3, "Error: error conditions", to 7, "Debug: debug-level messages".</p>
+
+  <p><b>Named example.</b> A card-authorisation service in payments cannot sample its authorisation-decision log, because a decline that a cardholder disputes must be reconstructable months later, and "we sampled that request away" is not an answer a regulator accepts. The same service absolutely can and should sample its debug-level connection-pool chatter. Treating those two streams as one log is what produces the bill below.</p>
+
+  <p>Here is the volume arithmetic across the three tiers, which is the calculation most teams do for the first time only after the invoice arrives.</p>
+
+  <div class="math">
+assume 5 log lines per request at 600 bytes = 3 KB per request<br>
+100 rps  -&gt; 300 KB/s -&gt; 25.9 GB/day  -&gt; 777.6 GB per 30 days<br>
+1,000 rps -&gt; 3 MB/s   -&gt; 259.2 GB/day -&gt; 7.78 TB per 30 days<br>
+10,000 rps -&gt; 30 MB/s -&gt; 2.59 TB/day  -&gt; 77.76 TB per 30 days<br>
+at an assumed all-in 0.50 USD per GB ingested and retained:<br>
+100 rps    = 389 USD/month<br>
+1,000 rps  = 3,888 USD/month<br>
+10,000 rps = 38,880 USD/month
+    <span class="gloss">rps is requests per second; the 5 lines and 600 bytes are my assumptions for a typical request path that logs ingress, authentication, one business event, one datastore call and egress; a day is 86,400 seconds. The 0.50 USD per GB is a placeholder you must replace with your own contract price, and it is stated as an assumption rather than quoted from any vendor. The point is not the absolute figure, it is that the monthly bill grows by exactly the factor traffic grows by, so a 100x traffic ramp is a 100x logging bill with no economy of scale anywhere in it.</span>
+  </div>
+
+  <p>The fix is tiering by severity rather than uniform sampling, and it is dramatic. Keep 100 percent of warnings and errors, sample informational lines at 1 percent.</p>
+
+  <div class="math">
+assume 2 percent of lines are WARN or ERROR<br>
+retained = 0.02 + (0.98 x 0.01) = 0.0298, that is 2.98 percent<br>
+at 10,000 rps: 77.76 TB x 0.0298 = 2.32 TB per 30 days<br>
+cost at the same assumed price = 1,158 USD/month, a 33.6x reduction<br>
+and every error line survives, the only category you would read
+    <span class="gloss">The 2 percent WARN-or-ERROR share and the 1 percent informational sampling rate are my assumptions and you should measure your own. The structure of the result is what generalises: because the interesting lines are a small minority, sampling only the boring majority buys nearly the whole saving while losing nearly none of the diagnostic value.</span>
+  </div>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  A["Log line emitted<br/>with TraceId and SpanId"] --> B{"Severity?"}
+  B -- "ERROR or WARN" --> C["Tier 1: hot<br/>keep 100 percent<br/>indexed, short retention"]
+  B -- "INFO" --> D{"Part of a<br/>sampled trace?"}
+  D -- "yes" --> C
+  D -- "no" --> E["Tier 2: sampled<br/>keep 1 in 100<br/>indexed"]
+  B -- "DEBUG" --> F["Tier 3: cold<br/>compressed object store<br/>unindexed, long retention"]
+  C --> G["Queryable during<br/>an incident"]
+  E --> G
+  F --> H["Queryable in hours,<br/>for audits and forensics"]
+  C -. "audit-class events<br/>bypass all sampling" .-> H
+  </div><figcaption>Severity routes a log line into one of three tiers with different unit costs, different index costs and different retrieval latencies. <b>The one rule that matters is that a line belonging to a sampled trace is promoted to the hot tier regardless of severity, so the informational context around a captured failure survives with it.</b> Audit-class events, such as a payment authorisation decision, bypass sampling entirely and are written to cold storage for the retention period the regulator sets, not the one your budget prefers.</figcaption></figure>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> log everything at informational level, keep it for 30 days, and do not build a pipeline; a single searchable store is correct and a tiering scheme is premature. At <b>1,000 requests per second</b> the collapse is the index, not the storage: full-text indexing every line is what breaks first, so this is the tier at which you make logs structured, stop logging inside hot loops, and separate the audit stream from the diagnostic stream. At <b>10,000 requests per second</b> uniform retention is financially indefensible, tiering is mandatory, and the ingestion path itself needs backpressure, because a service that blocks on its logging sink during an incident has converted an observability system into an outage amplifier.</p>
+
+  <p><b>Trade-off and failure mode.</b> Logs buy arbitrary detail and arbitrary cardinality at a per-event price that never gets cheaper. They fail in two ways worth naming separately: financially, by growing exactly as fast as your success; and operationally, when a synchronous logging call to a saturated sink adds its latency to every request, so the observability system becomes the cause of the incident it is reporting. Log asynchronously to a bounded local buffer and drop on overflow, loudly. <em>Source: <a href="https://opentelemetry.io/docs/concepts/signals/logs/">OpenTelemetry Logs specification</a> and <a href="https://www.rfc-editor.org/rfc/rfc5424.html">RFC 5424, The Syslog Protocol</a>.</em></p>
+
+  <h3 id="distributed-tracing">Distributed tracing</h3>
+
+  <p>A trace is "the path of a request through your application", assembled from spans, where a span is "a unit of work or operation". Each span carries a name, a parent span identifier, start and end timestamps, a span context, attributes, events, links and a status. The span with no parent is the root, and it represents the request end to end. Spans also carry a kind, and the five kinds tell you where a process boundary was crossed: <b>client</b> is "a synchronous outgoing remote call", <b>server</b> is "a synchronous incoming remote call", <b>internal</b> covers "operations which do not cross a process boundary", and <b>producer</b> and <b>consumer</b> cover the asynchronous job case where the two halves are separated in time.</p>
+
+  <p>The mechanism that makes a trace possible across service and vendor boundaries is context propagation over a wire header. W3C Trace Context exists because, in the specification's own framing, "traces that are collected by different tracing vendors cannot be correlated as there is no shared unique identifier". It defines the <code>traceparent</code> header as four hex-encoded fields:</p>
+
+  <pre><code>traceparent: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01</code></pre>
+
+  <p>Reading left to right: <code>00</code> is the version, then a 32-hex-character trace identifier of 16 bytes that must not be all zeros, then a 16-hex-character parent span identifier of 8 bytes that must not be all zeros, then two hex characters of trace flags whose least significant bit is the sampled flag. When that bit is 1, "the caller may have recorded trace data". A companion <code>tracestate</code> header carries vendor-specific key-value metadata so a request can cross two tracing systems without either one discarding the other's state.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client app
+  participant G as API gateway
+  participant K as Checkout service
+  participant P as Payments service
+  participant L as Ledger service
+  participant N as Async notifier
+  C->>G: POST /orders, no traceparent yet
+  Note over G: Root span starts.<br/>Generates trace-id 0af765...<br/>Sets sampled flag to 1
+  G->>K: traceparent 00-0af765...-b7ad6b...-01
+  Note over K: SERVER span, parent b7ad6b...
+  K->>P: traceparent 00-0af765...-3c1d99...-01
+  Note over P: SERVER span. Calls issuer.
+  P--xK: 504 after 9.8s, issuer timeout
+  Note over P: Span status ERROR,<br/>exception event recorded
+  K->>P: retry, traceparent 00-0af765...-4a2e01...-01
+  P-->>K: 200 authorised in 240ms
+  K->>L: traceparent 00-0af765...-5b3f12...-01
+  L-->>K: 201 entry written
+  K->>N: enqueue, traceparent carried on the message
+  Note over N: PRODUCER span ends here.<br/>CONSUMER span links to it later.
+  K-->>G: 201 created
+  G-->>C: 201 created in 10.4s
+  Note over G,L: One trace-id ties every span together.<br/>The 10.4s is explained by the 9.8s dead span, not by the retry.
+  </div><figcaption>A single order request crosses five services, and one trace identifier is propagated through every hop in the <code>traceparent</code> header while each hop mints its own span identifier. <b>The value of the trace is not that it shows you the path, it is that it attributes the 10.4 second user-visible latency to one specific 9.8 second failed call rather than to the service that merely reported the slow total.</b> Note the asynchronous tail: the notifier's consumer span starts after the response was already returned, so it is joined by a span link rather than by parent-child nesting.</figcaption></figure>
+
+  <p><b>Named example.</b> Google's Dapper is the documented origin case, built to trace web search across the fleet, and its published overhead table is the reason everybody samples. At full 1-in-1 sampling Dapper measured a 16.3 percent latency increase on a web search cluster; at 1 in 1,024 the measured change was minus 0.20 percent, inside the paper's stated 2.5 percent experimental error. That is the entire justification for sampling stated in two numbers.</p>
+
+  <p>Which raises the question the sampling rate actually decides: what is the probability you captured the rare failure you are now trying to debug? For head sampling at rate <em>p</em>, over <em>N</em> requests, with a failure affecting a fraction <em>f</em> of them, the expected number of captured failing traces is <em>N f p</em>, and the chance of catching at least one follows from the Poisson approximation.</p>
+
+  <div class="math">
+P(at least one captured) = 1 - e^(-N x f x p)<br>
+<br>
+case A: 1,000 rps, one hour, f = 1 in 10,000, p = 1/1024<br>
+N = 3,600,000, failures = 360, captured = 360 x 0.000977 = 0.352<br>
+P = 1 - e^(-0.352) = 29.6 percent<br>
+<br>
+case B: same failure, same p, but at 100 rps<br>
+N = 360,000, failures = 36, expected captured = 0.0352<br>
+P = 1 - e^(-0.0352) = 3.5 percent<br>
+<br>
+case C: 1,000 rps, over a full 24 hours instead of one hour<br>
+N = 86,400,000, failures = 8,640, expected captured = 8.44<br>
+P = 1 - e^(-8.44) = 99.98 percent
+    <span class="gloss">N is the number of requests in the window, f is the fraction of requests hitting the rare failure, p is the head sampling probability, e is Euler's number. The Poisson approximation is accurate here because f times p is tiny. Read the three cases as one lesson: at 1 in 1,024 sampling you will almost certainly see this bug eventually, and you will almost certainly not see it during the incident, which is the only time you needed it. Case B is why the Dapper paper says low-volume services should raise their rate; the paper's own words are that services handling "dozens rather than tens of thousands of requests per second" can afford to trace every request.</span>
+  </div>
+
+  <p>The structural fix is tail sampling, where "the decision to sample a trace takes place by considering all or most of the spans within the trace", which permits rules like always keep a trace containing an error. Head sampling cannot do this, and OpenTelemetry says so directly: "you cannot ensure that all traces with an error within them are sampled with head sampling alone." The cost is real. Tail sampling needs "stateful systems that can accept and store a large amount of data", it buffers every trace until it can decide, and the resulting components "often end up as vendor-specific technology". The arithmetic, though, is favourable.</p>
+
+  <div class="math">
+tail policy: keep all error traces, plus 1 percent of successes<br>
+at 0.1 percent errors: retained = 0.001 + (0.999 x 0.01) = 0.01099<br>
+that is 1.099 percent retained, versus 0.098 percent at 1/1024<br>
+11.3x more storage, for a 100 percent capture rate on failures<br>
+instead of the 29.6 percent per hour computed above
+    <span class="gloss">The 0.1 percent error rate and the 1 percent success-sampling rate are my assumptions. The closing comparison is the one that matters: you pay roughly an order of magnitude more storage and you stop gambling on whether the failure you are paged for is in the data.</span>
+  </div>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> trace every request with head sampling at 1 and skip the tail-sampling infrastructure entirely; the overhead is affordable and the completeness is worth more than the saving. At <b>1,000 requests per second</b> head sampling in the range of a few percent is the usual landing spot and it is also the tier at which that choice quietly starts failing you for rare bugs, per case A above. At <b>10,000 requests per second</b> head sampling alone is no longer defensible for debugging: you want low-rate head sampling for the baseline latency picture plus a tail sampler that guarantees error and high-latency traces, and you must budget for the collector fleet that buffers them.</p>
+
+  <p><b>Trade-off and failure mode.</b> Tracing buys causal attribution across service boundaries, which neither metrics nor logs can produce at any price. It costs propagation discipline in every library and every queue. Its failure mode is the broken trace: one service in the middle that does not forward <code>traceparent</code> silently severs the trace into two unrelated fragments, and the resulting picture is not merely incomplete, it is misleading, because the orphaned subtree looks like a root cause when it is a symptom. This is also where tracing touches AI-serving latency work, since a span-level breakdown is the only honest way to separate model time from everything else; see <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">time to first token and inter-token latency</a>. <em>Source: <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a>, <a href="https://opentelemetry.io/docs/concepts/signals/traces/">OpenTelemetry Traces</a>, <a href="https://opentelemetry.io/docs/concepts/sampling/">OpenTelemetry Sampling</a>, and <a href="https://static.googleusercontent.com/media/research.google.com/en//archive/papers/dapper-2010-1.pdf">Sigelman et al., Dapper (Google, 2010)</a>.</em></p>
+
+  <h2>3. The question you did not know to ask</h2>
+
+  <h3 id="observability">Observability</h3>
+
+  <p>Here is the distinction, stated as sharply as it can be stated. <b>Monitoring answers questions you knew to ask in advance. Observability is whether you can answer questions you did not.</b> OpenTelemetry's own definition carries the same idea: "observability lets you understand a system from the outside by letting you ask questions about that system without knowing its inner workings", and the property it is reaching for is the ability to troubleshoot "unknown unknowns", meaning novel problems nobody anticipated and therefore nobody instrumented for specifically.</p>
+
+  <p>This is not a maturity ladder where observability replaces monitoring. They are different capabilities with different economics, and you need both. Monitoring is what pages you. Observability is what you do for the next forty minutes. A system with perfect monitoring and no observability detects the outage in seconds and then flounders; a system with perfect observability and no monitoring learns about the outage from a customer.</p>
+
+  <div class="callout key"><b>The practical test.</b> Someone asks "why were requests slow for enterprise customers on the Frankfurt cluster between 14:02 and 14:09, but only on the checkout path, and only for accounts with more than 50 saved payment methods?" If you can answer that without shipping new code and waiting for it to reproduce, you have observability. If your answer is "let me add a metric and we will know next time", you have monitoring. Notice that the question contains four high-cardinality predicates. That is not a coincidence, it is the mechanism.</div>
+
+  <p>Cardinality is the practical constraint that decides which one you have, and it decides it at collection time, not at query time. A metrics system is cheap because it aggregated away every dimension you did not name in advance; asking it a question about a dimension it discarded is not slow, it is impossible. An event store keeps the per-event record with its high-cardinality attributes intact, so the question is answerable, and you pay for that by storing an event per request instead of a number per interval. Every observability architecture decision reduces to where you put that boundary: which attributes are cheap enough to keep on a metric, and which are so cardinal that they must live on a span or a log line instead.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  Q["A question arrives<br/>during an incident"] --> D{"Were its dimensions<br/>named before collection?"}
+  D -- "yes" --> M["Metric store answers it<br/>in milliseconds, at any traffic volume"]
+  D -- "no" --> C{"Is the dimension<br/>on a retained event?"}
+  C -- "yes, on a span<br/>or structured log" --> E["Event store answers it<br/>in seconds, at storage cost"]
+  C -- "no, it was<br/>aggregated away" --> X["Unanswerable.<br/>Ship instrumentation<br/>and wait for a recurrence"]
+  M --> R["Resolution"]
+  E --> R
+  X --> W["Extended outage,<br/>or an unresolved<br/>root cause"]
+  subgraph BUDGET["The cardinality budget decides where the line sits"]
+    direction LR
+    LO["Low cardinality:<br/>region, status class,<br/>endpoint, version"] --> MET["safe as metric labels"]
+    HI["High cardinality:<br/>user id, request id,<br/>session, full URL"] --> EVT["spans and logs only"]
+  end
+  </div><figcaption>The same question routes to a different store depending on a decision made long before the question existed. <b>The third branch, unanswerable, is not a tooling gap you can fix during the incident, and that is the entire cost of choosing aggregation.</b> The lower panel is the working rule: bounded dimensions may become metric labels, unbounded identifiers must go on events instead, and mixing the two up is how a metrics backend dies.</figcaption></figure>
+
+  <p><b>Named example.</b> Ride-hailing dispatch is the canonical high-cardinality domain. The interesting questions are all of the form "why did matching fail for riders in this one geohash cell during this seven-minute surge", and the dimensions in that question are location, time bucket, driver supply state and request identifier. None of those can be metric labels at any sane cost, so a dispatch service that instrumented only aggregate match rate can tell you that matching degraded and can never tell you where. What breaks without observability here is not the dashboard; it is the ability to distinguish a genuine supply shortage from a routing bug, which are the same aggregate curve and opposite responses.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> you have observability almost by accident, because you can retain every event and read the logs directly, and building a dedicated event pipeline is over-engineering. At <b>1,000 requests per second</b> is where the collapse happens: full retention becomes expensive at exactly the moment the system becomes too complex to reason about by reading, so this is the tier that demands a deliberate decision about which attributes survive collection. At <b>10,000 requests per second</b> observability is a designed budget, not a byproduct: you fund a fixed number of high-cardinality attributes per event, enforce it in a shared instrumentation library, and accept that anything outside that budget is a question you have chosen not to be able to answer.</p>
+
+  <p><b>Trade-off and failure mode.</b> Observability costs storage and instrumentation discipline in exchange for the ability to diagnose novelty. It fails in a way that is invisible until an incident, because an under-instrumented system looks identical to a well-instrumented one on every good day. It also fails by overcorrection: teams who discover high-cardinality event stores sometimes route everything there and rebuild an unqueryable, unaffordable data lake, which is monitoring's failure mode with a larger bill attached. Related material sits in <a href="../../ai-system-design-course/lessons/0005-reliability-and-security.html#observability">the AI system design course's treatment of observability for model-serving systems</a>. <em>Source: <a href="https://opentelemetry.io/docs/concepts/observability-primer/">OpenTelemetry Observability Primer</a>.</em></p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">During an outage you need to know whether slowness was confined to one customer tier. Your metrics have no tier label. What is the accurate description of your position?</div>
+    <button class="q-opt">You have an observability gap, because the metric retention window is far too short</button>
+    <button class="q-opt">You have an alerting gap, because the paging threshold was configured on the wrong signal</button>
+    <button class="q-opt">You have monitoring but no observability, because the dimension was discarded before storage</button>
+    <button class="q-opt">You have observability already, because the tier can be recovered by joining the two stores</button>
+    <div class="q-fb">Correct answer: monitoring, not observability. The dimension was aggregated away at collection time, so no query, index or retention setting can recover it. Option 1 is wrong because retention governs how far back you can look, not which dimensions exist at all. Option 2 is wrong because the alert fired correctly; the failure is in what the stored data can express, not in the threshold that read it. Option 4 is wrong because a join needs a shared key, and a pre-aggregated series has no per-request identity to join on. The fix is instrumentation, and it lands after this incident rather than during it.</div>
+  </div>
+
+  <h2>4. Turning signals into targets</h2>
+
+  <h3 id="slis">Service level indicators</h3>
+
+  <p>An SLI is "a carefully defined quantitative measure of some aspect of the level of service that is provided". The mechanism the SRE Workbook recommends is a ratio, and the discipline is in the denominator: good events divided by valid events, expressed as a percentage. "Valid" is doing real work there, because it excludes traffic you were never promising to serve, such as requests that failed validation or were rejected by a rate limiter you deliberately configured.</p>
+
+  <div class="math">
+SLI = (good events / valid events) x 100<br>
+<br>
+worked example, checkout availability over 30 days at 1,000 rps:<br>
+valid events = 1,000 x 86,400 x 30 = 2,592,000,000 requests<br>
+good events = non-5xx responses served in under 300 ms<br>
+if 1,900,000 were bad: good events = 2,590,100,000<br>
+SLI = (2,590,100,000 / 2,592,000,000) x 100 = 99.9267 percent
+    <span class="gloss">good events are the ones that met your explicit definition of served correctly, which here bundles a status-code condition and a latency condition into one indicator; valid events are all the requests you accepted responsibility for, excluding malformed input and deliberate rejections. The percentage is the SLI. Note that the definition of good is a product decision, not a measurement detail: moving the latency threshold from 300 ms to 500 ms changes this number without changing the system at all.</span>
+  </div>
+
+  <p>The SRE book is emphatic that indicator choice starts from users, not from what is easy to measure: "you shouldn't use every metric you can track in your monitoring system as an SLI; an understanding of what your users want from the system will inform the judicious selection of a few indicators." It is equally emphatic about aggregation. Averaging latency "obscures an important detail: it's entirely possible for most of the requests to be fast, but for a long tail of requests to be much, much slower", so treat metrics "as distributions rather than averages" and set your indicator on a percentile. The workbook further sorts services into three families with different natural indicators: request-driven services use availability, latency and quality; pipelines use freshness, correctness and coverage; storage systems use durability. A batch pipeline with an availability SLI is measuring the wrong thing well.</p>
+
+  <p><b>Named example.</b> A streaming platform's playback-start indicator is a clean case of the ratio discipline. Good events are sessions where video began within a target time; valid events exclude sessions the user abandoned before the request was issued and requests for titles not licensed in that region, because neither is a reliability failure. Without that exclusion the indicator moves whenever the content catalogue changes, and an SLI that moves for non-reliability reasons is one that on-call will learn to ignore.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> a ratio SLI is statistically noisy over short windows, so measure over days rather than minutes and resist the urge to alert on it directly. At <b>1,000 requests per second</b> you have enough events for a stable hourly ratio, which is the tier at which percentile-based latency indicators become meaningful rather than jittery. At <b>10,000 requests per second</b> the problem inverts: you have so many events that a serious regression affecting one customer segment is invisible inside a healthy global ratio, so you need per-segment indicators or a worst-segment indicator alongside the global one.</p>
+
+  <p><b>Trade-off and failure mode.</b> An SLI buys you one number that a product manager, an on-call engineer and an executive can all argue about productively. It costs you a genuine definitional fight about what "good" means. It fails when the indicator is measured somewhere the user is not: server-side latency that excludes the queueing, the load balancer and the client's network can sit comfortably inside target while users experience an outage. Measure as close to the user as you can afford to. <em>Source: <a href="https://sre.google/workbook/implementing-slos/">SRE Workbook, Chapter 2: Implementing SLOs</a> and <a href="https://sre.google/sre-book/service-level-objectives/">SRE Book, Chapter 4: Service Level Objectives</a>.</em></p>
+
+  <h3 id="slos">Service level objectives</h3>
+
+  <p>An SLO is "a target value or range of values for a service level that is measured by an SLI". It is the SLI plus a threshold plus a measurement window, and all three parts are load-bearing. The distinction from an SLA is consequence, and the SRE book gives you the test verbatim: "an easy way to tell the difference between an SLO and an SLA is to ask 'what happens if the SLOs aren't met?': if there is no explicit consequence, then you are almost certainly looking at an SLO." An SLA has a refund attached. An SLO has an engineering decision attached.</p>
+
+  <p>The window choice is the part teams get wrong most often. The workbook recommends "a four-week rolling window" as the general-purpose default, because a rolling window reflects what a user actually experienced, whereas a calendar window creates a perverse incentive at the boundary: an outage on the last day of a quarter costs almost nothing, and the same outage on the first day constrains you for three months. Use calendar windows for reporting to the business and rolling windows for engineering decisions.</p>
+
+  <p>On choosing the target, the guidance is to start from measured historical performance and round down to a manageable number, while refusing to let today's performance permanently cap your ambition. The corollary matters more than the rule: <b>a 100 percent SLO is always wrong.</b> It leaves no room to deploy, it makes every routine change a violation, and it is unachievable anyway once you count the dependencies you do not control. The SRE book's other structural advice is to "have as few SLOs as possible", because a service with fifteen objectives has none, in the sense that no one can tell you which one to defend when they conflict.</p>
+
+  <p><b>Named example.</b> Healthcare scheduling systems illustrate why the target is a product decision and not an engineering one. Appointment booking might sit at 99.9 percent, while the interface that pages an on-duty clinician sits far higher, because the consequence of unavailability differs by orders of magnitude between the two paths even though they run in the same cluster on the same infrastructure. A single service-wide SLO would either over-engineer the booking path or under-engineer the paging path, and the second of those is the one that ends up in a news story.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> a single availability SLO measured over 28 days is the correct total investment, and per-endpoint objectives are premature. At <b>1,000 requests per second</b> you split the objective by user journey, because a global number now averages a healthy read path together with a broken write path and reports the mean as fine. At <b>10,000 requests per second</b> SLOs become the interface between teams: each dependency publishes its own objective, and your achievable target is bounded by the product of everything you call, which is arithmetic worth doing explicitly before you promise anything.</p>
+
+  <div class="math">
+if you call 4 dependencies serially, each at 99.9 percent:<br>
+best achievable availability = 0.999^4 = 0.99600 = 99.6 percent<br>
+so a 99.9 percent objective is unreachable without redundancy,<br>
+caching, or graceful degradation<br>
+with a cache serving 80 percent of reads when a dependency is down:<br>
+effective availability = 0.996 + (0.004 x 0.80) = 0.9992<br>
+that is 99.92 percent on that path
+    <span class="gloss">The exponent is the number of dependencies on the critical path, and independence is an assumption that is often false in practice because dependencies share infrastructure, which makes the real number worse than this. The cache calculation at the end shows why degradation strategies are an availability lever and not merely a nicety: serving 80 percent of reads from cache during a dependency outage converts most of the unavailable time into degraded-but-successful time.</span>
+  </div>
+
+  <p><b>Trade-off and failure mode.</b> An SLO buys a shared, unambiguous definition of "good enough" that ends recurring arguments. It costs the political work of getting product, engineering and leadership to agree to a number that is explicitly below 100. It fails by being aspirational rather than measured: an SLO set higher than the system has ever achieved generates permanent violation, everyone learns to ignore it, and you have spent the credibility you will need later. It also fails by being set too low, at which point it silently authorises a level of unreliability that users will not tolerate. <em>Source: <a href="https://sre.google/sre-book/service-level-objectives/">SRE Book, Chapter 4: Service Level Objectives</a>.</em></p>
+
+  <h3 id="error-budgets">Error budgets</h3>
+
+  <p>An error budget is the arithmetic complement of the SLO, and the SRE book describes it as "the budget of how much unreliability is remaining for the quarter". If you promised 99.9 percent, you have explicitly permitted 0.1 percent of failure, and that permitted failure is a resource you may spend. This is the idea that converts reliability from a virtue into an engineering budget with a balance you can check.</p>
+
+  <p>Derive the minutes rather than memorising them, because deriving takes ten seconds and the memorised table is always for the wrong window.</p>
+
+  <div class="math">
+minutes in 30 days = 30 x 24 x 60 = 43,200<br>
+<br>
+99      percent -&gt; 43,200 x 0.01     = 432 minutes    = 7.2 hours<br>
+99.9    percent -&gt; 43,200 x 0.001    = 43.2 minutes<br>
+99.99   percent -&gt; 43,200 x 0.0001   = 4.32 minutes<br>
+99.999  percent -&gt; 43,200 x 0.00001  = 25.9 seconds
+    <span class="gloss">Take the window length in minutes and multiply by one minus the availability target. Every extra nine divides the budget by ten. The 99.9 percent figure of 43.2 minutes is independently confirmed by the SRE Workbook's burn-rate table, which lists 43 minutes as the time to exhaust a 30-day 99.9 percent budget at a 100 percent error rate. Note what the last row means operationally: at five nines your entire monthly budget is shorter than a single human deciding whether to roll back.</span>
+  </div>
+
+  <p>Now the number that changes behaviour. Take a service with a 99.9 percent SLO on a rolling 30-day window, and give it one bad afternoon: a 20-minute total outage.</p>
+
+  <div class="math">
+budget for 30 days at 99.9 percent = 43.2 minutes<br>
+one 20-minute total outage = 20 / 43.2 = 46.3 percent of budget<br>
+remaining = 23.2 minutes for the rest of the 30-day window<br>
+<br>
+same incident measured against a 90-day quarter:<br>
+minutes in 90 days = 129,600, budget = 129.6 minutes<br>
+20 / 129.6 = 15.4 percent of the quarterly budget<br>
+<br>
+three such incidents in one window = 60 / 43.2 = 138.9 percent<br>
+Budget exhausted.
+    <span class="gloss">The outage is assumed to be total, meaning 100 percent of requests failing for the full 20 minutes; a partial outage consumes proportionally less, so 20 minutes at a 25 percent error rate costs 5 minutes of budget, which is 11.6 percent of the 30-day budget. The window choice more than doubles the apparent severity of the identical incident, which is exactly why the window is part of the SLO definition and not an afterthought. The last line is the operational point: at 99.9 percent you can afford two twenty-minute outages a month and no more, and most teams have never done this multiplication.</span>
+  </div>
+
+  <p>The purpose is incentive alignment, and the SRE book is explicit that it exists to resolve the structural tension between shipping and stability by giving both sides "a common incentive". When budget remains, the team ships; when it is spent, the error budget policy triggers, and that policy must be agreed in advance with product management, developers and reliability engineers, before anyone is angry. A policy invented during the outage it applies to is not a policy.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Healthy
+  Healthy: Healthy<br/>burn rate under 1<br/>ship freely, take risks
+  Watch: Watch<br/>over 50 percent spent<br/>ticket alert fired
+  Critical: Critical<br/>over 90 percent spent<br/>risky changes need review
+  Exhausted: Exhausted<br/>budget at zero<br/>feature freeze in force
+  Frozen: Reliability work only<br/>agreed policy in force
+  Healthy --> Watch: sustained burn rate above 1
+  Watch --> Healthy: burn slows, window rolls forward
+  Watch --> Critical: burn continues
+  Critical --> Exhausted: budget hits zero
+  Critical --> Watch: mitigation lands
+  Exhausted --> Frozen: policy triggers automatically
+  Frozen --> Healthy: window rolls forward AND<br/>reliability action items closed
+  Frozen --> Frozen: further incidents<br/>extend the freeze
+  note right of Frozen
+    The freeze is not a punishment.
+    It is the pre-agreed price of the
+    risk the team already chose to take.
+  end note
+  </div><figcaption>The error budget is a state machine, and the transitions are mechanical rather than negotiated. <b>The critical property is that the exit from Frozen requires both time passing and reliability work actually landing, because a freeze that expires on the calendar alone teaches the team to wait it out rather than to fix anything.</b> Note also that the entry to Watch is driven by burn rate, not by absolute consumption, so a fast burn escalates before much budget is gone.</figcaption></figure>
+
+  <p><b>Named example.</b> Ad tech serving is where the budget framing earns its keep, because the cost of unavailability is directly denominated in lost auction revenue per second, so the conversation about whether to spend budget on a risky migration can be held in the same units as the conversation about what the migration is worth. What breaks without an error budget is not reliability directly; it is the decision procedure. Teams without one relitigate every launch from scratch, and the outcome tracks whoever argued hardest rather than whatever the data said.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> the budget is measurable but statistically thin, and a single unlucky hour can look like a policy trigger, so evaluate over the full window rather than reacting to slices of it. At <b>1,000 requests per second</b> the budget becomes a genuinely usable release gate and this is the tier at which automating the gate in the deployment pipeline starts paying for itself. At <b>10,000 requests per second</b> budgets are consumed by fractions of a percent of traffic rather than by visible outages, so partial-failure accounting matters more than downtime minutes, and per-journey budgets stop the healthy read path from subsidising the broken write path.</p>
+
+  <p><b>Trade-off and failure mode.</b> Error budgets buy an automatic, depersonalised decision rule. They cost you an agreement negotiated in advance and the organisational nerve to honour a freeze when a launch date is at stake. The dominant failure is the unenforced budget: a policy that is overridden the first time it is inconvenient is worse than no policy, because it has taught everyone that the number is decorative. The second failure is subtler, which is a budget nobody spends. Consistently finishing the window with 95 percent of budget unused means your SLO is set too low, you are over-investing in reliability relative to what users need, and that surplus should have been shipped as features. This connects to the cost material in <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a>. <em>Source: <a href="https://sre.google/sre-book/embracing-risk/">SRE Book, Chapter 3: Embracing Risk</a>.</em></p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A service holds a 99.9 percent objective over a rolling 30-day window. One total outage lasts 20 minutes. How much of the window's budget did it consume?</div>
+    <button class="q-opt">About 46 percent, since the window permits 43.2 minutes of total unavailability</button>
+    <button class="q-opt">About 15 percent, since the window permits 129.6 minutes of total unavailability</button>
+    <button class="q-opt">About 0.05 percent, since the window contains 43,200 minutes of possible service</button>
+    <button class="q-opt">About 4.6 percent, since the window permits 432.0 minutes of total unavailability</button>
+    <div class="q-fb">Correct answer: 20 divided by 43.2 is 46.3 percent, because 30 days is 43,200 minutes and 0.1 percent of that is 43.2 minutes. Option 2 uses a 90-day quarter's budget of 129.6 minutes, which is the right arithmetic for the wrong window, and the window is part of the objective's definition. Option 3 divides the outage by the whole window rather than by the budget, which measures downtime as a share of calendar time instead of as a share of permitted failure. Option 4 uses the budget for a 99 percent objective, one nine too few. The habit worth building is deriving 43,200 minutes first and multiplying, never recalling a table.</div>
+  </div>
+
+  <h2>5. Turning targets into a page</h2>
+
+  <h3 id="alerting">Alerting</h3>
+
+  <p>Alerting is the function that converts a continuous signal into a discrete interruption of a human being, and it should be designed with that framing in front of you, because the interruption is the expensive part. The most important rule in the SRE book is symptom-based paging: alert on what the user is experiencing, not on the internal condition you currently believe causes it. The book calls the "what" versus "why" split "one of the most important distinctions in writing good monitoring with maximum signal and minimum noise." Cause-based alerts multiply without bound, because there are unlimited ways to break a system and only a handful of ways for users to notice.</p>
+
+  <p>The SRE Workbook gives four attributes for judging any alerting strategy, and you should be able to name all four: <b>precision</b>, "the proportion of events detected that were significant"; <b>recall</b>, "the proportion of significant events detected"; <b>detection time</b>, "how long it takes to send notifications in various conditions"; and <b>reset time</b>, "how long alerts fire after an issue is resolved". Every alerting design trades these against each other, and a team that only optimises recall builds a pager that nobody reads.</p>
+
+  <p>The modern mechanism is the multiwindow, multi-burn-rate alert. Burn rate is the speed at which you are consuming error budget relative to the rate that would exactly exhaust it at the end of the window, so for a 99.9 percent SLO over 30 days a steady 0.1 percent error rate is a burn rate of 1. The workbook's table makes the consequences concrete: burn rate 1 exhausts in 30 days, burn rate 2 in 15 days, burn rate 10 in 3 days, and burn rate 1,000, meaning a 100 percent error rate, in 43 minutes. Its recommended configuration for a 99.9 percent objective uses three tiers: page at a 14.4x burn rate measured over a 1-hour long window with a 5-minute short window, which corresponds to 2 percent of budget consumed; page at a 6x burn rate over a 6-hour window with a 30-minute short window, at 5 percent consumed; and open a ticket rather than page at a 1x burn rate over 3 days with a 6-hour short window, at 10 percent consumed.</p>
+
+  <p>The two-window structure is the clever part and it is worth understanding rather than copying. The long window provides precision, because a short spike cannot trip it. The short window provides reset time, because when the incident ends the short window clears quickly and the alert stops firing instead of smouldering for hours after recovery. Both must be over threshold simultaneously for the alert to fire.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  S["SLI stream<br/>good / valid ratio"] --> L1["Long window 1h<br/>burn rate ≥ 14.4"]
+  S --> S1["Short window 5m<br/>burn rate ≥ 14.4"]
+  S --> L2["Long window 6h<br/>burn rate ≥ 6"]
+  S --> S2["Short window 30m<br/>burn rate ≥ 6"]
+  S --> L3["Long window 3d<br/>burn rate ≥ 1"]
+  S --> S3["Short window 6h<br/>burn rate ≥ 1"]
+  L1 --> A1{"AND"}
+  S1 --> A1
+  L2 --> A2{"AND"}
+  S2 --> A2
+  L3 --> A3{"AND"}
+  S3 --> A3
+  A1 --> P1["PAGE<br/>2 percent of budget gone<br/>fast burn, wake someone"]
+  A2 --> P2["PAGE<br/>5 percent of budget gone<br/>medium burn"]
+  A3 --> T1["TICKET<br/>10 percent of budget gone<br/>slow burn, business hours"]
+  P1 --> H["On-call human"]
+  P2 --> H
+  T1 --> B["Backlog, next working day"]
+  C["Cause-based signals:<br/>CPU, disk, pool depth,<br/>replica lag"] --> D["Dashboards and runbooks<br/>NEVER the pager"]
+  D -.-> H
+  </div><figcaption>Three burn-rate tiers watch the same indicator at different speeds, and each requires its long and short window to breach together before it fires. <b>The long window supplies precision so a transient blip cannot page anyone, and the short window supplies fast reset so the alert stops when the incident does.</b> The lower path is the discipline that keeps the pager survivable: saturation and resource signals are how you explain an incident, never how you get told about one.</figcaption></figure>
+
+  <p><b>Named example.</b> Logistics tracking is a good illustration of symptom-based paging beating cause-based paging. The user-visible symptom is a shipment status going stale, and it has dozens of possible causes: a scanner gateway offline, a partner feed lagging, a queue backing up, a database failover. Paging on each cause produces dozens of rules that fire during routine maintenance; paging on the symptom of freshness gives you one rule that fires exactly when customers are actually affected, with the cause signals available on a dashboard to explain it once you are awake.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> burn-rate alerting is statistically unstable because a handful of errors can produce an enormous instantaneous rate, so alert on absolute error counts with a floor, such as at least 10 failures, combined with the ratio. At <b>1,000 requests per second</b> burn-rate alerting works properly and this is the tier at which you should retire your accumulated cause-based rules, which by now number in the dozens and produce most of your noise. At <b>10,000 requests per second</b> a global symptom alert becomes too insensitive, because a segment can be entirely broken while the aggregate stays inside threshold, so you need per-journey burn rates and alert grouping to stop one incident from generating forty simultaneous pages.</p>
+
+  <p><b>Trade-off and failure mode.</b> Alerting trades precision against detection time along a curve you cannot escape, only choose a point on. Its failure mode has a name and a mechanism: alert fatigue. The SRE book puts the human limit plainly, that an engineer "can only react with a sense of urgency a few times a day before becoming fatigued", and the arithmetic of that limit is the subject of the next topic. A low-precision pager does not merely annoy people, it trains them to acknowledge without reading, and the page they dismiss on reflex will eventually be the real one. <em>Source: <a href="https://sre.google/workbook/alerting-on-slos/">SRE Workbook, Chapter 5: Alerting on SLOs</a> and <a href="https://sre.google/sre-book/monitoring-distributed-systems/">SRE Book, Chapter 6</a>.</em></p>
+
+  <h2>6. What happens to the humans</h2>
+
+  <p>Everything up to this point produces a signal. The rest of the chapter is about the system that receives it, and that system is made of tired people. It has a capacity, it has failure modes, and it degrades under load in ways that are entirely predictable if you do the arithmetic. Most engineers can describe a histogram bucket and cannot tell you how many pages per week their rotation can absorb, which is the wrong way round, because the second number is the one that determines how long your outages last.</p>
+
+  <h3 id="on-call">On-call</h3>
+
+  <p>On-call is the mechanism that guarantees a human with authority to act is reachable within a bounded time. Its design parameters are response time, rotation size, escalation path and, above all, load, and Google publishes concrete numbers for all of them.</p>
+
+  <p>Response targets are set by the availability goal, not by preference: "5 minutes for user-facing or otherwise highly time-critical services, and 30 minutes for less time-sensitive systems". Rotation size follows from wanting sustainable coverage: for a single-site team running 24/7 with both a primary and a secondary, the minimum is eight engineers, each on call one week per month; for a two-site follow-the-sun arrangement, at least six per site, which removes night shifts entirely and is worth more than any tooling investment you can make.</p>
+
+  <p>The load cap is the number to internalise. Google's rule allocates "at least 50 percent of SRE time into engineering: of the remainder, no more than 25 percent can be spent on-call", and it prices an incident honestly, because handling one properly means "root-cause analysis, remediation, and follow-up activities like writing a postmortem and fixing bugs", which "takes 6 hours". That yields a maximum of two incidents per 12-hour shift. Combine the two numbers and the sustainable page rate falls out.</p>
+
+  <div class="math">
+per-shift ceiling: 12 hours / 6 hours = 2 incidents per shift<br>
+<br>
+per-week sustainable load, derived from the 25 percent cap:<br>
+0.25 x 40-hour week = 10 hours of on-call work per week<br>
+10 / 6 = 1.67 real incidents per on-call week<br>
+<br>
+now add imprecision. Suppose the pager fires 7 times per<br>
+on-call week at precision 0.2:<br>
+real incidents = 7 x 0.2 = 1.4, costing 1.4 x 6 = 8.4 hours<br>
+which is inside the 10-hour cap<br>
+false pages = 7 x 0.8 = 5.6, costing zero budgeted hours,<br>
+and roughly a third land in the 56 sleeping hours of the<br>
+168-hour week: about 1.9 destroyed nights
+    <span class="gloss">Precision is the SRE Workbook's term for the proportion of pages that were significant, so precision 0.2 means four out of five pages were noise. The 6 hours per incident and the 25 percent cap are Google's published figures; the 7 pages per week, the precision of 0.2, the 40-hour week and the one-third-at-night split are my assumptions. The conclusion is the uncomfortable one: the real incident work fits comfortably inside the budget, and the rotation still burns out, because the thing destroying it is not accounted for anywhere in the capacity model. Alert precision is an on-call staffing decision wearing a monitoring costume.</span>
+  </div>
+
+  <p>The stress mechanism is not incidental either. The SRE book notes that stress hormones push responders toward intuition and away from deliberate analysis, which is precisely the wrong mode for a novel failure, and it names the countermeasures: clear escalation paths, rehearsed incident procedures, and blameless postmortems, all of which reduce the stakes of any individual decision. Fatigue does not just make on-call unpleasant, it measurably lengthens the outage.</p>
+
+  <p><b>Named example.</b> Gaming platforms face the sharpest version of this because their load is scheduled: a launch or a seasonal event concentrates both traffic and risk into a known window. The correct response is a staffing decision rather than a technical one, adding a surge rotation for the window so the normal rotation is not consuming a month of its capacity in one weekend. Teams that skip this discover that the incident after the launch incident is handled by someone who has been awake for twenty hours.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> the honest answer is often that a best-effort rotation among three or four engineers is proportionate, and the risk you are accepting is a slow response overnight, which you should state explicitly rather than pretend away. At <b>1,000 requests per second</b> you cross into needing a real rotation with a documented escalation path and a secondary, because an unanswered page now has customer consequences, and this is the tier where an informal arrangement collapses precisely when it is first tested. At <b>10,000 requests per second</b> you need the full structure: primary and secondary, a rotation large enough to hit the eight-engineer minimum, follow-the-sun if you can afford it, and an explicit weekly page-count budget per service that gates the addition of any new alert rule.</p>
+
+  <p><b>Trade-off and failure mode.</b> On-call buys bounded response time at the cost of ongoing human attention, which is your most expensive and least elastic resource. It fails through attrition, and attrition is a lagging indicator: by the time people are leaving, the pager has been bad for a year. The leading indicators are cheap to watch, so watch them. Pages per shift, the fraction arriving between midnight and six, and the fraction that resulted in no action are three numbers that should appear on the same review as your SLO. <em>Source: <a href="https://sre.google/sre-book/being-on-call/">SRE Book, Chapter 11: Being On-Call</a>.</em></p>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">Your rotation takes 7 pages per on-call week and only about one in five is a real incident. Which change most directly protects the rotation?</div>
+    <button class="q-opt">Add engineers to the rotation so that each person is on call less often than before</button>
+    <button class="q-opt">Extend the response target from 5 minutes to 30 minutes so responders can finish sleeping</button>
+    <button class="q-opt">Route every page to the secondary first so the primary is only woken for escalations</button>
+    <button class="q-opt">Raise precision by moving cause-based rules off the pager and onto dashboards and tickets</button>
+    <div class="q-fb">Correct answer: fix precision. Four of the seven weekly pages carry no incident behind them, so the cheapest available win is deleting the rules that produce them, and cause-based rules are almost always the source. Option 1 spreads a broken pager across more people, which lowers per-person frequency while raising total organisational cost and fixing nothing. Option 2 relaxes a target that was derived from the availability objective, so it trades real reliability for comfort. Option 3 moves the interruption to a different human and adds a handoff delay to every genuine incident. Precision is the only lever here that removes work rather than relocating it.</div>
+  </div>
+
+  <h3 id="production-incidents">Production incidents</h3>
+
+  <p>An incident is a coordination problem that happens to involve a technical fault. The technical fault is usually the easy part; what turns a ten-minute problem into a two-hour outage is five engineers investigating the same hypothesis in parallel while nobody talks to the customer-facing teams. The response framework Google uses, adapted from the Incident Command System that firefighters formalised in 1968, exists to make the coordination explicit.</p>
+
+  <p>The roles are named and separated: <b>Incident Command</b>, where "the incident commander holds the high-level state about the incident" and "structures the incident response task force, assigning responsibilities according to need and priority"; <b>Operational Work</b>, where the ops lead is the only person permitted to touch the system; <b>Communication</b>, "the public face of the incident response task force"; and <b>Planning</b>, which "supports Ops by dealing with longer-term issues, such as filing bugs, ordering dinner, arranging handoffs, and tracking how the system has diverged from the norm". The commander does not debug. That constraint feels wasteful with a small team and is the entire point: the moment the commander starts typing into a terminal, nobody holds the state.</p>
+
+  <p>Declaring early is the other half. The SRE book gives three tests, and any one of them is sufficient: "do you need to involve a second team in fixing the problem?", "is the outage visible to customers?", and "is the issue unsolved even after an hour's concentrated analysis?" The Workbook's Google Home case study shows the cost of hesitating, where late declaration allowed miscommunication between client and server developers to persist. Its other durable lesson is priority ordering: "first responders must prioritize mitigation above all else, or time to resolution suffers", which means rolling back, draining a region or shedding load before you understand why. Understanding is what the postmortem is for.</p>
+
+  <p>Two supporting mechanisms are worth naming. A live incident state document, edited concurrently, keeps the current hypothesis, the actions taken and the timeline in one place, and it becomes the raw material for the postmortem at zero extra cost. Handoff must be explicit: an outgoing commander does not leave until they have "firm acknowledgment of handoff", because the failure mode is an incident with two commanders or none, and both are worse than a tired one.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Detected
+  Detected: Detected<br/>page fires or a human reports it
+  Triaged: Triaged<br/>severity set, blast radius scoped
+  Declared: Declared<br/>IC, Ops lead, Comms lead named<br/>channel opened, state doc created
+  Mitigating: Mitigating<br/>rollback, drain, shed load<br/>cause NOT yet understood
+  Monitoring: Monitoring<br/>SLI recovering, watching for relapse
+  Resolved: Resolved<br/>user impact ended
+  Postmortem: Postmortem<br/>timeline, contributing causes,<br/>action items with owners
+  Reviewed: Reviewed<br/>senior engineer sign-off, published
+  Closed: Closed<br/>every P0 and P1 action item landed
+  Detected --> Triaged
+  Triaged --> Declared: any declaration test met
+  Triaged --> Resolved: minor, single team,<br/>no customer impact
+  Declared --> Mitigating
+  Mitigating --> Mitigating: handoff between commanders<br/>requires firm acknowledgment
+  Mitigating --> Monitoring: impact stopped
+  Monitoring --> Mitigating: relapse
+  Monitoring --> Resolved: stable
+  Resolved --> Postmortem: trigger criteria met
+  Postmortem --> Reviewed
+  Reviewed --> Closed
+  Closed --> [*]
+  note left of Mitigating
+    Mitigate before you diagnose.
+    Time to resolution suffers
+    when this order is reversed.
+  end note
+  note right of Closed
+    Resolved is not Closed.
+    An incident whose action items
+    never land will recur, and the
+    postmortem was then decorative.
+  end note
+  </div><figcaption>The incident lifecycle runs from detection through a declared, role-separated response to a reviewed postmortem, and it does not end when the outage ends. <b>The two states most organisations skip are Reviewed and Closed, which is why the same incident recurs: Resolved measures the outage, Closed measures the learning.</b> Note the loop on Mitigating, where a commander handoff is a state-preserving transition that requires explicit acknowledgment, and the shortcut from Triaged straight to Resolved for genuinely minor events, because declaring an incident for everything is its own kind of fatigue.</figcaption></figure>
+
+  <p><b>Named example.</b> The Workbook documents a Google Home incident where a quota problem was mitigated by raising the quota without identifying the underlying bug, and a Google Kubernetes Engine incident where responders held the relevant facts early but lacked the structure to combine them. Both are more instructive than a clean success story, because they show the two commonest real failures: stopping at mitigation, and having the information distributed across people who are not talking.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> formal incident command is overhead you should skip, and a written severity definition plus a rule about when to wake a second person is the right total investment. At <b>1,000 requests per second</b> incidents start spanning teams, which is exactly the condition the framework exists for, so this is the tier at which ad hoc response collapses and you adopt at minimum a named commander and a single agreed channel. At <b>10,000 requests per second</b> you need the full apparatus plus practice: rehearsals, a standing bridge, pre-agreed communication templates so the comms lead is not drafting customer language under pressure, and drills that "intentionally treat minor problems as major ones" to build the muscle before you need it.</p>
+
+  <p><b>Trade-off and failure mode.</b> Incident structure costs a fixed overhead on every incident, including the many that did not need it, and buys a bounded, predictable response on the few that did. It fails in both directions. Too little structure produces the parallel-investigation chaos above. Too much produces process theatre where responders spend the first fifteen minutes assigning roles for a problem one person could have fixed, and the observable symptom of that overcorrection is engineers quietly resolving things without declaring, which destroys your incident data. <em>Source: <a href="https://sre.google/sre-book/managing-incidents/">SRE Book, Chapter 14: Managing Incidents</a> and <a href="https://sre.google/workbook/incident-response/">SRE Workbook, Chapter 9: Incident Response</a>.</em></p>
+
+  <h3 id="postmortems">Postmortems</h3>
+
+  <p>A postmortem is "a written record of an incident, its impact, the actions taken to mitigate or resolve it, the root cause(s), and the follow-up actions to prevent the incident from recurring". It is the only mechanism in this chapter that converts an outage into a permanent improvement, and it is the one most often performed as ritual.</p>
+
+  <p>Write them on defined triggers rather than on judgement, so that nobody has to argue for one while embarrassed. Google's published trigger list is: "user-visible downtime or degradation beyond a certain threshold", "data loss of any kind", "on-call engineer intervention (release rollback, rerouting of traffic, etc.)", "a resolution time above some threshold", and "a monitoring failure (which usually implies manual incident discovery)". Any stakeholder may also request one. That last trigger is quietly the most valuable, because an incident you found out about from a customer means two failures occurred, and the monitoring failure is usually the more expensive one.</p>
+
+  <div class="callout key"><b>Blamelessness is a data-quality mechanism, not a kindness.</b> The definition is that a postmortem "must focus on identifying the contributing causes of the incident without indicting any individual or team", and the argument for it is entirely instrumental: without it, "people will not bring issues to light for fear of punishment." A blameful process does not produce accountability, it produces incomplete timelines, because the person who knows exactly what happened at 14:02 is the person with the strongest incentive to be vague about it. You are trading the satisfaction of assigning fault for the accuracy of your incident record, and the accurate record is worth more. The operating principle follows directly: "you can't fix people, but you can fix systems and processes to better support people making the right choices."</div>
+
+  <p>Action items are where postmortems most commonly die, and the Workbook's guidance is specific enough to audit against. "All action items have both an owner and a tracking number", with a single owner rather than a shared one, because distributed accountability reduces follow-through. Every item carries an explicit priority. Every item must be measurable, so "add an alert when more than X percent of machines are removed" qualifies and "make automation better" does not. Google's rule is stated as policy: "all postmortems which follow a user-affecting outage must have at least one P[01] bug associated with them". The prevention bias is captured in a line worth stealing: "let's plan for a future where we're all as stupid as we are today", meaning prefer a system change over a resolution to be more careful, because the second one does not survive contact with a bad night.</p>
+
+  <p>The named failure modes are equally auditable: finger-pointing, which erodes psychological safety and causes people to hide information; missing context, where undefined acronyms make the document useless to anyone outside the team; unactionable items with vague ownership; and delayed publication, where a postmortem written months later has lost both accuracy and attention. On the incentive side, Google reports rewarding the closing of action items rather than the writing of documents, publicly recognising authors, running reading clubs, and using a "Wheel of Misfortune" role-play exercise to spread incident lessons to engineers who were not there.</p>
+
+  <p><b>Named example.</b> Financial services organisations have the sharpest tension here, because regulatory reporting on outages is inherently attributive while a useful postmortem is inherently not. The workable resolution is two documents from one timeline: an internal blameless postmortem written for engineers, and a separate regulatory filing derived from it. Merging them produces a document that satisfies the regulator and teaches nobody anything, because everyone involved wrote it defensively.</p>
+
+  <p><b>Three scale tiers.</b> At <b>100 requests per second</b> a one-page document covering timeline, impact, contributing causes and three tracked actions is genuinely sufficient, and a heavier template will simply not get written. At <b>1,000 requests per second</b> the change is that postmortems now have an audience beyond the team, so the review step becomes real and unexplained internal jargon becomes a defect rather than a style issue. At <b>10,000 requests per second</b> the corpus itself is the asset: you tag postmortems by contributing cause and read them in aggregate, because the thing that actually reduces your incident rate is noticing that eleven separate outages last quarter shared one configuration-propagation mechanism, and no individual postmortem can tell you that.</p>
+
+  <p><b>Trade-off and failure mode.</b> A postmortem costs several engineer-hours immediately after the most tiring day of the quarter, and buys a permanent reduction in recurrence, but only if the action items land. The dominant failure is precisely there: the document is written, reviewed, admired and filed, and the action items are never scheduled against anything, so the identical incident recurs and the second postmortem cites the first. If you audit one thing in this chapter, audit the close rate of P0 and P1 postmortem action items, because an unscheduled action item is an outage you have decided to have again. <em>Source: <a href="https://sre.google/sre-book/postmortem-culture/">SRE Book, Chapter 15: Postmortem Culture</a> and <a href="https://sre.google/workbook/postmortem-culture/">SRE Workbook, Chapter 10: Postmortem Culture</a>.</em></p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A team writes thorough postmortems, yet the same class of outage recurs every quarter. Which diagnosis best explains that pattern?</div>
+    <button class="q-opt">The documents are too detailed, so the important causes are buried inside the timeline</button>
+    <button class="q-opt">The action items are never scheduled, so the analysis lands but the system change does not</button>
+    <button class="q-opt">The postmortem trigger threshold is too low, so minor events dilute the team's attention</button>
+    <button class="q-opt">The reviews lack a senior engineer, so the stated contributing causes are probably incorrect</button>
+    <div class="q-fb">Correct answer: unscheduled action items. Recurrence of a known, analysed failure means the analysis was right and nothing changed, which is the defining symptom of items that have an owner on paper and no priority in any backlog. Option 1 would degrade the analysis, but the premise says the postmortems are thorough and the causes were identified. Option 3 describes a different problem, wasted effort on trivia, which does not explain why the analysed cause persists. Option 4 attacks the accuracy of the causes, but repeated identical recurrence is evidence the causes were identified correctly. Audit the close rate of P0 and P1 items, not the prose.</div>
+  </div>
+
+  <h2>7. Scale drill: a card-authorisation service</h2>
+
+  <p>Take one system and walk the whole chapter across the three tiers. The system is card authorisation in payments: a request arrives, is risk-scored, is sent to the issuer, and returns approve or decline within a hard latency ceiling because the terminal is holding a customer's card.</p>
+
+  <p><b>At 100 requests per second.</b> Log every line at informational level and keep 30 days, roughly 778 GB, which is affordable and means you can answer nearly any question by reading. Trace every request at a head sampling rate of 1, because case B above shows that at this volume a 1-in-1024 rate gives you a 3.5 percent chance of capturing a rare failure within an hour, which is the same as no tracing at all. Four golden signals on one dashboard. One SLO: 99.9 percent of authorisations answered in under 500 ms over a rolling 28 days, giving you a 43.2 minute budget in a 30-day window. One symptom alert on that SLI with an absolute floor of 10 failures so a two-error blip does not compute an enormous burn rate. On-call is three or four engineers, best effort overnight, and you write that limitation down as an accepted risk rather than pretending otherwise. Postmortems are one page.</p>
+
+  <p><b>At 1,000 requests per second.</b> This is where things that worked stop working. Averages now hide a tail that is 10 unhappy users per second, so latency indicators move to percentiles. Logging reaches 7.78 TB per 30 days and full-text indexing every line is the component that fails first, so you separate the audit stream, which is never sampled because a disputed decline must be reconstructable, from the diagnostic stream, which is tiered by severity. Tracing settles at a few percent head sampling and you accept, explicitly, that rare-failure capture is now a gamble. Metrics cardinality becomes a live hazard: this is the tier at which someone adds a merchant identifier as a label and takes down the metrics backend before it takes down authorisations. SLOs split by journey, because a healthy authorisation path should not average with a broken refund path. Multiwindow burn-rate alerts replace the accumulated cause-based rules. On-call becomes a real rotation with a secondary and a documented escalation path, and incidents get a named commander because they now span the risk team and the issuer-connectivity team.</p>
+
+  <p><b>At 10,000 requests per second.</b> Uniform logging at 77.76 TB per 30 days is indefensible, so tiering is mandatory and the logging path itself needs backpressure with a bounded local buffer, because a synchronous write to a saturated sink would add its latency to every authorisation and convert your observability system into the outage. Tracing needs a tail sampler that guarantees every error and every slow trace, at roughly 11x the storage of aggressive head sampling, which buys a 100 percent capture rate on failures instead of a probability you have to compute per incident. Metric labels are enforced by an allowlist in a shared library, and the OTel default limit of 2,000 attribute combinations per metric is now a real ceiling you will hit, silently, via <code>otel.metric.overflow=true</code>. Error budgets are consumed by fractions of a percent of traffic rather than by visible downtime, so you account for partial failure rather than downtime minutes. Alerts group per journey so one incident does not generate forty pages. On-call hits the eight-engineer minimum or moves to follow-the-sun, and each service carries a weekly page-count budget that gates any new alert rule. Postmortems are read in aggregate by contributing-cause tag, because the leverage is now in the pattern across incidents rather than in any single one.</p>
+
+  <div class="callout warn"><b>The one thing that changes at every tier.</b> Notice what actually moved across the three tiers. The signals did not change: it is still latency, traffic, errors and saturation. What changed at every single step was the <em>cardinality budget</em> and the <em>human budget</em>. How many dimensions can you afford to keep, and how many interruptions can your rotation absorb. Those two numbers, not the choice of tool, are what determine whether you can operate the system.</div>
+
+  <div class="teacher-note"><b>Your teacher.</b> The highest-leverage exercise in this chapter costs you fifteen minutes and will probably alarm you. Take a service you own, look up how many pages its rotation took last month, and divide by the number of those that resulted in a code change, a config change or a rollback. That ratio is your alerting precision. Then multiply your real incident count by six hours and compare it to 25 percent of one engineer's month. Bring me both numbers and I will help you work out which of your alert rules to delete first, because the answer is almost always that you should delete rules rather than add engineers. If you want the second exercise: derive your own error budget in minutes from your stated SLO, then find your longest incident of the last quarter and work out what fraction of the budget it consumed. Most teams have never done that multiplication and are surprised by the answer.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://sre.google/workbook/alerting-on-slos/">SRE Workbook, Chapter 5: Alerting on SLOs</a> in full. It is the single densest chapter on this material anywhere, it is free, and its burn-rate tables are directly copyable into a real alerting configuration rather than being an abstraction you have to translate. Pair it with <a href="https://sre.google/sre-book/being-on-call/">SRE Book, Chapter 11: Being On-Call</a>, which supplies the human capacity numbers that make the alerting chapter's precision arguments concrete, and with the <a href="https://static.googleusercontent.com/media/research.google.com/en//archive/papers/dapper-2010-1.pdf">Dapper paper</a> for the measured overhead figures that explain why every tracing system you will ever use samples.</p>
+
+  <div class="pager">
+    <a href="0008-delivery-and-deployment.html"><span class="dir">&larr; Previous</span><span class="ttl">Delivery and Deployment</span></a>
+    <a class="nxt" href="0010-security.html"><span class="dir">Next &rarr;</span><span class="ttl">Security</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 10 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

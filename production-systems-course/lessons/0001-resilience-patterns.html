@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 2: Resilience Patterns - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 02 &middot; Resilience Patterns</div>
+  <h1>Resilience Patterns</h1>
+  <p class="paper-meta">
+    <span class="pill">10 topics</span>
+    The patterns that decide whether a partial failure stays partial.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Every pattern in this chapter is a decision about what to do when a dependency is <b>slow</b> rather than down. Down is cheap to detect and cheap to handle. Slow holds your threads, your connections, and your sockets while you wait, and that is how one service's problem becomes everyone's problem.</li>
+      <li><b>Retries multiply.</b> A three-attempt policy applied independently at four hops turns one user request into eighty-one requests at the deepest tier. The same policy is a rounding error at 100 requests per second and an extinction event at 10,000.</li>
+      <li><b>A timeout is a budget you allocate, not a number you pick.</b> If the sum of the timeouts down a call chain exceeds the caller's own deadline, every layer below the break point is doing work nobody will ever read.</li>
+      <li><b>Bounded everything.</b> Bounded retries, bounded queues, bounded concurrency, bounded blast radius. An unbounded queue is a latency bomb with a delayed fuse, and an unbounded retry policy is a denial-of-service attack you wrote yourself.</li>
+    </ul>
+  </div>
+
+  <h2>1. The only failure mode that matters</h2>
+
+  <p>A dependency that is down announces itself. The connection is refused, the DNS name does not resolve, the TLS handshake fails, and your client learns about it in a millisecond or two. You can detect that cheaply, fall back to something, and move on. Almost nothing in this chapter is needed for that case.</p>
+
+  <p>A dependency that is slow says nothing at all. It accepts your connection, reads your request, and then does not answer. Your thread is parked. Your connection is held open. Your socket buffer is allocated. Your request-scoped memory is pinned. From the outside your service looks completely healthy right up to the moment it has no workers left, at which point it stops answering its own callers, who are themselves running the same code, holding their own threads open, waiting on you. That is the mechanism behind every large outage postmortem you have ever read, and Google's SRE book gives it a name: a cascading failure is a failure that <em>grows over time as a result of positive feedback</em>. <em>Source: <a href="https://sre.google/sre-book/addressing-cascading-failures/">Google SRE Book, "Addressing Cascading Failures"</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  U["User request"] --> E["Edge"]
+  E --> S["Your service"]
+  S --> D{"Dependency<br/>responds how?"}
+  D -->|"fast and correct"| OK["Normal path"]
+  D -->|"down: connection refused"| FAST["Fails in ~1 ms.<br/>Cheap. Detectable. Fallback runs."]
+  D -->|"slow: no answer yet"| SLOW["Holds a worker, a connection,<br/>a socket and its buffers"]
+  SLOW --> Q["Queue depth grows"]
+  Q --> X["Your service is now<br/>the slow dependency"]
+  X --> S
+  </div><figcaption>The two failure shapes a dependency can take, and why only one of them is dangerous. A dependency that is down releases your resources immediately; a dependency that is slow keeps them. <b>The loop at the bottom is the whole problem: a service that runs out of workers while waiting becomes the next slow dependency for whoever calls it, and the failure walks back up the stack.</b></figcaption></figure>
+
+  <p>Hold on to one number for the whole chapter. Little's law says the concurrency a service carries is its arrival rate multiplied by the time each request occupies a worker.</p>
+
+  <div class="math">
+    L = &lambda; &times; W
+    <span class="gloss">L is the number of requests in flight at once, that is, the number of workers, threads, or connection-pool slots you are consuming. &lambda; (lambda) is the arrival rate in requests per second. W is the wall-clock time each request occupies a slot, in seconds.</span>
+  </div>
+
+  <p>At 20 milliseconds of service time, a service taking 100 requests per second holds 100 &times; 0.02 = 2 requests in flight. At 1,000 requests per second it holds 20, and at 10,000 it holds 200. Now suppose the dependency slows down and every call runs to a 1-second client timeout instead. W goes from 0.02 to 1.0, a factor of 50, and L follows it exactly: 100 in flight, then 1,000, then 10,000. Your worker pool did not change. That single multiplication is why the same slowdown is an annoyance at one tier and a total outage at another, and it is the arithmetic underneath every topic below.</p>
+
+  <h2>2. Deciding when to stop calling</h2>
+
+  <h3 id="circuit-breakers">Circuit breakers</h3>
+
+  <p>A circuit breaker is a proxy in front of a remote call that counts recent failures and, past a threshold, stops making the call at all and returns an error immediately. Microsoft's Azure Architecture Center describes it as a three-state machine. In <b>closed</b>, calls pass through and a time-based failure counter accumulates; when failures exceed a threshold within an interval, the breaker moves to <b>open</b> and starts a timeout timer. In <b>open</b>, every call fails instantly without touching the network. When the timer expires the breaker moves to <b>half-open</b>, which admits a limited number of trial requests: enough consecutive successes close it, and a single failure sends it straight back to open with the timer restarted. That half-open state exists for one reason, and the source is blunt about it: it "helps prevent a recovering service from suddenly being flooded with requests." <em>Source: <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker">Azure Architecture Center, Circuit Breaker pattern</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  direction LR
+  [*] --> Closed
+  state "Closed - calls pass through" as Closed
+  state "Open - calls fail instantly" as Open
+  state "Half open - trial calls only" as Half
+  Closed --> Closed: success resets failure counter
+  Closed --> Open: failure count crosses threshold in window
+  Open --> Open: every call rejected without a network hop
+  Open --> Half: reset timer expires
+  Half --> Closed: N consecutive trial successes
+  Half --> Open: any trial call fails, timer restarts
+  </div><figcaption>The circuit breaker as a state machine. Closed counts failures over a rolling window, open rejects without paying the timeout, and half-open probes recovery with a deliberately small number of trial calls. <b>Half-open is the state that stops a breaker from becoming a synchronised thundering herd: without it, every caller resumes at the same instant and knocks the recovering dependency straight back over.</b></figcaption></figure>
+
+  <p><b>A named example.</b> The Azure documentation works through an e-commerce workload whose catalogue data sits in a capacity-limited database. During a seasonal event, demand exceeds the provisioned throughput and the database starts returning HTTP 429. The breaker trips on the first 429, and instead of a queue of stalled page loads the application returns cached or default catalogue data with an on-screen notice, while an alert asks a human whether to raise capacity. Without the breaker, each 429 would be retried, each retry would consume more of the same exhausted quota, and the checkout path sharing that database would go down with the catalogue. At the infrastructure layer the same idea appears as service-mesh breakers: Envoy enforces limits on maximum connections, maximum pending requests, maximum requests, and maximum active retries per upstream cluster, and its documentation notes the implementation is "fully distributed (not coordinated)", so each proxy enforces its own copy of the limit. <em>Source: <a href="https://www.envoyproxy.io/docs/envoy/latest/intro/arch_overview/upstream/circuit_breaking">Envoy, Circuit breaking</a>.</em></p>
+
+  <p><b>The three tiers.</b> This is where breakers surprise people, because a breaker's threshold interacts with volume <em>per instance</em>, not per fleet. Take a common configuration: trip at a 50 percent error rate measured over a 10-second rolling window, with a minimum volume of 20 requests before the breaker is allowed to trip at all.</p>
+
+  <div class="math">
+    requests per instance per window = (fleet requests per second &divide; instances) &times; window seconds
+    <span class="gloss">The left side is the sample size the breaker actually gets to reason about. Fleet requests per second is total traffic. Instances is how many copies of your service are running, each with its own independent breaker and its own independent counter. Window seconds is the length of the rolling window, here 10.</span>
+  </div>
+
+  <p>At <b>100 requests per second</b> spread over 200 instances, each instance sees 0.5 requests per second, which is 5 requests per 10-second window. That is below the minimum volume of 20, so the breaker never arms and never trips, no matter how completely the dependency has failed. At this tier the honest answer is that a breaker is often unnecessary: a short timeout plus a fallback covers you, and the operational cost of a breaker that cannot reach quorum is worse than not having one. If you do want one, either share breaker state across the fleet or lengthen the window until the sample is real.</p>
+
+  <p>At <b>1,000 requests per second</b> over 40 instances, each instance sees 25 requests per second, which is 250 per window. The breaker now has a genuine sample. With a background error rate of 1 percent, the expected number of failures per window is 2.5 and the standard deviation is the square root of 250 &times; 0.01 &times; 0.99, which is about 1.57. A 50 percent threshold sits 125 failures away, roughly 78 standard deviations from the mean, so false trips are not a real risk. This is the tier where breakers start paying for themselves.</p>
+
+  <p>At <b>10,000 requests per second</b> over 200 instances, each instance sees 50 requests per second, or 500 per window, and the breaker is fast and confident. But now look at the cost of the detection delay itself. If the dependency fails totally at t = 0 and the window is 10 seconds long, the observed error rate crosses 50 percent about 5 seconds in. During those 5 seconds every request pays the full 1-second timeout:</p>
+
+  <div class="math">
+    wasted work = requests per second &times; detection seconds &times; timeout seconds
+    <span class="gloss">The result is in request-seconds, which is the total time your workers spent parked on calls that were never going to succeed. Detection seconds is how long the breaker takes to accumulate enough failures to trip. Timeout seconds is how long each doomed call is held before it gives up.</span>
+  </div>
+
+  <p>At 100 requests per second that is 100 &times; 5 &times; 1 = 500 request-seconds, which a pool of a few hundred workers absorbs without noticing. At 10,000 requests per second it is 10,000 &times; 5 &times; 1 = 50,000 request-seconds, which is 50,000 simultaneously parked workers if the timeout is a full second. No fleet has that. The breaker is correct and still too late, which is why at this tier the timeout has to come down before the breaker threshold goes up.</p>
+
+  <p><b>Trade-off and failure mode.</b> A breaker converts a slow failure into a fast one, and it does that by refusing requests that might have succeeded. Set it too sensitive and it trips on a normal blip, turning a 2 percent error rate into a 100 percent outage that you caused. Set it too slow to reset and it keeps rejecting long after the dependency recovered. The nastiest failure mode is the shared breaker over independent backends: the Azure guidance warns specifically against one breaker fronting a sharded data store, because a single sick shard trips the breaker for every healthy one. One breaker per independently failing thing, always.</p>
+
+  <h3 id="timeouts">Timeouts</h3>
+
+  <p>A timeout is the maximum time you will wait before abandoning a call. gRPC makes a distinction worth stealing: a <em>timeout</em> is a duration, a <em>deadline</em> is a point in time, and only the deadline composes across a call chain. When a server that received a deadline calls another service, gRPC can propagate it automatically, and it "converts the deadline to a timeout from which the already elapsed time is already deducted", which sidesteps clock skew between machines. Two facts from that guide should change how you write clients: gRPC sets <b>no deadline by default</b>, and you "should always explicitly set a realistic deadline in your clients." A missing timeout is not a neutral default. It is an infinite one. <em>Source: <a href="https://grpc.io/docs/guides/deadlines/">gRPC, Deadlines</a>.</em></p>
+
+  <p>The correct mental model is a budget that gets spent as the request travels. The user-facing service level objective is the total; every hop deducts its own processing time and hands the remainder down. Anything still executing after the budget is gone is doing work that will be discarded, and the Google SRE guidance names that too: high deadlines "can result in resource consumption in higher levels of the stack" precisely because nobody upstream is still listening.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  A["Client SLO<br/>1000 ms"] -->|"edge spends 60 ms"| B["Remaining<br/>940 ms"]
+  B -->|"API spends 40 ms"| C["Remaining<br/>900 ms"]
+  C -->|"budget for pricing hop<br/>300 ms"| D["Pricing service<br/>2 attempts of 140 ms<br/>plus 20 ms backoff"]
+  D -->|"remaining 600 ms"| E["Inventory hop<br/>300 ms"]
+  E -->|"remaining 300 ms"| F["Ledger hop<br/>300 ms"]
+  F --> G["Deadline reached.<br/>Anything still running<br/>is wasted work."]
+  </div><figcaption>A 1-second user-facing budget being spent down a call chain, with each hop deducting its own work before passing the remainder on. The pricing hop's 300 ms has to cover two attempts and the pause between them, which is what fixes the per-attempt timeout at 140 ms rather than 300. <b>The rule that matters: the sum of a hop's attempts and backoff must fit inside the budget it was handed, or its retry is guaranteed to be wasted.</b></figcaption></figure>
+
+  <div class="math">
+    per-attempt timeout = (hop budget &minus; total backoff) &divide; attempts
+    <span class="gloss">Hop budget is the slice of the remaining deadline allocated to this dependency, in milliseconds. Total backoff is the sum of the pauses between attempts. Attempts is the number of tries, counting the first one. The result is the longest any single try may run.</span>
+  </div>
+
+  <p>Work it: a 300 ms hop budget, 2 attempts, and a 20 ms backoff between them gives (300 &minus; 20) &divide; 2 = 140 ms per attempt. If instead you set the per-attempt timeout to 300 ms because that is what the budget said, the second attempt starts at 320 ms and finishes at 620 ms, more than double the budget, and the caller gave up on you 320 ms ago.</p>
+
+  <p><b>A named example.</b> Google's internal RPC services propagate deadlines through the call chain, reducing the deadline at each hop, and the SRE book is explicit that without propagation servers perform wasted work on requests whose client-side deadline already expired. In a search or ads serving path, where a single query fans out to dozens of backends, the absence of propagation is the difference between a fan-out that self-limits and one where a single slow leaf keeps the whole tree pinned.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> with 20 ms of service time you carry 2 requests in flight. A sloppy 30-second timeout on a slow dependency takes you to 100 &times; 30 = 3,000 in flight, which will still exhaust a default thread pool, but slowly enough that a human notices and restarts something. Many teams genuinely survive at this tier with bad timeouts, which is why bad timeouts are so common in code that later gets promoted.</p>
+
+  <p>At <b>1,000 requests per second</b> the same mistake gives 1,000 &times; 30 = 30,000 in flight. Nothing survives that, and this is the tier where teams discover that the timeout they never set is the reason the whole fleet went down at once. Timeouts stop being hygiene and become mandatory, and they need to be per-dependency rather than one global value, because a 5 ms cache and a 900 ms report generator cannot share a number.</p>
+
+  <p>At <b>10,000 requests per second</b> a static timeout is not enough on its own. You need deadline propagation so that work is abandoned at every layer simultaneously rather than layer by layer, and you need the timeout set from the observed latency distribution rather than a round number: a timeout at the 99.9th percentile of healthy latency catches genuine stalls while leaving normal slow requests alone. This is also the tier where the timeout must be smaller than the client's patience, or you will finish work nobody is waiting for.</p>
+
+  <p><b>Trade-off and failure mode.</b> Every timeout is a bet that a request which has taken this long will not succeed. Too short and you abandon requests that were about to complete, converting slow successes into fast failures and, if you retry them, into duplicate work on the server. Too long and you hold resources through the entire incident. The subtle failure is a timeout that is <em>longer</em> than the caller's: your service dutifully waits 5 seconds for a dependency while the caller gave up at 2, so every completion after 2 seconds is pure waste, and under load that waste is most of your capacity.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A dependency starts answering in 900 ms instead of 20 ms, but it never returns an error. Which failure appears first in your service?</div>
+    <button class="q-opt">The connection pool saturates, because each call holds a slot longer</button>
+    <button class="q-opt">The error rate spikes, because each call returns a failure sooner</button>
+    <button class="q-opt">The cache hit rate falls, because each call now bypasses caching</button>
+    <button class="q-opt">The CPU saturates, because each call consumes far more processor time</button>
+    <div class="q-fb">Little's law: concurrency is arrival rate times occupancy, so a 45-fold rise in occupancy is a 45-fold rise in slots held, and the pool is the first fixed-size thing you hit. The error rate does not spike, because a slow dependency returns no errors at all, which is exactly what makes it dangerous. Cache behaviour is unchanged, since the request is not doing anything different. CPU actually falls, because parked threads are waiting on a socket, not computing, and that is why CPU dashboards look calm during this class of outage.</div>
+  </div>
+
+  <h2>3. Calling again without making it worse</h2>
+
+  <h3 id="retries">Retries</h3>
+
+  <p>A retry re-sends a request that failed, on the theory that the failure was transient. The mechanism looks trivial and the arithmetic is not, because retries compose multiplicatively down a call chain. If every hop independently applies its own policy of <em>a</em> attempts, the deepest tier sees <em>a</em> raised to the power of the number of hops.</p>
+
+  <div class="math">
+    amplification = a<sup>h</sup>
+    <span class="gloss">a is the number of attempts each hop makes, counting the first one, so a policy of "one try plus two retries" means a = 3. h is the number of hops in the chain that each apply their own retry policy independently. The result is how many requests arrive at the deepest tier for every one request the user made.</span>
+  </div>
+
+  <p>With a = 3 and h = 4 the sequence is 3, 9, 27, 81. One checkout becomes eighty-one database queries. Google's SRE book gives the same shape with different constants, noting that "a single user action may create 64 attempts (4^3) on the database" when three layers each retry four times. This is not a worst case in the sense of being unlikely. It is the exact behaviour of a chain in which every layer's timeout expires, which is precisely what happens when the bottom of the chain is slow.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as Mobile client
+  participant E as Edge
+  participant A as Order API
+  participant P as Pricing service
+  participant D as Database
+  loop 3 attempts
+    U->>E: checkout
+    loop 3 attempts
+      E->>A: create order
+      loop 3 attempts
+        A->>P: price the basket
+        loop 3 attempts
+          P->>D: read price rows
+          D--xP: no answer within 1 s
+        end
+        P--xA: failed after 3 s
+      end
+      A--xE: failed after 9 s
+    end
+    E--xU: failed after 27 s
+  end
+  Note over D: 81 queries reached the database for one checkout
+  </div><figcaption>A retry storm drawn out hop by hop. Each layer is individually reasonable, retrying three times against what it believes is a transient fault, and the four layers together turn one checkout into eighty-one database reads. <b>Notice the second number as well as the first: the user waits eighty-one seconds, because nested retries multiply latency exactly as fast as they multiply load.</b></figcaption></figure>
+
+  <p>Now put traffic through it. Suppose the database steady state is one query per checkout.</p>
+
+  <ul>
+    <li><b>At 100 requests per second.</b> Steady load 100 queries per second, storm load 8,100. In absolute terms that is a few thousand queries per second against a database that a single well-provisioned node can often absorb in burst, and even when it cannot, the pool arithmetic saves you. The pricing service holds each doomed query for the full 1-second timeout, so by Little's law it needs 300 &times; 1 = 300 concurrent slots at the first level of nesting. A fleet of 20 instances with 200 slots each has 4,000 slots. You degrade, you page someone, you survive.</li>
+    <li><b>At 1,000 requests per second.</b> Storm load 81,000 queries per second, and the pricing tier needs 3,000 &times; 1 = 3,000 concurrent slots against those same 4,000. You are now at 75 percent pool utilisation purely on requests that are going to fail, with normal traffic still arriving. This is the tier where the system does not simply slow down, it flips: the moment the pool fills, every new request queues behind a doomed one and the failure becomes total rather than partial.</li>
+    <li><b>At 10,000 requests per second.</b> Storm load 810,000 queries per second, and the pricing tier would need 30,000 concurrent slots against 4,000. It is short by a factor of 7.5. There is no degradation phase here. The pool is gone in well under a second, and because the callers above are themselves retrying, the load does not decay when the database recovers, it keeps arriving. This is the retry storm as a self-sustaining event, and it is why the fix has to be a limiter rather than a smaller number of retries.</li>
+  </ul>
+
+  <p><b>The limiter.</b> The mature answer is a retry budget: a token bucket that caps retries as a fraction of overall traffic, so amplification is bounded no matter how many layers there are. Google's guidance is a server-wide budget, giving "only allow 60 retries per minute in a process" as an example. AWS documents the same idea in its SDKs: standard mode carries a retry quota of <b>500 tokens</b>, where a transient retry costs <b>14 tokens</b>, a throttling retry costs <b>5</b>, a successful retry restores what it spent, and a first-try success restores 1. When the budget hits zero the SDK stops retrying and returns the error immediately. AWS states the crossover directly: with the default of 3 max attempts the quota begins to drain when more than roughly <b>22 percent</b> of requests are sustained transient failures, or roughly <b>32 percent</b> for throttling errors. Below that, successes refill the bucket faster than retries drain it. <em>Source: <a href="https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html">AWS SDKs and Tools Reference Guide, Retry behavior</a>.</em></p>
+
+  <p><b>A named example.</b> AWS ships tuned defaults for DynamoDB clients: <b>4</b> maximum attempts instead of 3, and a <b>25 ms</b> transient base delay instead of 50 ms, chosen so that the extra attempt keeps the last retry's maximum backoff comparable to other services. That is a retail and gaming workload pattern, where the request is small, the latency budget is tight, and one extra fast attempt is worth more than a longer pause. The same document is equally clear about the opposite direction: legacy mode, which has no standardised quota, means "a client continues to retry at full rate during service disruptions", tying up threads and connections and delaying the service's own recovery.</p>
+
+  <p><b>Trade-off and failure mode.</b> Retries trade throughput and blast radius for a higher per-request success rate. They only pay when the failure really is transient and really is independent, and neither holds during an overload, because during an overload the cause of your failure is load and your retry is load. Two rules from the sources fall out of that. Retry only what is safe to repeat, which is the <a href="#idempotency">idempotency</a> question. And never retry the same error at two layers, because that is where the exponent comes from.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">Four hops in a call chain each independently apply a policy of three attempts. How much load does the deepest tier see for one user request?</div>
+    <button class="q-opt">Three, because attempts stay constant across the four hops</button>
+    <button class="q-opt">Twelve, because attempts are summed across the four hops</button>
+    <button class="q-opt">Eighty-one, because attempts compound at each of four hops</button>
+    <button class="q-opt">Sixty-four, because attempts compound at each of three hops</button>
+    <div class="q-fb">Independent policies compose multiplicatively, so it is three to the fourth power, or 81. Three would be right only if a single layer retried and the others passed failures straight through. Twelve is the classic error of adding the layers instead of multiplying them, and it is exactly the intuition that lets retry storms ship. Sixty-four is three layers of four attempts, which is the number in the Google SRE book, and using it here means you counted the hops wrong rather than the arithmetic.</div>
+  </div>
+
+  <h3 id="exponential-backoff">Exponential backoff</h3>
+
+  <p>Exponential backoff waits longer before each successive retry, so a client that keeps failing keeps stepping further out of the way. On its own it is not enough. The AWS Architecture Blog's analysis makes the point that with N clients contending, "the total amount of work done by the system increases with N2", and that capped exponential backoff alone barely helps because clients still cluster their attempts. The fix is deliberately counterintuitive: "trying to improve the performance of a system by adding randomness." That randomness is jitter, and the recommended form is full jitter. <em>Source: <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">AWS Architecture Blog, "Exponential Backoff And Jitter"</a>.</em></p>
+
+  <div class="math">
+    delay = random(0, 1) &times; min(cap, base &times; 2<sup>retry</sup>)
+    <span class="gloss">delay is how long this client waits before its next attempt. random(0, 1) is a fresh uniform draw per attempt, which is the jitter. cap is the ceiling on any single wait. base is the starting delay for the first retry. retry counts from 0 for the first retry, so the un-jittered window doubles each time.</span>
+  </div>
+
+  <p>Those are AWS's documented production constants, not invented ones: base is <b>50 ms</b> for transient errors and <b>1,000 ms</b> for throttling errors, and the cap is <b>20 seconds</b>. Google Cloud Storage's tooling uses the same shape with different constants, the gcloud CLI defaulting to a 1-second initial delay, a multiplier of 2, a maximum delay of 32 seconds and a maximum of 32 retries. <em>Source: <a href="https://docs.cloud.google.com/storage/docs/retry-strategy">Google Cloud Storage, Retry strategy</a>.</em></p>
+
+  <p><b>The thundering-herd arithmetic.</b> This is worth working end to end, because it is the clearest case in the chapter of a one-line change buying two orders of magnitude. Suppose N clients all receive an error at the same instant and all back off by a fixed 1,000 ms. They all retry inside the same scheduler tick, call it 10 ms wide. Now suppose instead they each sleep a uniform random time in [0, 1000] ms. The 1,000 ms window contains 100 buckets of 10 ms, so the expected arrivals per bucket are N &divide; 100.</p>
+
+  <div class="math">
+    peak reduction = window &divide; tick
+    <span class="gloss">window is the width of the jitter interval in milliseconds, here 1,000. tick is the resolution at which arrivals actually land, here 10 ms. The ratio is how many times lower the instantaneous peak becomes when the same retries are spread uniformly across the window instead of all landing in one tick.</span>
+  </div>
+
+  <p>With N = 1,000 clients, no jitter puts all 1,000 retries in a single 10 ms tick, an instantaneous rate of 100,000 requests per second. Full jitter puts an expected 10 per tick, an instantaneous rate of 1,000 per second: a hundredfold reduction, exactly the window-to-tick ratio. And the unlucky ticks are not much worse. The per-bucket count is approximately Poisson with mean 10, so the standard deviation is the square root of 10, about 3.16, and a 99th-percentile bucket sits near 10 + 2.33 &times; 3.16, which is about 17. The worst bucket you should expect is 17 requests, not 1,000. AWS's simulation of 100 contending clients found full jitter "reduced call counts by more than half compared to non-jittered backoff", with the blunt conclusion that "the return on implementation complexity of using jittered backoff is huge."</p>
+
+  <p><b>A named example.</b> Media and logistics pipelines that push large object batches into Google Cloud Storage lean on exactly this. The gcloud CLI retries on HTTP 408, 429 and 5xx responses as well as socket timeouts and TCP disconnects, using truncated binary exponential backoff with a 1-second initial delay, a multiplier of 2, a 32-second maximum delay and up to 32 retries. The interesting part is what those constants protect against: a batch job runs hundreds of uploader workers, so a single throttling response is never a single retry. Without a random component, every worker that received a 429 at the same instant returns at 1 second, then 2, then 4, re-creating the same throttle it was backing off from and converting a brief capacity limit into a standing one. AWS applies the same reasoning with different constants, using a 1,000 ms base for throttling errors against 50 ms for transient ones, on the stated grounds that a throttled service needs time to recover capacity while a transient fault usually clears in milliseconds.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b>, a synchronised herd is 100 requests landing at once, which almost any service absorbs. Fixed backoff is survivable here, and that is exactly why so much code ships with it. At <b>1,000 requests per second</b>, a 10-second outage queues 10,000 retries for a single instant; the un-jittered spike is a hundredfold overload on recovery and it will re-break the service you were waiting for, producing the sawtooth recovery pattern where a service comes back, dies, comes back, dies. Jitter is not optional at this tier. At <b>10,000 requests per second</b>, jitter is necessary but no longer sufficient. A 30-second outage queues 300,000 retries; spreading them over a 20-second jitter window still delivers 300,000 &divide; 20 = 15,000 retries per second on top of 10,000 requests per second of fresh traffic, which is 2.5 times normal load against a service that just came back. That is the honest limit of jitter: it flattens the peak, it does not reduce the total, so at this tier it has to be paired with a retry budget and with <a href="#backpressure">backpressure</a> at the recovering service.</p>
+
+  <p><b>Trade-off and failure mode.</b> Backoff trades latency for stability, and each doubling is latency you are spending on behalf of a user who is still waiting. It also interacts badly with deadlines: a client with a 300 ms budget and a 1,000 ms base delay will never take its second attempt, so the retry is dead code that only adds risk. The classic failure is jittering the backoff but not the periodic work around it, so a thousand instances still align their health checks, their cache refreshes, and their cron jobs on the same second. Anything periodic and fleet-wide needs jitter, not just retries.</p>
+
+  <h3 id="idempotency">Idempotency</h3>
+
+  <p>An operation is idempotent when performing it several times has the same effect on the server as performing it once. RFC 9110 defines it exactly that way and names GET, HEAD, PUT, DELETE and the safe methods as idempotent, while POST is deliberately excluded. The specification then draws the operational consequence: "A client MAY automatically repeat a request with a request method that the client considers idempotent, if the request was not successfully completed after the client received a connection failure." Idempotency is what makes a retry safe, which makes it the precondition for every pattern in the previous two topics. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2">RFC 9110, section 9.2.2, Idempotent Methods</a>.</em></p>
+
+  <p>The hard case is the one that matters: a request that creates something. You cannot make "create a payment" naturally idempotent, so you attach a client-generated key and make the server remember the outcome against it. Stripe's API does this with an <code>Idempotency-Key</code> header, and its documented behaviour is worth knowing precisely because it defines the whole contract. Stripe saves the status code and body of the first request for a given key "regardless of whether it succeeds or fails", so a repeat returns the same result including a 500. Keys may be up to <b>255</b> characters, are removed automatically after they are at least <b>24 hours</b> old, and reusing a key with different parameters is an error rather than a silent overwrite. Idempotency keys apply to POST only, because GET and DELETE are idempotent by definition. <em>Source: <a href="https://docs.stripe.com/api/idempotent_requests">Stripe API, Idempotent requests</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant C as Client
+  participant S as Payments API
+  participant K as Key store
+  participant L as Ledger
+  C->>S: POST /charges, Idempotency-Key: k1
+  S->>K: claim k1
+  K-->>S: claimed, no stored result
+  S->>L: write charge
+  L-->>S: charge ch_001 created
+  S->>K: store status and body against k1
+  S--xC: response lost in the network
+  Note over C,S: The client cannot tell success from failure
+  C->>S: POST /charges, Idempotency-Key: k1 (retry)
+  S->>K: claim k1
+  K-->>S: already stored
+  S-->>C: same status and body, charge ch_001
+  Note over L: The ledger was written exactly once
+  </div><figcaption>An idempotency key turning an ambiguous network failure into a safe retry. The client never learns whether the first attempt succeeded, and it does not need to: the server recognises the key, skips the write, and replays the stored response. <b>The key is claimed before the side effect and the response is stored after it, which is what makes a concurrent duplicate collide on the claim rather than double-charge the customer.</b></figcaption></figure>
+
+  <p><b>A named example.</b> Payments. A customer taps pay, the mobile network drops the response, and the app retries. Without an idempotency key that is a double charge, which is a refund, a support ticket, a chargeback risk and a trust problem. With one, the retry returns the original charge object and the ledger is written exactly once. Google Cloud Storage draws the same line from the other direction, classifying every get and list request as always idempotent and therefore unconditionally retriable, object writes as conditionally idempotent when sent with a generation precondition, and HMAC key creation as never idempotent and not to be retried at all.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b>, a key store is cheap: 100 writes per second against a store with a 24-hour retention is 8.64 million keys, and at roughly 100 bytes per record that is under a gigabyte. Many teams at this tier get away with a uniqueness constraint on a database column and no separate infrastructure. At <b>1,000 requests per second</b> the same maths gives 86.4 million keys per day, the key store becomes a real dependency on the write path, and its latency is now part of every payment's budget. Shorten retention deliberately, because retention is the only knob that bounds the size. At <b>10,000 requests per second</b> the key check has to be an in-memory store with a hard time-to-live and it has to be co-located with the write it protects, because a key store in another region adds a round trip to every request and, worse, can be partitioned away from the ledger it is meant to guard. This is also the tier where the concurrency question bites: two duplicate requests arriving 3 milliseconds apart must collide on the claim, so the claim needs to be an atomic compare-and-set, not a read followed by a write.</p>
+
+  <p><b>Trade-off and failure mode.</b> Idempotency costs a durable write, a lookup on the hot path, and a retention policy someone has to own. The failure modes are specific. Keys that are too coarse, for example one key per user session, collapse genuinely distinct requests into one and silently drop the second payment. Keys that are too fine, for example generated fresh on every retry, provide no protection at all and are the single most common bug in this area. And storing the result before the side effect is durable gives you the worst outcome available: a replayed success for a charge that never happened.</p>
+
+  <h2>4. Refusing work on purpose</h2>
+
+  <h3 id="backpressure">Backpressure</h3>
+
+  <p>Backpressure is the receiver telling the sender how much it can take, so that a fast producer cannot force a slow consumer into unbounded buffering. The Reactive Streams specification states the goal directly: to "govern the exchange of stream data across an asynchronous boundary while ensuring that the receiving side is not forced to buffer arbitrary amounts of data", with backpressure present "in order to allow the queues which mediate between threads to be bounded." The mechanism is demand: the subscriber calls <code>request(n)</code> to declare how many elements it can accept, and the publisher may not exceed that. <em>Source: <a href="https://github.com/reactive-streams/reactive-streams-jvm">Reactive Streams specification for the JVM</a>.</em></p>
+
+  <p>The same idea is wired into the transport your services already use. HTTP/2 flow control is credit-based: "Receivers advertise how many octets they are prepared to receive on a stream and for the entire connection" using WINDOW_UPDATE frames, the initial window is <b>65,535 octets</b> for both a new stream and the connection, and while an endpoint may disable flow control for itself, "an endpoint cannot ignore flow-control signals from its peer." It is also explicitly hop-by-hop, operating "between the endpoints of a single hop and not over the entire end-to-end path", which is why a proxy in the middle does not relieve you of doing this in your application. <em>Source: <a href="https://www.rfc-editor.org/rfc/rfc9113#section-5.2">RFC 9113, section 5.2, HTTP/2 Flow Control</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  P["Producer<br/>arrivals at rate lambda"] --> ADM{"Admission check:<br/>is the queue below<br/>its useful depth?"}
+  ADM -->|"yes"| Q["Bounded queue<br/>depth Q"]
+  ADM -->|"no"| SHED["Reject immediately<br/>HTTP 429 with Retry-After"]
+  Q --> W["Worker pool<br/>service rate mu"]
+  W --> OUT["Completed responses"]
+  Q -.->|"credit returned as slots free"| P
+  SHED -.->|"client backs off with jitter"| P
+  </div><figcaption>Backpressure as an explicit admission decision in front of a bounded queue. Work is either accepted into a queue whose depth is chosen deliberately, or refused straight away with a signal the client can act on. <b>The dotted lines are the point: both paths send information back to the producer, and a system that only ever slows down without ever saying no has no backpressure at all, just a longer queue.</b></figcaption></figure>
+
+  <p><b>The queue-depth arithmetic.</b> The single most useful derivation in this topic is the maximum <em>useful</em> queue depth. A queued request is only worth keeping if a worker will reach it before the client gives up. By Little's law, the wait at the back of a full queue is the queue depth divided by the service rate, so:</p>
+
+  <div class="math">
+    useful depth = &mu; &times; client timeout
+    <span class="gloss">useful depth is the deepest the queue can be while still being worth having, in requests. &mu; (mu) is the service rate in requests per second, that is, how fast the worker pool drains the queue. client timeout is how long the caller will wait, in seconds. Anything queued beyond this depth will be abandoned before it is served.</span>
+  </div>
+
+  <p>A service that drains 1,000 requests per second against callers who time out at 500 ms has a useful depth of 1,000 &times; 0.5 = 500. Queue slot 501 will be reached at 501 ms, one millisecond after the caller stopped listening, so every slot past 500 is guaranteed waste: it consumes memory, it delays nothing useful, and it will be retried anyway. The second piece of arithmetic is how fast the queue fills when arrivals exceed service. The queue fills in Q &divide; (&lambda; &minus; &mu;) seconds. At &lambda; = 1,100 and &mu; = 1,000 with Q = 500, that is 500 &divide; 100 = 5 seconds of grace. At &lambda; = 10,000 against the same &mu; = 1,000, it is 500 &divide; 9,000 = 56 milliseconds. A queue sized for a 10 percent overload gives you five seconds to react; the same queue under a tenfold overload gives you less than a tenth of a second, which is far less than any autoscaler's reaction time.</p>
+
+  <p><b>A named example.</b> Any gRPC service inherits HTTP/2's per-stream and per-connection windows, which is why a client streaming faster than a server consumes will stall on the transport rather than exhaust the server's heap. Streaming and ad-tech ingestion pipelines rely on exactly this: the consumer's demand, not the producer's ambition, sets the rate. Remove it and the first slow consumer turns into an out-of-memory kill, which drops its in-flight work, which redistributes that work onto the remaining consumers, which then die in turn.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> the operating system's socket buffers and your framework's default accept queue are already doing enough; explicit backpressure is usually over-engineering, and the failure it prevents is rare enough that you would not notice it. At <b>1,000 requests per second</b> you need a bounded queue with an explicit depth and an explicit rejection response, because the default unbounded queue now holds enough work to blow the heap during a five-second dependency stall. At <b>10,000 requests per second</b> the queue has to be bounded, sized from the timeout as above, drained newest-first or with deadline-aware dropping so that already-expired work is discarded rather than served, and paired with a rejection that clients honour. Refusing work early and cheaply is the Google SRE recommendation, and the sibling course covers what to shed and in what order in <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#load-shedding">load shedding</a> and <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#backpressure">backpressure</a>.</p>
+
+  <p><b>Trade-off and failure mode.</b> Backpressure trades completion for predictability: you deliberately fail some requests fast so the rest keep their latency. The trade is only worth it if the rejection is honest, which means a status the client understands and a hint about when to come back. The failure mode is backpressure that propagates without limit, where one slow consumer stalls the producer, which stalls its own producer, until an entire pipeline is deadlocked on a single bad node. That is why a bounded queue needs a shedding rule as well as a limit: at some depth the right answer is to drop work rather than to keep pushing the stall upstream.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A service drains 1,000 requests per second and its callers time out at 500 ms. How deep should its admission queue be?</div>
+    <button class="q-opt">Five hundred, because deeper entries expire before a worker reaches them</button>
+    <button class="q-opt">Five thousand, because a deeper queue absorbs longer bursts of traffic</button>
+    <button class="q-opt">Fifty, because a shallow queue keeps tail latency the lowest overall</button>
+    <button class="q-opt">Unbounded, because dropping any request is worse than making callers wait</button>
+    <div class="q-fb">Service rate times client timeout is 1,000 times 0.5, which is 500, and slot 501 is reached one millisecond after the caller has already given up. Five thousand looks like generous burst absorption but ninety percent of those slots hold work nobody is waiting for, and serving them costs capacity you owe to live requests. Fifty does minimise queueing delay, but it sheds during ordinary bursts the service could easily have absorbed, so you lose throughput for no latency benefit. Unbounded is the default in most frameworks and is the direct cause of the heap exhaustion this pattern exists to prevent.</div>
+  </div>
+
+  <h2>5. Knowing which instances to use</h2>
+
+  <h3 id="health-checks">Health checks</h3>
+
+  <p>A health check is an endpoint that answers the question "should traffic be sent here", asked by something outside the process. The Azure Architecture Center's health endpoint monitoring pattern separates two halves that teams routinely conflate: the checks the application performs when asked, and the analysis the external tool performs on the answer. The tool measures the response code and the response time; the application decides what to verify before replying. That guidance lists useful checks beyond a status code, including the availability and response time of a database or cloud storage, TLS certificate expiry, DNS resolution latency, and content checks that catch a 200 response with a broken body. <em>Source: <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/health-endpoint-monitoring">Azure Architecture Center, Health Endpoint Monitoring pattern</a>.</em></p>
+
+  <p>The design decisions that matter are all about scope. Expose more than one endpoint, so a core-service check and a lower-priority check can carry different consequences: the guidance gives the example of a geocoding service that "might be unavailable for a few minutes" while the application is still healthy. Cache the result, because "running the health check frequently might be expensive" and you do not want a dashboard refresh to trigger a fresh database probe. And secure the endpoint, because a health endpoint that reports dependency status is a map of your architecture and a cheap denial-of-service target.</p>
+
+  <p><b>A named example.</b> Azure Traffic Manager pings a configured URL, port and path, marks the application available on a 200, and marks it offline on any other status code, then reroutes requests to instances that are still responding. That is a global load balancer using an application-authored signal to make a routing decision, and the same document warns about the trap: Traffic Manager waits a bounded time for the response, so "make sure that your health verification code runs in this time", allowing for the network round trip. A health check that is slower than the checker's own timeout reports your healthy service as dead.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> a shallow check is right: confirm the process is up and can serve, and nothing more. The check traffic itself is not negligible at small scale, since 10 instances probed every 5 seconds by 3 checkers is 6 requests per second, or 6 percent of your traffic. At <b>1,000 requests per second</b> you want a deep check that verifies critical dependencies, and you now want it cached, because deep checks probed by every load balancer, every service-mesh sidecar and every monitoring system multiply quickly. At <b>10,000 requests per second</b> the check must be cached with a short refresh interval, it must be separated into shallow and deep endpoints with different consumers, and it must not be transitively deep. If your check calls a dependency whose check calls its dependency, one sick leaf marks the entire fleet unhealthy at once, and a load balancer with no healthy targets fails a lot harder than one with slow ones.</p>
+
+  <p><b>Trade-off and failure mode.</b> A deeper check catches more real problems and creates more false negatives. The dangerous direction is always the same: a shared dependency that every instance checks turns a partial failure into a total one, because all instances fail the check simultaneously and the load balancer removes all of them. Any health-check design at scale needs an answer to "what happens when zero targets are healthy", and the usual answer is fail-open, where the balancer sends traffic to all targets rather than none, on the grounds that a degraded service beats no service.</p>
+
+  <h3 id="liveness-readiness-probes">Liveness and readiness probes</h3>
+
+  <p>Kubernetes splits the health question into three probes with three different consequences, and the split is the lesson. A <b>startup</b> probe runs only during startup and holds the other probes off until the application has initialised. A <b>liveness</b> probe runs continuously and asks whether the container should be <em>restarted</em>; on failure past the threshold, the kubelet kills the container and the restart policy applies. A <b>readiness</b> probe also runs continuously but asks whether the container should receive <em>traffic</em>; on failure the kubelet marks the container not ready and removes the pod's IP from the EndpointSlices, so traffic stops arriving while the process keeps running. <em>Source: <a href="https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/">Kubernetes, Liveness, Readiness and Startup Probes</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Starting
+  state "Starting - startup probe running" as Starting
+  state "Ready - receiving traffic" as Ready
+  state "Not ready - running, no traffic" as NotReady
+  state "Killed - container restarted" as Killed
+  Starting --> Ready: startup probe passes, readiness passes
+  Starting --> Killed: startup probe fails past threshold
+  Ready --> NotReady: readiness probe fails
+  NotReady --> Ready: readiness probe passes again
+  Ready --> Killed: liveness probe fails past threshold
+  NotReady --> Killed: liveness probe fails past threshold
+  Killed --> Starting: restart policy applies
+  </div><figcaption>The same container, three probes, three different outcomes. Readiness moves a pod in and out of the load balancer without restarting it, liveness destroys and recreates it, and startup exists so that a slow boot is not mistaken for a deadlock. <b>The arrow to watch is Ready to Killed: wiring a liveness probe to a dependency check means a slow dependency restarts your entire fleet, which is the one thing guaranteed to make a slow dependency worse.</b></figcaption></figure>
+
+  <p>The Kubernetes documentation is unusually direct about that trap, warning that "incorrect implementation of liveness probes can lead to cascading failures", specifically "restarting of container under high load", failed client requests, and "increased workload on remaining pods due to some failed pods." The rule that falls out: a liveness probe should indicate an <em>unrecoverable</em> failure such as a deadlock, and nothing else. If a restart would not fix it, it does not belong in liveness.</p>
+
+  <p><b>A named example.</b> An e-commerce checkout fleet whose liveness endpoint validates a database connection. The database slows down under a sale, every pod's liveness check times out, the kubelet restarts every pod at roughly the same moment, and the fleet loses the warm connection pools and warm caches that were the only reason it was coping at all. On restart, every pod opens fresh connections to the database that was already slow. The readiness probe would have handled this correctly by draining traffic and leaving the process alive to recover. The documentation's own configuration example encodes the shape: a startup probe with a failure threshold of 30 and a 10-second period, giving up to 300 seconds to initialise, then a liveness probe with a 5-second period and a failure threshold of 3.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b> on a handful of pods, a readiness probe is genuinely useful and a liveness probe is often more risk than value: the fleet is small enough that a simultaneous restart is a full outage. At <b>1,000 requests per second</b> readiness has to be honest about warm-up, because a pod that reports ready before its connection pool and caches are warm will be handed its share of traffic and time out on all of it, and the load balancer will then mark it unhealthy in a loop. Add a startup probe rather than lengthening the liveness delay. At <b>10,000 requests per second</b> the probes need to be independent of every shared dependency, the readiness signal should reflect local capacity such as queue depth rather than dependency reachability, and rollouts need enough surge and probe headroom that a slow-starting new version cannot remove more capacity than the fleet can spare. The documentation also notes that <code>exec</code> probes fork processes on every execution, which "can introduce CPU overhead in high-density clusters", so at this tier the mechanism itself has a cost worth measuring.</p>
+
+  <p><b>Trade-off and failure mode.</b> Probes buy automatic recovery at the price of automatic destruction. Every liveness probe is a standing instruction to kill your own processes on a signal you defined, and it will be obeyed at the worst possible moment. The two symmetric failures are a probe too shallow to catch a real deadlock, which leaves a wedged process serving errors forever, and a probe too deep, which restarts healthy processes because something downstream was slow.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A dependency is slow, so your pods' health endpoint starts timing out. The liveness probe is wired to that endpoint. What happens?</div>
+    <button class="q-opt">Kubernetes restarts every pod, removing the capacity that was still serving</button>
+    <button class="q-opt">Kubernetes drains traffic gradually, keeping every pod running and still warm</button>
+    <button class="q-opt">Kubernetes scales the deployment upward, replacing the pods that were failing</button>
+    <button class="q-opt">Kubernetes pauses the rollout automatically, holding every pod at its version</button>
+    <div class="q-fb">Liveness failure means kill and restart, and because every pod checks the same slow dependency they all fail together, so the fleet restarts as one and loses its warm pools at the exact moment it needed them. Draining traffic while leaving the process alive is what a readiness probe does, which is why this check belonged there instead. Probes never trigger scaling; that is a separate controller reacting to metrics, and it would not help against a slow dependency anyway. Pausing a rollout is a deployment-strategy behaviour and has nothing to do with probes on steady-state pods.</div>
+  </div>
+
+  <h2>6. Surviving the loss of a whole thing</h2>
+
+  <h3 id="failover">Failover</h3>
+
+  <p>Failover is moving traffic from a failed resource to a working one, and at the DNS layer it is the coarsest and most widely deployed form of it. Amazon Route 53 supports two shapes. <b>Active-active</b> uses any routing policy other than failover: all records with the same name and type are live, and when a resource becomes unhealthy Route 53 simply stops including it in responses. <b>Active-passive</b> uses the failover routing policy: Route 53 returns only healthy primary records, and begins returning secondary records only when all primaries are unhealthy. <em>Source: <a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover-types.html">Amazon Route 53, Active-active and active-passive failover</a>.</em></p>
+
+  <p>The health signal behind it is worth reading closely, because it shows how a mature system avoids failing over on noise. Route 53 runs health checkers in many locations, checking every <b>10 or 30 seconds</b>, and the checkers "don't coordinate with one another". Aggregation is by quorum: if <b>more than 18 percent</b> of checkers report an endpoint healthy, it is healthy; at 18 percent or fewer it is unhealthy. The documentation explains the choice, saying the value "was chosen to make sure that health checkers in multiple regions consider the endpoint healthy" and to prevent an endpoint being marked unhealthy "only because network conditions have isolated the endpoint from some health-checking locations." An individual HTTP check requires a TCP connection within <b>four seconds</b> and a 2xx or 3xx status within <b>two seconds</b> of connecting. <em>Source: <a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/dns-failover-determining-health-of-endpoints.html">Amazon Route 53, How Route 53 determines whether a health check is healthy</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  R["Resolver asks for<br/>shop.example.com"] --> H{"Route 53:<br/>are primary records<br/>healthy?"}
+  H -->|"more than 18 percent of checkers say yes"| PRI["Return primary records<br/>region A application"]
+  H -->|"18 percent of checkers or fewer"| SEC["Return secondary record"]
+  SEC --> S3["Static site in object storage<br/>'temporarily unavailable'"]
+  PRI --> TTL["Resolver caches for the TTL"]
+  SEC --> TTL
+  TTL --> STALE["Clients keep the old answer<br/>until the TTL expires"]
+  </div><figcaption>DNS failover with a quorum health signal and a deliberately humble secondary. Route 53 aggregates independent checkers rather than trusting any one of them, so a network partition that isolates a few checking locations does not trigger a failover on its own. <b>The bottom of the diagram is the cost nobody plans for: resolver caching means the failover takes effect over the TTL, not instantly, so the TTL you set months ago is your actual recovery time.</b></figcaption></figure>
+
+  <p><b>A named example.</b> The Route 53 documentation describes a retail pattern directly: a web server as the primary resource and an object-storage bucket configured as a website endpoint as the secondary, containing "a simple 'temporarily unavailable' message." That is a deliberately unambitious failover target, and it is a better answer than it looks. A static page cannot fail for the same reason the application did, it needs no capacity planning, and it converts a connection timeout into an honest message. The same documentation flags the trap in the more ambitious version, warning that with weighted records "all the records with nonzero weights must be unhealthy before Route 53 starts to respond to DNS queries using records that have weights of zero", which "can make your web application or website unreliable if the last healthy resource can't handle all the traffic when other resources are unavailable."</p>
+
+  <p><b>The three tiers.</b> That last warning is the whole scaling story. At <b>100 requests per second</b> across two regions, failing all traffic into one region means that region serves 100 requests per second instead of 50. If it was sized for its own peak with any headroom at all, it absorbs the doubling and nobody notices. At <b>1,000 requests per second</b> the doubling to 1,000 in one region is survivable only if you actually provisioned for it, which means running each region at roughly 50 percent utilisation in steady state and paying for capacity you hope never to use. This is the tier where teams discover their failover target was sized for its own share of traffic and falls over the moment it inherits everyone else's. At <b>10,000 requests per second</b> failover has to be planned as a capacity event rather than a routing event: either you hold static capacity in every region for the full load, or you accept a documented degradation, shedding low-value traffic on arrival so the surviving region serves the requests that matter. This is also where DNS alone stops being enough, because the resolver cache means your failover completes over minutes; anycast routing and connection-level failover in the client library act far faster.</p>
+
+  <p><b>Trade-off and failure mode.</b> Failover costs idle capacity and adds a control system that can itself be wrong. Two failure modes dominate. The first is the untested secondary: a passive standby that has never taken production traffic has stale configuration, cold caches, expired credentials and a schema version nobody checked, and it discovers all of this in the first second of the incident. The second is failing over on a symptom whose cause travels with you, such as a poison request or a corrupt configuration push, so the secondary dies exactly the way the primary did and you have now used up your last option. Both point at the same remedy, which is the next topic.</p>
+
+  <h3 id="chaos-engineering">Chaos engineering</h3>
+
+  <p>Chaos engineering is the practice of deliberately injecting failure into a running system to find out whether the resilience you designed actually works. The canonical definition is precise about what is being bought: it is "the discipline of experimenting on a system in order to build confidence in the system's capability to withstand turbulent conditions in production." The advanced principles set the method. Build a hypothesis around <em>steady-state behaviour</em>, meaning a measurable output such as orders per second rather than an internal metric. Vary real-world events including hardware faults, traffic spikes and scaling events. Run experiments in production, because that is the only place the real system exists. Automate them so they run continuously. And minimise the blast radius. <em>Source: <a href="https://principlesofchaos.org/">Principles of Chaos Engineering</a>.</em></p>
+
+  <p>The practice was formalised in the literature by the team that built it, in Basiri et al., "Chaos Engineering", IEEE Software vol. 33 no. 3, which frames it as an experimental methodology for validating the dependability of distributed systems rather than as a testing tool. <em>Source: <a href="https://arxiv.org/abs/1702.05843">Basiri et al., "Chaos Engineering" (IEEE Software, 2016)</a>.</em></p>
+
+  <p><b>A named example.</b> Netflix, in streaming, is the origin story and remains the clearest one. The relevant point for this chapter is not that they turn instances off, it is <em>what</em> the experiments validate: every pattern above is a claim about behaviour under a condition that does not occur during normal operation. Your circuit breaker's half-open logic, your retry budget's exhaustion path, your readiness probe's behaviour when a dependency stalls, and your failover target's cold caches are all untested code paths in the most literal sense. They run for the first time during the incident unless you make them run earlier.</p>
+
+  <p><b>The three tiers.</b> At <b>100 requests per second</b>, production chaos experiments are usually premature and game days are not. Walk through the scenarios on paper, then test the two things that are cheap and always wrong: kill a single instance and confirm the service recovers, and point a dependency at a black hole to confirm your timeout is what you think it is. At <b>1,000 requests per second</b> automated experiments in a production-like environment start to pay, and the highest-value experiment is latency injection rather than instance termination, because slow is the case your design has not covered. At <b>10,000 requests per second</b> continuous automated experiments in production become the only way to keep pace with change, and the blast-radius controls have to be real infrastructure: a small percentage of traffic, a single availability zone, an automatic abort wired to the steady-state metric, and a kill switch that does not depend on the system under test. The arithmetic here is a business decision rather than a capacity one. An experiment that degrades 1 percent of traffic for 60 seconds at 10,000 requests per second affects 100 &times; 60 = 6,000 requests, and you should be able to state that number and its cost before you run it, because that is what "minimise the blast radius" means operationally.</p>
+
+  <p><b>Trade-off and failure mode.</b> Chaos engineering trades a small amount of deliberate, observed, bounded harm for the removal of a much larger amount of unknown risk, and it is only a good trade if the bound is real. The failure mode is an experiment without an abort: the blast radius grows past what was planned, or the experiment triggers a failure mode nobody predicted and the kill switch depends on the very control plane that is now degraded. The second failure mode is subtler and more common. A team runs experiments, the system passes, and the passing result is taken as proof of resilience rather than as evidence about the specific conditions tested. A chaos experiment can only falsify a hypothesis. It never proves the system is safe.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Your breaker trips at a fifty percent error rate over ten seconds, with a minimum volume of twenty requests. The fleet serves 100 requests per second across 200 instances. What happens when the dependency fails completely?</div>
+    <button class="q-opt">The breaker trips quickly, because each instance sees ample request volume</button>
+    <button class="q-opt">The breaker never trips, because per-instance volume stays under the minimum</button>
+    <button class="q-opt">The breaker trips instantly, because the whole fleet exceeds the minimum</button>
+    <button class="q-opt">The breaker trips slowly, because the rolling window keeps resetting itself</button>
+    <div class="q-fb">Each instance sees 0.5 requests per second, which is 5 per ten-second window, and 5 is below the minimum volume of 20, so the breaker is never allowed to arm. Ample volume would require far more traffic per instance than a 200-way split of 100 requests per second leaves. Reasoning from the fleet total is the actual trap here: breakers are per-process by default and never see the fleet number, which is why the same configuration behaves completely differently after a scale-out. A rolling window does age out old samples, but slow tripping is not the issue when the sample never reaches the arming threshold at all.</div>
+  </div>
+
+  <h2>7. Scale drill: a payments checkout service</h2>
+
+  <p>One system, three tiers, same code. The checkout path calls a pricing service, a fraud-scoring service, and a ledger. The ledger is the slow one, and today it is slow rather than down.</p>
+
+  <ul>
+    <li><b>At 100 requests per second.</b> Healthy occupancy is 20 ms, so 2 requests in flight. When the ledger degrades to a 1-second timeout, occupancy rises 50-fold to 100 in flight, which a 4,000-slot fleet absorbs. Three attempts per hop over four hops means the ledger sees up to 8,100 requests per second at peak, and the pricing tier needs 300 concurrent slots. You degrade visibly and survive. What you actually need here: a per-dependency timeout, an idempotency key on the charge, and a readiness probe. A circuit breaker at 200 instances would never reach its minimum volume, so either skip it or share its state.</li>
+    <li><b>At 1,000 requests per second.</b> Occupancy under the same degradation is 1,000 in flight and the retry storm needs 3,000 of your 4,000 slots, which is the tipping point where partial failure flips to total. Everything from the previous tier stays, and three things become mandatory: full jitter on every backoff, because a ten-second stall now queues 10,000 synchronised retries; a bounded admission queue sized at &mu; times the client timeout; and a circuit breaker, which at 40 instances now sees 250 requests per window and can trip on evidence rather than noise. The failover target must be provisioned for the full 1,000, not for its own 500.</li>
+    <li><b>At 10,000 requests per second.</b> The storm would need 30,000 slots against 4,000, so there is no degradation phase at all. Timeouts must come from the observed latency distribution and propagate as deadlines, so every layer abandons work at the same instant. Retries must be governed by a token-bucket budget rather than a count, so amplification is capped regardless of chain depth. The admission queue must drop deadline-expired work rather than serve it. The breaker's five-second detection window now burns 50,000 request-seconds, so the timeout has to shrink before the threshold is tuned. Failover becomes a capacity event with a documented degradation, and the whole arrangement is only trustworthy if a continuous, blast-radius-limited experiment has actually exercised it.</li>
+  </ul>
+
+  <p>The pattern across the tiers is consistent and worth stating plainly. Nothing in this chapter is free, most of it is unnecessary at 100 requests per second, and the same configuration that was harmless there is the direct cause of the outage at 10,000. If you are asked to justify one of these patterns, justify it with the arithmetic of the tier you are actually at, not with the pattern's reputation. For the cost side of the same trade at the request level, the sibling courses cover <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a> and <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">the two latency numbers</a> that a timeout budget has to respect.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is reaching for Little's law before reaching for a pattern. Take a service you know, write down its arrival rate and its healthy occupancy, multiply them, then multiply again with occupancy replaced by the client timeout. The gap between those two numbers is your entire exposure to a slow dependency, and it tells you whether you need a breaker or just a better timeout. Bring me your numbers and I will push on the assumptions, especially the worker-pool size, which is the one people almost always guess.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://sre.google/sre-book/addressing-cascading-failures/">"Addressing Cascading Failures"</a> from the Google SRE book. It is the single chapter that connects every topic here into one mechanism, and its treatment of retry amplification, deadline propagation and load shedding is the reference the rest of the industry writes against. Pair it with the <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">AWS analysis of backoff and jitter</a> for the arithmetic, and the <a href="https://docs.aws.amazon.com/sdkref/latest/guide/feature-retry-behavior.html">AWS SDK retry behaviour reference</a> for what a production retry policy actually looks like when someone has to ship it.</p>
+
+  <div class="pager">
+    <a href="0000-edge-and-traffic.html"><span class="dir">&larr; Previous</span><span class="ttl">Edge and Traffic Management</span></a>
+    <a class="nxt" href="0002-async-and-event-driven.html"><span class="dir">Next &rarr;</span><span class="ttl">Asynchronous and Event-Driven Systems</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 2 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

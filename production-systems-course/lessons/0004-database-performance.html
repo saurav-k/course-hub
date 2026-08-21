@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 5: Database Performance - Production Systems Course</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PRODUCTION SYSTEMS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Chapter 05 &middot; Database Performance</div>
+  <h1>Database Performance</h1>
+  <p class="paper-meta">
+    <span class="pill">8 topics</span>
+    The database is where most systems actually die. Everything here is the gap between a query on your laptop and the same query against a hundred million rows.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>An index turns a query whose cost is <b>linear in table size</b> into one whose cost is <b>logarithmic</b>. Almost every database incident is a query that lost its index.</li>
+      <li>The application layer causes more database load than the database layer does. <b>N+1 query patterns and oversized connection pools</b> are self-inflicted denial of service.</li>
+      <li>Read replicas buy read capacity by spending <b>consistency</b>. You do not get to skip deciding which reads may be stale.</li>
+      <li>Schema changes and backups are where the real outages live. <b>Expand-contract</b> is the safe migration shape, and an untested backup is not a backup.</li>
+    </ul>
+  </div>
+
+  <h2>1. The gap between a laptop and production</h2>
+
+  <p>Every query in this chapter works perfectly on a developer machine. That is the problem. A thousand-row table fits entirely in memory, has a trivial plan space, and returns in under a millisecond whether or not it is indexed. None of the mechanisms that decide production behaviour are active at that size, so the laptop gives you no signal at all about what happens at a hundred million rows.</p>
+
+  <p>Four things change on the way up, and they change at different points. Data stops fitting in the buffer cache, so page reads become real input and output. Query cost stops being noise, so the difference between a linear scan and a logarithmic lookup becomes the difference between meeting a latency budget and missing it by two orders of magnitude. Concurrency arrives, so connection counts and lock durations start to matter more than any single query. And the table becomes large enough that changing its shape is itself a production event.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  A["Application code"] -->|"1. acquire a connection"| B["Connection pool"]
+  B -->|"2. network round trip"| C["Parser and planner"]
+  C -->|"3. choose a plan"| D["Executor"]
+  D -->|"4. page in cache"| E["Shared buffers<br/>(RAM)"]
+  D -->|"5. page not in cache"| F["Storage<br/>(8 kB pages)"]
+  E --> G["Result rows"]
+  F --> G
+  G -->|"6. network round trip"| A
+  </div><figcaption>The six places a query spends time. On a laptop, steps 1 and 5 are effectively free: there is no contention for connections and the whole table is already in memory. <b>In production those two steps dominate, which is why laptop timings are not evidence of anything.</b> Steps 1 and 2 are the subject of connection pooling and N+1 queries; steps 3 through 5 are the subject of indexing and query optimization.</figcaption></figure>
+
+  <p>The arithmetic in this chapter uses one running set of assumptions so the numbers compose. PostgreSQL's default disk block is 8,192 bytes, which the server reports as <code>block_size</code>, and that is the unit in which pages are read. <em>Source: <a href="https://www.postgresql.org/docs/current/runtime-config-preset.html">PostgreSQL, Preset Options</a>.</em> Where the example is MySQL, InnoDB's default index page is 16 kB instead. <em>Source: <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-physical-structure.html">MySQL, Physical Structure of an InnoDB Index</a>.</em> Everything else that follows is derived from stated assumptions, and the assumptions are always stated.</p>
+
+  <h2>2. Making the database find rows without reading them all</h2>
+
+  <h3 id="database-indexing">Database indexing</h3>
+
+  <p>An index is a separate, ordered data structure that maps column values to row locations, so the database can navigate to the rows it wants instead of examining every row to find out. The default structure is a B-tree, and PostgreSQL is explicit about its shape: B-tree indexes are multi-level tree structures where each level is a doubly-linked list of pages, a single metapage sits at a fixed position, and every other page is either an internal page holding pointers to the next level down or a leaf page holding tuples that point at table rows. Typically over 99 percent of all pages are leaf pages. The tree deepens only when the root itself cannot fit a new downlink, at which point a root page split adds a level. <em>Source: <a href="https://www.postgresql.org/docs/current/btree.html">PostgreSQL, B-Tree Indexes</a>.</em> B-tree is the default because it handles equality and range queries on anything that can be sorted; hash indexes handle only equality, GIN suits values with many components such as arrays and documents, and BRIN suits columns whose values correlate with physical row order. <em>Source: <a href="https://www.postgresql.org/docs/current/indexes-types.html">PostgreSQL, Index Types</a>.</em></p>
+
+  <p>The property that matters is the shape of the growth curve. Work out the fanout from the page size and you can compute the depth for any table size.</p>
+
+  <div class="math">
+    fanout &asymp; usable page bytes &divide; bytes per index entry<br>
+    depth = &lceil; log<sub>fanout</sub>(N) &rceil;
+    <span class="gloss">Read as: how many children one index page can point at, and then how many levels of such pages you need to address N rows. Assumptions used below: an 8,192-byte PostgreSQL page with roughly 8,000 usable bytes after the page header, and a bigint key costing about 20 bytes per entry once the key, the pointer to the row, and the line pointer are counted. That gives a fanout of 8,000 &divide; 20 = 400.</span>
+  </div>
+
+  <p>At a fanout of 400, a table of 1,000 rows needs 3 leaf pages under a single root, so the tree is 2 levels deep. A million rows needs 2,500 leaf pages under 7 internal pages under a root, so 3 levels. A hundred million rows needs 250,000 leaf pages, 625 internal pages above them, 2 pages above those, and a root: 4 levels. Growing the table by a factor of 100,000 cost you two extra page reads. Add one more read to fetch the actual row from the heap and a point lookup against a hundred-million-row table is 5 page reads, of which the root and the two upper internal levels total 628 pages, or about 5 MB, which will be resident in memory permanently. In practice you pay for one or two real reads.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  Q["Query: WHERE order_id = 84,120,331"] --> R
+  R["Read 1: root page<br/>covers keys 1 to 100,000,000<br/>400 downlinks"]
+  R -->|"key is 64M or above"| B["Read 2: internal page<br/>covers 64,000,000 to 100,000,000"]
+  R -->|"key is below 64M"| X["internal page<br/>(not visited)"]
+  B -->|"key is in the 84M band"| C["Read 3: internal page<br/>covers 84,000,000 to 84,159,999"]
+  B -->|"other bands"| Y["internal pages<br/>(not visited)"]
+  C --> L["Read 4: leaf page<br/>400 index entries<br/>each points at a heap tuple"]
+  L --> H["Read 5: heap page<br/>the row itself"]
+  H --> A["Answer"]
+  </div><figcaption>A point lookup against 100 million rows at a fanout of 400. Each read halves nothing and divides by 400 instead, so the tree is only four levels deep. <b>The index does not make the lookup faster in a constant way; it changes the growth curve from linear in table size to logarithmic, which is why the same structure survives a thousandfold increase in data.</b> The dashed-off branches are the pages the query never touches, and they are the entire point.</figcaption></figure>
+
+  <p><b>A named example.</b> In payments, a card processor's transaction ledger is the canonical case. The merchant dashboard asks for one merchant's transactions in a date window against a table holding every transaction the platform has ever settled. With a composite index on <code>(merchant_id, created_at)</code> the query descends four levels and range-scans the leaves for exactly the rows in the window. Without it, every dashboard page load reads the entire ledger. The failure is not that the dashboard is slow: it is that a hundred concurrent dashboard loads each pull the whole table through the buffer cache, evicting the pages that the authorisation path needs, and the outage lands on card authorisations rather than on the dashboard that caused it.</p>
+
+  <p><b>At 100 requests per second</b>, indexing is still mostly about correctness of habit rather than survival. A modest table fits in memory and a sequential scan of it is fast enough to hide a missing index for a long time. This is exactly when the missing index gets written and shipped. <b>At 1,000 requests per second</b>, the missing index becomes the incident. The buffer cache is now the scarce resource, and a single unindexed query running at even a fraction of your traffic will evict the working set for everything else. This is the tier at which a query that "worked fine last quarter" starts taking the system down, because the table finally outgrew memory. <b>At 10,000 requests per second</b>, indexes stop being optional and start needing curation. You are now paying write amplification on every index, so the question flips from "is this query indexed" to "which of these fourteen indexes earns its place", and covering indexes that let the query be answered from the index alone become worth the extra bytes.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Every index is a second structure that must be updated on every insert, update, and delete of the indexed columns, and it consumes storage and memory that would otherwise cache the table. Indexes fail in three characteristic ways. They fail silently when a query stops being able to use them: wrapping the indexed column in a function, comparing against a different type, or leading a composite index with the wrong column all cause a quiet fallback to a full scan with no error anywhere. They fail by bloat, when heavy update traffic leaves the index far larger than the data it describes. And they fail by multiplication, when a table accumulates so many indexes that write latency, not read latency, becomes the bottleneck.</p>
+
+  <h3 id="query-optimization">Query optimization</h3>
+
+  <p>Query optimization is the work of getting the planner to choose the plan you want, which starts with understanding that the planner is a cost model and not a mind reader. PostgreSQL describes the job plainly: a given query can be executed in many different ways that all produce the same results, and if it is computationally feasible the optimizer examines each possible plan and selects the one estimated to run fastest. Below a threshold number of relations it does a near-exhaustive search of join orders; above it, it hands the problem to a genetic algorithm because the search space has become too large to enumerate. <em>Source: <a href="https://www.postgresql.org/docs/current/planner-optimizer.html">PostgreSQL, Planner/Optimizer</a>.</em></p>
+
+  <p>The cost model is inspectable, and it is worth taking literally. PostgreSQL documents that costs are measured in arbitrary units set by the planner's cost parameters, traditionally in units of disk page fetches with <code>seq_page_cost</code> conventionally 1.0, and gives the estimate for a plain sequential scan directly. <em>Source: <a href="https://www.postgresql.org/docs/current/using-explain.html">PostgreSQL, Using EXPLAIN</a>.</em></p>
+
+  <div class="math">
+    estimated cost = (disk pages read &times; seq_page_cost) + (rows scanned &times; cpu_tuple_cost)
+    <span class="gloss">Read as: the planner charges you once for every page it must pull off storage and once again, much more cheaply, for every row it must look at. The documented defaults are seq_page_cost = 1.0 and cpu_tuple_cost = 0.01, so a plan that reads 345 pages containing 10,000 rows costs (345 &times; 1.0) + (10,000 &times; 0.01) = 445 units, which is the worked example in the documentation itself.</span>
+  </div>
+
+  <p>Now push that formula at production scale and the 50 ms budget answers itself. Assume an average row width of 200 bytes, so an 8,192-byte page holds about 40 rows. A hundred million rows therefore occupy 100,000,000 &divide; 40 = 2,500,000 pages, which is 2,500,000 &times; 8,192 bytes &asymp; 20.5 GB. The planner's own estimate for scanning it is (2,500,000 &times; 1.0) + (100,000,000 &times; 0.01) = 3,500,000 cost units, against a handful of units for the four-level index descent above. The wall-clock version is more brutal. To read 20.5 GB inside a 50 ms budget you need 20.5 GB &divide; 0.05 s = 410 GB per second of sustained scan throughput. Assume, generously, that the table is entirely resident in memory and that you can scan it at 10 GB per second: that is 2.05 seconds, or 41 times the budget, with zero storage input or output involved. There is no hardware purchase that closes this gap. The plan has to change.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">A report filters 100 million rows on an unindexed column and must return inside a 50 ms budget. Which change addresses the cause?</div>
+    <button class="q-opt">Raise the memory so the whole table stays cached</button>
+    <button class="q-opt">Build an index so the scan touches fewer pages</button>
+    <button class="q-opt">Split the table across more shards to spread reads</button>
+    <button class="q-opt">Move the query onto a read replica to offload</button>
+    <div class="q-fb">The cost is linear in the number of pages examined, so the only fix is to examine fewer pages. Caching the whole table removes storage input and output but leaves you scanning 20 GB of memory, which the arithmetic above puts at roughly two seconds. Sharding divides the table but each shard still scans linearly, so ten shards give you a tenth of two seconds, still four times over budget, at the cost of a distributed query. A read replica moves the identical linear scan onto different hardware and changes the elapsed time not at all; it protects the primary, which is a different problem.</div>
+  </div>
+
+  <p><b>A named example.</b> In ad tech, a campaign reporting API aggregates impressions and clicks over arbitrary date ranges. The query is a multi-way join across campaigns, creatives, and an event table, and it is precisely the shape where the planner's join-order search matters: with enough relations in the query, PostgreSQL stops enumerating join orders exhaustively and starts using its genetic optimizer, which finds a reasonable plan rather than necessarily the best one. When statistics on the event table go stale after a bulk load, the planner's row estimate for the date predicate collapses, it picks a nested loop expecting a hundred rows, gets ten million, and the reporting API stops responding while every other query on the box waits behind it.</p>
+
+  <p><b>At 100 requests per second</b>, you optimize reactively. Read the plan when something is slow, add the index, move on. The planner's defaults are almost always right at this size because almost any plan is fast enough. <b>At 1,000 requests per second</b>, optimization becomes a standing practice rather than an incident response. You need slow-query logging on by default, you need <code>EXPLAIN ANALYZE</code> to be a routine part of code review for any new query touching a large table, and you need to watch the gap between estimated and actual row counts, because that gap is the leading indicator of a plan about to flip. Note the documented caveat that <code>EXPLAIN ANALYZE</code> excludes network transmission cost and adds measurement overhead of its own, so treat its timings as relative rather than absolute. <b>At 10,000 requests per second</b>, plan stability matters more than plan quality. A plan that is 20 percent worse but never flips is preferable to an optimal plan that occasionally chooses a nested loop over ten million rows, because the failure is not gradual: it is a step function that saturates the database in seconds.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Optimization spends engineering time and adds indexes, materialised aggregates, and query rewrites that all have to be maintained. The failure mode specific to optimization is the plan flip. Nothing in your code changed, nothing in your traffic changed, but the statistics moved just far enough that the planner crossed a cost boundary and chose differently. It presents as a total outage with a blameless deploy log, and the only defence is monitoring estimate-versus-actual divergence before the boundary is crossed.</p>
+
+  <h2>3. Making the application stop talking so much</h2>
+
+  <h3 id="n-plus-one-queries">N+1 queries</h3>
+
+  <p>An N+1 query is the pattern where the application issues one query to fetch a collection and then one further query per member of that collection to fetch its associated data. It is not a database problem. The database answers all N+1 queries quickly and correctly; the cost is entirely in round trips. Rails documents the arithmetic in its own guide: fetching 10 books and then each book's author executes 1 query to find the books plus 10 queries to load the authors, 11 in total, while eager loading with <code>includes</code> executes just 2. <em>Source: <a href="https://guides.rubyonrails.org/active_record_querying.html">Ruby on Rails, Active Record Query Interface</a>.</em></p>
+
+  <p>Eleven queries instead of two is invisible. The pattern is dangerous because N is set by data, not by code, so the same line of code that costs 11 queries in a test fixture costs 201 in production the first time a customer has 200 orders.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as API instance
+  participant D as Database
+  Note over A,D: Pattern 1 - N+1 with N = 200
+  A->>D: SELECT * FROM orders LIMIT 200
+  D-->>A: 200 order rows
+  loop 200 times, one round trip each
+    A->>D: SELECT * FROM customers WHERE id = ?
+    D-->>A: 1 customer row
+  end
+  Note over A,D: 201 round trips at 1 ms = about 201 ms
+  Note over A,D: Pattern 2 - one join
+  A->>D: SELECT ... FROM orders JOIN customers ON ... LIMIT 200
+  D-->>A: 200 joined rows
+  Note over A,D: 1 round trip plus 5 ms of server work = about 6 ms
+  </div><figcaption>The same page rendered two ways. Every individual query in the loop is fast, which is exactly why N+1 survives code review and survives the database's own slow-query log. <b>The cost is not query time, it is 200 sequential network round trips that the join collapses into one, and the ratio is about 34 to 1 in wall clock.</b> The loop is also serial, so no amount of database capacity shortens it.</figcaption></figure>
+
+  <p>The wall-clock difference is the smaller half of the damage. The larger half is what those 201 ms do to concurrency, which Little's law makes precise.</p>
+
+  <div class="math">
+    L = &lambda; &times; W
+    <span class="gloss">Read as: the number of requests concurrently in flight equals the arrival rate multiplied by the time each one spends in the system. Assumptions: 1 ms per round trip on the same network, 5 ms of server work for the joined query, and N = 200 associated rows per page.</span>
+  </div>
+
+  <p>The N+1 version holds a connection for W = 0.201 s per request; the join version holds one for W = 0.006 s. At an arrival rate of 100 requests per second, the N+1 page needs L = 100 &times; 0.201 = 20.1 connections busy at all times, and the join needs 0.6. At 1,000 requests per second it needs 201 connections, which already exceeds PostgreSQL's typical default <code>max_connections</code> of 100, while the join needs 6. At 10,000 requests per second it needs 2,010 connections, which is not a tuning problem but a physical impossibility on a single database, while the join still needs only 60. The same code, unchanged, is fine at one tier, marginal at the next, and impossible at the third.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">A listing endpoint issues one query for 200 rows and then one query per row for its association. Which change removes the amplification?</div>
+    <button class="q-opt">Widen the connection pool on each running application node</button>
+    <button class="q-opt">Cache each separate row lookup inside a shared tier</button>
+    <button class="q-opt">Fetch the associated rows with one batched join query</button>
+    <button class="q-opt">Move the whole listing endpoint onto a read replica</button>
+    <div class="q-fb">The 200 lookups are serial round trips, so the only structural fix is to stop making 200 of them. A bigger pool lets more of these expensive requests run at once, which increases total database load rather than reducing per-request latency, and it is how an N+1 becomes an outage. Caching each lookup helps only on repeat visits and leaves the cold path at 201 round trips while adding an invalidation problem. A read replica changes which machine answers the 200 queries, not how many there are, and adds staleness for nothing.</div>
+  </div>
+
+  <p><b>A named example.</b> In e-commerce, the order-history page is where this lands. Fetch the customer's orders, then for each order fetch the line items, and for each line item fetch the product. That is not N+1, it is N+M+1, and it is quadratic in a customer's purchase history. It passes every test because test customers have three orders. It fails on your best customers first, which means the worst latency in the system is served to the accounts with the highest lifetime value, and it fails during peak season when those customers are most active.</p>
+
+  <p><b>At 100 requests per second</b>, N+1 is a latency annoyance you can defer. Twenty connections held for a page render is survivable, and the page is merely slow. <b>At 1,000 requests per second</b>, N+1 is the thing that takes the system down, and it is the single most common cause of a first serious database incident. You have crossed the connection ceiling, so requests begin queueing for connections and latency goes non-linear across every endpoint, not just the guilty one. This is the tier where you need automated detection: instrument queries per request and alert on the ratio rather than on the total. <b>At 10,000 requests per second</b>, N+1 must be structurally impossible rather than merely discouraged. That means eager loading by default in the data-access layer, a hard per-request query budget enforced in the framework that fails the request in non-production environments, and batching at the boundary so that even genuinely separate lookups are coalesced.</p>
+
+  <p><b>The trade-off and the failure mode.</b> The fix has a real cost. A join returns a denormalised result with the parent row repeated once per child, so 200 orders each with 20 line items transfers the order columns 4,000 times. Eager loading everything also over-fetches, pulling associations the request never renders. The failure mode of the fix is the opposite of the failure mode of the problem: too-aggressive eager loading turns a fast page into one that transfers megabytes. The honest answer is a batched second query, which is what Rails calls <code>preload</code>: two queries rather than one join, no row duplication, and still constant in N.</p>
+
+  <h3 id="connection-pooling">Connection pooling</h3>
+
+  <p>A connection pool keeps a fixed set of database connections open and lends them to requests, because opening a connection is expensive and because databases cannot support unbounded concurrency. PostgreSQL sizes shared memory and other resources directly from <code>max_connections</code>, whose default is typically 100 and may be lower if kernel settings will not support it. <em>Source: <a href="https://www.postgresql.org/docs/current/runtime-config-connection.html">PostgreSQL, Connections and Authentication</a>.</em> An external pooler goes further by multiplexing many client connections onto few server connections. PgBouncer offers three modes: session pooling assigns a server connection for the client's whole connected lifetime, transaction pooling returns it to the pool as soon as the transaction ends, and statement pooling returns it after each query and forbids multi-statement transactions. Its defaults are <code>max_client_conn</code> of 100 and <code>default_pool_size</code> of 20 server connections per user and database pair. <em>Source: <a href="https://www.pgbouncer.org/config.html">PgBouncer configuration</a>.</em></p>
+
+  <p>Pool sizing is the arithmetic people get most consistently wrong, because the instinct is to size the pool against the request rate. The correct sizing is against concurrency, which is Little's law again.</p>
+
+  <div class="math">
+    server connections needed &asymp; &lambda; &times; W &times; headroom<br>
+    connections demanded = app instances &times; pool size per instance
+    <span class="gloss">Read as: the first line is how many connections the work actually requires, and the second is how many your fleet will try to open regardless. The gap between them is the entire problem. Assumptions: 1,000 requests per second, 6 ms of database time per request after the N+1 is fixed, and a headroom factor of 3 to absorb tail latency.</span>
+  </div>
+
+  <p>The work needs 1,000 &times; 0.006 &times; 3 = 18 server connections. Now count what the fleet demands. Forty application instances each configured with a pool of 10, which is a conservative-sounding number that nobody would flag in review, demand 40 &times; 10 = 400 connections against a <code>max_connections</code> of 100. Three quarters of those connection attempts are refused, and they are refused as connection errors rather than as slow queries, so the symptom is a fleet-wide error spike with a completely idle database. The database has capacity for twenty times the work being asked of it and is rejecting traffic anyway.</p>
+
+  <p>Autoscaling turns this from a mistake into a trap, because the pool size is a fixed multiplier on an elastic number. If a traffic spike scales the fleet from 40 instances to 120, connection demand goes from 400 to 1,200 with no configuration change and no deploy. The database is attacked hardest by your own infrastructure at precisely the moment it is least able to absorb it.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  subgraph APP["Application tier, autoscaled 40 to 120 instances"]
+    I1["Instance 1<br/>pool = 10"]
+    I2["Instance 2<br/>pool = 10"]
+    I3["Instance 120<br/>pool = 10"]
+  end
+  I1 --> P["Connection proxy<br/>transaction pooling<br/>max_client_conn raised"]
+  I2 --> P
+  I3 --> P
+  P -->|"20 server connections,<br/>constant under autoscaling"| DB["PostgreSQL<br/>max_connections = 100"]
+  I1 -. "direct: 1,200 connections demanded,<br/>1,100 refused" .-> DB
+  </div><figcaption>The proxy exists to break the multiplication. Without it, connection demand is instances times pool size, which is elastic in the wrong direction. <b>With transaction pooling in front, the number of server connections is a property of the database rather than a property of how many application instances happen to be running.</b> The dotted path is what an autoscaling event does to an unproxied fleet.</figcaption></figure>
+
+  <p><b>A named example.</b> In gaming, a live-service backend scales its session service on player concurrency, which swings by an order of magnitude between a weekday morning and a patch-day evening. Each instance holds a pool sized for its own comfort. The patch drops, the fleet triples, and the database refuses connections while sitting at 15 percent CPU. What makes this incident memorable is that every dashboard says the database is healthy, because it is: the resource that ran out was a counter, not a capability.</p>
+
+  <p><b>At 100 requests per second</b>, the framework's default pool on a handful of instances is fine and an external pooler is unnecessary machinery. <b>At 1,000 requests per second</b>, you need to have done the multiplication at least once, and you need pool acquisition wait time as a monitored metric, because that metric is what distinguishes "the database is slow" from "we ran out of connections", which look identical from the application's point of view. This is also the tier where an external pooler starts to earn its place, particularly if the fleet autoscales. <b>At 10,000 requests per second</b>, an external pooler in transaction mode is not optional, connection counts must be a property of the pooler rather than of the fleet size, and you should be running separate pools per workload class so that a slow analytics query cannot consume the connections the checkout path needs. Isolating pools by workload is the same reasoning as isolating them by tenant, and it is the cheapest blast-radius control available.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Transaction pooling breaks anything that assumes session state survives between transactions: session-level advisory locks, temporary tables, prepared statements bound to a session, and <code>SET</code> statements outside a transaction. PgBouncer's own documentation says plainly that transaction and statement pooling break certain session-based features and require application cooperation. The failure is subtle and intermittent, because it only manifests when a connection happens to be reassigned between two operations that assumed continuity. The failure mode of the pool itself is queueing: when the pool is exhausted, requests wait for a connection, and that wait is added to every request rather than to the guilty one, so the whole service degrades uniformly. Give the pool an acquisition timeout so it sheds load instead of queueing without bound, which is the same argument made for <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#backpressure">backpressure</a> in the sibling course.</p>
+
+  <h2>4. Spreading the read load</h2>
+
+  <h3 id="read-replicas">Read replicas</h3>
+
+  <p>A read replica is a second copy of the database that continuously applies the primary's write-ahead log and serves read-only queries from the result. PostgreSQL calls this hot standby, defines it as the ability to connect and run read-only queries while the server is in standby mode, and is unusually direct about the consistency it offers: the data takes time to arrive, so there is a measurable delay between primary and standby, running the same query nearly simultaneously on both might return differing results, and the standby is <em>eventually consistent</em> with the primary. <em>Source: <a href="https://www.postgresql.org/docs/current/hot-standby.html">PostgreSQL, Hot Standby</a>.</em> Managed platforms say the same thing: Amazon RDS copies updates to a read replica asynchronously, and the replica allows only read-only connections. <em>Source: <a href="https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/USER_ReadRepl.html">Amazon RDS, Working with DB instance read replicas</a>.</em> The lag is directly observable rather than a matter of estimation: <code>pg_stat_replication</code> exposes <code>replay_lag</code>, defined as the time elapsed between flushing recent WAL locally and receiving notification that the standby has written, flushed, and applied it. <em>Source: <a href="https://www.postgresql.org/docs/current/monitoring-stats.html">PostgreSQL, Monitoring Statistics</a>.</em></p>
+
+  <p>Adding a replica is easy. Deciding which reads may be stale is the actual work, and it has arithmetic. The usual rule is read-your-writes: after a session writes, pin its reads to the primary for a window longer than the observed lag.</p>
+
+  <div class="math">
+    primary read load = write rate &times; sticky window &times; reads per second per pinned session
+    <span class="gloss">Read as: each write pins one session to the primary for the length of the sticky window, and while pinned that session's reads land on the primary too. Assumptions: 1,000 requests per second total, 10 percent of them writes, a measured replay_lag p99 of 250 ms rounded up to a 500 ms sticky window, and 4 reads per second from a session in that window.</span>
+  </div>
+
+  <p>That gives 100 writes per second and 900 reads per second. Sticky reads are 100 &times; 0.5 &times; 4 = 200 reads per second forced onto the primary, so the primary carries 100 writes plus 200 sticky reads = 300 requests per second and the replicas carry the remaining 700. Now let replication lag degrade so that you have to widen the sticky window to 1 second: sticky reads double to 400, the primary carries 500, and the replicas carry 500. You have lost 200 requests per second of read offload without adding a single user. This is the sentence worth memorising: every 100 ms of replication lag you fail to fix is read capacity you hand back to the primary.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TD
+  W["Write request"] --> PR["Primary"]
+  PR --> M["Pin this session's reads<br/>to the primary for 500 ms"]
+  R["Read request"] --> Q{"Did this session write<br/>within the last 500 ms?"}
+  Q -->|"yes: 200 reads per second"| PR
+  Q -->|"no: 700 reads per second"| RR["Read replica pool"]
+  PR -. "asynchronous WAL stream" .-> RR
+  RR --> LAG["replay_lag p99 = 250 ms<br/>monitored, alerted, and<br/>the source of the 500 ms window"]
+  </div><figcaption>Routing is a consistency decision expressed as a rule, not an infrastructure decision. The sticky window must be wider than the worst replication lag you tolerate, which is why the lag metric feeds directly back into the routing rule. <b>The replica does not give you free read capacity; it gives you read capacity in exchange for a staleness budget you have to spend deliberately.</b></figcaption></figure>
+
+  <p><b>A named example.</b> In streaming, the catalogue and recommendation reads dwarf the writes, and almost all of them tolerate seconds of staleness with no user-visible effect. Continue-watching position is the exception: a viewer who stops on one device and resumes on another within a few seconds will see the old position if that read hits a lagging replica, and the video restarts from the wrong place. The product-level fix is not a database change, it is recognising that one read path out of fifty has a consistency requirement and routing that one to the primary.</p>
+
+  <p><b>At 100 requests per second</b>, a replica is for availability and for keeping analytics off the primary, not for read scaling, which you do not need. Adding replica routing at this tier buys you a consistency bug and no capacity. <b>At 1,000 requests per second</b>, replicas start to matter, and this is the tier where the read-your-writes bug ships. The pattern is invariable: reads are moved to replicas as a performance fix, and two weeks later support reports that users occasionally do not see their own edits. Build the routing rule and the lag metric at the same time as the replica. <b>At 10,000 requests per second</b>, replicas are load-bearing, so replication lag becomes a first-class service-level objective with an alert and an error budget, you need enough replicas that losing one does not overload the rest, and you need explicit degradation behaviour for when lag exceeds the sticky window, which is to fail reads over to the primary and accept the load rather than serve data you know is too old.</p>
+
+  <p><b>The trade-off and the failure mode.</b> You are buying read capacity with consistency, and the price is paid by whichever read path you misclassify. Replicas also fail in a way that has no analogue on the primary: query conflicts. PostgreSQL documents these as hard conflicts in which standby queries might be cancelled and sessions disconnected, because replaying an <code>ACCESS EXCLUSIVE</code> lock or a vacuum cleanup record from the primary conflicts with a running standby query. The knobs are <code>max_standby_streaming_delay</code>, which lets WAL application wait rather than cancel, and <code>hot_standby_feedback</code>, which prevents the primary from vacuuming rows a standby still needs. Both have a cost the documentation names: delaying WAL application increases lag, and standby feedback delays cleanup of dead rows on the primary and may cause table bloat. There is no setting that gives you fresh replicas, uncancelled long queries, and an unbloated primary at once. Pick two and say which.</p>
+
+  <h2>5. Changing the schema without stopping the world</h2>
+
+  <h3 id="database-migrations">Database migrations</h3>
+
+  <p>A migration is a change to the shape of the database applied as a versioned, ordered step. On a small table this is a one-line command. On a large table it is a production event, because the question is not whether the change is correct but what lock it takes and for how long. PostgreSQL's <code>ALTER TABLE</code> documentation is the reference for which forms are cheap and which are catastrophic, and the distinctions are precise. Adding a column with a non-volatile default stores the default in the table's metadata and returns it when existing rows are accessed, which makes the statement very fast even on large tables and requires no rewrite. Adding a column with a volatile default, a stored generated column, or an identity column causes the entire table and its indexes to be rewritten. Adding a <code>CHECK</code> or <code>NOT NULL</code> constraint requires scanning the table to verify existing rows but does not require a rewrite. And a constraint added <code>NOT VALID</code> can be committed immediately without scanning, with the later <code>VALIDATE CONSTRAINT</code> step acquiring only a <code>SHARE UPDATE EXCLUSIVE</code> lock because it knows concurrent transactions are already enforcing the constraint on new rows. <em>Source: <a href="https://www.postgresql.org/docs/current/sql-altertable.html">PostgreSQL, ALTER TABLE</a>.</em></p>
+
+  <p>Index creation has its own escape hatch with its own price. <code>CREATE INDEX CONCURRENTLY</code> builds the index without taking locks that prevent concurrent inserts, updates, or deletes, where a standard build locks out writes until it finishes. The cost is stated just as plainly: it performs two scans of the table, must wait for all existing transactions that could modify or use the index to terminate, requires more total work, and takes significantly longer. If it fails partway it leaves behind an invalid index that is ignored for querying but still consumes update overhead, and the recommended recovery is to drop it and try again. <em>Source: <a href="https://www.postgresql.org/docs/current/sql-createindex.html">PostgreSQL, CREATE INDEX</a>.</em></p>
+
+  <p>MySQL frames the same territory as online DDL with an explicit capability table. In MySQL 8.4, <code>ADD COLUMN</code> defaults to <code>ALGORITHM=INSTANT</code>, modifies only metadata, does not rebuild the table, and permits concurrent DML. Adding a secondary index runs in place, does not rebuild the table, permits concurrent DML, and the table remains available for reads and writes while the index is built, though <code>CREATE INDEX</code> finishes only after all transactions accessing the table complete. <em>Source: <a href="https://dev.mysql.com/doc/refman/8.4/en/innodb-online-ddl-operations.html">MySQL, Online DDL Operations</a>.</em> The practical lesson is not to memorise either table but to know that such a table exists for your engine and version, and to check it before every migration on a large table.</p>
+
+  <div class="callout warn"><span class="tag">The lock queue</span> The dangerous property of a strong lock is not how long it is held but that it blocks the queue behind it. A statement waiting for <code>ACCESS EXCLUSIVE</code> sits in the lock queue, and every subsequent query on that table queues behind the waiter, including the trivially fast ones. So a migration that would have held its lock for 40 ms can take the table fully offline for as long as the longest transaction already running, because it waits for that transaction, and everything else waits for it. Always set a short lock timeout on migrations and retry, so a failed acquisition is a failed migration rather than a full outage.</div>
+
+  <p><b>A named example.</b> GitHub's database infrastructure team built and open-sourced <code>gh-ost</code> for exactly this problem: a triggerless online schema migration tool for MySQL that is testable and provides pausability, dynamic reconfiguration, and auditing. Rather than using triggers, which the team identifies as the source of many limitations and risks, it reads the binary log stream to capture table changes and applies them asynchronously onto a ghost table, and it offers what the project calls true pause, where throttling truly ceases writes on the master with no row copies and no ongoing event processing. It can also run the same flow against a replica to build confidence without touching the primary. <em>Source: <a href="https://github.com/github/gh-ost">gh-ost, GitHub</a>.</em> The existence of that tool is the argument: a company operating MySQL at that scale concluded that the built-in path was not enough and wrote a purpose-built one, and pausability and testability are the features they led with, not speed.</p>
+
+  <p><b>At 100 requests per second</b>, a maintenance window is a legitimate answer. Take the lock, run the migration, accept 30 seconds of downtime at 3 a.m. This is not a failure of engineering; it is correctly declining to pay for machinery you do not need. <b>At 1,000 requests per second</b>, the window stops being acceptable and the migration must be online, which means every migration is decomposed into individually safe steps, indexes are built concurrently, constraints are added <code>NOT VALID</code> and validated separately, and every migration carries a lock timeout. This is the tier at which teams discover that their migration tool runs everything in one transaction, which is exactly what <code>CREATE INDEX CONCURRENTLY</code> forbids. <b>At 10,000 requests per second</b>, migrations need their own tooling and their own review path: batched backfills with rate limiting and a pause control, replication lag as a throttle input so a backfill stops when replicas fall behind, and a rehearsal against a production-sized copy that produces a real duration estimate rather than a guess.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Safe migrations are slower, more numerous, and require multiple deploys for one logical change. The characteristic failure is the unthrottled backfill: a single <code>UPDATE</code> over a hundred million rows holds one enormous transaction, generates an enormous volume of WAL, blows out replication lag on every replica, and prevents vacuum from cleaning up anything for its whole duration. The second failure, more insidious, is the migration that succeeded on the database but not in the application, because the old code and the new schema disagree during the deploy window. That is what the next topic exists to prevent.</p>
+
+  <h3 id="schema-versioning">Schema versioning</h3>
+
+  <p>Schema versioning is the discipline of treating the schema as a versioned artifact that must remain compatible with more than one version of the application at a time. This is forced on you by the deploy model rather than chosen: any rolling deploy, blue-green cutover, or canary means old and new application code run simultaneously against one database, so a schema that only works with the new code is broken for the duration of the deploy and unrecoverable if you need to roll back.</p>
+
+  <p>The formal treatment is Google's F1 work, which addresses the same problem in a distributed setting where servers cannot change schema atomically. The protocol allows different servers to transition to a new schema at different times while remaining online, and it guarantees correctness so long as all servers are no more than one schema version behind at any time, which means at most two schema versions are active simultaneously. The paper's central move is that certain schema changes can introduce corruption, and the fix is to replace a corruption-causing change with a sequence of changes each of which is safe under the two-version rule. <em>Source: <a href="https://research.google/pubs/online-asynchronous-schema-change-in-f1/">"Online, Asynchronous Schema Change in F1" (Rae, Rollins, Shute, Sodhi, Vingralek, VLDB 2013)</a>.</em></p>
+
+  <p>Expand-contract is that idea applied to ordinary deploys. Never change a thing; add the new thing, move to it, then remove the old thing, with each step compatible with both the code before it and the code after it. Renaming a column is the clearest illustration, because the one-step version is a guaranteed outage and the multi-step version has no outage at all.</p>
+
+  <figure class="diagram"><div class="mermaid">
+stateDiagram-v2
+  [*] --> Expand: add the new column, nullable, no default, no rewrite
+  Expand --> Dual_write: new code writes both columns, old code writes one
+  Dual_write --> Backfill: batched updates, throttled on replication lag
+  Backfill --> Verify: compare old and new for every row
+  Verify --> Backfill: mismatch found in rows written during the backfill
+  Verify --> Read_new: every row agrees
+  Read_new --> Contract: reads have moved, writes still go to both
+  Contract --> [*]: stop dual writing, then drop the old column
+</div><figcaption>Expand-contract as a state machine. Every transition is independently deployable and independently revertible, and at no point does a running version of the application see a schema it cannot handle. <b>The verify state is the one teams skip and the one that matters: without it you drop the old column on the evidence that the backfill script exited zero.</b> Note the loop back to backfill, because rows written during the backfill by old code are exactly the rows that will be missing.</figcaption></figure>
+
+  <p><b>A named example.</b> In healthcare, a patient records system splitting a single <code>name</code> field into structured given and family names cannot take downtime and cannot tolerate a window in which a record is written by old code and read by new code as a blank name. Expand-contract is what makes the change auditable as well as safe: each step is a separate change with its own verification evidence, which is what a regulated environment needs anyway. The one-step rename would produce, at minimum, a set of records with null names written during the deploy window, and in a clinical system those are not rows, they are incidents.</p>
+
+  <p><b>At 100 requests per second</b>, if you deploy with a brief window you can genuinely change schema and code together, and expand-contract is ceremony. Say so honestly rather than performing rigour you do not need. <b>At 1,000 requests per second</b>, rolling deploys make the two-version rule mandatory, which means every migration must be reviewed against the question "does the currently deployed code still work after this?" and, just as importantly, "does the new code work before this?". Backward and forward compatibility are separate checks and both are required. <b>At 10,000 requests per second</b>, the version skew window is long enough, and the fleet large enough, that compatibility must be enforced rather than reviewed: migrations tested against both the previous and the next application version in CI, a schema registry or equivalent that makes the current expected version explicit, and an automated check that fails a deploy attempting a destructive change against a schema that live code still depends on.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Expand-contract turns one change into three or four deploys spread over days, and it leaves the system in an intermediate state where two columns must be kept in agreement. The dominant failure mode is abandonment: the expand and backfill ship, the contract never does, and eighteen months later the table has six unused columns, three of which are still being dual-written by code nobody can safely delete because nobody can prove what reads them. Track the contract step as work, not as cleanup, and it will actually happen.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">You must rename a column on a 200 million row table while rolling deploys keep old and new code running together. What is the safe shape?</div>
+    <button class="q-opt">Rename the column and ship the new code together</button>
+    <button class="q-opt">Add a column, backfill it, dual-write, then drop old</button>
+    <button class="q-opt">Take a maintenance window and rename during low traffic</button>
+    <button class="q-opt">Create a database view that exposes the newer name</button>
+    <div class="q-fb">Only the expand-contract sequence keeps every deployed version of the code working at every instant, which is what a rolling deploy requires. Renaming and shipping together guarantees a window in which one of the two live code versions is querying a column that does not exist, and it makes rollback impossible because reverting the code does not revert the schema. A maintenance window removes the version skew but not the change itself, and at this table size it also removes your availability. A view papering over the name leaves writes ambiguous, adds a permanent indirection, and does not move the data anywhere.</div>
+  </div>
+
+  <h2>6. The last line of defence</h2>
+
+  <h3 id="backups">Backups</h3>
+
+  <p>A backup is a copy of the data from which the database can be reconstructed, and its only meaningful property is whether a restore from it succeeds inside the time you have. PostgreSQL lists three fundamentally different approaches, each with its own strengths and weaknesses: SQL dump, file system level backup, and continuous archiving. <em>Source: <a href="https://www.postgresql.org/docs/current/backup.html">PostgreSQL, Backup and Restore</a>.</em> Continuous archiving is the one that supports point-in-time recovery, because it combines a base backup with the sequence of WAL files written since. The documentation is explicit that any internal inconsistency in the base backup will be corrected by log replay, and that with an indefinitely long sequence of archived WAL you can restore the database to its state at any time since the base backup was taken. <em>Source: <a href="https://www.postgresql.org/docs/current/continuous-archiving.html">PostgreSQL, Continuous Archiving and Point-in-Time Recovery</a>.</em></p>
+
+  <p>That same page contains the two operational instructions that separate a backup strategy from a backup folder, and both are about verification rather than about copying. It says you should set up and test your procedure for archiving WAL files <em>before</em> you take your first base backup, because recovery requires a continuous sequence of archived WAL extending back at least as far as the start of the backup. It says you are advised to monitor the archiving process to ensure it is working as you intend. And after a recovery it says to inspect the contents of the database to ensure you have recovered to the desired state, and if not, to start over. Every one of those is a verification step, and every one of them is the step that gets skipped.</p>
+
+  <div class="callout warn"><span class="tag">The only rule that matters</span> An untested backup is not a backup. It is a file whose usefulness is a hypothesis. The failure is never that the backup file is missing; it is that the file exists, the job has reported success for two years, and the restore fails because the WAL sequence has a gap, or the archive command silently overwrote files, or the extension the schema depends on is not installed on the restore host. You do not learn any of this during a backup. You learn it during a restore, and the only question is whether that restore is a drill or an outage.</div>
+
+  <p>The arithmetic that makes this concrete is restore time against your stated recovery time objective, which is how long you may take to come back, and recovery point objective, which is how much data you may lose.</p>
+
+  <div class="math">
+    RTO<sub>actual</sub> = provision + (base backup size &divide; restore throughput) + (WAL volume &divide; replay throughput) + verify<br>
+    WAL volume = WAL rate &times; age of the base backup
+    <span class="gloss">Read as: the time to come back is the time to get hardware, plus the time to copy the base backup, plus the time to replay every change since that backup was taken, plus the time to check it is right. Assumptions: a 2 TB database, a restore stream of 200 MB per second from object storage, a WAL rate of 1 MB per second, single-threaded replay at 30 MB per second, a nightly base backup so the worst case is 24 hours old, and 10 minutes each side for provisioning and verification.</span>
+  </div>
+
+  <p>Copying the base backup takes 2,000,000 MB &divide; 200 MB/s = 10,000 s, which is 2 hours 47 minutes. The WAL accumulated since the nightly backup is 1 MB/s &times; 86,400 s = 86.4 GB, and replaying it at 30 MB/s takes 2,880 s, or 48 minutes. Add 20 minutes for provisioning and verification and the actual recovery time is about 3 hours 55 minutes. If the documented RTO is 1 hour, the plan is fiction, and it has been fiction for as long as it has been written down.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  A["Disaster at T"] --> B["Provision host<br/>10 min"]
+  B --> C["Copy 2 TB base backup<br/>at 200 MB/s<br/>167 min"]
+  C --> D["Replay 86.4 GB of WAL<br/>at 30 MB/s<br/>48 min"]
+  D --> E["Verify contents<br/>and cut over<br/>10 min"]
+  E --> F["Actual RTO: 235 min<br/>Stated RTO: 60 min"]
+  C -. "fix 1: parallel restore<br/>at 800 MB/s = 42 min" .-> G["Revised RTO: 74 min"]
+  D -. "fix 2: base backup every 6 h<br/>21.6 GB replays in 12 min" .-> G
+  </div><figcaption>Where the four hours actually go, and which two changes recover them. Restore time is dominated by bytes copied and WAL replayed, and both are engineering choices rather than facts of nature. <b>The number on this diagram is only knowable by performing a restore, which is the reason the drill is the deliverable and the backup file is not.</b> Note that neither fix touches the backup process itself.</figcaption></figure>
+
+  <p>The recovery point side is separate arithmetic and it is usually the easier of the two. If WAL is archived on a 60-second timer, then a total loss of the primary volume loses up to 60 seconds of committed transactions. At 1,000 writes per second that is up to 60,000 transactions, and whether that is acceptable is a product decision rather than an infrastructure one. In payments it is not acceptable and you pay for synchronous replication to a second location; in analytics it is entirely acceptable and paying for zero RPO is waste.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Nightly backups have reported success for two years. The primary volume is lost, and the restore fails. What is the most likely cause?</div>
+    <button class="q-opt">The backups were never restored into a live database</button>
+    <button class="q-opt">The backups were written to a slower storage class</button>
+    <button class="q-opt">The backups were taken during the peak traffic hour</button>
+    <button class="q-opt">The backups were kept for a shorter retention period</button>
+    <div class="q-fb">A backup job reports on whether it finished writing, which is not the same claim as whether the result is restorable, so two years of green is two years of untested hypothesis. A slower storage class makes the restore take longer, which is an RTO problem rather than a reason it fails outright. Backing up during peak traffic affects the primary's performance during the backup window and does not corrupt the result. A short retention period would mean no backup exists at all, which is a different and much more visible failure than a restore that starts and then breaks.</div>
+  </div>
+
+  <p><b>A named example.</b> In logistics, a shipment tracking platform holds a few terabytes of event history and quotes a one-hour RTO in its customer contracts. The number came from a template. The first real restore drill, run deliberately in a staging account, produces the four-hour figure above, and the fix is not a better backup product but two ordinary engineering changes: base backups every six hours instead of nightly, which cuts WAL replay from 48 minutes to about 12, and a parallel restore stream that cuts the copy from 167 minutes to roughly 42. That brings the total to about 74 minutes, close enough that the remaining gap is a conversation with the business rather than a surprise during an incident.</p>
+
+  <p><b>At 100 requests per second</b>, a nightly logical dump plus a documented restore procedure is proportionate, and the important discipline is simply to perform one restore, once, and time it. <b>At 1,000 requests per second</b>, the dataset has outgrown logical dumps, so you need continuous archiving with point-in-time recovery, and you need the restore drill on a schedule rather than as a one-off. This is also the tier where a bad migration or a mistaken <code>DELETE</code> becomes a realistic reason to restore, which is a different requirement from hardware loss: you need to recover to a specific moment, not just to last night. <b>At 10,000 requests per second</b>, restore time itself becomes the design constraint, which usually means backups per shard so restores parallelise, an automated drill that restores to a scratch environment and asserts on row counts and checksums, and a rehearsed path for the case you actually fear most, which is not total loss but logical corruption discovered hours after it happened, when the corrupt data is already replicated to every copy you have.</p>
+
+  <p><b>The trade-off and the failure mode.</b> Backups cost storage, cost some load on the primary or on a dedicated replica, and cost real engineering time on drills that produce nothing visible when they succeed. That invisibility is why the budget gets cut. The failure modes worth naming are the silent ones: WAL archiving that stopped weeks ago while base backups kept succeeding, so the base backups are unrestorable to any point; an archive command that overwrote files, which the documentation warns about explicitly and advises testing against; a restore host missing an extension the schema requires; and encryption keys stored only in the system being restored. Every one of these is invisible until the restore, and every one of them is caught by a drill.</p>
+
+  <h2>7. Scale drill: an order-history page</h2>
+
+  <p>One endpoint, three tiers. A food delivery marketplace renders a customer's order history: the orders, the line items on each, and the restaurant for each order. Watch how each of the eight topics changes as the same endpoint goes from 100 to 10,000 requests per second.</p>
+
+  <p><b>At 100 requests per second.</b> The orders table has a few million rows. Index <code>(customer_id, created_at)</code> and you are done; the four-level descent is not yet four levels. The N+1 in the line-item loop costs about 200 ms per page and nobody has complained. The framework's default connection pool across six instances demands 60 connections against a default of 100, which fits. There are no read replicas because there is nothing to offload. Migrations run in a two-minute window at 4 a.m. and expand-contract would be ceremony. Backups are a nightly dump, and the one thing genuinely worth doing at this tier is restoring one of them and writing down how long it took.</p>
+
+  <p><b>At 1,000 requests per second.</b> The orders table has crossed a hundred million rows and no longer fits in cache, so the index is now the only thing standing between you and a 20 GB scan. The N+1 is now the top incident risk: at 201 ms of database time per request, Little's law says 201 connections busy against a limit of 100, so the endpoint takes down every other endpoint by exhausting the pool. Fixing it to a batched fetch drops that to about 6 connections. The fleet has autoscaled to 40 instances and the connection multiplication has to be dealt with, which is where an external pooler in transaction mode enters. Read replicas arrive for the history reads, which are tolerant of a second of staleness, but a customer who just placed an order must see it, so the sticky window and the read-your-writes rule arrive at the same time. Migrations must now be online, concurrent index builds and <code>NOT VALID</code> constraints become standard, and every migration carries a lock timeout. Continuous archiving replaces the dump, and the restore drill goes on a schedule.</p>
+
+  <p><b>At 10,000 requests per second.</b> Index count is now curated rather than accumulated, because write amplification on the orders table is a bottleneck in its own right, and covering indexes that answer the history query without touching the heap start to pay for themselves. Plan stability outranks plan quality, because a nested loop chosen by a stale statistic saturates the database in seconds. Query budgets are enforced by the data-access layer so an N+1 cannot be introduced at all. The pooler is mandatory and split by workload class so that history reads cannot starve order placement. Replication lag is a service-level objective with an alert, there are enough replicas to lose one, and there is defined behaviour for when lag exceeds the sticky window. Migrations have their own tooling, their own rehearsal against a production-sized copy, and lag-aware throttling on every backfill. Backups are per shard so restores parallelise, and the drill is automated and asserts on checksums rather than on exit codes. The endpoint is the same endpoint. Every decision around it has changed.</p>
+
+  <p>Worth noticing: nothing in this drill was fixed by buying a larger database. Each tier was solved by changing the shape of the work, which is the same argument the sibling courses make about <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#latency-budgets">latency budgets</a> and about deciding <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#ttft-and-itl">which part of a latency number the user actually feels</a>.</p>
+
+  <div class="teacher-note"><b>Your teacher.</b> The habit worth building from this chapter is doing the page arithmetic before you write the query. Pick a table you own, estimate its row width, divide the page size by it to get rows per page, multiply out to get the total pages, and ask whether a plan that reads all of them can meet the budget you have promised. Then run <code>EXPLAIN ANALYZE</code> and compare your estimate against the planner's. When they disagree, one of you is wrong about the data, and finding out which is the whole skill. Bring me a plan and your arithmetic and I will push on both.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the PostgreSQL chapter on <a href="https://www.postgresql.org/docs/current/continuous-archiving.html">Continuous Archiving and Point-in-Time Recovery</a> end to end, including the parts about testing the archive procedure before the first base backup. It is the shortest path from "we have backups" to "we have a recovery time we can defend". Pair it with <a href="https://research.google/pubs/online-asynchronous-schema-change-in-f1/">"Online, Asynchronous Schema Change in F1"</a>, which gives the formal reason expand-contract works and generalises it to systems where no single server can change schema atomically.</p>
+
+  <div class="pager">
+    <a href="0003-protocols-and-real-time.html"><span class="dir">&larr; Previous</span><span class="ttl">Protocols and Real-Time Transport</span></a>
+    <a class="nxt" href="0005-distributed-data.html"><span class="dir">Next &rarr;</span><span class="ttl">Distributing Data</span></a>
+  </div>
+
+  <footer><p>Production Systems Course &middot; Chapter 5 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
