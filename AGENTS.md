@@ -114,7 +114,7 @@ but not a single line of code, so an accessibility or contrast fix landed in one
 other broken - which is exactly how the copy button shipped at 2.7:1 and 25 pages of scroll boxes
 shipped with no tab stop. Land every such fix in both, and re-audit both.
 
-Three traps in that design system, all found on the published site:
+Four traps in that design system, all found on the published site:
 
 - **Theme tokens are declared three times** (`:root`, the `prefers-color-scheme: dark` block, and
   `:root[data-theme="dark"|"light"]`, because the toggle sets `data-theme` and must beat the OS).
@@ -127,6 +127,17 @@ Three traps in that design system, all found on the published site:
   reader navigates by; `.h-sub` (the h3 face) and `.h-label` (the small uppercase h4 face) set how
   big it looks. Fix a broken heading order by retagging the heading and adding the matching class -
   never by leaving the tag wrong because the right one looks wrong.
+- **A Mermaid line break must be written `&lt;br/&gt;`, never `<br/>`.** A literal `<br/>` inside a
+  `<div class="mermaid">` is parsed by the browser as a real `BR` element. Mermaid's first render
+  survives that, but `hub.js` stashes the graph source as `node.textContent` in order to repaint on
+  a theme or palette change, and `textContent` drops the `BR` and joins the two halves **with no
+  break and no space**. So the diagram is correct until the reader touches the appearance controls,
+  and mangled from then on: `Hand-written rulesabout 1950 to 1990`. In a sequence diagram the join
+  can merge two statements and the figure becomes a red error box instead. Writing the entity puts
+  the literal characters into the text node, so Mermaid sees the tag it expects on every render.
+  Relatedly, **a semicolon inside a Mermaid label is a statement separator** and breaks the diagram
+  the same way; use a dash. The six `course.css` courses are not affected, because `course.js`
+  reloads the page to change theme rather than repainting in place.
 
 Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
 tolerate Mermaid's async draw. `course.js` starts Mermaid under `startOnLoad`, which offers no
