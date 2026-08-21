@@ -87,6 +87,34 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 - Do not change `.github/workflows/` or `scripts/` unless the task is explicitly about the pipeline.
 - If the task needs a decision you cannot make from the repository - a course's direction, a licence question, a deployment change - stop and ask. Do not guess.
 
+## Editing the shared assets
+
+`assets/course.css` and `assets/course.js` exist as **six byte-identical copies**: the hub root
+plus each course except `statistical-foundations-ml-course`, which keeps its own retuned pair.
+Nothing enforces this - the validator only checks structure and links - so edit the root copy,
+then `cp` it over the five course copies and confirm with `md5 assets/course.css */assets/course.css`.
+A drifted copy ships silently and only shows up on the live site.
+
+Two traps in that design system, both found on the published site:
+
+- **Theme tokens are declared three times** (`:root`, the `prefers-color-scheme: dark` block, and
+  `:root[data-theme="dark"|"light"]`, because the toggle sets `data-theme` and must beat the OS).
+  A token added to `:root` alone silently keeps its light value in dark mode. Add every new token
+  to all the blocks that already carry one.
+- **`@media print` cannot use a bare `:root`.** `:root[data-theme="dark"]` out-specifies it in every
+  medium, so a print rule written that way never applies to a reader who toggled dark. Restate print
+  overrides at each theme selector.
+
+Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - lives in
+`course.js` and must tolerate Mermaid's async draw; there is no completion hook under `startOnLoad`.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
+
 ## What "done" looks like
 
 - The validator passes.
