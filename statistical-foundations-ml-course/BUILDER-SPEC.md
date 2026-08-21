@@ -29,11 +29,11 @@ The course `index.html` groups the lecture as one `<section class="module">` wit
 3. **Work every intermediate step the slides compress.** The reader must never have to reconstruct a missing step. If the slide writes one line of algebra, this course writes the three lines behind it, inside a `<ol class="worked">`.
 4. **Name every symbol in words on every page where it appears,** not once per lecture.
 5. **At least three diagrams per content page,** using several distinct kinds across the lecture.
-6. **At least two quizzes per content page,** using the exact markup in `assets/course.js`.
+6. **At least two quizzes per content page,** using the exact markup in `../assets/hub.js`.
 7. **Never hard-code a colour in an SVG.** Use the semantic `.chart` classes so the figure survives both themes.
 8. **Cite a primary source.** The canon is in `RESOURCES.md`. Anything new goes there first.
 9. **Where the lecture is loose, say so** in a `.callout.warn`, rather than smoothing it over.
-10. Self-contained HTML with the same `<head>`, spine nav, and `../assets/course.js` at the end of `<body>`.
+10. Self-contained HTML with the same `<head>` and spine nav. The head links `../../assets/hub.css`, then `../assets/course-extras.css`, then loads `../../assets/hub.js` and `../outline.js`. Nothing loads at the end of `<body>`.
 
 ## Required section skeleton for a content page
 
@@ -71,11 +71,13 @@ Kinds already in use, so reuse rather than reinvent: `flowchart`, `sequenceDiagr
 
 **Always wrap node labels in double quotes.** A statistics course is full of parentheses, commas, and maths, and every one of them breaks the Mermaid parser unquoted. `A["P(X > 2000)"]` is safe; `A[P(X > 2000)]` is not.
 
+**Write a line break inside a label as the entity `&lt;br/&gt;`, never as `<br/>`.** A literal tag is parsed into a real element before Mermaid ever sees it, the runtime reads the graph source out of `node.textContent`, and the two halves of the label join with no break and no space. A semicolon inside a label breaks the diagram the same way; use a dash.
+
 **Keep a `timeline` to about six columns.** Mermaid shrinks the whole diagram to fit the reading column rather than wrapping it, so a twelve-column timeline arrives unreadable. Split it into two figures.
 
 **Keep `quadrantChart` point labels under about 26 characters,** and keep the points away from the axes and the centre lines. Mermaid centres a label under its point and does not clip or wrap it, so a long label at an extreme coordinate runs straight off the chart.
 
-The Mermaid palette and the mindmap root label are corrected in `assets/course.js` and `assets/course.css`. Do not fight those corrections; see the "Known gotchas" section of `NOTES.md` for why each exists.
+The Mermaid palette comes from the hub runtime `../assets/hub.js`. The mindmap root label, and the branch ramp that mindmaps and timelines use, are corrected in `assets/course-extras.css`. Do not fight those corrections; see the "Known gotchas" section of `NOTES.md` for why each exists.
 
 ### Inline SVG, for anything quantitative
 
@@ -117,7 +119,7 @@ Fixed for the whole course. The same idea keeps the same colour on every page.
 
 ## Quizzes
 
-Use the widget documented in the header of `assets/course.js`. `data-answer` is a zero-based index.
+Use the widget documented in the header of `../assets/hub.js`. `data-answer` is a zero-based index.
 
 **Every option must match in word count and sit as close as possible in character count.**
 A visibly longer correct answer leaks the answer and destroys the retrieval practice, which is the entire point of the widget.
