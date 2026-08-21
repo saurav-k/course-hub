@@ -19,8 +19,14 @@ from pathlib import Path
 
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 
+# A module heading's tag and its size are separate decisions: the heading-order
+# work retagged every course index from <h3> to <h2 class="h-sub"> so the outline
+# a screen reader walks is unbroken, while the visual face stayed the same. Match
+# either level, and match the closing tag to the opening one, so that neither
+# retagging nor a future class on the heading can silently empty the manifest.
 MODULE_PATTERN = re.compile(
-    r'<div class="module-h">\s*<span class="mnum">(?P<num>.*?)</span>\s*<h3>(?P<title>.*?)</h3>',
+    r'<div class="module-h">\s*<span class="mnum">(?P<num>.*?)</span>\s*'
+    r'<h(?P<level>[23])\b[^>]*>(?P<title>.*?)</h(?P=level)>',
     re.DOTALL,
 )
 # Courses register a lesson either as a full card or as a line in a parts list,
