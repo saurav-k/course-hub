@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 1: Context and Protocol - Production Agent Engineering</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AGENT ENGINEERING</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 01 &middot; Context and Protocol &middot; Chapter 1</div>
+  <h1>Context and Protocol</h1>
+  <p class="paper-meta">
+    <span class="pill">4 topics</span>
+    The substrate every other chapter stands on: what goes into the window, how tools arrive, and how agents hand work to each other.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li>Prompt engineering optimised one string. <b>Context engineering</b> curates the whole token budget across a long-running loop, which is a state management problem rather than a writing problem.</li>
+      <li>The <b>Model Context Protocol</b> turns the N times M integration problem into an N plus M one. Writing a server is easy; deciding what a server must never expose is the engineering.</li>
+      <li>Agent-to-agent handoffs travel as <b>validated typed objects</b>, never as free text. A schema converts a silent downstream misinterpretation into a loud upstream failure.</li>
+      <li><b>Guardrails belong in version control</b> next to the code they protect, with a diff, a review, a test, and a rollback. A safety rule you cannot bisect is not a control.</li>
+    </ul>
+  </div>
+
+  <h2>1. The mental model: the window is a working set</h2>
+
+  <p>You already know how to reason about a cache under pressure. The context window is that cache, the eviction policy is yours to write, and the cost of a miss is not a slow request but a wrong answer delivered confidently. That is the single transfer of intuition this chapter is built on, and it is why the discipline moved from writing better prompts to managing better state.</p>
+
+  <p>A single-turn assistant made the window a formatting question, because you controlled everything that went into it. An agent running for forty turns does not work that way. Every tool result, every retrieved document, every intermediate plan, and every error message accumulates in the same finite space, and nothing evicts itself. By turn thirty the model is reasoning over a working set assembled by chance rather than by design. Production agent engineering is mostly the work of taking that assembly back under explicit control.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  subgraph W["Context window: a finite working set"]
+    direction LR
+    S["System policy<br/>(stable, cacheable)"]
+    T["Tool definitions<br/>(grows with integrations)"]
+    H["Turn history<br/>(grows without bound)"]
+    R["Retrieved evidence<br/>(grows with ambition)"]
+    A["Answer reserve<br/>(must be protected)"]
+  end
+  C["Context engineering:<br/>an explicit admission and<br/>eviction policy per slot"] --> W
+  W --> O["Model call"]
+  O --> H
+  </div><figcaption>Four of the five slots grow on their own and the fifth is the one the user actually wants. <b>Without an admission and eviction policy the answer reserve is what gets squeezed, which is why long-running agents degrade rather than fail.</b> Every technique in this chapter is a policy for one of these slots.</figcaption></figure>
+
+  <h2>2. Curating what the model sees</h2>
+
+  <h3 id="context-engineering">Context engineering</h3>
+  <p>Context engineering is the set of strategies for curating and maintaining the optimal set of tokens available to the model during inference, covering system instructions, tool definitions, protocol-supplied data, external documents, and message history. It displaced prompt engineering for a structural reason rather than a fashionable one: prompt engineering assumes a single authored input, and an agent in a loop generates its own inputs. Once the model is writing most of what it will later read, the interesting decisions move from wording to admission, compaction, and eviction.</p>
+  <p>The practical shape is a budget with named slots and an owner for each one. System policy is stable and belongs at the front of the request so a provider prefix cache can serve it, which links this directly to <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html#prompt-caching">prompt caching</a> in the interview track. Turn history needs a compaction rule, usually summarise-and-drop with the last few turns kept verbatim. Retrieved evidence needs a hard cap and a relevance floor, because adding a marginal document costs tokens on every subsequent turn of the loop, not just this one. The answer reserve is protected first and shrunk last. <em>Source: <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">"Effective context engineering for AI agents" (Anthropic)</a>.</em></p>
+
+  <div class="callout warn"><b>The failure you will actually hit.</b> Tool definitions are the slot engineers forget to budget, because they are invisible in the application code and paid for on every single model call. An agent with sixty tools spends a large and permanent fraction of its window describing capabilities it will not use in this task. The fix is retrieval, not a bigger window: expose a small stable core, and put the long tail behind a search-and-fetch interface that loads a definition only when the task needs it.</div>
+
+  <h3 id="custom-mcp-server">Building a custom MCP server</h3>
+  <p>The Model Context Protocol is an open protocol that standardises how applications supply context and capability to language models. It carries JSON-RPC 2.0 messages between three roles: hosts, which are the applications that initiate connections, clients, which are the connectors inside a host, and servers, which are the services that provide context and capability. A server can offer three things. Resources are context and data for the user or the model to read. Prompts are templated workflows a user invokes deliberately. Tools are functions the model may execute. Clients can offer sampling, roots, and elicitation back to the server. <em>Source: <a href="https://modelcontextprotocol.io/specification/2025-06-18">Model Context Protocol specification, revision 2025-06-18</a>.</em></p>
+  <p>The value is the same value a language server protocol delivered to editors. Without it, every host integrates every data source separately and the work multiplies. With it, you write one server for your internal system and every conforming host can use it. That is why the build decision is rarely whether to write a server and almost always what the server is allowed to do.</p>
+  <p>Three design choices decide whether your server survives contact with production. The first is granularity: a tool that returns an entire record dumps hundreds of unbudgeted tokens into the window on every call, so return the projection the task needs and offer a detail tool for the rest. The second is the resource-versus-tool split, which is a trust split rather than a stylistic one, because resources are read into context while tools execute code. The third is that tool descriptions are themselves untrusted input. The specification is explicit that descriptions of tool behaviour, including annotations, should be considered untrusted unless they come from a trusted server, which means a server you did not write can attempt to influence your agent through nothing more than the text of a tool description.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Your agent grew from six tools to sixty and its accuracy on the original six tasks fell. Which change addresses the cause most directly?</div>
+    <button class="q-opt">Increase the context window so every tool definition fits</button>
+    <button class="q-opt">Retrieve tool definitions on demand instead of loading all</button>
+    <button class="q-opt">Lower the temperature so the model selects tools carefully</button>
+    <button class="q-opt">Deploy a reviewer model that audits every tool selection</button>
+    <div class="q-fb">Fifty-four irrelevant definitions are permanent noise on every call, and selection accuracy falls as the candidate set grows. A larger window keeps the noise and adds cost. Temperature changes sampling variance, not the size of the candidate set the model is choosing from. A reviewer model catches a bad choice after it is made and doubles your per-turn cost to do it, which treats the symptom.</div>
+  </div>
+
+  <h2>3. Making handoffs legible</h2>
+
+  <h3 id="typed-state-handoffs">Typed state handoffs</h3>
+  <p>When one agent hands work to another, the payload must be a validated typed object, not a paragraph. Pydantic is the usual carrier in Python, and its guarantee is worth stating precisely: if validation completes without raising, the fields of the resulting model instance conform to the field types declared on the model. That is a narrow promise and exactly the right one, because it converts an entire class of downstream failure into a single loud exception at a known boundary. <em>Source: <a href="https://pydantic.dev/docs/validation/latest/concepts/models/">Pydantic models documentation</a>.</em></p>
+  <p>The argument against free text is a distributed-systems argument you have made before. Text between services is an untyped, unversioned, unvalidated wire format, and every consumer reimplements a parser that disagrees slightly with every other consumer. When the researcher agent writes "the customer is probably on the enterprise tier" and the billing agent reads a tier, the ambiguity does not surface as an error. It surfaces as a wrong invoice, three hops later, with no stack trace pointing home. A schema makes the researcher fail at the moment it cannot produce a valid tier, which is the moment when the context to fix it still exists.</p>
+  <p>Two properties matter beyond the type check. Schemas need versioning, because an agent pipeline is a distributed system with independently deployed components and you will eventually run two versions at once. And validation is necessary rather than sufficient: a schema-valid object can still be semantically wrong, so a confidence field or an explicit unknown variant is usually better than a required field the upstream agent is forced to guess at.</p>
+
+  <figure class="diagram"><div class="mermaid">
+sequenceDiagram
+  participant R as Research agent
+  participant V as Schema validator
+  participant P as Planner agent
+  participant X as Executor agent
+  R->>V: Candidate handoff object
+  V--xR: ValidationError, retry with the field it missed
+  R->>V: Corrected handoff object
+  V->>P: Typed, versioned, validated state
+  P->>V: Plan object with a step budget
+  V->>X: Typed plan
+  X->>X: Execute under the caller's permissions
+  X-->>P: Typed result or a typed failure
+  </div><figcaption>The validator sits on every edge, not just the entry point, and it can push a failure back to the agent that produced it. <b>A typed handoff makes the producing agent responsible for its own output while the context to correct it still exists, instead of exporting an ambiguity to a consumer three hops away.</b> Note that the executor runs under the caller's permissions, which is the boundary Chapter 5 defends.</figcaption></figure>
+
+  <h3 id="guardrails-as-code">Guardrails as code</h3>
+  <p>A guardrail is a check around the model: input screening, output validation, schema conformance, policy classification, and refusal handling. Guardrails-as-code means those rules live in files in your repository, review through a pull request, run in continuous integration, deploy with a version, and roll back like anything else you ship. NVIDIA's NeMo Guardrails is a useful reference implementation of the shape, because it makes the rules declarative artifacts: a YAML configuration plus Colang flows, with rails placed at five distinct points in the request lifecycle. Input rails screen the user's submission, retrieval rails control fetched content, dialog rails manage conversational flow, execution rails oversee tool invocation, and output rails validate what the model produced. <em>Source: <a href="https://docs.nvidia.com/nemo/guardrails/latest/index.html">NVIDIA NeMo Guardrails documentation</a>.</em></p>
+  <p>The reason to insist on this is operational rather than aesthetic. A guardrail edited through an admin console has no diff, no author, no test, and no bisect. When a safety incident happens at 02:00 the only question worth asking is which change caused it, and a console-edited rule cannot answer. Treat the rule set as source: every rule carries a test case that would fail without it, the whole set runs against a fixture corpus in continuous integration, and a rule change ships behind the same release process as a code change.</p>
+  <p>Two subtleties separate a real control from a checkbox. Guardrails must have a defined failure direction, decided per rail: a policy classifier that is unavailable should block, while a formatting validator that is unavailable can usually let the request through. And a guardrail is a control only if it runs somewhere the model cannot influence, which means an independent, separately monitored component rather than another instruction inside the same prompt. The interview track develops the threat side of this under <a href="../../ai-system-design-course/lessons/0005-reliability-and-security.html#prompt-injection">prompt injection</a>.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your team moves an unchanged safety rule from an admin console into the repository. What is the primary engineering benefit of that move?</div>
+    <button class="q-opt">The rule now carries an author, a diff, and a rollback</button>
+    <button class="q-opt">The rule now runs faster inside the model serving hot path</button>
+    <button class="q-opt">The rule now blocks a wider range of unsafe user inputs</button>
+    <button class="q-opt">The rule now applies to each tenant without a manual edit</button>
+    <div class="q-fb">Version control buys attribution and reversibility, which is exactly what an incident review needs at 02:00 and exactly what a console cannot supply. Where a rule is stored does not change how fast it executes. Coverage is a property of the rule's own logic, so an unchanged rule blocks precisely the inputs it blocked before the move. Tenant scoping is an independent design decision that a console can express just as well.</div>
+  </div>
+
+  <h2>4. Field drill</h2>
+
+  <p>Questions a Staff+ reviewer will put to this design, and the trap inside each one.</p>
+
+  <ul>
+    <li><b>"Why not just use a bigger context window?"</b> The trap is treating the window as capacity. It is a working set with an eviction policy you either write or inherit by accident. Cost, latency, and the accuracy cost of irrelevant tokens all move against you, and none of them is fixed by a larger allocation.</li>
+    <li><b>"What does your MCP server refuse to do?"</b> The trap is answering with the feature list. Answer with the boundary: what it never returns, what scope its credential holds, why a tool is a tool rather than a resource, and how it behaves when the caller is an agent acting on a low-trust user's behalf.</li>
+    <li><b>"Two agents disagree about the customer's tier. Where does that surface?"</b> The trap is proposing a reconciliation step. With free-text handoffs it surfaces as a wrong action with no error, so the answer is that the schema makes it surface at the producer, before the ambiguity travels.</li>
+    <li><b>"How do you roll back a guardrail?"</b> The trap is describing a toggle. A toggle disables a rule; it does not tell you which rule change broke production last night. Answer with the release process: versioned rules, a test per rule, continuous integration on a fixture corpus, and a revert.</li>
+    <li><b>"Your agent behaved differently for the same input yesterday. Why?"</b> The trap is blaming sampling. Sampling is one candidate among several, and in a long-running agent the more likely cause is that the assembled context differed, through compaction, a changed tool set, or a retrieval result that moved.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> The exercise that pays for this chapter is an audit. Take an agent you already run, dump the exact bytes sent on its tenth turn, and account for every token by slot: policy, tools, history, evidence, reserve. Almost everyone discovers that tool definitions and stale history own more of the window than the evidence does. Bring me your breakdown and I will push on which slot you would evict from first and what breaks when you do.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read the <a href="https://modelcontextprotocol.io/specification/2025-06-18">Model Context Protocol specification</a> end to end once, paying particular attention to its security and trust section rather than its message formats. Pair it with <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">"Effective context engineering for AI agents"</a>, which supplies the vocabulary the rest of this course uses for the window.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Syllabus</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0001-evaluation-and-the-data-flywheel.html"><span class="dir">Next &rarr;</span><span class="ttl">Evaluation and the Data Flywheel</span></a>
+  </div>
+
+  <footer><p>Production Agent Engineering &middot; Chapter 1 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>

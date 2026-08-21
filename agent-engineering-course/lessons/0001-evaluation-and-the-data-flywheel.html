@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Chapter 2: Evaluation and the Data Flywheel - Production Agent Engineering</title>
+<link rel="stylesheet" href="../assets/course.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AGENT ENGINEERING</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Pillar 02 &middot; Evaluation and the Data Flywheel &middot; Chapter 2</div>
+  <h1>Evaluation and the Data Flywheel</h1>
+  <p class="paper-meta">
+    <span class="pill">4 topics</span>
+    How a team earns the right to change a prompt: grade the path, test in the dark, and turn complaints into the next test suite.
+  </p>
+
+  <div class="card tldr">
+    <h4>The one-minute version</h4>
+    <ul>
+      <li><b>Trajectory evals</b> grade the sequence of steps, not only the final answer. An agent that reaches the right answer through the wrong tools is a latent incident, and outcome-only scoring gives it a pass.</li>
+      <li><b>Shadow testing</b> runs the candidate on real production traffic while discarding its output. You buy real-distribution signal without exposing a single user to the change.</li>
+      <li>A <b>data flywheel</b> is a pipeline, not a sentiment. A thumbs-down is a triage ticket, and the artifact it produces is a labelled case in the golden dataset that gates tomorrow's release.</li>
+      <li>A <b>public teardown</b> converts a fixed bug into an institutional asset. Write it blamelessly and about the system, because "you cannot fix people, but you can fix systems and processes".</li>
+    </ul>
+  </div>
+
+  <h2>1. The mental model: evaluation is the flywheel's bearing</h2>
+
+  <p>You have run services where the deploy gate was a test suite that a human wrote once and rarely revisited. That model breaks here for a specific reason: the input distribution of an agent is written by users, and it moves. A suite frozen at launch measures last quarter's product. The only durable answer is a loop where production failures become test cases automatically enough that the suite tracks the distribution instead of drifting away from it.</p>
+
+  <p>Call that loop a flywheel because the metaphor is load-bearing rather than decorative. It is heavy to start, it stores energy, and it keeps turning through the weeks when nobody is pushing. The bearing that lets it spin is evaluation. Without a trustworthy gate the loop still runs, but every rotation ships an unverified change, and you have built a fast path to production rather than a compounding asset.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  P["Production traffic"] --> S["Signals:<br/>thumbs-down, escalation,<br/>abandonment, retry"]
+  S --> T["Triage:<br/>reproduce, classify,<br/>label the failure mode"]
+  T --> G["Golden dataset<br/>(one case per real failure)"]
+  G --> E["Eval gate in CI:<br/>trajectory + outcome"]
+  E --> C["Candidate change<br/>(prompt, tool, model)"]
+  C --> H["Shadow run on<br/>mirrored traffic"]
+  H --> E
+  E -->|passes| D["Deploy"]
+  D --> P
+  G -.->|never touched| HO["Held-out slice"]
+  </div><figcaption>Complaints enter as signals and leave as test cases, and no candidate reaches production without passing the cases its predecessors failed. <b>The flywheel only compounds if triage is a staffed step, because an unlabelled thumbs-down is data you are storing rather than a case you can gate on.</b> The held-out slice never feeds back, so it stays an honest measure when everything else has been optimised against.</figcaption></figure>
+
+  <h2>2. Grading the process, not just the product</h2>
+
+  <h3 id="trajectory-evals">Trajectory evals</h3>
+  <p>A trajectory is the sequence of steps an agent takes to reach a solution, including its choice of tools, its strategies, and the efficiency of its approach. Trajectory evaluation compares the actual trajectory against an expected or ideal one, which reveals errors and inefficiencies that a final-answer comparison cannot see. Google's Agent Development Kit documentation is direct about why both dimensions are needed: the decision-making process and the final output are complementary, and it supplies both exact tool-trajectory matching and rubric-based judged variants for multi-turn cases. <em>Source: <a href="https://adk.dev/evaluate/">Google Agent Development Kit, "Why Evaluate Agents"</a>.</em></p>
+  <p>The reason a distributed-systems engineer should care is familiar. Outcome-only scoring is end-to-end assertion with no observability inside the call graph, so a passing test tells you the system produced the right value on this input and nothing at all about whether it did so for a reason that will hold next week. An agent that answered correctly after calling the refund tool twice and the audit-log tool never has a green test and an open incident.</p>
+  <p>Strictness is the design decision, and it is where teams get this wrong. Exact-order matching against a reference trajectory is precise and brittle: it fails a genuinely better path, so the suite starts punishing improvement. Softer variants that require the reference calls to be present while tolerating extra calls and different ordering are more useful for most tasks, and a judged rubric handles the cases where several paths are legitimately correct. The rule of thumb is to be strict about side-effecting tools, where ordering and count are the contract, and lenient about read-only ones, where they are an implementation detail.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">Your agent returns the correct final answer, but it called the refund tool twice and never called the audit-log tool. Grading only the final answer will:</div>
+    <button class="q-opt">record a pass, because the visible output matched the reference</button>
+    <button class="q-opt">record a fail, because the tool ordering broke the contract</button>
+    <button class="q-opt">record a pass, because the latency budget was never exceeded</button>
+    <button class="q-opt">record a fail, because the refund tool was invoked repeatedly</button>
+    <div class="q-fb">Outcome scoring compares the final answer with the reference and nothing else, so a duplicated side effect and a skipped audit call are invisible to it. The two failing options both describe what a trajectory eval would catch, which is the point: outcome scoring cannot see tool ordering or tool counts because it never looks at them. The latency option is a different metric entirely and would not decide a correctness verdict either way.</div>
+  </div>
+
+  <h3 id="shadow-testing">Shadow testing</h3>
+  <p>Shadow testing, also called dark launching, activates a new or modified backend behaviour in production for real users without the users being able to tell it is being called. Martin Fowler's example is a recommendation engine invoked during checkout whose results are never displayed, which lets the feature take a genuine production workload while the risk to users stays at zero. Applied to agents, you mirror a slice of live requests to a candidate prompt, model, or tool configuration, discard the candidate's response, and compare the two runs offline. <em>Source: <a href="https://martinfowler.com/bliki/DarkLaunching.html">"Dark Launching" (Martin Fowler)</a>.</em></p>
+  <p>The distinction from canarying matters and interviewers probe it. A canary serves the new version's output to a fraction of users, which means a defective release reaches those users but the blast radius is bounded, and the SRE workbook is explicit that the impact on the error budget is directly proportional to the amount of traffic exposed to defects. A shadow serves nothing, so the exposure is zero and the cost is that you learn nothing about user behaviour. They answer different questions. Shadow tells you whether the candidate is safe and how it differs; canary tells you whether users are better off. Run shadow first, then canary, then the full <a href="../../ai-system-design-course/lessons/0004-evaluation-and-quality.html#ab-testing">A/B test</a>. <em>Source: <a href="https://sre.google/workbook/canarying-releases/">"Canarying Releases", Google SRE Workbook</a>.</em></p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart TB
+  U["User request"] --> GW["Gateway"]
+  GW --> PRI["Primary agent<br/>(current prompt)"]
+  PRI --> RESP["Response served"]
+  RESP --> U
+  GW -. "mirrored copy,<br/>sampled slice" .-> SH["Shadow agent<br/>(candidate prompt)"]
+  SH --> SINK["Response discarded"]
+  PRI --> LOG["Comparison store"]
+  SH --> LOG
+  LOG --> DIFF["Offline diff:<br/>trajectory, cost, latency,<br/>judged quality"]
+  SH -. "read-only tool<br/>credentials only" .-> TOOLS["Tools"]
+  </div><figcaption>The mirrored branch is a dead end by construction: it costs tokens, produces a comparison record, and reaches no user. <b>The credential boundary is the part teams forget, because a shadow agent that inherits write access will send a duplicate email or issue a duplicate refund for every mirrored request.</b> Shadow traffic must run against read-only tool credentials or against a sandbox, without exception.</figcaption></figure>
+
+  <div class="callout warn"><b>The failure you will actually hit.</b> Shadow traffic doubles inference spend on the sampled slice and it is billed to a budget nobody assigned. Cap the sample rate, cap the shadow's step budget separately from the primary's, and give the shadow its own cost kill-switch of the kind Chapter 4 describes. A shadow experiment that runs unattended over a weekend is the classic overnight runaway bill, and it is worse than a user-facing one because nobody is watching a surface that by design produces no user-visible change.</div>
+
+  <h2>3. Making failures compound</h2>
+
+  <h3 id="data-flywheel">The data flywheel</h3>
+  <p>A data flywheel turns user dissatisfaction into labelled evaluation data. The mechanism is unglamorous: capture the signal with enough surrounding state to reproduce the failure, triage it into a named failure mode, promote the reproducible ones into the golden dataset with an expected trajectory and an expected outcome, and gate every future release on that dataset. Each rotation makes the suite a closer model of the real input distribution, which is the only definition of evaluation quality that survives contact with production.</p>
+  <p>The classical warning applies with full force here. Sculley and colleagues named feedback loops as a principal source of hidden technical debt in machine learning systems, including the direct kind where a model's own outputs influence the data it is later trained or evaluated on. An agent whose evaluation set is built entirely from cases users complained about will be measured on an input distribution its own behaviour created, and the aggregate score improves while the product does not. The mitigation is structural: keep a randomly sampled, never-triaged holdout slice, track the two curves separately, and treat divergence between them as a signal rather than a nuisance. <em>Source: <a href="https://papers.nips.cc/paper_files/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html">"Hidden Technical Debt in Machine Learning Systems" (Sculley et al., 2015)</a>.</em></p>
+  <p>Two operational details decide whether the flywheel spins. A thumbs-down carries almost no information on its own, so capture the trajectory, the retrieved evidence, the prompt version, and the model identifier alongside it, or you will have a complaint you cannot reproduce. And triage needs a named owner with allocated time, because the step between a raw signal and a labelled case is human work that no amount of tooling removes. The interview track covers the resulting artifact under <a href="../../ai-system-design-course/lessons/0004-evaluation-and-quality.html#golden-dataset">golden datasets</a>.</p>
+
+  <h3 id="public-teardown">The public teardown</h3>
+  <p>Write up the hardest bug you fixed this week and publish it where other engineers can read it, internally at minimum. The discipline to borrow is the blameless postmortem, whose framing assumption is that everyone involved in an incident had good intentions and did the right thing with the information they had. Google's formulation of the payoff is the sentence to keep: you cannot fix people, but you can fix systems and processes. <em>Source: <a href="https://sre.google/sre-book/postmortem-culture/">"Postmortem Culture: Learning from Failure", Google SRE Book</a>.</em></p>
+  <p>This belongs in an engineering curriculum rather than a career one because of what the writing forces. A teardown that survives review has to state the failure mode precisely, show the evidence that discriminated between competing hypotheses, and explain why the obvious first fix was wrong. Most people discover while writing that they repaired a symptom, and the discovery is cheap on the page and expensive in production. The written artifact then becomes the fastest onboarding material your team has, because a new engineer learns the system's real failure modes rather than its intended behaviour.</p>
+  <p>Two constraints for the agent case specifically. Redact before you publish, since agent traces contain user content, retrieved documents, and tool arguments, and a trace is a richer disclosure than a stack trace ever was. And close the loop back to the flywheel: every teardown should end with the identifier of the golden-dataset case that now fails without the fix. A teardown without a regression test is a story, not an engineering artifact.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">Before promoting a new agent prompt to a canary release, why run it as a shadow against mirrored production traffic first?</div>
+    <button class="q-opt">It removes the need for a golden dataset in the pipeline</button>
+    <button class="q-opt">It proves the new prompt is better than the current one</button>
+    <button class="q-opt">It measures the new prompt without exposing a user to it</button>
+    <button class="q-opt">It avoids the extra inference cost that a duplicate run adds</button>
+    <div class="q-fb">A shadow discards its output, so real-distribution behaviour is observed at zero user exposure. It does not replace the golden dataset, which is the offline gate a candidate must clear before it is worth mirroring traffic to. It cannot prove the candidate is better, because nobody saw its answers and there is no user signal to compare, which is exactly what a canary and then an A/B test are for. And it costs more rather than less, because every mirrored request is inference you pay for twice.</div>
+  </div>
+
+  <h2>4. Field drill</h2>
+
+  <p>Questions a Staff+ reviewer will put to this design, and the trap inside each one.</p>
+
+  <ul>
+    <li><b>"Your agent scores 94 percent. On what?"</b> The trap is quoting the aggregate. Answer with the composition: how many cases, drawn from where, how many are trajectory-graded, what the held-out slice scores separately, and when the set last grew.</li>
+    <li><b>"Why not just canary it?"</b> The trap is treating shadow and canary as competing options. They answer different questions and cost different amounts of user exposure. Shadow proves safety at zero exposure; canary measures user outcome at bounded exposure.</li>
+    <li><b>"Your eval score improved for six weeks and churn did not move. Explain."</b> The trap is defending the score. The likely cause is a feedback loop where the suite is built from cases the current behaviour generates, so the suite has converged on the model rather than on the users.</li>
+    <li><b>"What happens to a thumbs-down at 03:00?"</b> The trap is answering with the dashboard. Answer with the pipeline: what is captured with it, who triages it, on what cadence, and what the artifact is when triage finishes.</li>
+    <li><b>"Give me a trajectory eval that is too strict."</b> The trap is agreeing that stricter is safer. Exact-order matching over read-only lookups fails a better path, so the suite starts blocking improvements and the team learns to route around it.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Do the arithmetic before you build any of this. Take your current thumbs-down volume, assume a realistic fraction is reproducible, and work out how many labelled cases per week your triage capacity actually produces. Most teams find the number is small enough that the golden dataset grows by single digits weekly, which changes what you build first. Bring me your number and we will argue about whether triage or capture is your real bottleneck.</div>
+
+  <h4>Primary source to go deeper</h4>
+  <p>Read <a href="https://sre.google/workbook/canarying-releases/">"Canarying Releases"</a> from the SRE Workbook alongside Fowler's <a href="https://martinfowler.com/bliki/DarkLaunching.html">"Dark Launching"</a>, because holding the two in mind together is what stops a team from conflating exposure with measurement. Then read <a href="https://papers.nips.cc/paper_files/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html">"Hidden Technical Debt in Machine Learning Systems"</a> for the feedback-loop failure the flywheel invites.</p>
+
+  <div class="pager">
+    <a href="0000-context-and-protocol.html"><span class="dir">&larr; Previous</span><span class="ttl">Context and Protocol</span></a>
+    <a class="nxt" href="0002-state-async-and-degradation.html"><span class="dir">Next &rarr;</span><span class="ttl">State, Async and Degradation</span></a>
+  </div>
+
+  <footer><p>Production Agent Engineering &middot; Chapter 2 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+<script src="../assets/course.js"></script>
+</body>
+</html>
