@@ -114,13 +114,18 @@ but not a single line of code, so an accessibility or contrast fix landed in one
 other broken - which is exactly how the copy button shipped at 2.7:1 and 25 pages of scroll boxes
 shipped with no tab stop. Land every such fix in both, and re-audit both.
 
-Four traps in that design system, all found on the published site:
+Five traps in that design system, all found on the published site:
 
+- **The two design systems name the theme attribute differently.** `hub.css` and `hub.js` use
+  `:root[data-mode="dark"|"light"]` plus an independent `:root[data-palette="..."]` axis; the older
+  `course.css` system uses `:root[data-theme="dark"|"light"]`. Read the top of the stylesheet you are
+  editing before writing a selector, and note that a script probing the live page for `data-theme`
+  reads `null` on every `hub.css` page whatever the reader has chosen.
 - **Theme tokens are declared three times** (`:root`, the `prefers-color-scheme: dark` block, and
-  `:root[data-theme="dark"|"light"]`, because the toggle sets `data-theme` and must beat the OS).
+  the explicit-choice selector for that system, because the toggle must beat the OS).
   A token added to `:root` alone silently keeps its light value in dark mode. Add every new token
   to all the blocks that already carry one.
-- **`@media print` cannot use a bare `:root`.** `:root[data-theme="dark"]` out-specifies it in every
+- **`@media print` cannot use a bare `:root`.** The explicit-choice selector out-specifies it in every
   medium, so a print rule written that way never applies to a reader who toggled dark. Restate print
   overrides at each theme selector.
 - **A heading's tag and its size are separate decisions.** `h1`-`h4` set the outline a screen
