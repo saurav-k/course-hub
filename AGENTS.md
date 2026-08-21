@@ -101,7 +101,20 @@ Nothing enforces this - the validator only checks structure and links - so edit 
 then `cp` it over the five course copies and confirm with `md5 assets/course.css */assets/course.css`.
 A drifted copy ships silently and only shows up on the live site.
 
-Two traps in that design system, both found on the published site:
+Those copies are not the whole stylesheet, though. `llm-inference-course/assets/lab.css` and
+`llm-evolution-course/assets/course-extras.css` are course-local sheets layered on top of a shared
+one, and they restyle shared elements - `.lab h4` and `.stub-note h4` among them. Before you change
+any element or widget selector, grep **every** `*.css` in the repository for it, not just the copies
+you sync.
+
+**There are two design systems live at once, and a fix to one is not a fix to the other.**
+`assets/course.css` + `course.js` carry the six older courses; `assets/hub.css` + `hub.js` are the
+new system, and `llm-evolution-course` already runs on it. They share class names and widget markup
+but not a single line of code, so an accessibility or contrast fix landed in one silently leaves the
+other broken - which is exactly how the copy button shipped at 2.7:1 and 25 pages of scroll boxes
+shipped with no tab stop. Land every such fix in both, and re-audit both.
+
+Three traps in that design system, all found on the published site:
 
 - **Theme tokens are declared three times** (`:root`, the `prefers-color-scheme: dark` block, and
   `:root[data-theme="dark"|"light"]`, because the toggle sets `data-theme` and must beat the OS).
@@ -110,9 +123,16 @@ Two traps in that design system, both found on the published site:
 - **`@media print` cannot use a bare `:root`.** `:root[data-theme="dark"]` out-specifies it in every
   medium, so a print rule written that way never applies to a reader who toggled dark. Restate print
   overrides at each theme selector.
+- **A heading's tag and its size are separate decisions.** `h1`-`h4` set the outline a screen
+  reader navigates by; `.h-sub` (the h3 face) and `.h-label` (the small uppercase h4 face) set how
+  big it looks. Fix a broken heading order by retagging the heading and adding the matching class -
+  never by leaving the tag wrong because the right one looks wrong.
 
-Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - lives in
-`course.js` and must tolerate Mermaid's async draw; there is no completion hook under `startOnLoad`.
+Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
+tolerate Mermaid's async draw. `course.js` starts Mermaid under `startOnLoad`, which offers no
+completion hook, so it retries until every `.mermaid` holds an `svg`. `hub.js` drives the render
+itself and awaits `mermaid.run()`, so it can simply do the pass when that promise settles. Re-run
+the pass on `load` and on resize in both: web fonts and column width decide what actually overflows.
 
 ## Maintaining this file
 

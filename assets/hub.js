@@ -173,6 +173,7 @@
     });
     var release = function () {
       Array.prototype.forEach.call(nodes, function (node) { node.style.minHeight = ''; });
+      settleDiagrams();   // the SVGs exist only now, and their width is final
     };
     window.mermaid.initialize({
       startOnLoad: false,
@@ -576,24 +577,78 @@
   }
 
   /* ---------- the widgets every lesson uses ---------- */
+  /* Answering used to be reported by colour alone, and `disabled` removed the
+     button the reader had just pressed from the tab order, which drops focus to
+     <body> and costs a keyboard reader their place. Mark the outcome with a
+     glyph and a spoken phrase, and keep every option exactly where the keyboard
+     left it. Ported from the fix the live-site audit made in `course.js`. */
+  function markOption(option, glyph, spokenLabel) {
+    var mark = document.createElement('span');
+    mark.className = 'q-mark';
+    mark.setAttribute('aria-hidden', 'true');
+    mark.textContent = glyph;
+    var spoken = document.createElement('span');
+    spoken.className = 'sr-only';
+    spoken.textContent = spokenLabel + '. ';
+    option.insertBefore(spoken, option.firstChild);
+    option.insertBefore(mark, option.firstChild);
+  }
+
   function wireQuizzes() {
     Array.prototype.forEach.call(document.querySelectorAll('.q'), function (question) {
       var answer = parseInt(question.getAttribute('data-answer'), 10);
       var options = question.querySelectorAll('.q-opt');
       var feedback = question.querySelector('.q-fb');
+      if (feedback) feedback.setAttribute('aria-live', 'polite');
       Array.prototype.forEach.call(options, function (option, index) {
         option.addEventListener('click', function () {
           if (question.dataset.done) return;
           question.dataset.done = '1';
           Array.prototype.forEach.call(options, function (other, position) {
-            if (position === answer) other.classList.add('correct');
-            else if (position === index) other.classList.add('wrong');
-            other.disabled = true;
+            if (position === answer) {
+              other.classList.add('correct');
+              markOption(other, '\u2713', 'Correct answer');
+            } else if (position === index) {
+              other.classList.add('wrong');
+              markOption(other, '\u2717', 'Your answer, incorrect');
+            }
+            other.setAttribute('aria-disabled', 'true');
           });
           if (feedback) feedback.classList.add('show');
         });
       });
     });
+  }
+
+  /* ---------- diagrams: an accessible name, and keyboard reach ----------
+     Mermaid returns an SVG with no accessible name, so a screen reader
+     announces "flowchart" and nothing else, while the figcaption underneath
+     already says in prose what the figure means. And a box that scrolls
+     sideways is unreachable without a mouse until it can take focus. Both were
+     fixed in `course.js` by the live-site audit; this is the same pair of
+     passes for the new system. */
+  function nameDiagrams() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure .mermaid svg'), function (svg) {
+      if (svg.getAttribute('aria-label')) return;
+      var figure = svg.closest('figure');
+      var caption = figure && figure.querySelector('figcaption');
+      if (!caption) return;
+      svg.setAttribute('aria-label', caption.textContent.replace(/\s+/g, ' ').trim());
+    });
+  }
+
+  /* Only a box that genuinely overflows gets a tab stop, and it gives the stop
+     back when the column grows and it no longer does. */
+  function markScrollables() {
+    Array.prototype.forEach.call(document.querySelectorAll('.diagram, pre, .math'), function (box) {
+      if (box.scrollWidth > box.clientWidth + 1) box.setAttribute('tabindex', '0');
+      else if (box.getAttribute('tabindex') === '0') box.removeAttribute('tabindex');
+    });
+  }
+
+  function settleDiagrams() {
+    nameDiagrams();
+    markScrollables();
   }
 
   function wireCopyButtons() {
@@ -627,6 +682,16 @@
     wireCopyButtons();
     renderMermaid();
     syncSettings();
+    settleDiagrams();     // code blocks and formulas are ready before Mermaid is
+
+    // Web fonts settle after DOMContentLoaded and can change what overflows, and
+    // so does every column resize.
+    window.addEventListener('load', settleDiagrams);
+    var settleTimer = null;
+    window.addEventListener('resize', function () {
+      clearTimeout(settleTimer);
+      settleTimer = setTimeout(settleDiagrams, 150);
+    });
 
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {

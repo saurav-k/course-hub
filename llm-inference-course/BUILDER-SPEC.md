@@ -4,7 +4,7 @@ You are building one hands-on LAB lesson of a 16-lesson published course on prod
 
 - Gold template: `lessons/0000-inference-101.html` (READ IT FULLY FIRST, copy the skeleton).
 
-This course links TWO stylesheets: `../assets/course.css` AND `../assets/lab.css`. Use the lab components: `.lab` (with `.goal` label + h4), `.term` (terminal blocks with `.p` prompt / `.c` comment / `.o` output spans), `.metric-grid`/`.metric` (k/v/u), `.checklist`.
+This course links TWO stylesheets: `../assets/course.css` AND `../assets/lab.css`. Use the lab components: `.lab` (with `.goal` label + `<h3 class="h-label">` title), `.term` (terminal blocks with `.p` prompt / `.c` comment / `.o` output spans), `.metric-grid`/`.metric` (k/v/u), `.checklist`.
 
 ## Hard rules
 1. No em dashes anywhere. Use `-`.
