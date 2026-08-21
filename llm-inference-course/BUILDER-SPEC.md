@@ -4,7 +4,7 @@ You are building one hands-on LAB lesson of a 16-lesson published course on prod
 
 - Gold template: `lessons/0000-inference-101.html` (READ IT FULLY FIRST, copy the skeleton).
 
-This course links TWO stylesheets: `../assets/course.css` AND `../assets/lab.css`. Use the lab components: `.lab` (with `.goal` label + `<h3 class="h-label">` title), `.term` (terminal blocks with `.p` prompt / `.c` comment / `.o` output spans), `.metric-grid`/`.metric` (k/v/u), `.checklist`.
+This course links TWO stylesheets, in this order: the shared design system `../../assets/hub.css`, then the course-local `../assets/course-extras.css`. Use the lab components, all of which live in the extras file: `.lab` (with `.goal` label + `<h3 class="h-label">` title), `.term` (terminal blocks with `.p` prompt / `.c` comment / `.o` output spans), `.metric-grid`/`.metric` (k/v/u), `.checklist`. Everything else, `.pill` included, comes from `hub.css`.
 
 ## Hard rules
 1. No em dashes anywhere. Use `-`.
@@ -13,7 +13,19 @@ This course links TWO stylesheets: `../assets/course.css` AND `../assets/lab.css
 4. Everything grammatically explainable. Plain English before commands/code. Any formula in `.math` + `.gloss`.
 5. Accuracy: web-verify current tool usage/flags (vLLM, SGLang, TensorRT-LLM, LiteLLM, etc.) so commands are real, not invented. Note version-sensitivity where relevant.
 6. End each lesson with a `.checklist` (ul.checklist) of what the learner should now be able to do.
-7. Self-contained HTML: same head as gold (link course.css + lab.css + mermaid CDN), same spine, course.js at end of body.
+7. Self-contained HTML: same head as gold, in this exact order, and nothing at the end of `<body>`:
+
+   ```html
+   <link rel="stylesheet" href="../../assets/hub.css">
+   <link rel="stylesheet" href="../assets/course-extras.css">
+   <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+   <script src="../../assets/hub.js"></script>
+   <script src="../outline.js"></script>
+   ```
+
+   `hub.js` takes no `defer` and no `async`; that is what stops the flash of the wrong colours. It mounts the rail, the Appearance panel and the copy buttons at runtime, so the spine needs no theme button of its own.
+8. Write a Mermaid line break as `&lt;br/&gt;` and any bold inside a label as `&lt;b&gt;`, never as a literal tag. A literal tag is parsed into a real element, and `hub.js` re-reads the graph source with `textContent` on every palette or mode change, so the break vanishes and the two halves join with no space. The page looks right until the reader touches the appearance controls. A semicolon inside a label is a statement separator; use a dash.
+9. Never write a literal colour. Use the semantic tokens from `hub.css`, or a `color-mix()` of them, so all six palettes and both modes follow for free. The attribute is `data-mode`; `data-theme` is dead and fails silently.
 
 ## Section skeleton (match gold)
 1. `.eyebrow` = `Module NN &middot; <Module Name> &middot; Lesson NN`
