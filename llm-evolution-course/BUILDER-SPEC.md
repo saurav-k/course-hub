@@ -106,15 +106,35 @@ That is the whole point of it, so the figures are not decoration.
   Once the diagram shows it, rewrite the caption as a teaching caption: what the reader should take from the picture, not what the picture contains.
 - **Sequence diagrams and block diagrams must both render.**
   Sweep the page in a real browser before you open the pull request and look at every figure in both light and dark.
+- **Check the rendered label text, not just that a figure rendered.**
+  Counting SVGs proves nothing, because an error box is itself an SVG, and a lost line break leaves
+  a perfectly valid diagram with two words run together. **Change the palette, then look again**:
+  the `<br/>` defect above only appears on the repaint, so a figure that is right on first paint can
+  be wrong for any reader who touches the appearance controls. The mechanical version of that check
+  is to count `.mermaid svg br` plus `.mermaid svg text tspan` before and after a palette click and
+  confirm the totals do not fall.
 
 Mermaid rules that keep diagrams from breaking:
 
 - Quote every node label: `A["like this"]`, never `A[like this]`.
 - Quote edge labels too: `A -->|"like this"| B`.
-- Use `<br/>` inside a quoted label for a line break.
+- **Write a line break as `&lt;br/&gt;`, never as `<br/>`.** This is the one that has already cost
+  this course a full sweep, so it is worth understanding rather than memorising. A literal `<br/>`
+  inside a `<div class="mermaid">` is parsed by the browser into a real `BR` element. Mermaid's
+  first render copes, but `hub.js` stashes the graph source as `node.textContent` so it can repaint
+  on a theme or palette change, and `textContent` drops the `BR` and joins the two halves **with no
+  break and no space**. The diagram is therefore correct until the reader touches the appearance
+  controls and mangled afterwards - `Hand-written rulesabout 1950 to 1990` - and in a sequence
+  diagram the join can merge two statements and turn the figure into a red error box. The entity
+  puts the literal characters into the text node, so Mermaid sees the tag on every render.
+- **No semicolons inside a label or a note.** Mermaid treats `;` as a statement separator, so it
+  breaks the diagram exactly as above. Use a dash.
 - Write square brackets as `&#91;` and `&#93;` inside a label.
 - Avoid raw ampersands and percent signs in labels.
 - Keep one idea per figure. If a figure needs a legend to be understood, it is two figures.
+- Keep a figure inside the content column. The merged chapters sit between 854 and 906 pixels wide
+  against an 854-pixel column; a long horizontal chain of boxes reaches two or three times that and
+  the reader has to scroll a figure sideways to read it. Redraw it `flowchart TB` instead.
 
 ---
 
