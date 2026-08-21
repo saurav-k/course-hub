@@ -33,6 +33,13 @@ Where the topic has arithmetic, show it. Capacity, queue depth, connection count
 
 Every diagram goes in `<figure class="diagram"><div class="mermaid">...</div><figcaption>...</figcaption></figure>`. The figcaption explains the diagram in plain grammatical English and **bolds the key takeaway**. A diagram with no figcaption is incomplete.
 
+**Write a line break inside a label as `&lt;br/&gt;`, never as a literal `<br/>`.**
+A literal tag is parsed into a real `BR` element and is therefore absent from the element's
+`textContent`. The runtime repaints every diagram from that text when the reader changes palette
+or mode, so the two halves of the label join with no break and no space from that moment on.
+The first paint looks correct, which is how this survives review. A semicolon inside a label is a
+statement separator and breaks the diagram the same way, so use a dash.
+
 ## Cross-linking
 
 Link to sibling chapters with relative links, for example `<a href="0001-resilience-patterns.html#circuit-breakers">circuit breakers</a>`. Link to the two sibling courses where they genuinely touch: `../../ai-system-design-course/lessons/0003-cost-and-performance.html` and `../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html`. Only link anchors you have confirmed exist.
@@ -50,12 +57,15 @@ Link to sibling chapters with relative links, for example `<a href="0001-resilie
 
 ## Quizzes
 
-Use the widget documented in `assets/course.js`. **Every option must be the same length in words and near-identical in characters** so formatting never leaks the answer. Feedback must explain why each wrong option is wrong, not merely restate the right one.
+Use the widget documented in the hub runtime, `assets/hub.js`. **Every option must be the same length in words and near-identical in characters** so formatting never leaks the answer. Feedback must explain why each wrong option is wrong, not merely restate the right one.
 
 ## Head, nav, and footer
 
 Copy them verbatim from the template, changing only the title and the pager targets:
 
-- `<link rel="stylesheet" href="../assets/course.css">` and the mermaid CDN script in `<head>`
+- in `<head>`, in this order: `<link rel="stylesheet" href="../../assets/hub.css">`, the mermaid
+  CDN script, `<script src="../../assets/hub.js"></script>`, `<script src="../outline.js"></script>`.
+  `hub.js` carries no `defer` and no `async`; that is what stops the flash of the wrong palette.
 - the `.spine` nav with `PRODUCTION SYSTEMS` as the home label
-- `<script src="../assets/course.js"></script>` last in body
+- nothing at the end of `<body>`. The runtime loads from the head and mounts the rail, the
+  appearance control and the reading progress bar itself.

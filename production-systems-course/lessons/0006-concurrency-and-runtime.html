@@ -4,8 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Chapter 7: Concurrency and Runtime - Production Systems Course</title>
-<link rel="stylesheet" href="../assets/course.css">
+<link rel="stylesheet" href="../../assets/hub.css">
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
 </head>
 <body>
 <nav class="spine"><div class="spine-inner">
@@ -43,14 +45,14 @@
 
   <figure class="diagram"><div class="mermaid">
 flowchart TB
-  R["Incoming requests"] --> A["Application layer<br/>threads, goroutines, workers"]
-  A --> S["Shared mutable state<br/>rows, counters, caches"]
-  A --> RT["Language runtime<br/>heap, allocator, collector"]
-  A --> P["Platform<br/>containers, functions, VMs"]
-  S --> F1["Lost updates<br/>Deadlocks<br/>Lock contention"]
-  RT --> F2["GC pauses<br/>Memory leaks<br/>OOM kills"]
-  P --> F3["Cold starts<br/>Connection storms"]
-  F1 --> T["Tail latency and<br/>silent corruption"]
+  R["Incoming requests"] --> A["Application layer&lt;br/&gt;threads, goroutines, workers"]
+  A --> S["Shared mutable state&lt;br/&gt;rows, counters, caches"]
+  A --> RT["Language runtime&lt;br/&gt;heap, allocator, collector"]
+  A --> P["Platform&lt;br/&gt;containers, functions, VMs"]
+  S --> F1["Lost updates&lt;br/&gt;Deadlocks&lt;br/&gt;Lock contention"]
+  RT --> F2["GC pauses&lt;br/&gt;Memory leaks&lt;br/&gt;OOM kills"]
+  P --> F3["Cold starts&lt;br/&gt;Connection storms"]
+  F1 --> T["Tail latency and&lt;br/&gt;silent corruption"]
   F2 --> T
   F3 --> T
   </div><figcaption>The three layers where concurrency and runtime failures live, and the single symptom they all arrive as. <b>None of these produce an error at the point of failure; they all surface as a corrupted value or a bad tail percentile much later.</b> That delay between cause and symptom is the entire reason this material is hard to debug in production.</figcaption></figure>
@@ -179,17 +181,17 @@ sequenceDiagram
   W1->>LK: acquire lock, TTL 30s
   LK-->>W1: granted
   W1->>ST: read object
-  Note over W1: Stop-the-world pause<br/>longer than the TTL
+  Note over W1: Stop-the-world pause&lt;br/&gt;longer than the TTL
   LK-->>LK: TTL expires, lock auto-released
   W2->>LK: acquire lock, TTL 30s
   LK-->>W2: granted
   W2->>ST: read object
   W2->>ST: write new value
   ST-->>W2: ok
-  Note over W1: Pause ends. Worker 1 has<br/>no idea it lost the lock.
+  Note over W1: Pause ends. Worker 1 has&lt;br/&gt;no idea it lost the lock.
   W1->>ST: write stale value
   ST-->>W1: ok
-  Note over ST: Worker 2's write is gone.<br/>Both writes were accepted.
+  Note over ST: Worker 2's write is gone.&lt;br/&gt;Both writes were accepted.
   </div><figcaption>A lock that expires while its holder is paused stops being a lock, and the storage layer has no way to know. <b>Worker 1's write is accepted after its lease is gone, silently destroying Worker 2's committed work, and every single step here returned success.</b> The pause can be garbage collection, a page fault, CPU starvation on a noisy neighbour, or a stop signal from an operator; none of them are exotic.</figcaption></figure>
 
   <p>Kleppmann's fix is a <b>fencing token</b>: a number that increases every time a client acquires the lock, handed to the client at acquisition and passed with every write. The storage server remembers the highest token it has seen and rejects any write carrying a lower one. This moves the safety guarantee out of the lock service, where it depends on timing, and into the storage layer, where it depends only on ordering. His specific criticism of Redlock is that it has no facility for generating such a token, and that its safety rests on assumptions of bounded network delay, bounded process pauses, and bounded clock error rather than on a guarantee that holds regardless of delay.</p>
@@ -209,11 +211,11 @@ sequenceDiagram
   W2->>ST: write, token = 42
   ST->>ST: 42 > highest seen 41, accept
   ST-->>W2: ok
-  Note over W1: Pause ends, still believes<br/>it holds the lock
+  Note over W1: Pause ends, still believes&lt;br/&gt;it holds the lock
   W1->>ST: write, token = 41
   ST->>ST: 41 < highest seen 42, reject
   ST-->>W1: rejected, stale token
-  Note over ST: State is correct. The stale<br/>writer learns it lost.
+  Note over ST: State is correct. The stale&lt;br/&gt;writer learns it lost.
   </div><figcaption>The same pause, with a monotonically increasing token checked at the storage layer. <b>Safety no longer depends on any timing assumption, because a write is judged by its position in an order rather than by whether a lease happened to still be valid.</b> Note where the check lives: the lock service cannot enforce this, only the resource being protected can.</figcaption></figure>
 
   <p>This is not a new idea, and the strongest evidence for it is that Google's Chubby, a lock service running in production for years before the Redlock debate, ships exactly this mechanism. Chubby's paper states the problem in the same terms: a process holding a lock may issue a request and then fail, another process may acquire the lock and act, and if the first request later arrives it may be acted on without the protection of the lock and on inconsistent data. Chubby's answer is a <b>sequencer</b>, an opaque byte-string describing the state of the lock immediately after acquisition, containing the lock name, the mode it was acquired in, and the lock generation number, which is a per-node counter that increases each time the lock goes from free to held. The client passes the sequencer to the server it is talking to, and that server is expected to test whether the sequencer is still valid and reject the request if not. Chubby also offers a weaker fallback for servers that do not support sequencers, called <b>lock-delay</b>: when a lock becomes free because the holder failed or became unreachable, rather than because it was released cleanly, the server refuses to hand it out for a configured delay, capped at one minute. The paper describes this as imperfect but as protection against everyday problems caused by message delays and restarts. <em>Source: <a href="https://www.usenix.org/legacy/event/osdi06/tech/full_papers/burrows/burrows_html/">Burrows, "The Chubby lock service for loosely-coupled distributed systems" (OSDI 2006)</a>.</em></p>
@@ -253,12 +255,12 @@ sequenceDiagram
   DB-->>A: balance = 100
   B->>DB: SELECT balance WHERE id=7
   DB-->>B: balance = 100
-  Note over A,B: Both now hold the same stale<br/>value and neither knows it
+  Note over A,B: Both now hold the same stale&lt;br/&gt;value and neither knows it
   A->>DB: UPDATE balance = 100 - 10
   DB-->>A: 1 row updated
   B->>DB: UPDATE balance = 100 - 30
   DB-->>B: 1 row updated
-  Note over DB: Balance is 70, not 60.<br/>The 10 debit vanished.<br/>Both requests returned success.
+  Note over DB: Balance is 70, not 60.&lt;br/&gt;The 10 debit vanished.&lt;br/&gt;Both requests returned success.
   </div><figcaption>The lost update, the race condition that costs real money. <b>Neither request failed, neither log line is suspicious, and the only evidence is that the ledger no longer balances.</b> The read-modify-write cycle is the shape to look for: any time your code computes a new value from a value it read earlier, you are exposed unless the write is conditional or the read was locked.</figcaption></figure>
 
   <p>In-process races are the same failure in a different medium. Go's memory model defines a read-write data race as a read and a write to the same location, at least one of them non-synchronising, unordered by happens-before. The guidance is blunt: programs that modify data being simultaneously accessed by multiple goroutines must serialise such access, using channel operations or the <code>sync</code> and <code>sync/atomic</code> packages. The consequences of ignoring that are worse than most engineers assume. The model guarantees that a single-word read observes some value actually written, but explicitly states that races on multiword data structures can lead to inconsistent values that do not correspond to any single write, and that such races can in turn lead to arbitrary memory corruption. A racy map or slice is not "occasionally wrong". It is undefined. <em>Source: <a href="https://go.dev/ref/mem">The Go Memory Model</a>.</em></p>
@@ -289,15 +291,15 @@ sequenceDiagram
 flowchart LR
   subgraph Cycle["The circular wait"]
     direction LR
-    T1["Transaction 1<br/>holds lock on ORDER 7"] -->|"waits for"| L2["Lock on<br/>INVENTORY 9"]
-    L2 --> T2["Transaction 2<br/>holds lock on INVENTORY 9"]
-    T2 -->|"waits for"| L1["Lock on<br/>ORDER 7"]
+    T1["Transaction 1&lt;br/&gt;holds lock on ORDER 7"] -->|"waits for"| L2["Lock on&lt;br/&gt;INVENTORY 9"]
+    L2 --> T2["Transaction 2&lt;br/&gt;holds lock on INVENTORY 9"]
+    T2 -->|"waits for"| L1["Lock on&lt;br/&gt;ORDER 7"]
     L1 --> T1
   end
-  Cycle --> D{"Detector finds<br/>the cycle"}
-  D -->|"picks a victim"| V["Transaction 2<br/>rolled back"]
-  D -->|"survivor proceeds"| S["Transaction 1<br/>commits"]
-  V --> R["Application must retry<br/>the whole transaction"]
+  Cycle --> D{"Detector finds&lt;br/&gt;the cycle"}
+  D -->|"picks a victim"| V["Transaction 2&lt;br/&gt;rolled back"]
+  D -->|"survivor proceeds"| S["Transaction 1&lt;br/&gt;commits"]
+  V --> R["Application must retry&lt;br/&gt;the whole transaction"]
   </div><figcaption>A wait-for cycle between two transactions that touched the same two tables in opposite orders, and how the database resolves it. <b>The database breaks the cycle by destroying one transaction, which means deadlock handling is always application work: something must retry the victim.</b> A service that treats a deadlock error as a fatal 500 has converted a recoverable event into a user-visible failure.</figcaption></figure>
 
   <p>Databases handle deadlocks by detecting the cycle and killing a participant. InnoDB documents that when deadlock detection is enabled, which is the default, it detects the condition and rolls back one of the transactions, the victim, and that if detection is disabled it falls back on <code>innodb_lock_wait_timeout</code> instead. PostgreSQL documents the same resolution, automatically detecting deadlocks and aborting one of the transactions so the others can complete. Both vendors give the same prevention advice, and it is worth quoting the shape of it: PostgreSQL says the best defence is to ensure that all applications using the database acquire locks on multiple objects in a consistent order, and adds that the first lock acquired on an object should be the most restrictive mode that will be needed for it. MySQL's list is the same idea from the other side: keep transactions small and short, use the same order of operations across transactions, index the columns used in <code>SELECT ... FOR UPDATE</code> and <code>UPDATE ... WHERE</code>, and implement retry logic. MySQL also makes a point people get wrong: the possibility of deadlock is not affected by isolation level, because isolation level changes read behaviour while deadlocks come from writes. <em>Source: <a href="https://www.postgresql.org/docs/current/explicit-locking.html">PostgreSQL, "Explicit Locking"</a>.</em></p>
@@ -522,6 +524,5 @@ stateDiagram-v2
 
   <footer><p>Production Systems Course &middot; Chapter 07 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
 </main>
-<script src="../assets/course.js"></script>
 </body>
 </html>
