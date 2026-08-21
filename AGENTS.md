@@ -34,7 +34,10 @@ The hub is published as a static website on Amazon S3. A merge into `main` deplo
 6. **Never renumber or rename existing lessons.**
    Their URLs are public and linked. Add new numbers at the end of the sequence.
 
-7. **Validate before you open the pull request.**
+7. **Never link a local `.md` file from a page.**
+   The deploy syncs everything except `*.md`, so the link works from disk and returns a 404 on the live site. Name the file in `<code>` instead. The validator fails the pull request on it.
+
+8. **Validate before you open the pull request.**
 
    ```bash
    python3 scripts/validate_site.py
@@ -59,6 +62,7 @@ Do not infer the house style from this file. Infer it from the lessons.
 - One tight idea per lesson, mental model first, then the mechanism, then the trade-offs.
 - Full normal prose. Complete sentences. No terse fragments in published content, whatever style the chat conversation is using.
 - Include active-recall widgets. Copy the exact markup documented in the course `assets/course.js` header; do not invent your own widget shape.
+- A Mermaid diagram is a `<div class="mermaid">`, never a `<pre class="mermaid">`. `assets/hub.js` appends a copy button to every `<pre>`, and Mermaid renders from the element's `textContent`, so a `pre` silently picks up the word `copy` as a final line of graph source and the diagram renders as a syntax error. Nothing reaches the console, so always look at the figures rather than counting them.
 - Make quiz options match in word and character count. A visibly longer correct answer leaks the answer.
 - File it as `lessons/NNNN-kebab-case.html`, continuing the existing sequence.
 - Link `../assets/course.css` and `../assets/course.js`. Do not inline a copy of the design system.
@@ -70,6 +74,8 @@ Do not infer the house style from this file. Infer it from the lessons.
 ## Adding a new course
 
 Create a top-level folder with its own `index.html`, `assets/`, and `lessons/`, write its `MISSION.md` before any lesson, and add a card for it in the hub `index.html`. Nothing else is needed: the pipeline syncs the whole hub, so merging the pull request publishes the new course on its own.
+
+A course may instead ship a `routes.js` manifest, which lets one pool of lessons be read along several named routes. `llm-evolution-course` is the one that does; `llm-evolution-course/routes/README.md` is the reference for the mechanism, and `scripts/gen_outline.py` refuses to run against such a course.
 
 ## Accuracy
 

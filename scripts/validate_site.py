@@ -1,18 +1,31 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Four checks, all deterministic and offline:
+Eight checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
 3. Every course ``outline.js`` names exactly the lessons that are on disk.
 4. Every relative ``href``/``src`` in every page resolves to a file on disk.
+5. No published page links a local ``.md`` file, which the deploy excludes.
+
+A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
+which lets one pool of lessons be read along several named routes. That course
+derives its outline at load time, so check 3 does not apply to it and three
+further checks do:
+
+6. Its ``routes.js`` and its ``lessons/`` agree, every route covers every page
+   of the kinds it declares, and every manifest title matches the page's ``h1``.
+7. Every lesson's committed pager matches the route that owns the page, which is
+   what makes navigation correct with scripting switched off.
+8. Every lesson carries the living-document metadata that course requires.
 
 Exit code 0 means the site is publishable. Exit code 1 lists every problem.
 """
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import sys
@@ -28,6 +41,18 @@ EXTERNAL_PREFIXES: tuple[str, ...] = ("http://", "https://", "//", "#", "mailto:
 OUTLINE_ASSIGNMENT: re.Pattern[str] = re.compile(
     r"window\.COURSE_OUTLINE\s*=\s*(?P<payload>\{.*\})\s*;", re.DOTALL
 )
+
+ROUTES_ASSIGNMENT: re.Pattern[str] = re.compile(
+    r"window\.COURSE_ROUTES\s*=\s*(?P<payload>\{.*\})\s*;", re.DOTALL
+)
+
+H1_PATTERN: re.Pattern[str] = re.compile(r"<h1[^>]*>(?P<title>.*?)</h1>", re.DOTALL)
+
+PAGER_PATTERN: re.Pattern[str] = re.compile(
+    r'<nav class="pager" data-pager-route="(?P<route>[^"]+)"[^>]*>(?P<body>.*?)</nav>', re.DOTALL
+)
+
+ANCHOR_HREF: re.Pattern[str] = re.compile(r'<a\b[^>]*href="(?P<href>[^"]*)"', re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -148,6 +173,11 @@ def check_outlines_match_disk() -> list[Problem]:
         lessons_dir = course / "lessons"
         if not manifest.is_file() or not lessons_dir.is_dir():
             continue
+        if (course / "routes.js").is_file():
+            # A routed course derives its outline from the active route at load
+            # time, so its outline.js holds logic rather than a literal. The
+            # route checks below cover the same ground for it.
+            continue
 
         declared = outline_lessons(manifest)
         if declared is None:
@@ -165,6 +195,177 @@ def check_outlines_match_disk() -> list[Problem]:
             problems.append(
                 Problem(relative(manifest), f"outline names lessons/{ghost}, which is not on disk")
             )
+    return problems
+
+
+def route_manifest(course: Path) -> tuple[dict, list[Problem]]:
+    """Parse a course's routes.js, or return the reason it could not be read."""
+    manifest_path = course / "routes.js"
+    match = ROUTES_ASSIGNMENT.search(manifest_path.read_text(encoding="utf-8"))
+    if match is None:
+        return {}, [Problem(relative(manifest_path), "no readable window.COURSE_ROUTES assignment")]
+    try:
+        return json.loads(match.group("payload")), []
+    except json.JSONDecodeError as error:
+        return {}, [Problem(relative(manifest_path), f"window.COURSE_ROUTES is not valid JSON: {error}")]
+
+
+def route_files(route: dict) -> list[str]:
+    return [name for section in route.get("sections", []) for name in section.get("lessons", [])]
+
+
+def owning_route(manifest: dict, name: str) -> dict | None:
+    """The first route containing a page. Its order is what the committed pager,
+    breadcrumb and no-script navigation follow, so it has to be well defined."""
+    for route in manifest.get("routes", []):
+        if name in route_files(route):
+            return route
+    return None
+
+
+def page_title(page: Path) -> str | None:
+    match = H1_PATTERN.search(page.read_text(encoding="utf-8"))
+    return None if match is None else html.unescape(re.sub(r"<[^>]+>", "", match.group("title"))).strip()
+
+
+def check_routes_cover_the_pool() -> list[Problem]:
+    problems: list[Problem] = []
+
+    for course in course_directories():
+        if not (course / "routes.js").is_file():
+            continue
+        where = relative(course / "routes.js")
+        manifest, failures = route_manifest(course)
+        if failures:
+            problems.extend(failures)
+            continue
+
+        pages = manifest.get("pages", {})
+        lessons_dir = course / "lessons"
+        on_disk = {lesson.name for lesson in lessons_dir.glob("*.html")} if lessons_dir.is_dir() else set()
+
+        for missing in sorted(on_disk - set(pages)):
+            problems.append(Problem(where, f"lessons/{missing} is on disk but not in pages"))
+        for ghost in sorted(set(pages) - on_disk):
+            problems.append(Problem(where, f"pages names lessons/{ghost}, which is not on disk"))
+
+        for name in sorted(set(pages) & on_disk):
+            declared = pages[name].get("title", "")
+            actual = page_title(lessons_dir / name)
+            if actual is not None and actual != declared:
+                problems.append(
+                    Problem(where, f"lessons/{name} has h1 {actual!r} but pages says {declared!r}")
+                )
+
+        route_ids = [route.get("id") for route in manifest.get("routes", [])]
+        if manifest.get("default") not in route_ids:
+            problems.append(Problem(where, f"default {manifest.get('default')!r} names no route"))
+
+        for route in manifest.get("routes", []):
+            rid = route.get("id", "?")
+            kinds = route.get("kinds") or []
+            if not kinds:
+                problems.append(Problem(where, f"route {rid} declares no kinds"))
+                continue
+
+            listed = route_files(route)
+            seen: set[str] = set()
+            for name in listed:
+                if name in seen:
+                    problems.append(Problem(where, f"route {rid} lists lessons/{name} twice"))
+                seen.add(name)
+                if name not in pages:
+                    problems.append(Problem(where, f"route {rid} lists lessons/{name}, which is not in pages"))
+
+            expected = {name for name, page in pages.items() if page.get("kind") in kinds}
+            for gap in sorted(expected - seen):
+                problems.append(
+                    Problem(where, f"route {rid} declares kind {pages[gap].get('kind')!r} but omits lessons/{gap}")
+                )
+    return problems
+
+
+def check_pagers_match_the_owning_route() -> list[Problem]:
+    """The committed pager is the whole of a lesson's navigation with scripting
+    off, so it has to be the owning route's neighbours and not a stale guess."""
+    problems: list[Problem] = []
+
+    for course in course_directories():
+        if not (course / "routes.js").is_file():
+            continue
+        manifest, failures = route_manifest(course)
+        if failures:
+            continue
+        pages = manifest.get("pages", {})
+        lessons_dir = course / "lessons"
+
+        for name in sorted(pages):
+            lesson = lessons_dir / name
+            if not lesson.is_file():
+                continue
+            where = relative(lesson)
+            route = owning_route(manifest, name)
+            if route is None:
+                problems.append(Problem(where, "no route contains this lesson"))
+                continue
+
+            match = PAGER_PATTERN.search(lesson.read_text(encoding="utf-8"))
+            if match is None:
+                problems.append(Problem(where, 'no <nav class="pager" data-pager-route="..."> block'))
+                continue
+            if match.group("route") != route.get("id"):
+                problems.append(
+                    Problem(where, f"pager claims route {match.group('route')!r}, "
+                                   f"but {route.get('id')!r} owns this lesson")
+                )
+                continue
+
+            order = route_files(route)
+            at = order.index(name)
+            expected = [
+                order[at - 1] if at > 0 else "../index.html",
+                order[at + 1] if at < len(order) - 1 else "../index.html",
+            ]
+            found = ANCHOR_HREF.findall(match.group("body"))
+            if found != expected:
+                problems.append(
+                    Problem(where, f"pager links {found} but route {route.get('id')!r} wants {expected}")
+                )
+    return problems
+
+
+def check_lessons_carry_zone_metadata() -> list[Problem]:
+    """A routed course also runs the living-document mechanism: every lesson
+    declares how current it is, so a stale page says so rather than looking new."""
+    problems: list[Problem] = []
+
+    for course in course_directories():
+        if not (course / "routes.js").is_file():
+            continue
+        lessons_dir = course / "lessons"
+        if not lessons_dir.is_dir():
+            continue
+        for lesson in sorted(lessons_dir.glob("*.html")):
+            body = lesson.read_text(encoding="utf-8")
+            for attribute in ("data-zone", "data-asof"):
+                if attribute not in body:
+                    problems.append(Problem(relative(lesson), f"no {attribute} on the lesson status block"))
+    return problems
+
+
+def check_no_local_markdown_links() -> list[Problem]:
+    """The deploy syncs the repository minus ``*.md``, so a page that links a
+    local Markdown file works from disk and returns a 404 on the published site."""
+    problems: list[Problem] = []
+
+    for page in html_pages():
+        for link in read_links(page):
+            if not is_local(link):
+                continue
+            if strip_suffixes(link).lower().endswith(".md"):
+                problems.append(
+                    Problem(relative(page), f"links a local Markdown file, which is never published -> {link}")
+                )
     return problems
 
 
@@ -189,7 +390,11 @@ def main() -> int:
         check_courses_are_registered()
         + check_lessons_are_registered()
         + check_outlines_match_disk()
+        + check_routes_cover_the_pool()
+        + check_pagers_match_the_owning_route()
+        + check_lessons_carry_zone_metadata()
         + check_local_links_resolve()
+        + check_no_local_markdown_links()
     )
 
     if problems:
