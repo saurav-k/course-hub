@@ -18,7 +18,7 @@ Read `../ai-system-design-course/lessons/0000-llm-basics.html` in full as the go
 5. **Concept-only.** The learner is a Principal engineer with twelve years of distributed-systems experience. Do not re-teach queues, caches, replication, idempotency, or circuit breakers. Name the isomorphism and then say where it breaks.
 6. **Say what it costs.** Every technique gets its trade-off named in the same subsection that introduces it. A subsection that only lists benefits is not finished.
 7. **Field framing.** Every chapter ends with a `Field drill` section: the questions a Staff+ reviewer asks about a system you are going to run, each with the trap named.
-8. Self-contained HTML with the same `<head>`, spine nav, and `../assets/course.js` at the end of body. `assets/course.css` and `assets/course.js` are copies of the sibling course's files; do not fork the design system.
+8. Self-contained HTML with the same `<head>` block as the neighbouring chapters and the same spine nav, and nothing at the end of body. The design system is the hub's shared `assets/hub.css` and `assets/hub.js`, linked from `<head>`; this course adds no stylesheet of its own and must not fork one.
 
 ## Required section skeleton
 
@@ -37,7 +37,7 @@ Reserve them for a failure that is silent, expensive, or both, at most one per c
 
 ## Quizzes
 
-Use the widget documented in `assets/course.js`.
+Use the widget documented in the header of the hub's `assets/hub.js`.
 **Every option must be the same length in words and as close as possible in characters**, ideally within about five characters across the four.
 A visibly longer correct answer leaks the answer and destroys the retrieval practice, which is the entire point.
 
