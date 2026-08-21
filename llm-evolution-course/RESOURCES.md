@@ -183,8 +183,9 @@ The papers were read as PDFs, not as abstracts, because most of the numbers quot
 ## Sources this course still needs
 
 Several lessons in the moving zone carry no sources at all, because the scaffold refused to assert what it could not verify.
-Those lessons are, by number: 0038, 0041, 0046, 0047, 0054, 0055, 0056 and 0057.
+Those lessons are, by number: 0038, 0041, 0054, 0055, 0056 and 0057.
 Whoever writes them finds and dates the sources, and adds them here.
+0046 and 0047 were on that list and are no longer: their sources were found while writing lessons 0043 to 0050 and are recorded below.
 
 ## Known sourcing traps
 
@@ -239,6 +240,84 @@ Journal citations were confirmed against Crossref, and arXiv identifiers against
 - **The Jelinek quip.** The scaffold pointed at Jelinek's recollection second-hand. His own 2004 slides are online and give the wording as "Whenever I fire a linguist our system performance improves", attributed to his talk at a workshop in Wayne, Pennsylvania, in December 1988. Lesson 0012 quotes the slides.
 - **The LSTM forget gate.** The word *forget* does not occur anywhere in Hochreiter and Schmidhuber 1997, which has an input gate and an output gate. The forget gate is Gers, Schmidhuber and Cummins 2000. Lesson 0016 records the correction.
 - **AlexNet's headline number.** 15.3% and 16.4% are both real and come from different competition tracks. Lesson 0017 gives both and names the track each time.
+
+
+## Added while writing lessons 0043 to 0050
+
+Every entry below was opened and read before it was used in one of these lessons.
+Papers were read as full text rather than as abstracts wherever a number quoted in a lesson lives in the body, and every arXiv identifier and submission date was confirmed against the arXiv metadata API.
+Where a figure comes from a model repository rather than from a paper, the repository and the field name are given, so the next writer can re-read the same file rather than trusting this line.
+
+### Serving and the key-value cache, for lesson 0043
+
+- Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang and Stoica, *Efficient Memory Management for Large Language Model Serving with PagedAttention*, submitted 12 September 2023. Section 3 carries the OPT-13B per-token arithmetic, 800 KB per token from 2 x 5,120 x 40 x 2 bytes, and the profiled figure that only 20.4 to 38.2 per cent of cache memory held actual token states. <https://arxiv.org/abs/2309.06180>
+- Dao, Fu, Ermon, Rudra and Re, *FlashAttention*, submitted 27 May 2022. Section 2.1 is the source for the A100 memory-hierarchy figures and for the statement that these operations are bottlenecked by memory accesses. <https://arxiv.org/abs/2205.14135>
+- Shazeer, *Fast Transformer Decoding: One Write-Head is All You Need*, submitted 6 November 2019. Multi-query attention, and the abstract's diagnosis that incremental decoding is limited by memory bandwidth. <https://arxiv.org/abs/1911.02150>
+- Ainslie, Lee-Thorp, de Jong, Zemlyanskiy, Lebron and Sanghai, *GQA*, submitted 22 May 2023. The five per cent uptraining recipe. <https://arxiv.org/abs/2305.13245>
+- Leviathan, Kalman and Matias, *Fast Inference from Transformers via Speculative Decoding*, submitted 30 November 2022. Two to three times acceleration on T5-XXL with identical outputs. <https://arxiv.org/abs/2211.17192>
+
+### Mixture of experts, for lessons 0044 and 0045
+
+- Shazeer, Mirhoseini, Maziarz, Davis, Le, Hinton and Dean, *Outrageously Large Neural Networks*, submitted 23 January 2017. Section 4 is the origin of the routing-collapse description quoted in lesson 0045. <https://arxiv.org/abs/1701.06538>
+- Fedus, Zoph and Shazeer, *Switch Transformers*, submitted 11 January 2021. Section 2.2 for the expert-capacity formula and for dropped tokens passing through the residual; section 5.6 and Table 9 for Switch-C at 1,571B parameters and 2,048 experts, and for the finding that instability tracked arithmetic per sequence rather than sparsity. <https://arxiv.org/abs/2101.03961>
+- Jiang et al., *Mixtral of Experts*, submitted 8 January 2024. The abstract is the only place both halves of the 47B against 13B pair appear together. <https://arxiv.org/abs/2401.04088>
+- Dai et al., *DeepSeekMoE*, submitted 11 January 2024. Section 3.1 works the combinatorial example quoted in lesson 0045: 16 experts choosing 2 gives 120 combinations, 64 choosing 8 gives 4,426,165,368. <https://arxiv.org/abs/2401.06066>
+- Wang, Chen, Xie, Zhao, Wu and Dai, *Auxiliary-Loss-Free Load Balancing Strategy for Mixture-of-Experts*, submitted 28 August 2024. The bias-per-expert control loop, four months before DeepSeek-V3 used it at scale. <https://arxiv.org/abs/2408.15664>
+- DeepSeek-AI, *DeepSeek-V3 Technical Report*, submitted 27 December 2024. Section 2.1.2 for the verbatim "the bias term is only used for routing", for the complementary sequence-wise loss with an extremely small coefficient, for node-limited routing, and for the no-token-dropping claim. <https://arxiv.org/abs/2412.19437>
+
+### Sparse and hybrid attention, for lesson 0046
+
+The scaffold left this lesson without sources. These are the ones it now has.
+
+- DeepSeek-AI, *DeepSeek-V3.2: Pushing the Frontier of Open Large Language Models*, submitted 2 December 2025. Introduces DeepSeek Sparse Attention. <https://arxiv.org/abs/2512.02556>
+- *IndexCache: Accelerating Sparse Attention via Cross-Layer Index Reuse*, submitted 12 March 2026. The best plain-English description of a lightning indexer, the statement that the indexer itself stays quadratic and runs at every layer, and the 75 per cent, 1.82 times and 1.48 times figures on a 30B model. <https://arxiv.org/abs/2603.12201>
+- *MiniMax Sparse Attention*, submitted 11 June 2026. Blockwise indexing on top of grouped-query attention, with 28.4 times less per-token attention compute at 1M context and 14.2 times prefill and 7.6 times decode speed-ups on H800, and a published kernel. <https://arxiv.org/abs/2606.13392>
+- Gu and Dao, *Mamba: Linear-Time Sequence Modeling with Selective State Spaces*, submitted 1 December 2023. The linear-cost lineage the hybrid stacks draw on. <https://arxiv.org/abs/2312.00752>
+
+### Why a small model beats a large old one, for lesson 0047
+
+The scaffold left this lesson without sources as well.
+
+- Hendrycks, Burns, Basart, Zou, Mazeika, Song and Steinhardt, *Measuring Massive Multitask Language Understanding*, submitted 7 September 2020. Table 1 is the source for GPT-3 175B at 43.9 per cent few-shot. <https://arxiv.org/abs/2009.03300>
+- Jiang et al., *Mistral 7B*, submitted 10 October 2023. Its Table 2 reports 60.1 per cent on MMLU. <https://arxiv.org/abs/2310.06825>
+- Abdin et al., *Phi-3 Technical Report*, submitted 22 April 2024. 3.8 billion parameters, 3.3 trillion filtered and synthetic tokens, 69 per cent MMLU. <https://arxiv.org/abs/2404.14219>
+- Zhang et al., *A Careful Examination of Large Language Model Performance on Grade School Arithmetic*, submitted 1 May 2024. The contamination check that names the Phi, Mistral and some Llama families as showing signs of overfitting, and several frontier models as not. <https://arxiv.org/abs/2405.00332>
+- Dubey et al., *The Llama 3 Herd of Models*, submitted 31 July 2024. The 15.6-trillion-token pre-training corpus. <https://arxiv.org/abs/2407.21783>
+- Snell, Lee, Xu and Kumar, *Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters*, submitted 6 August 2024. The arithmetic-matched result against a fourteen-times-larger model, with its restriction to problems the smaller model already sometimes solves. <https://arxiv.org/abs/2408.03314>
+- Su, Lu, Pan, Murtadha, Wen and Liu, *RoFormer: Enhanced Transformer with Rotary Position Embedding*, submitted 20 April 2021. <https://arxiv.org/abs/2104.09864>
+- Shazeer, *GLU Variants Improve Transformer*, submitted 12 February 2020. Its entire conclusion section is the sentence quoted in lesson 0047 about divine benevolence. <https://arxiv.org/abs/2002.05202>
+- Zhang and Sennrich, *Root Mean Square Layer Normalization*, submitted 16 October 2019. The dispensable re-centring hypothesis and the 7 to 64 per cent running-time reduction. <https://arxiv.org/abs/1910.07467>
+
+### Long context, for lesson 0048
+
+- Liu, Lin, Hewitt, Paranjape, Bevilacqua, Petroni and Liang, *Lost in the Middle*, submitted 6 July 2023. Section 1 and Figure 1 for the U-shaped curve, and for GPT-3.5-Turbo scoring below its own 56.1 per cent closed-book result with the relevant document in the middle. <https://arxiv.org/abs/2307.03172>
+- Hsieh, Sun, Kriman, Acharya, Rekesh, Jia, Zhang and Ginsburg, *RULER*, submitted 9 April 2024. Section 4 defines effective length against Llama2-7B's 85.6 per cent at 4,000 tokens; Table 3 is the source for every advertised-against-effective pair in lesson 0048. <https://arxiv.org/abs/2404.06654>
+- Peng, Quesnelle, Fan and Shippole, *YaRN*, submitted 31 August 2023. Rotary-trained models failing to generalise past their training length, and the ten-times-fewer-tokens figure. <https://arxiv.org/abs/2309.00071>
+
+### Reasoning and checkable rewards, for lessons 0049 and 0050
+
+- DeepSeek-AI, *DeepSeek-R1*, submitted 22 January 2025, **read as arXiv version 1**, which is not the same document as version 2. Version 1 carries the two reward rules in section 2.2.2, the training template in Table 1 of section 2.2.3, and the self-evolution and aha-moment material with the rise from 15.6 to 71.0 per cent on AIME 2024 in section 2.2.4. Version 2 is the later journal text and does not contain them in that form. <https://arxiv.org/abs/2501.12948>
+- Muennighoff et al., *s1: Simple test-time scaling*, submitted 31 January 2025. Section 3 defines budget forcing; section 4.2 reports 50 to 57 per cent on AIME24, the flattening at six interventions, and the repetitive loops beyond it. <https://arxiv.org/abs/2501.19393>
+- Turpin, Michael, Perez and Bowman, *Language Models Don't Always Say What They Think*, submitted 7 May 2023. The reordering bias and the drop of as much as 36 per cent across thirteen tasks. <https://arxiv.org/abs/2305.04388>
+- Chen et al., *Reasoning Models Don't Always Say What They Think*, submitted 8 May 2025. Reveal rates often below 20 per cent, and the plateau in faithfulness under outcome-based reinforcement learning. <https://arxiv.org/abs/2505.05410>
+- Shao et al., *DeepSeekMath*, submitted 5 February 2024, for group relative policy optimization. <https://arxiv.org/abs/2402.03300>
+- Lambert et al., *Tulu 3*, submitted 22 November 2024, for the name reinforcement learning with verifiable rewards. <https://arxiv.org/abs/2411.15124>
+
+### Non-paper sources cited in lessons 0043 to 0050
+
+- Model repositories read directly on 22 August 2026 for every expert count, `index_topk`, `full_attention_interval` and layer-type list quoted in lessons 0044, 0045 and 0046: `mistralai/Mixtral-8x7B-v0.1`, `deepseek-ai/DeepSeek-V3`, `deepseek-ai/DeepSeek-V3.2`, `deepseek-ai/DeepSeek-V4-Pro`, `deepseek-ai/DeepSeek-V4-Flash`, `zai-org/GLM-5.2`, `moonshotai/Kimi-K2-Instruct`, `moonshotai/Kimi-K3`, `openai/gpt-oss-120b` and `Qwen/Qwen3.8-2.4T-A95B`. Total and active parameter counts came from the same repositories' model cards, never from arithmetic.
+- Anthropic developer documentation, *Compaction*, read 22 August 2026. The stated rationale that response quality degrades as a conversation grows. <https://platform.claude.com/docs/en/build-with-claude/compaction>
+- Anthropic developer documentation, *Context editing*, read 22 August 2026. The statement that context is a finite resource with diminishing returns and that irrelevant content degrades model focus. <https://platform.claude.com/docs/en/build-with-claude/context-editing>
+- Willison, *Notes on OpenAI's new o1 chain-of-thought models*, 12 September 2024. Third-party sourced and labelled as such in lesson 0049, because `openai.com` blocks automated retrieval and no paper states the claim. The source for reasoning tokens being invisible in the response but billed as output tokens. <https://simonwillison.net/2024/Sep/12/openai-o1/>
+- TechCrunch, 29 January 2025, on the distillation accusation, used in lesson 0047 for the same reason. The lesson states the dispute and does not adjudicate it. <https://techcrunch.com/2025/01/29/microsoft-probing-whether-deepseek-improperly-used-openais-api/>
+
+### Corrections and sourcing notes from this range
+
+- **The DeepSeek-R1 arXiv record has two substantially different versions.** Version 2 is the journal text and drops the reward-rule wording, the training template and the aha-moment section that almost every summary of this paper quotes. Anyone checking a claim about R1 must read version 1 or they will not find it.
+- **Total and active parameter counts cannot be derived from each other.** Attention and the embedding tables are counted in both, so no ratio recovers either from the expert count. Lessons 0044 and 0047 quote both halves from a document every time.
+- **Cache-size arithmetic is meaningless without its configuration.** Lesson 0043 gives layer count, hidden size and bytes per number every time it gives a figure, and marks the GPT-3 line as arithmetic performed here from the paper's Table 2.1 rather than a figure the paper quotes.
+- **Every efficiency speed-up in lesson 0046 is lab-reported** against a baseline and hardware that lab chose. One group published its kernel, which makes a number checkable rather than checked. The lesson says so in its own body.
+- **A cross-paper benchmark comparison is a comparison of claims.** GPT-3's 43.9 per cent, Mistral 7B's 60.1 per cent and phi-3-mini's 69 per cent on MMLU come from three groups running three harnesses, and lesson 0047 states that rather than presenting them as one experiment.
 
 ## Added while writing lessons 0051 to 0057
 
