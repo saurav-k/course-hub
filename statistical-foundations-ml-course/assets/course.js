@@ -90,11 +90,14 @@
       startOnLoad: true,
       theme: dark ? 'dark' : 'neutral',
       themeVariables: vars,
-      flowchart: { curve: 'basis', htmlLabels: true, padding: 12, useMaxWidth: true },
-      sequence: { useMaxWidth: true, wrap: true },
-      mindmap: { useMaxWidth: true },
-      timeline: { useMaxWidth: true },
-      quadrantChart: { useMaxWidth: true }
+      flowchart: { curve: 'basis', htmlLabels: true, padding: 12, useMaxWidth: false },
+      sequence: { useMaxWidth: false, wrap: true },
+      state: { useMaxWidth: false },
+      class: { useMaxWidth: false },
+      er: { useMaxWidth: false },
+      mindmap: { useMaxWidth: false },
+      timeline: { useMaxWidth: false },
+      quadrantChart: { useMaxWidth: false }
     });
   }
   initMermaid();
