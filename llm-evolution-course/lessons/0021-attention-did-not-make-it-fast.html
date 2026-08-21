@@ -41,10 +41,6 @@
   <div class="callout key"><span class="tag">Where this lesson starts</span>
     <p>Attention, the subject of <a href="0020-attention-stop-compressing.html">Attention: stop compressing</a>, solved reach. This lesson is about the constraint that was left, and it is the reason the Transformer exists. It assumes you know what attention computes.</p>
   </div>
-  <div class="card tldr stub-note">
-    <h2 class="h-label">This page is a stub</h2>
-    <p>The structure, the brief, the prerequisites, the figures and the sources are settled. The prose is not written yet. A writing crew replaces sections 2 and 3 below with the lesson itself, keeps the figures and fills them in, and leaves sections 1, 4 and 5 in place. Read <code>BUILDER-SPEC.md</code> before you start.</p>
-  </div>
   <h2>1. Where this lesson sits</h2>
   <h3>What you need first</h3>
   <ul class="prereqs">
@@ -52,62 +48,206 @@
   </ul>
   <h3>The one tight idea</h3>
   <p>Attention fixed how far a model could reach, but the recurrence underneath it still forced one step per word, so training time grew with sentence length no matter how many machines you had.</p>
-  <h2>2. What this lesson must cover</h2>
-  <p class="stub-todo">To write. Full prose, complete sentences, 1,400 to 2,000 words. Every bullet below is a beat the finished lesson owes the reader, in this order.</p>
-  <ul class="covers">
-    <li>Sequential dependency stated concretely: step n cannot start until step n minus one has finished.</li>
-    <li>Why that resists parallel hardware even when the hardware is available.</li>
-    <li>Path length as the other quantity worth tracking: how many operations separate two words.</li>
-    <li>The three escapes people tried before 2017: convolutions, conditional computation, and attention without recurrence.</li>
-    <li>Ending on the open question rather than an answer: could attention be kept and the sequential step deleted? <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a> is where it is answered.</li>
-  </ul>
-  <div class="callout warn"><span class="tag">Do not overclaim</span>
-    <p>The mixture-of-experts work of 2017 is a real ancestor of the 2024 efficiency turn. Mention it here and let the later lessons carry it, rather than teaching routing twice.</p>
-  </div>
-  <h2>3. The figures this lesson needs</h2>
-  <p>Each figure below renders today as a working sketch of the right shape. Replace the sketch with the finished diagram described in its caption. Do not remove a figure without saying why in the pull request.</p>
+
+  <h2>2. Two different questions about a sequence model</h2>
+  <p>By the end of 2015 the field had a translation architecture that worked: an encoder and a decoder, both recurrent networks, with attention bolted between them so that every output position could draw on every input position.
+  <a href="0020-attention-stop-compressing.html">Attention: stop compressing</a> is the story of how that came about, and it closes a question that had been open since the first neural translation systems.</p>
+  <p>The question it closed is <b>reach</b>. Can information from the first word of a sentence get to the last word of the translation without being crushed?
+  With attention, yes, and it can do so from any position to any position.</p>
+  <p>There is a second question, and attention does not touch it.
+  <b>How long does it take?</b>
+  Not how many operations in total, which is a different thing, but how many of those operations have to happen one after another rather than all at once.</p>
+  <p>That second question turns out to be the one that decides what gets built, and the reason is the hardware.
+  A graphics card is wide rather than quick. It wins by doing thousands of independent small operations at the same instant, which is the argument <a href="0017-the-year-the-hardware-caught-up.html">2012: the year the hardware caught up</a> makes about why deep learning became practical at all.
+  Work that must happen in a strict order cannot use that width.
+  A model that insists on finishing word nine before it starts word ten is a model that leaves nearly all of a very expensive machine idle.</p>
+
+  <h2>3. The dependency, stated concretely</h2>
+  <p>A recurrent network reads a sequence by carrying a running state.
+  To produce the state after word ten, it applies its little network to the state after word nine together with word ten.
+  So the state after word nine must exist first.
+  That is not a performance characteristic that better engineering can remove. It is what recurrence means.</p>
+  <p>The Transformer paper names the cost in one sentence: this inherently sequential nature precludes parallelisation within training examples, which becomes critical at longer sequence lengths, because memory limits how many examples you can batch together instead.</p>
+  <p>Read the second half of that sentence carefully, because it is the part people skip.
+  There is an obvious escape: if you cannot run the words of one sentence at the same time, run many sentences at the same time.
+  That works, and it is what everyone did.
+  It stops working exactly when sentences get long, because a long sentence uses more memory, so fewer of them fit on the card at once, so there is less independent work available precisely when you need more of it.
+  The two problems are the same problem, and they compound.</p>
+  <p>There is a measurement of this sitting in plain sight in the sequence-to-sequence paper of September 2014.
+  Its authors report that their model ran at about 1,700 words per second on a single graphics card, which was too slow, so they spread it across a machine with eight cards, one layer per card and the remaining four cards splitting the output layer.
+  The result was 6,300 words per second.</p>
+  <p>Eight times the hardware, 3.7 times the speed.
+  That is what the sequential dependency costs, measured by the people who paid it, and even with all eight cards busy their training run still took about ten days.</p>
   <figure class="diagram" id="figure-1">
-    <div class="mermaid">
-flowchart LR
-  R["Recurrent"] --> R1["n steps in order"]
-  R --> R2["path length up to n"]
-  C["Convolutional"] --> C1["parallel"]
-  C --> C2["path length grows with depth"]
-  A["Self-attention"] --> A1["one step"]
-  A --> A2["path length one"]
-    </div>
-    <figcaption><b>Figure 1. Two quantities that matter</b> <span class="fig-brief">Finished version: a small table comparing sequential operations and maximum path length for recurrent, convolutional and self-attention layers, using the values from the 2017 paper's own table.</span></figcaption>
-  </figure>
-  <figure class="diagram" id="figure-2">
     <div class="mermaid">
 sequenceDiagram
   autonumber
+  participant C as The graphics card
   participant W1 as Word 1
   participant W2 as Word 2
   participant W3 as Word 3
-  W1->>W2: state, after word 1 is done
-  W2->>W3: state, after word 2 is done
-  Note over W1,W3: nothing about word 3 can start early
+  W1->>C: compute the state after word 1
+  Note over C: everything else waits
+  C-->>W2: state after word 1 is now available
+  W2->>C: compute the state after word 2
+  Note over C: everything else still waits
+  C-->>W3: state after word 2 is now available
+  W3->>C: compute the state after word 3
+  Note over C,W3: three words, three turns, in order.<br/>Thirty words take thirty turns.
     </div>
-    <figcaption><b>Figure 2. Why one step blocks the next</b> <span class="fig-brief">Finished version: add a wall-clock axis so the reader sees idle hardware.</span></figcaption>
+    <figcaption><b>Figure 1. One card, one word at a time</b> <span class="fig-brief">The card is not slow; it is waiting. Every note in this diagram is a period during which thousands of arithmetic units have nothing to do, because the only work available depends on a result that does not exist yet.</span></figcaption>
   </figure>
-  <h2>4. Where this hands off</h2>
+
+  <h2>4. Path length, the other quantity worth tracking</h2>
+  <p>Sequential steps are about time. There is a second quantity, about learning, and the two get confused because they often have the same value.</p>
+  <p><b>Path length</b> is the number of operations that information has to pass through to get from one position to another.
+  It matters because of how these networks are trained: a correction signal travels backwards along that same path, and it gets weaker at every step it passes through.
+  <a href="0015-backpropagation-and-the-two-winters.html">Backpropagation, and the two winters</a> is the lesson on why that happens; the short version is that a signal multiplied by a number smaller than one, thirty times over, arrives as nothing.
+  The shorter the path between two positions, the easier it is for the model to learn a relationship between them.</p>
+  <p>In a recurrent layer, information from word one reaches word thirty by passing through twenty-nine intermediate states.
+  In a convolutional layer, which looks at a small window of neighbouring positions at once, you cover more ground per layer but you have to stack layers to reach across a sentence, so the path grows with the depth of the stack.
+  In an attention layer, every position is compared with every other position directly, so the path from any word to any other word is one operation, regardless of how far apart they are.</p>
+  <p>The Transformer paper's Table 1 puts all of this in one place, and it is the most important object in that paper.</p>
+  <table>
+    <caption>Table 1 of "Attention Is All You Need", reproduced. <i>n</i> is the sentence length in tokens and <i>d</i> is the size of the vector representing each one. The first column is total work; the second is how much of it must happen in order; the third is how far a signal travels between the two most distant positions.</caption>
+    <thead><tr><th>Layer type</th><th>Work per layer</th><th>Sequential operations</th><th>Maximum path length</th></tr></thead>
+    <tbody>
+      <tr><td>Recurrent</td><td>n &times; d&sup2;</td><td>n</td><td>n</td></tr>
+      <tr><td>Convolutional</td><td>k &times; n &times; d&sup2;</td><td>1</td><td>log n, base k</td></tr>
+      <tr><td>Self-attention</td><td>n&sup2; &times; d</td><td>1</td><td>1</td></tr>
+    </tbody>
+  </table>
+  <p>Two columns, one idea.
+  A recurrent layer needs <i>n</i> steps in order and a signal travels <i>n</i> hops.
+  A self-attention layer needs one step and a signal travels one hop, from any position to any other.
+  That is the entire argument for the architecture that arrives in June 2017.</p>
+  <p>The price is in the first column, and it is worth stating now because the whole next decade is spent paying it: self-attention's total work grows with the <i>square</i> of the sentence length, because every position is compared with every position.
+  The paper is straightforward about the trade: self-attention is cheaper than recurrence only while the sentence is shorter than the vector size, which was comfortably true of the sentences it was translating and stopped being true the moment anyone wanted to read a document.</p>
+  <figure class="diagram" id="figure-2">
+    <div class="mermaid">
+flowchart LR
+  R["Recurrent"] --> R1["word 1 reaches word 30<br/>through 29 carried states"] --> R2["29 hops, and they<br/>must happen in order"]
+  C["Convolutional"] --> C1["a window of neighbours per layer,<br/>stacked to reach further"] --> C2["parallel, but the path<br/>grows with the depth"]
+  A["Self-attention"] --> A1["word 1 is compared with<br/>word 30 directly"] --> A2["1 hop, and every<br/>position at once"]
+    </div>
+    <figcaption><b>Figure 2. The same journey, three ways</b> <span class="fig-brief">All three rows answer one question: how does word 1 reach word 30. Convolution fixes the ordering problem without fixing the distance problem, which is why it was the obvious escape route in 2016 and not the one that won.</span></figcaption>
+  </figure>
+
+  <h2>5. What it was costing by 2017</h2>
+  <p>The clearest evidence that this had become the binding constraint is what the state of the art cost to move.</p>
+  <p>In March 2017 Denny Britz, Anna Goldie, Minh-Thang Luong and Quoc Le at Google published a study whose entire purpose was to establish which design choices in a recurrent translation model actually mattered, because nobody knew: results were reported on different data with different tuning, and could not be compared.
+  Their opening diagnosis names the constraint outright, saying that these architectures are expensive to train, typically requiring days to weeks of graphics-card time to converge, which makes an exhaustive search over design choices prohibitively expensive.
+  Their answer required, by their own account, over 250,000 graphics-card hours, all on the standard English-to-German translation task.</p>
+  <p>That number is the field admitting something.
+  A quarter of a million card-hours to <i>tune</i> an architecture, rather than to invent one, is not a sustainable way to make progress, and it was the direct consequence of every experiment being slow for structural reasons.</p>
+
+  <h2>6. Three escapes, tried in eighteen months</h2>
+  <p>Between late 2016 and mid-2017 three different routes out of recurrence were attempted, by three different groups, and all three are in the record.</p>
+  <h3>Convolutions</h3>
+  <p>A convolutional layer looks at a fixed window of neighbouring positions and can compute every window at the same time, so it has no sequential dependency at all.
+  Nal Kalchbrenner and colleagues at DeepMind posted ByteNet on 31 October 2016, using dilated convolutions to translate in linear time.
+  Jonas Gehring, Michael Auli, David Grangier, Denis Yarats and Yann Dauphin at Facebook AI Research posted convolutional sequence to sequence learning on 8 May 2017, and it beat Google's production translation system, in their words, at an order of magnitude faster speed.</p>
+  <p>Five weeks before the attention answer, the convolutional answer was working and winning.
+  What it could not fix is the third column of the table: a convolution sees a window, so reaching across a long sentence still requires stacking layers, and the path between distant words still grows.</p>
+  <h3>Conditional computation</h3>
+  <p>On 23 January 2017 Noam Shazeer, with Azalia Mirhoseini, Krzysztof Maziarz, Andy Davis, Quoc Le, Geoffrey Hinton and Jeff Dean, posted a layer containing thousands of small networks and a router that sends each example to only a few of them.
+  It reached 137 billion parameters while doing only a small fraction of that much arithmetic per example.</p>
+  <p>Note what this attacks and what it does not.
+  It decouples how much a model <i>knows</i> from how much it <i>computes</i>, which is a real and lasting idea.
+  It does not remove the sequential dependency, because in that paper those layers sit between stacked recurrent layers, which are still recurrent.
+  This is the ancestor of the sparse models that make the 2024 efficiency turn possible, and this course takes that up properly in <a href="0044-mixture-of-experts-the-router.html">Mixture of experts, part one: the router</a> rather than teaching routing twice.
+  What matters here is the date and the name: Shazeer is on this paper five months before he is on the Transformer.</p>
+  <h3>Attention with nothing underneath it</h3>
+  <p>On 6 June 2016, a year before anything else in this section, Ankur Parikh, Oscar Tackstrom, Dipanjan Das and Jakob Uszkoreit at Google published a model for deciding whether one sentence implies another.
+  It uses attention to break the problem into pieces that can be solved separately, which makes it, in their words, trivially parallelisable.
+  It has no recurrence and no convolution.
+  It reached the state of the art on its benchmark with almost an order of magnitude fewer parameters than the previous best, and it did so, again in their words, without relying on any word-order information at all.</p>
+  <p>That last clause is doing two jobs.
+  It is a boast, and it is a warning: a model built only from attention genuinely does not know what order its input is in, which is a problem somebody will have to solve.</p>
+  <p>Jakob Uszkoreit is the person who, a year later, proposed replacing recurrent networks with self-attention.
+  The Transformer paper says so in its own author-contribution footnote.
+  This 2016 paper is the missing link between the two, and it is the reason the idea did not come from nowhere.</p>
+  <figure class="diagram" id="figure-3">
+    <div class="mermaid">
+flowchart TB
+  P["Mid-2016: recurrence is the bottleneck<br/>reach is solved, speed is not"] --> C["Convolutions<br/>ByteNet, Oct 2016<br/>ConvS2S, May 2017"]
+  P --> M["Conditional computation<br/>Mixture-of-Experts, Jan 2017"]
+  P --> A["Attention with no recurrence<br/>Parikh and Uszkoreit, Jun 2016"]
+  C --> CR["parallel, but the path between<br/>distant words still grows"]
+  M --> MR["more capacity per unit of compute,<br/>still recurrent underneath"]
+  A --> AR["parallel and one hop,<br/>but no idea of word order"]
+  AR --> Q["so: could the ordering<br/>be added back in?"]
+    </div>
+    <figcaption><b>Figure 3. Three routes out, and the one that led somewhere</b> <span class="fig-brief">None of these three is a failure, and two of them are still in use. The attention branch is the one to watch, because its one objection, that the model has no idea of word order, turns out to be far cheaper to answer than the objections to the other two.</span></figcaption>
+  </figure>
+
+  <h2>7. The question this leaves open</h2>
+  <p>So, by the first half of 2017, the position was this.</p>
+  <p>Attention could reach anywhere in a sentence in one hop, and it was bolted on top of a mechanism that insisted on walking through the sentence one word at a time.
+  Two of the three routes out kept the walking.
+  The third abandoned it entirely and worked, on one task, with the admission that the resulting model had no idea what order its words were in.</p>
+  <p>The obvious question had been asked and not yet answered at scale: if attention already connects every position to every other position, what exactly is the recurrence still for?
+  Could you keep the attention, delete the sequential step, and add the word order back some other way?</p>
+  <p>That is the question, and this lesson deliberately stops at it.
+  <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a> is where it is answered, by eight people at Google, in a paper posted on 12 June 2017.</p>
+
+  <h2>8. Where this hands off</h2>
   <p>This course owns chronology, causation, people and dates. It hands off for mechanism, maths and code rather than re-deriving them.</p>
   <ul class="handoff">
-    <li><b>In this course:</b> <a href="0020-attention-stop-compressing.html">Attention: stop compressing</a></li>
-    <li><b>In this course:</b> <a href="0023-two-papers-one-day.html">Two papers, one day</a></li>
-    <li><b>In this course:</b> <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a></li>
+    <li><b>In this course:</b> <a href="0020-attention-stop-compressing.html">Attention: stop compressing</a> <span class="pq-why">The mechanism this lesson says was fast enough at reaching and too slow at everything else</span></li>
+    <li><b>In this course:</b> <a href="0023-two-papers-one-day.html">Two papers, one day</a> <span class="pq-why">What was actually posted on 12 June 2017, and what neither paper claimed</span></li>
+    <li><b>In this course:</b> <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a> <span class="pq-why">The answer to the question this lesson ends on</span></li>
+    <li><b>In this course:</b> <a href="0044-mixture-of-experts-the-router.html">Mixture of experts, part one: the router</a> <span class="pq-why">Where the 2017 routing idea is taught properly, and what it became</span></li>
   </ul>
-  <h2>5. Sources to read first</h2>
+  <h2>9. Sources to read first</h2>
   <ul class="sources">
-    <li><a href="https://arxiv.org/abs/1706.03762">Vaswani et al., Attention Is All You Need, table 1, 2017</a></li>
-    <li><a href="https://arxiv.org/abs/1705.03122">Gehring et al., Convolutional Sequence to Sequence Learning, 2017</a></li>
-    <li><a href="https://arxiv.org/abs/1701.06538">Shazeer et al., Outrageously Large Neural Networks: The Sparsely-Gated Mixture-of-Experts Layer, 2017</a></li>
+    <li><a href="https://arxiv.org/abs/1706.03762">Vaswani et al., Attention Is All You Need, 2017</a>. Table 1 and section 4, "Why Self-Attention", which states the three desiderata this lesson is organised around.</li>
+    <li><a href="https://arxiv.org/abs/1409.3215">Sutskever, Vinyals and Le, Sequence to Sequence Learning with Neural Networks, 2014</a>. Section 3.5 gives the 1,700 and 6,300 words per second on one card and on eight.</li>
+    <li><a href="https://arxiv.org/abs/1703.03906">Britz, Goldie, Luong and Le, Massive Exploration of Neural Machine Translation Architectures, March 2017</a>. The 250,000 graphics-card hours.</li>
+    <li><a href="https://arxiv.org/abs/1705.03122">Gehring et al., Convolutional Sequence to Sequence Learning, May 2017</a>. The convolutional escape, and the order-of-magnitude speed claim.</li>
+    <li><a href="https://arxiv.org/abs/1610.10099">Kalchbrenner et al., Neural Machine Translation in Linear Time, October 2016</a>. ByteNet, the earlier convolutional attempt.</li>
+    <li><a href="https://arxiv.org/abs/1701.06538">Shazeer et al., Outrageously Large Neural Networks, January 2017</a>. Conditional computation, and 137 billion parameters between recurrent layers.</li>
+    <li><a href="https://arxiv.org/abs/1606.01933">Parikh, Tackstrom, Das and Uszkoreit, A Decomposable Attention Model for Natural Language Inference, June 2016</a>. Attention with no recurrence, and no word-order information.</li>
   </ul>
-  <p class="src-warn">These are research pointers left by the scaffold, not citations. Open each one and confirm it says what the brief claims before it appears in prose.</p>
+  <p class="src-warn">Every one of these was opened and checked against what this lesson claims before it was written into the prose.</p>
   <div class="quiz">
     <h3 class="h-label">Retrieval practice</h3>
-    <p class="stub-todo">To write: three or four questions that test whether the one tight idea landed, not whether a date was memorised. Four options each, matched in word and character count, with the answer index in <code>data-answer</code> and a one-sentence explanation in <code>.q-fb</code>. Copy the exact markup from a neighbouring finished lesson in <code>llm-papers-course</code>.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does recurrence waste a graphics card?</div>
+      <button class="q-opt">The card cannot hold all of the words of a long sentence in its memory</button>
+      <button class="q-opt">The card has to swap a different set of weights in for every new word</button>
+      <button class="q-opt">The card wins by doing many things at once and here it must wait</button>
+      <button class="q-opt">The card must send each finished word back to the processor to check</button>
+      <div class="q-fb">Computing the state after word ten requires the state after word nine, so nearly all of the card's width has no work available to it.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does maximum path length measure, and why does it matter?</div>
+      <button class="q-opt">How far a correction signal travels between two positions when learning</button>
+      <button class="q-opt">How many words a model can hold in memory before it starts forgetting</button>
+      <button class="q-opt">How long a sentence can be before the training run exhausts the memory</button>
+      <button class="q-opt">How many layers a network needs before its accuracy stops improving</button>
+      <div class="q-fb">A signal weakens at every step it passes through, so a shorter path makes a long-range relationship easier to learn.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why were convolutions not the answer, given that they parallelise?</div>
+      <button class="q-opt">They were far more expensive per layer than a recurrent layer had been</button>
+      <button class="q-opt">They fix the ordering problem but the distance between words still grows</button>
+      <button class="q-opt">They could not be combined with attention, so reach was lost completely</button>
+      <button class="q-opt">They had already been shown to translate worse than the recurrent models</button>
+      <div class="q-fb">A convolution sees a window, so reaching across a sentence means stacking layers, and the path between distant words grows with the depth.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What did the 2016 attention-only model give up in exchange for being parallel?</div>
+      <button class="q-opt">Accuracy, which fell well below the recurrent systems of that same year</button>
+      <button class="q-opt">Capacity, since the model held far fewer parameters than its rivals did</button>
+      <button class="q-opt">Reach, because attention alone cannot connect two positions in one hop</button>
+      <button class="q-opt">Order, since attention alone has no notion of where a word sits at all</button>
+      <div class="q-fb">Its authors advertised this as a strength, and it is also the one objection the 2017 architecture had to answer.</div>
+    </div>
   </div>
   <nav class="pager" data-pager-route="constraint" aria-label="Lesson navigation">
     <a href="0020-attention-stop-compressing.html"><span class="dir">&larr; Previous</span><span class="ttl">Attention: stop compressing</span></a>
