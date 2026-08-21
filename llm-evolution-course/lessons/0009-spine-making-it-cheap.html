@@ -43,10 +43,6 @@
   <div class="callout key"><span class="tag">Where this lesson starts</span>
     <p><a href="0008-spine-the-open-weights-turn.html">The open-weights turn</a> left a large and growing set of models that most people still could not afford to train, tune, or serve. This chapter is about the four separate things the field did about that.</p>
   </div>
-  <div class="card tldr stub-note">
-    <h4>This page is a stub</h4>
-    <p>The structure, the brief, the prerequisites, the figures and the sources are settled. The prose is not written yet. A writing crew replaces sections 2 and 3 below with the lesson itself, keeps the figures and fills them in, and leaves sections 1, 4 and 5 in place. Read <code>BUILDER-SPEC.md</code> before you start.</p>
-  </div>
   <h2>1. Where this lesson sits</h2>
   <h3>What you need first</h3>
   <ul class="prereqs">
@@ -54,53 +50,165 @@
   </ul>
   <h3>The one tight idea</h3>
   <p>Once capability was possible, the binding constraint became price, and the answer was to stop paying for the whole model on every token.</p>
-  <h2>2. What this lesson must cover</h2>
-  <p class="stub-todo">To write. Full prose, complete sentences, 1,400 to 2,000 words. Every bullet below is a beat the finished lesson owes the reader, in this order.</p>
-  <ul class="covers">
-    <li>Adapters: tune a small number of extra numbers instead of all of them.</li>
-    <li>Serving: the key-value cache, and why memory rather than arithmetic is the limit.</li>
-    <li>Sparsity: a mixture of experts decouples what a model knows from what it computes.</li>
-    <li>Why a small modern model beats a very large old one, and why almost none of that is architecture.</li>
-    <li>Context length: the advertised number and the usable number are not the same number.</li>
-  </ul>
-  <div class="callout warn"><span class="tag">Do not overclaim</span>
-    <p>The relative contribution of each cost reduction is a judgement, not a measurement. Say so on the diagram.</p>
-  </div>
-  <h2>3. The figures this lesson needs</h2>
-  <p>Each figure below renders today as a working sketch of the right shape. Replace the sketch with the finished diagram described in its caption. Do not remove a figure without saying why in the pull request.</p>
+  <h2>2. Tuning a model you cannot afford to retrain</h2>
+  <p>By 2023 the weights of capable models were downloadable, as <a href="0008-spine-the-open-weights-turn.html">The open-weights turn</a> describes, and almost nobody could do anything with them.
+  Adjusting a model in the ordinary way means updating every one of its numbers, which means holding all of them in memory along with a working copy for the training machinery.
+  For a model of any size that is a rack of hardware, not a laptop.</p>
+  <p>Four separate ideas answered that, and this chapter takes them in order: cheap adaptation, cheap serving, sparse computation, and honest context length.
+  None of them makes a model more capable. All of them change what it costs to have one.</p>
+  <p>The idea that broke this open is small and slightly surprising.
+  Freeze the original numbers entirely.
+  Alongside them, add a much smaller set of extra numbers, and train only those.
+  At the end you have the untouched original plus a small patch, and the patch is a few tenths of a per cent of the size of what it modifies.
+  This was published in June 2021 as LoRA and it works because the change a model needs in order to specialise turns out to be far simpler than the model itself.</p>
+  <p>A second paper in May 2023 added the other half.
+  Store the frozen originals at reduced precision, roughly four bits per number instead of sixteen, using a scheme designed to lose as little as possible, and the whole job fits on one large card that a research group or a determined individual can rent by the hour.
+  Between them, those two ideas turned fine-tuning from an industrial activity into a hobbyist one, and that is a large part of why the ecosystem described in <a href="0008-spine-the-open-weights-turn.html">The open-weights turn</a> appeared as quickly as it did.
+  <a href="../../llm-papers-course/lessons/0028-lora.html">The LoRA lesson</a> next door works through the mechanism.</p>
+
+  <h2>3. Serving is a memory problem before it is an arithmetic problem</h2>
+  <p>Tuning is a one-off cost. Serving is the cost you pay forever, and it has a shape most people guess wrong.</p>
+  <p>A model generates one piece of text at a time, and each new piece has to attend to everything that came before it.
+  Recomputing all of that from scratch for every new token would be absurd, so the intermediate results for each earlier position are kept and reused.
+  That store is called the key-value cache, and it holds one entry per position per layer.</p>
+  <p>Two things follow.
+  First, the cache grows linearly with the length of the conversation, and in practice it gets very large: at long context it can rival the model's own weights for memory.
+  Second, generating each token requires reading the whole cache, which means the limiting resource is how fast memory can be read rather than how fast the arithmetic can be done.
+  A graphics card that can perform enormous numbers of operations per second spends much of its time waiting for numbers to arrive.</p>
+  <p>Almost all the serving engineering since 2022 follows from that sentence.
+  You can manage the cache in small blocks rather than one contiguous run, so that memory is not wasted on space reserved and never used.
+  You can have several attention heads share one set of cached entries instead of each keeping its own.
+  You can compress the cache into a smaller representation and expand it on use, which one 2024 design reported cut the cache by about 93 per cent.
+  None of these change what the model knows. They change what it costs to let it speak.</p>
   <figure class="diagram" id="figure-1">
-    <div class="mermaid">
-flowchart LR
-  TOK["One token"] --> RT["Router picks a few experts"]
-  RT --> E1["expert 1<br/>used"]
-  RT --> E2["expert 2<br/>used"]
-  RT --> E3["expert 3<br/>idle"]
-  RT --> E4["expert 4<br/>idle"]
-  E1 --> SUM["weighted sum"]
-  E2 --> SUM
-    </div>
-    <figcaption><b>Figure 1. Total parameters against active parameters</b> <span class="fig-brief">Finished version: paired bars per model, one for stored parameters and one for parameters actually used per token. The widening gap over time is the whole lesson.</span></figcaption>
-  </figure>
-  <figure class="diagram" id="figure-2">
     <div class="mermaid">
 sequenceDiagram
   autonumber
-  participant U as Request
-  participant S as Server
+  participant U as A request
+  participant S as The server
   participant KV as Key-value cache
-  participant G as GPU
+  participant G as The hardware
   U->>S: a prompt
-  S->>G: compute the prompt once
-  G->>KV: store one entry per token per layer
+  S->>G: compute the whole prompt once
+  G->>KV: store one entry per position, per layer
   loop for every generated token
-    S->>KV: read the whole cache
-    KV->>G: keys and values
-    G-->>S: one token
+    S->>KV: read the entire cache again
+    KV->>G: keys and values, the memory-bound step
+    G-->>S: one more token
   end
     </div>
-    <figcaption><b>Figure 2. Where the money goes when you serve a token</b> <span class="fig-brief">Finished version: annotate each arrow with its cost in memory or arithmetic, and mark which one dominates at long context.</span></figcaption>
+    <figcaption><b>Figure 1. Where the money actually goes when a model answers you</b> <span class="fig-brief">The prompt is computed once and the loop runs thousands of times, and the expensive edge inside that loop is a memory read rather than a calculation. That is why the answer to "make it cheaper" has been about memory ever since.</span></figcaption>
   </figure>
-  <h2>4. Where this hands off</h2>
+
+  <h2>4. Sparsity: what a model knows against what it computes</h2>
+  <p>The deeper problem is that in an ordinary model, knowing more and costing more are the same thing.</p>
+  <p>Most of a model's numbers live in a block that sits after the attention in every layer, and every piece of text passing through is multiplied by all of them, every time.
+  Want a model that knows more? Make that block bigger. Now every token costs more, forever.
+  Parameters and cost are welded together.</p>
+  <p>Mixture of experts breaks that weld, and the mechanism is simpler than the name.
+  Replace the one big block with many smaller ones, called experts.
+  Add a small chooser, called the router, which is one modest table of numbers and a rule that picks the highest-scoring few.
+  For each piece of text, score every expert, pick the top handful, send the text through only those, and blend their outputs weighted by their scores.</p>
+  <p>The consequence is that a model now has two sizes, and they are different numbers.
+  There is the total, which is what it knows and what you must fit in memory.
+  And there is the active count, which is what actually runs for each token and therefore sets the cost.
+  A widely used 2023 model held 47 billion parameters and used 13 billion per token.
+  By 2026 the ratio at the frontier of open weights had reached roughly thirty to one.</p>
+  <p>Read that trend carefully, because the surprising number is not the one people quote.
+  Total parameters went up enormously between 2023 and 2026.
+  Active parameters per token barely moved: around thirteen billion at the start of that period and around thirteen billion in a mainstream 2026 release, with only the very largest models reaching a hundred.
+  The industry found it could keep expanding what a model knows almost indefinitely while what it computes per token grew very slowly.</p>
+  <p>The catch is memory again.
+  All those parameters have to be resident somewhere even when they are idle, so the largest open-weight models of 2026 are simultaneously free to download and impossible for an individual to serve.
+  Sparsity did not remove the bottleneck. It moved it from arithmetic to memory capacity.</p>
+  <figure class="diagram" id="figure-2">
+    <div class="mermaid">
+flowchart TB
+  TOK["One token arrives at the layer"] --> RT["Router: score every expert,<br/>keep the top few"]
+  RT --> E1["expert 1 &middot; runs"]
+  RT --> E2["expert 2 &middot; runs"]
+  RT --> E3["expert 3 &middot; idle"]
+  RT --> E4["expert 4 &middot; idle"]
+  E1 --> SUM["Blend the outputs,<br/>weighted by their scores"]
+  E2 --> SUM
+  SUM --> OUT["Stored: all four. Computed: two."]
+    </div>
+    <figcaption><b>Figure 2. The whole idea, in one layer and one token</b> <span class="fig-brief">The bottom box is the point. Everything above it exists to make those two numbers different, so that a model can be made to know more without every token being made to cost more.</span></figcaption>
+  </figure>
+
+  <h2>5. Why the router is the hard part</h2>
+  <p>A router is trained like everything else, which means nothing in the mechanism prevents it learning to send almost everything to the same three experts.
+  If it does, those three get all the practice and improve, the rest get none and stay poor, and the router acquires an even better reason to prefer the three it already likes.
+  That runaway is called routing collapse, and it was identified as far back as 2017.
+  Worse, in a real cluster the experts live on different machines, so a router that favours a few of them turns hundreds of machines into one busy machine and a lot of idle ones.</p>
+  <p>Three generations of fix tell the story neatly, and each one is more elegant than the last.</p>
+  <p>The first, from 2021, adds a term to the training objective that penalises imbalance, along with a fixed capacity per expert; anything that overflows is simply dropped and skips the layer.
+  It works, and it has an obvious flaw: you are degrading the model in order to keep the scheduler happy.
+  The paper that introduced it says so, noting that too large a balancing penalty impairs performance.</p>
+  <p>The second, from January 2024, is about specialisation rather than balance: use many more, much smaller experts so the model can compose a more precise combination per token, and set aside a few shared experts that every token always uses, to hold the common knowledge that would otherwise be duplicated everywhere.</p>
+  <p>The third, from December 2024, is the one worth remembering.
+  Keep a small bias number per expert.
+  Add it to the scores <b>only when deciding which experts to pick</b>, never when weighting their outputs.
+  After each training step, look at the actual load and nudge the bias down for overloaded experts and up for underloaded ones.
+  That is a control loop rather than a penalty: it adjusts the queue without distorting the answer, and the laboratory that introduced it reported dropping no tokens at all.</p>
+
+  <h2>6. The same trick, pointed at attention</h2>
+  <p>Once the expert blocks are cheap, the expensive thing left in the layer is attention, whose cost grows with the square of the length as <a href="0004-spine-the-transformer-turn.html">The Transformer turn</a> sets out.
+  And by 2025 everybody wanted very long contexts, because an agent reading a codebase needs them.</p>
+  <p>The answer of 2025 and 2026 is the same idea in a second location.
+  Instead of every position attending to every position, a cheap index runs first and picks the few thousand positions most likely to matter, and full attention runs over only those.
+  The clearest way to see this is in the models' own configuration files, where it is a single integer: at a context of one million positions, one 2026 model attends to 1,024 of them per query rather than to a million.
+  Lab-reported reductions in attention computation at that length run to more than an order of magnitude. <span class="claim claim-marketing">MARKETING</span></p>
+  <p>There is an honest caveat built into the design.
+  The index has to consider everything in order to decide what to keep, so the index is itself the remaining quadratic cost.
+  Later work attacks that by noticing that neighbouring layers pick almost the same positions, and reusing one layer's choices across several.
+  This is a good general lesson: an optimisation usually relocates a cost rather than deleting it.</p>
+  <figure class="diagram" id="figure-3">
+    <div class="mermaid">
+flowchart TB
+  subgraph Y2024["Around 2024"]
+    direction LR
+    F1["Expert block: sparse"] ~~~ A1["Attention: dense, quadratic"]
+  end
+  subgraph Y2026["Around 2026"]
+    direction LR
+    F2["Expert block: sparse"] ~~~ A2["Attention: sparse, indexed"]
+  end
+  Y2024 -->|"the bottleneck moves down"| Y2026
+    </div>
+    <figcaption><b>Figure 3. One idea, applied twice, two years apart</b> <span class="fig-brief">Making one half of the layer cheap is what exposed the other half as the bottleneck. Expect the same pattern again: whatever is left paying full price after an optimisation is the next thing somebody will make selective.</span></figcaption>
+  </figure>
+
+  <h2>7. Why a small model now beats a very large old one</h2>
+  <p>A model of a few billion parameters in 2026 outperforms the 175-billion-parameter model of 2020 on most things people measure.
+  Six causes stack up, and it is worth stating plainly that almost none of them is a better architecture.</p>
+  <ol>
+    <li><b>Far more data.</b> The 2020 model saw 300 billion tokens. A small 2024 model saw fifty times that, on a model twenty times smaller. <a href="0005-spine-the-scaling-bet.html">The scaling bet</a> explains why the older one was badly undertrained.</li>
+    <li><b>Better data.</b> Aggressive deduplication, filtering and curriculum, and in some lines deliberately synthesised material. Some of the strongest published claims here are contested on contamination grounds, so treat them carefully.</li>
+    <li><b>Architectural hygiene.</b> A dozen small improvements to position handling, normalisation and attention layout. Each is worth a few per cent; together they are worth a lot.</li>
+    <li><b>Post-training.</b> The 2020 model had none at all. <a href="0006-spine-teaching-a-model-to-be-useful.html">Teaching a model to be useful</a> shows how much of the usable gap sits here rather than in the base model.</li>
+    <li><b>Distillation from a larger teacher.</b> Many small modern models are lossy compressions of a frontier model rather than small models trained from scratch.</li>
+    <li><b>It is allowed to think.</b> A 2026 model can spend thousands of tokens of working before answering, where the 2020 model answered in one pass. <a href="0010-spine-the-reasoning-turn.html">The reasoning turn, and where we are</a> is about that.</li>
+  </ol>
+  <p>How much each of those six contributes is a judgement rather than a measurement.
+  Nobody has run the experiment that would separate them, because it would mean training the same model six times with one ingredient removed each time, and nobody has done it in public.
+  Anyone who gives you percentages for that split is estimating.</p>
+
+  <h2>8. The number you are sold and the number you get</h2>
+  <p>One cost reduction deserves separate treatment because it is routinely misread.</p>
+  <p>Advertised context length went from two thousand positions in 2020 to a million by 2026.
+  That number is a <b>capacity</b> claim: how much text the model will accept without refusing.
+  It is not a <b>competence</b> claim, and the two are routinely different by a large factor.</p>
+  <p>Two measured failure modes are worth knowing by name.
+  In July 2023 researchers reported that performance is highest when the relevant information sits at the beginning or the end of the input and degrades significantly when the model has to use something in the middle, even for models built for long inputs.
+  That is a positional bias, and it is the reason "put the important thing last" is real advice rather than folklore.
+  In April 2024 a harder evaluation than the usual find-the-sentence test added multi-step tracing and aggregation, and found that although models claimed context sizes of 32,000 positions or more, only about half of them maintained satisfactory performance at that length.</p>
+  <p>Retrieval is not comprehension.
+  The 2026 answer is that context is <b>managed</b> rather than merely enlarged: production systems summarise earlier turns, clear stale tool output, and give the model explicit memory to write to, spending the million positions deliberately instead of filling them.</p>
+  <p>By this point the field had capability it could afford to deploy everywhere.
+  What it still had was a model that got exactly one pass of thought per question, however hard the question was.
+  Changing that is the last new axis in this course, and it is <a href="0010-spine-the-reasoning-turn.html">The reasoning turn, and where we are</a>.</p>
+  <h2>9. Where this hands off</h2>
   <p>This course owns chronology, causation, people and dates. It hands off for mechanism, maths and code rather than re-deriving them.</p>
   <ul class="handoff">
     <li><b>Deep dive:</b> <a href="0042-lora-and-qlora.html">LoRA and QLoRA: fine-tuning for the rest of us</a> <span class="pq-why">You can adapt a large model by training a small number of extra numbers alongside the frozen originals, and if you also store the originals at lower precision the whole job fits on one ordinary machine.</span></li>
@@ -111,15 +219,50 @@ sequenceDiagram
     <li><b>Deep dive:</b> <a href="0047-why-a-small-model-beats-a-huge-one.html">Why a small model now beats a huge one from 2020</a> <span class="pq-why">A model a fraction of the size now outperforms the largest models of 2020 on most tasks, and almost none of the reason is a better architecture.</span></li>
     <li><b>Deep dive:</b> <a href="0048-long-context-capacity-is-not-competence.html">Long context: capacity is not competence</a> <span class="pq-why">The advertised context length is how much text a model will accept, not how much it can use, and the two numbers are routinely different by a large factor.</span></li>
   </ul>
-  <h2>5. Sources to read first</h2>
+  <h2>10. Sources to read first</h2>
   <ul class="sources">
     <li><a href="https://arxiv.org/abs/2106.09685">Hu et al., LoRA: Low-Rank Adaptation of Large Language Models, 2021</a></li>
     <li><a href="https://arxiv.org/abs/2309.06180">Kwon et al., Efficient Memory Management for Large Language Model Serving with PagedAttention, 2023</a></li>
   </ul>
-  <p class="src-warn">These are research pointers left by the scaffold, not citations. Open each one and confirm it says what the brief claims before it appears in prose.</p>
+  <p class="src-warn">Every one of these was opened and checked against what this chapter claims before it was written into the prose.</p>
   <div class="quiz">
     <h4>Retrieval practice</h4>
-    <p class="stub-todo">To write: three or four questions that test whether the one tight idea landed, not whether a date was memorised. Four options each, matched in word and character count, with the answer index in <code>data-answer</code> and a one-sentence explanation in <code>.q-fb</code>. Copy the exact markup from a neighbouring finished lesson in <code>llm-papers-course</code>.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why is serving a token a memory problem rather than an arithmetic one?</div>
+      <button class="q-opt">Because the weights are too large to fit inside one card's memory at all</button>
+      <button class="q-opt">Because each token has to be written to disk before the next one is begun</button>
+      <button class="q-opt">Because the model recomputes the whole prompt again for every new token</button>
+      <button class="q-opt">Because each new token requires reading the whole cache of earlier ones</button>
+      <div class="q-fb">The cache grows with the conversation and is read in full for every token, so the hardware spends its time waiting for numbers rather than multiplying them.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does a mixture of experts actually decouple?</div>
+      <button class="q-opt">Training cost from serving cost, so a big model becomes cheap to train</button>
+      <button class="q-opt">What a model knows from what it computes for each token that passes</button>
+      <button class="q-opt">Model quality from data quality, so less careful filtering is required</button>
+      <button class="q-opt">Context length from attention cost, so long inputs stop being quadratic</button>
+      <div class="q-fb">Total parameters are what you must store and active parameters are what you must run, and the router is what makes those two numbers different.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does a learned router need something to stop it?</div>
+      <button class="q-opt">Favoured experts get all the practice, which makes them more favoured</button>
+      <button class="q-opt">Routers drift over time, so their scores stop matching the expert numbers</button>
+      <button class="q-opt">Routers cannot be trained by the ordinary loop, so they need a second one</button>
+      <button class="q-opt">Experts overlap heavily, so the router cannot tell which one to send it to</button>
+      <div class="q-fb">Routing collapse is a runaway: practice improves the chosen few, which gives the router an even better reason to keep choosing them.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does an advertised context length of one million tell you?</div>
+      <button class="q-opt">That the model can use a million positions of text with even accuracy</button>
+      <button class="q-opt">That the model was trained on documents about a million positions long</button>
+      <button class="q-opt">That the model will accept that much text, which is not the same thing</button>
+      <button class="q-opt">That attention over a million positions now costs no more than over ten</button>
+      <div class="q-fb">Capacity and competence are routinely a large factor apart, and measured failures include a bias against material sitting in the middle.</div>
+    </div>
   </div>
   <nav class="pager" data-pager-route="spine" aria-label="Lesson navigation">
     <a href="0041-who-ships-open-weights-now.html"><span class="dir">&larr; Previous</span><span class="ttl">Who ships open weights now</span></a>

@@ -85,6 +85,53 @@ If one is wrong, fix it here in the same pull request.
 - Kimi Team, *Kimi k1.5: Scaling Reinforcement Learning with LLMs*, 2025. <https://arxiv.org/abs/2501.12599>
 - Muennighoff et al., *s1: Simple test-time scaling*, 2025. <https://arxiv.org/abs/2501.19393>
 
+## Added while writing the ten spine chapters
+
+Every entry below was opened and checked before it was used in a spine chapter.
+The arXiv identifiers were confirmed against the arXiv metadata API and the three journal DOIs against Crossref, so the title, venue and date in each line are the publisher's own record rather than a recollection.
+
+### Journal DOIs for the three pre-web sources the scaffold left unlinked
+
+- Weizenbaum, *ELIZA, a computer program for the study of natural language communication between man and machine*, CACM 9(1):36-45, 1966. <https://doi.org/10.1145/365153.365168>
+- Shannon, *A Mathematical Theory of Communication*, Bell System Technical Journal 27(3):379-423, 1948. <https://doi.org/10.1002/j.1538-7305.1948.tb01338.x>
+- Rumelhart, Hinton and Williams, *Learning representations by back-propagating errors*, Nature 323(6088):533-536, 1986. <https://doi.org/10.1038/323533a0>
+
+### Papers cited in a spine chapter and not already listed above
+
+- Le et al., *Building high-level features using large scale unsupervised learning*, 2011. <https://arxiv.org/abs/1112.6209>
+- Coates et al., *Deep learning with COTS HPC systems*, ICML 2013. <https://proceedings.mlr.press/v28/coates13.html>
+- Mikolov, Yih and Zweig, *Linguistic Regularities in Continuous Space Word Representations*, NAACL 2013. <https://aclanthology.org/N13-1090/>
+- Kalchbrenner and Blunsom, *Recurrent Continuous Translation Models*, EMNLP 2013. <https://aclanthology.org/D13-1176/>
+- Parikh et al., *A Decomposable Attention Model for Natural Language Inference*, 2016. <https://arxiv.org/abs/1606.01933>
+- Britz et al., *Massive Exploration of Neural Machine Translation Architectures*, 2017. <https://arxiv.org/abs/1703.03906>
+- Ziegler et al., *Fine-Tuning Language Models from Human Preferences*, 2019. <https://arxiv.org/abs/1909.08593>
+- Jiang et al., *Mistral 7B*, 2023. <https://arxiv.org/abs/2310.06825>
+- DeepSeek-AI, *DeepSeek-V2*, 2024, for multi-head latent attention and the key-value cache reduction. <https://arxiv.org/abs/2405.04434>
+- Allen Institute for AI, *Tulu 3*, 2024, the paper that names reinforcement learning with verifiable rewards. <https://arxiv.org/abs/2411.15124>
+- DeepSeek-AI, *DeepSeek-V3 Technical Report*, 2024, for the auxiliary-loss-free router and the training-cost table used as the four-labels worked example. <https://arxiv.org/abs/2412.19437>
+- Kimi Team, *Kimi k1.5*, 2025, the independent report that no tree search or step-level scorer was needed. <https://arxiv.org/abs/2501.12599>
+- METR, *Measuring AI Ability to Complete Long Software Tasks*, 2025, the time-horizon trend. Cite the trend, not a current number. <https://arxiv.org/abs/2503.14499>
+- *MCPMark*, 2025, for the pass@1 against pass^4 reliability gap. <https://arxiv.org/abs/2509.24002>
+- *Towards a Science of AI Agent Reliability*, 2026. <https://arxiv.org/abs/2602.16666>
+- *Beyond pass@1: A Reliability Science Framework for Long-Horizon LLM Agents*, 2026, for the meltdown-rate finding. <https://arxiv.org/abs/2603.29231>
+- *The Long-Horizon Task Mirage?*, 2026. <https://arxiv.org/abs/2604.11978>
+
+### Non-paper sources cited in a spine chapter
+
+- Common Crawl, the non-profit whose archive GPT-2 rejected and GPT-3 used. <https://commoncrawl.org/>
+- OpenAI, `gpt-2/domains.txt`, the published top-1,000 domain list for WebText. <https://github.com/openai/gpt-2/blob/master/domains.txt>
+- Meta, *Llama 2 Community License*, for the monthly-active-user clause. <https://ai.meta.com/llama/license/>
+- Open Source Initiative, *Meta's LLaMA 2 license is not Open Source*. <https://opensource.org/blog/metas-llama-2-license-is-not-open-source>
+- Anthropic, *Model Context Protocol*, November 2024. <https://www.anthropic.com/news/model-context-protocol>
+- Epoch AI, *The gap between open and closed models*, for the four-month figure. Inferred, and dependent on the index construction. <https://epoch.ai/data-insights/open-closed-eci-gap>
+- Anthropic, *Redeploying Claude Fable 5*, June and July 2026, for the export-control episode. <https://www.anthropic.com/news/redeploying-fable-5>
+- Licence files read directly from the model repositories for the table in lesson 0008, as published on 21 August 2026: `Qwen/Qwen3.8-2.4T-A95B`, `Qwen/Qwen3.8-27B`, `moonshotai/Kimi-K3`, `openai/gpt-oss-120b`, and the MIT-licensed DeepSeek-V4 and GLM-5.2 repositories.
+
+### Sourcing note carried forward
+
+`openai.com` blocks automated fetching, so OpenAI claims in the spine are routed through arXiv where a paper exists, and through the OpenAI GitHub repositories for the GPT-2 parameter-count correction, the model card and the domain list.
+Where only a blog post exists, the spine states what the post says and attributes it, rather than treating it as a measurement.
+
 ## Announcements and non-paper primary sources
 
 Announcements move and get rewritten, so prefer an archived snapshot and record the date you read it.
