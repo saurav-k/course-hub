@@ -38,8 +38,11 @@
         secondaryColor: currentDark() ? '#2a2110' : '#f5f2ea',
         tertiaryColor: currentDark() ? '#1b1913' : '#f4f1e8'
       },
-      flowchart: { curve: 'basis', htmlLabels: true, padding: 12 },
-      sequence: { useMaxWidth: true, wrap: true }
+      flowchart: { curve: 'basis', htmlLabels: true, padding: 12, useMaxWidth: false },
+      sequence: { useMaxWidth: false, wrap: true },
+      state: { useMaxWidth: false },
+      class: { useMaxWidth: false },
+      er: { useMaxWidth: false }
     });
   }
   initMermaid();
