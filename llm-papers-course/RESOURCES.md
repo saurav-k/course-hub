@@ -13,6 +13,7 @@ High-trust sources grounding this course. Each lesson also links its own primary
 - 02 BERT - https://arxiv.org/abs/1810.04805
 - 03 GPT-1 - OpenAI "Improving Language Understanding by Generative Pre-Training" (2018)
 - 04 GPT-2 - "Language Models are Unsupervised Multitask Learners" (2019)
+- 04 GPT-2 release repository (corrects the paper's parameter counts to 124M / 355M / 774M / 1558M) - https://github.com/openai/gpt-2
 - 05 Scaling Laws - https://arxiv.org/abs/2001.08361
 - 06 GPT-3 - https://arxiv.org/abs/2005.14165
 - 07 The Pile - https://arxiv.org/abs/2101.00027
