@@ -9,8 +9,9 @@
 - **No em dashes** anywhere (global user rule). Use `-`.
 
 ## Build architecture
-- Shared design system: `assets/course.css` (Tufte-ish, print-friendly, dark/light).
-- Shared JS: `assets/course.js` (mermaid init + quiz widget + code copy).
+- Shared design system: the hub-level `assets/hub.css` (six palettes, light/dark, print-friendly).
+- Shared runtime: the hub-level `assets/hub.js` (mermaid, quiz widget, code copy, outline rail, appearance controls).
+- This course carries no `assets/` directory of its own. `outline.js` is the rail's data manifest, generated from `index.html`.
 - One `index.html` = course home with the ranked 38-lesson syllabus (10 modules).
 - Each lesson = `lessons/NNNN-slug.html`, links back to index, glossary, prev/next.
 - Glossary reference at `reference/glossary.html` — canonical terms, adhered to everywhere.
