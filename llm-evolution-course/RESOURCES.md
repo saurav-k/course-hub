@@ -199,3 +199,43 @@ Each of these is also repeated in the "Do not overclaim" block of the lesson it 
 - **AlexNet's headline error rate.** Two competition tracks give two different real numbers. Always name the track.
 - **GPT-2's parameter counts.** OpenAI corrected them. The older figures are still in wide circulation, including in this repository before they were fixed.
 - **Who invented attention.** Content-based addressing appears in several places in late 2014. Present it as convergent, not singular.
+
+## Added while writing lessons 0011 to 0018
+
+Every entry below was opened and read before it was used in one of these lessons.
+Journal citations were confirmed against Crossref, and arXiv identifiers against the arXiv metadata API, so title, venue and date in each line are the publisher's own record.
+
+### Journal and conference DOIs the scaffold left unlinked
+
+- Shannon, *Prediction and Entropy of Printed English*, Bell System Technical Journal 30(1):50-64, January 1951. <https://doi.org/10.1002/j.1538-7305.1951.tb01366.x>
+- Rosenblatt, *The perceptron: a probabilistic model for information storage and organization in the brain*, Psychological Review 65(6):386-408, 1958. <https://doi.org/10.1037/h0042519>
+- Elman, *Finding Structure in Time*, Cognitive Science 14(2):179-211, March 1990. <https://doi.org/10.1207/s15516709cog1402_1>
+- Brown, Cocke, Della Pietra, Della Pietra, Jelinek, Lafferty, Mercer and Roossin, *A Statistical Approach to Machine Translation*, Computational Linguistics 16(2):79-85, June 1990. <https://aclanthology.org/J90-2002/>
+- Brown, Della Pietra, Della Pietra and Mercer, *The Mathematics of Statistical Machine Translation: Parameter Estimation*, Computational Linguistics 19(2):263-311, 1993. <https://aclanthology.org/J93-2003/>
+- Bengio, Simard and Frasconi, *Learning long-term dependencies with gradient descent is difficult*, IEEE Transactions on Neural Networks 5(2):157-166, March 1994. <https://doi.org/10.1109/72.279181>
+- Hochreiter and Schmidhuber, *Long Short-Term Memory*, Neural Computation 9(8):1735-1780, November 1997. <https://doi.org/10.1162/neco.1997.9.8.1735>; author copy at <https://www.bioinf.jku.at/publications/older/2604.pdf>
+- Bengio, Ducharme, Vincent and Jauvin, *A Neural Probabilistic Language Model*, JMLR 3:1137-1155, February 2003. <https://www.jmlr.org/papers/v3/bengio03a.html>
+- Deng, Dong, Socher, Li, Li and Fei-Fei, *ImageNet: A large-scale hierarchical image database*, CVPR 2009, pp. 248-255. <https://doi.org/10.1109/CVPR.2009.5206848>
+- Krizhevsky, Sutskever and Hinton, *ImageNet Classification with Deep Convolutional Neural Networks*, NeurIPS 2012. <https://proceedings.neurips.cc/paper_files/paper/2012/file/c399862d3b9d6b76c8436e924a68c45b-Paper.pdf>
+- Mikolov, Yih and Zweig, *Linguistic Regularities in Continuous Space Word Representations*, NAACL-HLT 2013, pp. 746-751. <https://aclanthology.org/N13-1090/>
+- Pennington, Socher and Manning, *GloVe: Global Vectors for Word Representation*, EMNLP 2014, pp. 1532-1543. <https://aclanthology.org/D14-1162/>
+
+### Sources these lessons added
+
+- Jelinek, *Some of my Best Friends are Linguists*, invited talk at LREC 2004. The slide deck is the primary source for Jelinek's own wording of the quip about firing linguists, its occasion, and the three-model accuracy table used in lesson 0012. <http://www.lrec-conf.org/lrec2004/doc/jelinek.pdf>; the journal version is Language Resources and Evaluation 39(1):25-34, February 2005, <https://doi.org/10.1007/s10579-005-2693-4>
+- Papineni, Roukos, Ward and Zhu, *BLEU: a Method for Automatic Evaluation of Machine Translation*, ACL 2002. <https://aclanthology.org/P02-1040/>
+- Gers, Schmidhuber and Cummins, *Learning to Forget: Continual Prediction with LSTM*, Neural Computation 12(10):2451-2471, October 2000. The forget gate is here, not in the 1997 LSTM paper. <https://doi.org/10.1162/089976600300015015>
+- Hochreiter, Bengio, Frasconi and Schmidhuber, *Gradient Flow in Recurrent Nets: the Difficulty of Learning Long-Term Dependencies*. States the above-one and below-one boundary on the per-step scale factor explicitly. <https://www.bioinf.jku.at/publications/older/ch7.pdf>
+- Mikolov, Karafiat, Burget, Cernocky and Khudanpur, *Recurrent neural network based language model*, Interspeech 2010. <https://www.isca-archive.org/interspeech_2010/mikolov10_interspeech.pdf>
+- Graves, *Generating Sequences With Recurrent Neural Networks*, arXiv v1 4 August 2013. <https://arxiv.org/abs/1308.0850>
+- Hinton et al., *Deep Neural Networks for Acoustic Modeling in Speech Recognition: The Shared Views of Four Research Groups*, IEEE Signal Processing Magazine 29(6):82-97, November 2012. <https://doi.org/10.1109/MSP.2012.2205597>
+- He, Zhang, Ren and Sun, *Deep Residual Learning for Image Recognition*, arXiv v1 10 December 2015, for the 3.57 per cent ImageNet figure quoted in its abstract. <https://arxiv.org/abs/1512.03385>
+- *NVIDIA CUDA Programming Guide, version 1.0*, dated 6/23/2007. Chapter 1 is the primary source for the "wide, not fast" argument. <https://developer.download.nvidia.com/compute/cuda/1.0/NVIDIA_CUDA_Programming_Guide_1.0.pdf>
+- ILSVRC official results pages, the source for every top-five error figure in lesson 0017: <https://image-net.org/challenges/LSVRC/2011/results>, <https://image-net.org/challenges/LSVRC/2012/results.html>, <https://image-net.org/challenges/LSVRC/2013/results>
+
+### Corrections these lessons made to the scaffold's pointers
+
+- **The DOCTOR script.** The name does not appear in Weizenbaum's 1966 CACM paper, which describes only scripts making ELIZA answer as a Rogerian psychotherapist would. Lesson 0011 says so rather than repeating the name.
+- **The Jelinek quip.** The scaffold pointed at Jelinek's recollection second-hand. His own 2004 slides are online and give the wording as "Whenever I fire a linguist our system performance improves", attributed to his talk at a workshop in Wayne, Pennsylvania, in December 1988. Lesson 0012 quotes the slides.
+- **The LSTM forget gate.** The word *forget* does not occur anywhere in Hochreiter and Schmidhuber 1997, which has an input gate and an output gate. The forget gate is Gers, Schmidhuber and Cummins 2000. Lesson 0016 records the correction.
+- **AlexNet's headline number.** 15.3% and 16.4% are both real and come from different competition tracks. Lesson 0017 gives both and names the track each time.
