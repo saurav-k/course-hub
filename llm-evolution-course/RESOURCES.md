@@ -239,3 +239,73 @@ Journal citations were confirmed against Crossref, and arXiv identifiers against
 - **The Jelinek quip.** The scaffold pointed at Jelinek's recollection second-hand. His own 2004 slides are online and give the wording as "Whenever I fire a linguist our system performance improves", attributed to his talk at a workshop in Wayne, Pennsylvania, in December 1988. Lesson 0012 quotes the slides.
 - **The LSTM forget gate.** The word *forget* does not occur anywhere in Hochreiter and Schmidhuber 1997, which has an input gate and an output gate. The forget gate is Gers, Schmidhuber and Cummins 2000. Lesson 0016 records the correction.
 - **AlexNet's headline number.** 15.3% and 16.4% are both real and come from different competition tracks. Lesson 0017 gives both and names the track each time.
+
+## Added while writing lessons 0051 to 0057
+
+Every entry below was opened and read before it was used in one of these lessons.
+arXiv identifiers, titles, submission dates and first authors were confirmed against the arXiv metadata API; vendor pages were fetched and read.
+
+### The reasoning negative results (lesson 0051)
+
+- DeepSeek-AI, *DeepSeek-R1: Incentivizing Reasoning Capability in LLMs via Reinforcement Learning*, arXiv v1, 22 January 2025. Section 4.2, "Unsuccessful Attempts", is the primary source for the three process-reward-model limitations and the two tree-search failures. <https://arxiv.org/abs/2501.12948v1>
+- The released DeepSeek-R1 `config.json`, the source for the vocabulary size of 129,280. <https://huggingface.co/deepseek-ai/DeepSeek-R1/raw/main/config.json>
+- Kimi Team, *Kimi k1.5: Scaling Reinforcement Learning with LLMs*, arXiv, 22 January 2025. Same day as the above, and the abstract states the framework needs no tree search, value functions or process reward models. <https://arxiv.org/abs/2501.12599>
+- Uesato et al., *Solving math word problems with process- and outcome-based feedback*, arXiv, 25 November 2022. <https://arxiv.org/abs/2211.14275>
+- Lightman et al., *Let's Verify Step by Step*, arXiv, 31 May 2023. The PRM800K release of 800,000 step-level human labels. <https://arxiv.org/abs/2305.20050>
+- Feng et al., *AlphaZero-like Tree-Search can Guide Large Language Model Decoding and Training*, arXiv, 29 September 2023. <https://arxiv.org/abs/2309.17179>
+- Snell et al., *Scaling LLM Test-Time Compute Optimally can be More Effective than Scaling Model Parameters*, arXiv, 6 August 2024. <https://arxiv.org/abs/2408.03314>
+- Yue et al., *VAPO: Efficient and Reliable Reinforcement Learning for Advanced Reasoning Tasks*, arXiv, 7 April 2025. The live counter-argument that value-based methods are not finished. <https://arxiv.org/abs/2504.05118>
+
+### Post-training after PPO (lesson 0052)
+
+- Rafailov et al., *Direct Preference Optimization: Your Language Model is Secretly a Reward Model*, arXiv, 29 May 2023. <https://arxiv.org/abs/2305.18290>
+- Bai et al., *Constitutional AI: Harmlessness from AI Feedback*, arXiv, 15 December 2022. <https://arxiv.org/abs/2212.08073>
+- Lee et al., *RLAIF vs. RLHF*, arXiv, 1 September 2023. The same-size and same-checkpoint labeller results. <https://arxiv.org/abs/2309.00267>
+- Shao et al., *DeepSeekMath*, arXiv, 5 February 2024. Group relative policy optimisation. <https://arxiv.org/abs/2402.03300>
+- Ethayarajh et al., *KTO*, February 2024 <https://arxiv.org/abs/2402.01306>; Hong et al., *ORPO*, March 2024 <https://arxiv.org/abs/2403.07691>; Meng et al., *SimPO*, May 2024 <https://arxiv.org/abs/2405.14734>
+- Shumailov et al., *The Curse of Recursion: Training on Generated Data Makes Models Forget*, arXiv, 27 May 2023 <https://arxiv.org/abs/2305.17493>, and Gerstgrasser et al., *Is Model Collapse Inevitable? Breaking the Curse of Recursion by Accumulating Real and Synthetic Data*, arXiv, 1 April 2024 <https://arxiv.org/abs/2404.01413>. They must be read as a pair: the first assumes replacement, the second tests accumulation.
+- Anthropic, *Claude's new constitution*, 22 January 2026. Cited only for what the document is and its CC0 licence. <https://www.anthropic.com/news/claude-new-constitution>
+
+### Tools, protocols and agents (lessons 0053 and 0054)
+
+- Yao et al., *ReAct: Synergizing Reasoning and Acting in Language Models*, arXiv, 6 October 2022. <https://arxiv.org/abs/2210.03629>
+- Schick et al., *Toolformer: Language Models Can Teach Themselves to Use Tools*, arXiv, 9 February 2023. <https://arxiv.org/abs/2302.04761>
+- Anthropic, *Introducing the Model Context Protocol*, 25 November 2024. <https://www.anthropic.com/news/model-context-protocol>
+- The Model Context Protocol specification. Primary source for JSON-RPC, for the sentence about taking inspiration from the Language Server Protocol, and for the Security and Trust and Safety principles. <https://modelcontextprotocol.io/specification/2025-06-18>
+- The Linux Foundation, *Linux Foundation Announces the Formation of the Agentic AI Foundation*, 9 December 2025 <https://www.linuxfoundation.org/press/linux-foundation-announces-the-formation-of-the-agentic-ai-foundation>, and the protocol maintainers' announcement of the same day, which carries the 97 million monthly SDK downloads and 10,000 servers figures <https://blog.modelcontextprotocol.io/posts/2025-12-09-mcp-joins-agentic-ai-foundation/>
+- Greshake et al., *Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection*, arXiv, 23 February 2023. <https://arxiv.org/abs/2302.12173>
+- Wu, Liu, Zhang et al., *MCPMark*, arXiv, 28 September 2025. 52.56 percent pass@1 against 33.86 percent pass^4, and 16.2 turns and 17.4 tool calls per task. <https://arxiv.org/abs/2509.24002>
+- Kwa, West, Becker et al. (METR), *Measuring AI Ability to Complete Long Software Tasks*, arXiv, 18 March 2025 <https://arxiv.org/abs/2503.14499>, read together with METR's own page for the result, which carries a banner saying the doubling time in its text is out of date <https://metr.org/blog/2025-03-19-measuring-ai-ability-to-complete-long-tasks/>
+- Rabanser, Kapoor, Kirgis et al., *Towards a Science of AI Agent Reliability*, arXiv, 18 February 2026. <https://arxiv.org/abs/2602.16666>
+- Khanal, Tao, Zhou et al., *Beyond pass@1: A Reliability Science Framework for Long-Horizon LLM Agents*, arXiv, 31 March 2026. <https://arxiv.org/abs/2603.29231>
+- Wang, Bai, Sun et al., *The Long-Horizon Task Mirage? Diagnosing Where and Why Agentic Systems Break*, arXiv, 13 April 2026. <https://arxiv.org/abs/2604.11978>
+- OpenAI, *Function calling* API guide, cited only as documentation of the schema-in, structured-call-out convention. `platform.openai.com` serves it; `openai.com` itself refuses automated retrieval. <https://platform.openai.com/docs/guides/function-calling>
+
+### Multimodality (lesson 0055)
+
+- Dosovitskiy et al., *An Image is Worth 16x16 Words*, arXiv, 22 October 2020. <https://arxiv.org/abs/2010.11929>
+- Radford et al., *Robust Speech Recognition via Large-Scale Weak Supervision* (Whisper), arXiv, 6 December 2022. The 680,000 hours figure. <https://arxiv.org/abs/2212.04356>
+- Alayrac et al., *Flamingo*, arXiv, 29 April 2022 <https://arxiv.org/abs/2204.14198>; Liu et al., *Visual Instruction Tuning* (LLaVA), arXiv, 17 April 2023 <https://arxiv.org/abs/2304.08485>
+- Gemini Team, *Gemini: A Family of Highly Capable Multimodal Models*, arXiv, 19 December 2023 <https://arxiv.org/abs/2312.11805>; Chameleon Team, *Chameleon: Mixed-Modal Early-Fusion Foundation Models*, arXiv, 16 May 2024 <https://arxiv.org/abs/2405.09818>
+- Yue et al., *MMMU*, arXiv, 27 November 2023. The 11,500 questions and the 56 and 59 percent figures, as of that date. <https://arxiv.org/abs/2311.16502>
+- Wei et al., *DeepSeek-OCR: Contexts Optical Compression*, arXiv, 21 October 2025 <https://arxiv.org/abs/2510.18234>, and *DeepSeek-OCR 2: Visual Causal Flow*, arXiv, 28 January 2026 <https://arxiv.org/abs/2601.20552>
+- Liang, Ying et al., *Visual Merit or Linguistic Crutch? A Close Look at DeepSeek-OCR*, arXiv, 7 January 2026. The semantic-corruption experiment, and the reason the compression claim is quoted with a caveat. <https://arxiv.org/abs/2601.03714>
+
+### Where we are now, and what is still open (lessons 0056 and 0057)
+
+- Anthropic platform documentation, *Introducing Claude Fable 5 and Claude Mythos 5*. The 9 June 2026 availability date, the 1M context, the 128k output limit, the pricing, always-on thinking with an effort parameter, and the fact that raw chain of thought is never returned. <https://platform.claude.com/docs/en/about-claude/models/introducing-claude-fable-5-and-claude-mythos-5>
+- Anthropic, *Introducing Claude Opus 5*, 24 July 2026. <https://www.anthropic.com/news/claude-opus-5>
+- Anthropic, *Redeploying Fable 5*, 30 June 2026, updated 1 July 2026. Primary source for every date in the export-control episode, and for the over-99-percent classifier figure, which is the company's own. <https://www.anthropic.com/news/redeploying-fable-5>
+- Simon Willison, *The new GPT-5.6 family: Luna, Terra, Sol*, 9 July 2026. Used as a secondary source because `openai.com` returns HTTP 403 to automated retrieval, and also the source for both halves of the SWE-bench Pro episode. <https://simonwillison.net/2026/Jul/9/gpt-5-6/>
+- Phan, Gatti et al., *Humanity's Last Exam*, arXiv, 24 January 2025. <https://arxiv.org/abs/2501.14249>
+- Jain, Han et al., *LiveCodeBench: Holistic and Contamination Free Evaluation of Large Language Models for Code*, arXiv, 12 March 2024. <https://arxiv.org/abs/2403.07974>
+- Turpin et al., *Language Models Don't Always Say What They Think*, arXiv, 7 May 2023 <https://arxiv.org/abs/2305.04388>, and Lanham et al., *Measuring Faithfulness in Chain-of-Thought Reasoning*, arXiv, 17 July 2023 <https://arxiv.org/abs/2307.13702>
+- Villalobos, Ho, Sevilla et al., *Will we run out of data? Limits of LLM scaling based on human-generated data*, arXiv. The 2026 to 2032 projection. <https://arxiv.org/abs/2211.04325>
+
+### Corrections and sourcing notes these lessons made
+
+- **The two January 2025 papers are the same day, not days apart.** DeepSeek-R1 and Kimi k1.5 were both submitted to arXiv on 22 January 2025. Lesson 0051 says so.
+- **The Anthropic constitution announcement is dated 22 January 2026**, not 21 January, according to the page itself.
+- **`openai.com` refuses automated retrieval and `platform.openai.com` does not.** Any OpenAI product claim in this range is therefore either taken from the platform documentation or labelled as third-party sourced with the third party named.
+- **METR's own page disclaims the doubling-time figure in its text.** Lesson 0054 cites the trend and quotes the disclaimer rather than repeating a current number.
+- **The DeepSeek-OCR compression claim has a published challenge.** Lesson 0055 cites both, because a January 2026 study reports that accuracy falls from roughly 90 percent to roughly 20 percent once linguistic support is removed.
