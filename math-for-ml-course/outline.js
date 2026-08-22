@@ -15,6 +15,20 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0000-one-line-of-a-paper.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Eigenvalues, SVD, and PCA",
+      "lessons": [
+        {
+          "title": "Some directions a matrix only stretches",
+          "href": "lessons/0060-eigenvectors-the-directions-a-matrix-does-not-turn.html"
+        },
+        {
+          "title": "One polynomial holds every eigenvalue",
+          "href": "lessons/0061-the-characteristic-equation-trace-and-determinant.html"
+        }
+      ]
     }
   ],
   "extras": [
