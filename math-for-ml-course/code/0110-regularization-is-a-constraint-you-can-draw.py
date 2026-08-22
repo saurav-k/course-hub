@@ -14,7 +14,7 @@ Finally it demonstrates the trade-off the page owes: on two predictors
 correlated at 0.92 by construction, the lasso's choice between them is
 unstable across bootstrap resamples.
 
-    python3 0130-regularization-is-a-constraint-you-can-draw.py
+    python3 0110-regularization-is-a-constraint-you-can-draw.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

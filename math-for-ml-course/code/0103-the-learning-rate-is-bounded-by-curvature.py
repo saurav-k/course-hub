@@ -18,7 +18,7 @@ the start is conservative, and the empirical answer is larger.
 A threshold derived on a quadratic is exact on a quadratic and a guide
 everywhere else. Knowing which of those you are holding is the lesson.
 
-    python3 0123-the-learning-rate-is-bounded-by-curvature.py
+    python3 0103-the-learning-rate-is-bounded-by-curvature.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

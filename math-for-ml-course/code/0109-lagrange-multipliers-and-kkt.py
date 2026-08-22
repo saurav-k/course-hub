@@ -13,7 +13,7 @@ multiplier IS the eigenvalue IS the captured variance.
 It then measures the multiplier as a price, by re-solving a small constrained
 problem at a ladder of constraint levels and differencing.
 
-    python3 0129-lagrange-multipliers-and-kkt.py
+    python3 0109-lagrange-multipliers-and-kkt.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

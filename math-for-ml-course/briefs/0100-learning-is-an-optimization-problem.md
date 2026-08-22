@@ -1,6 +1,6 @@
 # M06 L01 - Learning is an optimization problem
 
-**Page `lessons/0120-learning-is-an-optimization-problem.html`** &middot; module M06, lesson 1 of 12 &middot; program `code/0120-learning-is-an-optimization-problem.py` &middot; dataset `datasets/m06-credit.csv`
+**Page `lessons/0100-learning-is-an-optimization-problem.html`** &middot; module M06, lesson 1 of 12 &middot; program `code/0100-learning-is-an-optimization-problem.py` &middot; dataset `datasets/m06-credit.csv`
 
 **Label:** `core`
 **Rung:** `med` / working

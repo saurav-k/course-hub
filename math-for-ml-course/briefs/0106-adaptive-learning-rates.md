@@ -1,6 +1,6 @@
 # M06 L07 - Adaptive learning rates: one step size per parameter
 
-**Page `lessons/0126-adaptive-learning-rates.html`** &middot; module M06, lesson 7 of 12 &middot; program `code/0126-adaptive-learning-rates.py` &middot; dataset `datasets/m06-credit.csv`
+**Page `lessons/0106-adaptive-learning-rates.html`** &middot; module M06, lesson 7 of 12 &middot; program `code/0106-adaptive-learning-rates.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

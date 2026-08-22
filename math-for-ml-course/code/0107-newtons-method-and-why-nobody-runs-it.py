@@ -10,7 +10,7 @@ It also demonstrates the two theorems the page proves:
   - Newton is affine invariant: rescale a feature column by a million and
     its iteration count does not move, while gradient descent's does.
 
-    python3 0127-newtons-method-and-why-nobody-runs-it.py
+    python3 0107-newtons-method-and-why-nobody-runs-it.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

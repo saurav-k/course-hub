@@ -12,7 +12,7 @@ It then does three things the page needs:
   - shows AdaGrad's effective rate decaying monotonically, which is what
     RMSProp's moving average was invented to repair.
 
-    python3 0126-adaptive-learning-rates.py
+    python3 0106-adaptive-learning-rates.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

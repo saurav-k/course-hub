@@ -7,7 +7,7 @@ from the same start. The ratio is what turns "momentum helps" into a number.
 It also checks the terminal-velocity formula directly, by feeding a constant
 gradient and comparing the converged velocity against -eta*g/(1 - alpha).
 
-    python3 0125-momentum-and-when-it-helps.py
+    python3 0105-momentum-and-when-it-helps.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

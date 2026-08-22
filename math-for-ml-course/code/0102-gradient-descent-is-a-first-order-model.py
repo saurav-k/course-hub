@@ -9,7 +9,7 @@ and running it here - before any optimizer exists - is the right place for it.
 Every optimizer in the rest of M06 trusts this gradient. If it is wrong,
 nothing downstream can be right, and nothing downstream will tell you.
 
-    python3 0122-gradient-descent-is-a-first-order-model.py
+    python3 0102-gradient-descent-is-a-first-order-model.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """
