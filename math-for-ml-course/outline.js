@@ -41,6 +41,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0064-positive-definiteness-and-its-eigenvalue-test.html"
         }
       ]
+    },
+    {
+      "n": "→",
+      "title": "The road ahead",
+      "lessons": [
+        {
+          "title": "Every module was asking one table a different question",
+          "href": "lessons/0200-one-dataset-eleven-modules.html"
+        },
+        {
+          "title": "Two modules compute the same two numbers by different means",
+          "href": "lessons/0201-three-routes-same-coefficients.html"
+        },
+        {
+          "title": "The same slope is worthless on eight rows and decisive on twenty thousand",
+          "href": "lessons/0202-what-a-coefficient-is-worth.html"
+        }
+      ]
     }
   ],
   "extras": [
