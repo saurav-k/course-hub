@@ -74,3 +74,10 @@ A predicted box and a ground-truth box with integer corners chosen so the inters
 
 - scikit-learn's own definition of data leakage, quoted and linked.
 - The PASCAL VOC detection criterion for the IoU threshold.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The worked example is **intersection over union on two boxes**, and the leakage is found on `tickets.csv`: 510 of 527 test customers are already in training. Both theorems are proved on the page and then re-checked numerically by the program on the real customer sets.
+The Venn archetype is drawn **four times in one figure**, one per operation, with the real cardinalities under each, so inclusion-exclusion is visible rather than stated.

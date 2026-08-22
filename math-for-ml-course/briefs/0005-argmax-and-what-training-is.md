@@ -66,3 +66,10 @@ Three logits. Compute max, argmax, and then softmax by hand (reusing the arithme
 ## Sources
 
 - Goodfellow, Bengio and Courville, *Deep Learning*, for the softmax naming point, quoted.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The page proves **softmax shift invariance** and spends it twice, once as the stabilisation `0007` needs and once as the reason temperature never moves a prediction. The program checks the second claim on all 5,000 rows at four temperatures.
+The bar chart uses one real row of `tickets.csv`, so two of its three logits are negative and it is drawn against a zero line.

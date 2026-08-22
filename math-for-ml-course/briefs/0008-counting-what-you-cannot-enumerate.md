@@ -75,3 +75,10 @@ A grid of 3 learning rates, 4 batch sizes and 2 optimisers: 24 runs by the multi
 
 - A primary source for the dropout `2^n` claim, quoted with its own wording.
 - A primary source for the coalition attribution weight.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The growth chart carries `n`, `n^2`, `2^n` and `n!` and marks the crossing at **n = 4**, not the later crossing a reader might guess: 24 against 16, while both are still checkable by hand.
+Pascal's rule is **drawn** rather than only stated, as a triangle with one cell and its two parents highlighted and each row's total annotated as a power of two, so the second and third theorems share one figure. The program enumerates all 2^12 subsets of a real feature set and asserts the count three ways.

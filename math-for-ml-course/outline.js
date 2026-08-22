@@ -17,6 +17,48 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "01",
+      "title": "Foundations",
+      "lessons": [
+        {
+          "title": "Every formula is a loop you already know how to write",
+          "href": "lessons/0001-reading-a-formula.html"
+        },
+        {
+          "title": "A split is a partition, and leakage is a non-empty intersection",
+          "href": "lessons/0002-sets-and-splits.html"
+        },
+        {
+          "title": "A model is a function, and depth is composition",
+          "href": "lessons/0003-a-model-is-a-function.html"
+        },
+        {
+          "title": "A monotone change moves every number and no ordering",
+          "href": "lessons/0004-the-shape-of-a-function.html"
+        },
+        {
+          "title": "Training is an argmin, and prediction is an argmax",
+          "href": "lessons/0005-argmax-and-what-training-is.html"
+        },
+        {
+          "title": "A logarithm answers one question: what exponent?",
+          "href": "lessons/0006-logs-and-exponentials.html"
+        },
+        {
+          "title": "Log space is where the arithmetic still works",
+          "href": "lessons/0007-why-ml-lives-in-log-space.html"
+        },
+        {
+          "title": "Three questions decide every counting problem",
+          "href": "lessons/0008-counting-what-you-cannot-enumerate.html"
+        },
+        {
+          "title": "A bound is a claim about growth, not about your data",
+          "href": "lessons/0009-limits-and-reading-big-o.html"
+        }
+      ]
+    },
+    {
       "n": "04",
       "title": "Eigenvalues, SVD, and PCA",
       "lessons": [
