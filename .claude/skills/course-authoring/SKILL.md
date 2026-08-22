@@ -55,6 +55,11 @@ Every one of these ships green, renders wrong, and reaches no console.
 It is the difference between "diagram-heavy" and "three diagrams, two kinds, one of them quantitative".
 Read it on every branch.
 
+Two of those bars decide the shape of a page rather than its polish.
+
+- **The big picture comes first.** Every content page opens with an orientation figure, before the first body section, showing where this idea sits in the whole. A reader who sees the opening sentence and that figure alone can say what the page is about and why it exists.
+- **Fewer words.** 1,800 prose words per page, 400 prose words per figure. When a paragraph and a figure say the same thing, the paragraph goes.
+
 ## Facts
 
 Every technical claim carries a link to a source you fetched and read during this session.

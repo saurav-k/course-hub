@@ -4,6 +4,9 @@ Four page types ship from this repository.
 A course picks one content shape in its `MISSION.md` and stays in it.
 Mixing shapes inside a course is why a reader cannot tell whether the next page is ten minutes or forty.
 
+Every one of them opens with the big picture: a content page with its orientation figure, a map page with the map itself.
+The counts behind that are in [`pedagogy.md`](pedagogy.md).
+
 ## The hub landing page
 
 `index.html` at the repository root. One card per course, grouped by subject.
@@ -39,7 +42,7 @@ Do not restate the map in `BUILDER-SPEC.md`: the seven pre-existing courses did,
 
 `<course>/lessons/NNNN-kebab-case.html`. Uses `main.wrap`.
 
-One tight idea, 8 to 12 reading minutes.
+One tight idea, 1,800 prose words at the most.
 Whether it is called a lesson, a chapter, or a part is the course's own word for the same contract.
 
 Owes, in this order:
@@ -48,14 +51,18 @@ Owes, in this order:
 2. `<h1>`: the one idea, phrased as a claim with a verb in it rather than a topic.
 3. `.paper-meta`: rung pill, reading-time pill, and the attribution or framing line.
 4. `.card.tldr`: the one-minute version.
-5. The mental model, carrying the first diagram, before any formula.
-6. The mechanism, every symbol named in words.
-7. The trade-off, named in the same section as the technique that incurs it.
-8. Quizzes, after the idea is fully worked.
-9. `.teacher-note`.
-10. `Primary source to go deeper`.
-11. `.pager`.
-12. `<footer>`.
+5. **The orientation figure**: where this idea sits in the whole, before any body section.
+6. The mental model, before any formula.
+7. The mechanism, every symbol named in words.
+8. The trade-off, named in the same section as the technique that incurs it.
+9. Quizzes, after the idea is fully worked.
+10. `.teacher-note`.
+11. `Primary source to go deeper`.
+12. `.pager`.
+13. `<footer>`.
+
+Item 5 is the one that decides whether the page reads as a wall.
+The reader gets the big picture before the detail, and every paragraph after it that the figure already says is a paragraph to cut.
 
 The counts that make this a course page rather than a blog post are in [`pedagogy.md`](pedagogy.md).
 
@@ -63,7 +70,9 @@ The counts that make this a course page rather than a blog post are in [`pedagog
 
 A **chapter** indexes many topics rather than developing one, so a reader can use it during a review.
 Every topic is its own `<h3 id="kebab-case">`, the id is what the glossary links to, and **an id is a public URL**: the validator strips fragments before checking a link, so a renamed anchor breaks the glossary silently.
-A chapter still owes everything above; its diagram floor rises with its topic count, roughly one diagram per two topics.
+A chapter still owes everything above, the word ceiling included.
+Its diagram floor rises with its topic count, roughly one diagram per two topics, and its orientation figure is the map of the topics it indexes.
+A chapter that cannot hold its topics under the ceiling is several chapters, and the fix is to split it rather than to cut it.
 
 A **lab page** carries at least one `.lab` with a real goal, real commands, and a measurable outcome, and closes with a `ul.checklist` rather than only a quiz.
 Prefer invocations that actually run. Note where a flag is version-sensitive.

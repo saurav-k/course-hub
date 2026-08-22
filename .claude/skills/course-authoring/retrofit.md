@@ -43,9 +43,11 @@ Mechanical, reviewable at a glance:
 
 Judgement, one page per commit:
 
-6. **Raise the diagrams to the floor.** A page at one flowchart needs a second kind, chosen by what the reader is confused about rather than by what is quick to draw. This is authoring, not formatting, so treat each page as a small `new-lesson.md` job.
-7. **Draw the quantitative claims.** A course that states magnitudes and draws none needs hand-authored `svg.chart` figures. Usually one or two pages carry most of the numbers; start there.
-8. **Rebalance the answer indices** across the course, not within a page.
+6. **Give every page its orientation figure.** The big picture, before the first body section. No page in the hub predating this bar has one, so this is the largest single item in any retrofit and it is the one that changes how the course reads. Draw it from the course map: the module the page sits in, the page before it, and what it unlocks.
+7. **Bring the page under the word ceiling.** Start with the paragraphs a figure already says, which cost the reader nothing to lose. A page still over 1,800 prose words after that is two pages, and splitting it is a map change: new numbers at the end, never a renumber.
+8. **Raise the diagrams to the floor.** A page at one flowchart needs a second kind, chosen by what the reader is confused about rather than by what is quick to draw. This is authoring, not formatting, so treat each page as a small `new-lesson.md` job.
+9. **Draw the quantitative claims.** A course that states magnitudes and draws none needs hand-authored `svg.chart` figures. Usually one or two pages carry most of the numbers; start there.
+10. **Rebalance the answer indices** across the course, not within a page.
 
 ## The ordering
 

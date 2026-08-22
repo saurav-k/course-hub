@@ -37,6 +37,23 @@ MIN_DIAGRAM_KINDS_PER_COURSE: int = 4
 MIN_QUIZZES_PER_PAGE: int = 2
 MAX_ANSWER_INDEX_SHARE: float = 0.40
 
+# The orientation figure: the big picture, before the detail. It sits between
+# the one-minute version and the first body section, so at most one <h2> - the
+# one-minute version's own - may open before it. The word cap is the backstop
+# for a page that puts its whole essay under a single heading: the longest
+# one-minute version in the hub is 206 words, so 250 leaves a framing sentence
+# and nothing more. Three content lines is what "where this sits in the whole"
+# costs at minimum: what came before, this, what it enables.
+MAX_SECTIONS_BEFORE_ORIENTATION: int = 1
+MAX_WORDS_BEFORE_ORIENTATION: int = 250
+MIN_ORIENTATION_LINES: int = 3
+
+# Fewer words, more of the meaning carried by the picture. Both numbers are the
+# measured ceiling of the pages that read best rather than a wish: every page in
+# `llm-papers-course` and `llm-inference-course` sits under both.
+MAX_PROSE_WORDS_PER_PAGE: int = 1800
+MAX_PROSE_WORDS_PER_FIGURE: int = 400
+
 QUIZ_BLOCK = re.compile(r'<div class="q" data-answer="(\d+)">(.*?)</div>\s*</div>', re.S)
 OPTION = re.compile(r'<button class="q-opt">(.*?)</button>', re.S)
 FIGURE = re.compile(r"<figure[^>]*>(.*?)</figure>", re.S)
@@ -61,6 +78,24 @@ MERMAID_LABEL = re.compile(r"[\[\(\{]+([^\[\]\(\)\{\}]+)[\]\)\}]+")
 ENTITY = re.compile(r"[&#](?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);|#\d+;")
 
 CHART_SEMANTIC = re.compile(r"^(?:m|s|f|t|sw)-[a-z0-9-]+$")
+
+# Prose is what is left of the reading column once everything that is not prose
+# is taken out of it: the figures, the code, the quizzes and the page chrome.
+# It is the quantity the word bars are stated in, because it is the quantity a
+# reader has to hold.
+MAIN = re.compile(r"<main[^>]*>(.*?)</main>", re.S)
+FIGURE_BLOCK = re.compile(r"<figure[^>]*>.*?</figure>", re.S)
+PRE_BLOCK = re.compile(r"<pre[^>]*>.*?</pre>", re.S)
+SCRIPTISH = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S)
+QUIZ_WRAPPER = re.compile(
+    r'<div class="quiz">.*?(?=<h2|<div class="teacher-note"|<(?:div|nav) class="pager"|\Z)', re.S
+)
+NAV_BLOCK = re.compile(r"<nav[^>]*>.*?</nav>", re.S)
+FOOTER_BLOCK = re.compile(r"<footer[^>]*>.*?</footer>", re.S)
+PAGER_BLOCK = re.compile(r'<(div|nav) class="pager".*?</\1>', re.S)
+NOT_PROSE = (SCRIPTISH, NAV_BLOCK, FOOTER_BLOCK, PAGER_BLOCK, QUIZ_WRAPPER, FIGURE_BLOCK, PRE_BLOCK)
+SECTION_HEADING = re.compile(r"<h2\b", re.I)
+SVG_TEXT = re.compile(r"<text\b", re.I)
 
 
 @dataclass(frozen=True)
@@ -267,6 +302,109 @@ def check_figures(page: Path, src: str, css_classes: frozenset[str]) -> list[Fin
     return found
 
 
+def reading_column(src: str) -> str:
+    """The page body, which is what a reader reads. Chrome lives outside it."""
+    body = MAIN.search(src)
+    return body.group(1) if body else src
+
+
+def prose(fragment: str) -> int:
+    """Words of prose in a fragment of the reading column."""
+    for pattern in NOT_PROSE:
+        fragment = pattern.sub(" ", fragment)
+    return len(plain(fragment).split())
+
+
+def figure_lines(body: str) -> int:
+    """How much a figure actually draws.
+
+    A Mermaid diagram is counted in content lines of graph source, which works
+    across every kind the hub uses without parsing any of them, and a
+    hand-authored chart in its ``<text>`` labels. A two-box picture cannot place
+    an idea inside a larger whole, and the count is what says so.
+    """
+    lines = 0
+    for graph in MERMAID_BLOCK.findall(body):
+        source = [line.strip() for line in plain(graph).splitlines()]
+        content = [
+            line
+            for line in source[1:]
+            if line and not line.startswith("%%") and line not in {"end"}
+        ]
+        lines += len(content)
+    return lines + len(SVG_TEXT.findall(body))
+
+
+def check_orientation(page: Path, src: str) -> list[Finding]:
+    """The big picture comes first.
+
+    Every content page opens with a figure that says where this idea sits in the
+    whole: what it is part of, what came before it, what it enables. It is the
+    page's first figure and it stands between the one-minute version and the
+    first body section, so a reader who looks at nothing else knows what the
+    page is about and why it exists.
+    """
+    if not is_lesson(page):
+        return []
+    body = reading_column(src)
+    start = body.find("<figure")
+    if start < 0:
+        return [Finding(rel(page), "WARN", "no orientation figure; a content page opens with the big picture")]
+
+    found: list[Finding] = []
+    lead = body[:start]
+    sections = len(SECTION_HEADING.findall(lead))
+    if sections > MAX_SECTIONS_BEFORE_ORIENTATION:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"the first figure arrives {sections} sections in; the orientation figure belongs "
+                    "between the one-minute version and the first body section")
+        )
+    words = prose(lead)
+    if words > MAX_WORDS_BEFORE_ORIENTATION:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{words} words of prose before the first figure, the cap is "
+                    f"{MAX_WORDS_BEFORE_ORIENTATION}; the reader gets the picture first")
+        )
+    end = body.find("</figure>", start)
+    drawn = figure_lines(body[start:end if end > 0 else len(body)])
+    if drawn < MIN_ORIENTATION_LINES:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"the orientation figure draws {drawn} thing(s), the floor is {MIN_ORIENTATION_LINES}; "
+                    "it must show what came before this idea, the idea, and what it enables")
+        )
+    return found
+
+
+def check_word_load(page: Path, src: str) -> list[Finding]:
+    """Fewer words, and more of the meaning carried by the picture.
+
+    Both ceilings are measured off the pages that read best rather than chosen:
+    every page in ``llm-papers-course`` and ``llm-inference-course`` clears them.
+    When a paragraph and a figure say the same thing, the paragraph goes.
+    """
+    if not is_lesson(page):
+        return []
+    found: list[Finding] = []
+    words = prose(reading_column(src))
+    figures = len(FIGURE.findall(src))
+    if words > MAX_PROSE_WORDS_PER_PAGE:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{words} words of prose, the ceiling is {MAX_PROSE_WORDS_PER_PAGE}; "
+                    "cut what a figure already says, or split the page")
+        )
+    if figures and words / figures > MAX_PROSE_WORDS_PER_FIGURE:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{round(words / figures)} words per figure, the ceiling is {MAX_PROSE_WORDS_PER_FIGURE}; "
+                    "the picture is not carrying its share")
+        )
+    return found
+
+
 def check_math(page: Path, src: str) -> list[Finding]:
     return [
         Finding(rel(page), "FAIL", "a .math block has no .gloss naming its symbols")
@@ -422,6 +560,8 @@ def main() -> int:
         findings += check_design_system(page, src)
         findings += check_mermaid(page, src)
         findings += check_figures(page, src, css_classes)
+        findings += check_orientation(page, src)
+        findings += check_word_load(page, src)
         findings += check_math(page, src)
         findings += check_signposting(page, src)
         quiz_findings, answers = check_quizzes(page, src)
