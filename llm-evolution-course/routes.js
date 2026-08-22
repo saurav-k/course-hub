@@ -252,6 +252,10 @@ window.COURSE_ROUTES = {
     {
       "title": "Chronicle",
       "href": "reference/chronicle.html"
+    },
+    {
+      "title": "Frontier watch",
+      "href": "reference/what-to-watch.html"
     }
   ],
   "routes": [
