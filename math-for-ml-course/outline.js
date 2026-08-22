@@ -85,6 +85,60 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "06",
+      "title": "Optimization",
+      "lessons": [
+        {
+          "title": "Learning is an optimization problem",
+          "href": "lessons/0100-learning-is-an-optimization-problem.html"
+        },
+        {
+          "title": "Convexity, and the one guarantee it buys",
+          "href": "lessons/0101-convexity-and-the-one-guarantee-it-buys.html"
+        },
+        {
+          "title": "Gradient descent is a first-order model, taken one step at a time",
+          "href": "lessons/0102-gradient-descent-is-a-first-order-model.html"
+        },
+        {
+          "title": "The learning rate is bounded by curvature",
+          "href": "lessons/0103-the-learning-rate-is-bounded-by-curvature.html"
+        },
+        {
+          "title": "Stochastic gradient descent: paying in noise to buy iterations",
+          "href": "lessons/0104-stochastic-gradient-descent.html"
+        },
+        {
+          "title": "Momentum, and when averaging past gradients actually helps",
+          "href": "lessons/0105-momentum-and-when-it-helps.html"
+        },
+        {
+          "title": "Adaptive learning rates: one step size per parameter",
+          "href": "lessons/0106-adaptive-learning-rates.html"
+        },
+        {
+          "title": "Newton's method, and why nobody runs it at scale",
+          "href": "lessons/0107-newtons-method-and-why-nobody-runs-it.html"
+        },
+        {
+          "title": "Saddle points and plateaus: what actually slows deep training",
+          "href": "lessons/0108-saddle-points-and-plateaus.html"
+        },
+        {
+          "title": "Constrained optimization: Lagrange multipliers and KKT",
+          "href": "lessons/0109-lagrange-multipliers-and-kkt.html"
+        },
+        {
+          "title": "Regularization is a constraint you can draw",
+          "href": "lessons/0110-regularization-is-a-constraint-you-can-draw.html"
+        },
+        {
+          "title": "Early stopping is the regularizer you did not write",
+          "href": "lessons/0111-early-stopping.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Calculus for machine learning",
       "lessons": [

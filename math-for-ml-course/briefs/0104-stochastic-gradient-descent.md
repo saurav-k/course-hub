@@ -1,0 +1,96 @@
+# M06 L05 - Stochastic gradient descent: paying in noise to buy iterations
+
+**Page `lessons/0104-stochastic-gradient-descent.html`** &middot; module M06, lesson 5 of 12 &middot; program `code/0104-stochastic-gradient-descent.py` &middot; dataset `datasets/m06-credit.csv`
+
+## The single tight idea
+
+A noisy gradient from 32 rows is a better deal than an exact one from twenty thousand, because accuracy in the gradient buys less than iterations do.
+
+## Prerequisites
+
+| Needs | From |
+|---|---|
+| The update rule | M06 L03 |
+| The step-size ceiling and the condition number | M06 L04 |
+| **The mean of `m` samples is unbiased, and its standard error falls as `1/sqrt(m)`** | **M08 Expectation, limits, simulation - a FORWARD reference, see below** |
+
+**Forward edge, flagged (scout amendment A1).** M08 sits two modules after M06 in the approved order, and this page needs one result from it.
+**Resolution adopted here:** this page **states** the result in words, draws it, and cross-links forward. M08 owns the derivation. That is r1 section 4.5's rule - "a concept you do not own gets one sentence and a link, never a derivation" - applied across a forward edge instead of a backward one. The page says openly that the proof is in M08 so the reader is not left wondering whether they missed it.
+
+## Beats, in order
+
+1. **The objective is a sum over rows**, seeded on L01. A sum is an average, and an average can be sampled.
+2. **The minibatch gradient is unbiased, and its standard error is `sigma/sqrt(m)`.** One sentence, a forward link to M08, and a scatter figure that shows it rather than proving it.
+3. **The arithmetic of diminishing returns.** 10,000 rows against 100 costs 100 times the computation and reduces the standard error by 10.
+4. **So the right comparison is total work, not per-step accuracy.** Batch gradient descent needs work proportional to `n*log(1/eps)`; SG needs work proportional to `1/eps`, and **neither the per-iteration cost nor that bound depends on `n`**. That independence is why deep learning is affordable, and it is the page's key callout.
+5. **The bill.** With a *fixed* step size, SG converges linearly to a **neighbourhood** of the optimum and no further. A training loss that flattens and jitters is this, drawn.
+6. **The fix, with its exact condition.** `sum(alpha_k) = infinity` and `sum(alpha_k^2) < infinity`. With `alpha_k = beta/(gamma + k)` the expected gap is `O(1/k)`.
+7. **Batch size and learning rate are one knob.** The linear scaling rule, with the ResNet-50 numbers.
+8. **Trade-off.** The noise that buys iterations is the same noise that stops you converging. The schedule is how you buy the first and then stop paying for the second.
+
+## Named theorem and its stated proof (D4)
+
+**Theorem** (Bottou, Curtis & Nocedal, *Optimization Methods for Large-Scale Machine Learning*, Thm 4.6, strongly convex objective, fixed stepsize). Run SG with a fixed step `a` satisfying `0 < a <= mu/(L*M_G)`. Then the expected optimality gap satisfies
+`E[F(w_k) - F*] <= a*L*M/(2*c*mu) + (1 - a*c*mu)^(k-1) * ( F(w_1) - F* - a*L*M/(2*c*mu) )`,
+which tends to `a*L*M/(2*c*mu)` as `k` grows.
+
+**Stated proof, in the three moves the page carries.**
+
+*Move 1, one step of the recursion.* Smoothness of `F` with constant `L`, plus the bounds on the first and second moments of the stochastic direction, give a per-step inequality of the form
+`E[F(w_{k+1})] - F(w_k) <= -mu*a*||grad F(w_k)||^2 + (a^2*L/2)*(M + M_G*||grad F(w_k)||^2)`.
+The first term is the progress the step buys. The second is the price the noise charges, and **it does not vanish as the gradient does**, because of the constant `M`.
+
+*Move 2, strong convexity turns the gradient norm into the gap.* For a `c`-strongly convex `F`, `||grad F(w)||^2 >= 2*c*(F(w) - F*)`. Substituting, and using the step-size condition to keep the coefficient of the gap negative, gives
+`E[F(w_{k+1}) - F*] <= (1 - a*c*mu)*E[F(w_k) - F*] + a^2*L*M/2`.
+
+*Move 3, solve the affine recursion.* A recursion `d_{k+1} <= r*d_k + q` with `0 < r < 1` has fixed point `q/(1 - r)` and satisfies `d_k - q/(1-r) <= r^(k-1) * (d_1 - q/(1-r))`. Here `r = 1 - a*c*mu` and `q = a^2*L*M/2`, so the fixed point is `a*L*M/(2*c*mu)`, which is the theorem. **QED**
+
+**What the page must make the reader see.** The fixed point is **proportional to the step size `a`** and to the noise level `M`. Halving the step halves the radius of the ball and also slows the contraction `r`. That trade is the whole reason step-size schedules exist, and it falls straight out of move 3.
+
+**Companion result, stated.** With `alpha_k = beta/(gamma + k)` and `beta > 1/(c*mu)`, the same source's Theorem 4.7 gives `E[F(w_k) - F*] <= nu/(gamma + k)`, an `O(1/k)` rate. The conditions `sum(alpha) = infinity, sum(alpha^2) < infinity` are what that schedule satisfies and a `1/k^2` schedule does not.
+
+## Planned figures
+
+1. **Orientation, `flowchart`.** "L03: one gradient costs a pass over all n rows" into "THIS PAGE - a sampled gradient costs 32" into "L06 momentum and L07 Adam, all built on the sampled one", with "why deep learning is affordable" dotted in.
+2. **`svg.chart`.** Three clouds of sampled gradient estimates at `m = 1`, `32`, `1024` around the true gradient in `m-gold`, spreads drawn to the measured `1/sqrt(m)` ratio. Kills "a minibatch gradient is wrong": it is unbiased and noisy, which are different things.
+3. **`svg.chart`.** Total work against `n`: `n*log(1/eps)` in `s-alarm` and a flat `1/eps` in `s-signal`, crossover marked. Kills "batch is more accurate so it must be better".
+4. **`svg.chart`.** Training loss against step for a fixed step size, flattening into a noisy `s-alarm` band with the noise-ball radius annotated, against a decayed schedule in `s-signal` that keeps falling. Kills the module's most damaging misconception.
+
+## The worked example, in eight parts
+
+The linear scaling rule on ResNet-50 and ImageNet. Every figure is **quoted** from Goyal et al., Table 1.
+
+1. Facebook trained ResNet-50 on ImageNet at minibatch 8,192 across 256 GPUs in one hour.
+2. The baseline: 8 GPUs, 32 images each, `kn = 256`, `eta = 0.1`, top-1 validation error `23.60% +/- 0.12`.
+3. The batch grew by `8192/256 = 32`, so the rule says the learning rate grows by 32: `0.1 * 32 = 3.2`. (Derived from the rule; it matches the paper's table.)
+4. Large batch, **no** warmup, `eta = 3.2`: `24.84% +/- 0.37`.
+5. Large batch, **constant** warmup: `25.88% +/- 0.56`.
+6. Large batch, **gradual** warmup: `23.74% +/- 0.09`.
+7. Read them in order. Scaling the batch alone costs 1.24 points. The *wrong* warmup was worse than none, costing 2.28. Gradual warmup closes the gap to 0.14, inside the run-to-run spread.
+8. **The sentence to carry: batch size and learning rate are one knob, and this is a measurement rather than an argument.** The paper also records about 90% scaling efficiency from 8 GPUs to 256.
+
+## Quiz seeds
+
+**Q1 (misconception).** With a fixed step size, where does SGD end up on a strongly convex objective?
+Correct: orbiting a region around the minimum, and no closer. Distractors: exactly at the minimum (needs a decaying step, which is the fix not the default); at a nearby local minimum (impossible, a strongly convex objective has one); diverging (false, the noise is bounded).
+
+**Q2.** Growing the minibatch from 100 to 10,000 costs 100 times the compute. What does it buy?
+Correct: one tenth of the standard error. Distractors: one hundredth (reads the scaling as linear - the commonest error here); no error at all (forgets the dataset is itself a sample); one thousandth (not any power of the ratio).
+
+## Practice seed
+
+**Stem.** Your recipe is batch 256 at `eta = 0.1` on one GPU. You move to 16 GPUs at 32 images each. Give the new batch, the new learning rate, whether warmup is needed, and what to expect if you skip it.
+**Hint.** Work out the new batch size before you touch the learning rate, and express the change as a single multiplier. Then ask what the rule's justification assumes about the gradient across the steps being merged, and when in training that assumption is worst.
+**Solution.** New batch `16 * 32 = 512`, so the multiplier is 2 and `eta = 0.2`. Warmup is needed because the rule assumes the gradient is roughly constant across the merged steps, which fails while the network changes fastest - the start. Skipping it costs accuracy: at a 32-fold scale-up the measured cost was 24.84% against a 23.60% baseline, closing to 23.74% with gradual warmup. **The trap: a *constant* warmup was worse than no warmup at all, at 25.88%. "Some warmup" is not the lesson; "gradual warmup" is.**
+**`.p-check`.** The multiplier from the old batch to the new must be the same number as the multiplier from the old learning rate to the new. If those two differ you have applied the rule to the per-GPU batch rather than the total.
+
+## Code and dataset
+
+**Program:** `code/m06-05-sgd.py`. **Dataset:** `datasets/m06-credit.csv`, standardised.
+**What it computes twice:** the standard error of the minibatch gradient, once empirically by drawing 2,000 minibatches at each of `m = 1, 8, 32, 128, 1024` and measuring the spread, and once from the `sigma/sqrt(m)` formula using the full-data per-row gradient variance. The two curves must lie on top of each other, which is what turns the formula from an assertion into a measurement. The program also runs SGD at a fixed step and at a `1/k` schedule and reports the final loss band of each, so the noise ball is measured and not merely drawn.
+
+## Sources, primary only
+
+- Bottou, Curtis & Nocedal, arXiv:1606.04838, Theorems 4.6 and 4.7, eq 4.19, and section 3.3 for the total-work comparison.
+- Goodfellow, Bengio & Courville, ch. 8, section 8.1.3, for the standard-error argument and its 100-against-10,000 arithmetic.
+- Goyal et al., arXiv:1706.02677, Table 1 and section 2.2, for every quoted number.
