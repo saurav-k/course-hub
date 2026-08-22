@@ -219,6 +219,26 @@ window.COURSE_OUTLINE = {
         {
           "title": "Partial derivatives put every dial on its own axis, and the gradient collects them",
           "href": "lessons/0083-partial-derivatives-and-the-gradient.html"
+        },
+        {
+          "title": "The gradient points uphill, and it is steepest only in the Euclidean sense",
+          "href": "lessons/0084-the-gradient-points-uphill.html"
+        },
+        {
+          "title": "The Jacobian is the chain rule when both ends are vectors",
+          "href": "lessons/0085-the-jacobian.html"
+        },
+        {
+          "title": "Backpropagation is the chain rule run right to left on a computation graph",
+          "href": "lessons/0086-backpropagation.html"
+        },
+        {
+          "title": "A long chain of Jacobians: what backprop costs, and how the signal decays",
+          "href": "lessons/0087-a-long-chain-of-jacobians.html"
+        },
+        {
+          "title": "Curvature is the second derivative, and the Hessian holds it for every direction at once",
+          "href": "lessons/0088-curvature-and-the-hessian.html"
         }
       ]
     },
