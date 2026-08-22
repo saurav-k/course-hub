@@ -437,6 +437,30 @@ window.COURSE_OUTLINE = {
       "title": "Estimation, testing, and inference",
       "lessons": [
         {
+          "title": "The number you computed is one draw from a distribution of numbers you could have computed",
+          "href": "lessons/0160-a-statistic-is-a-random-variable.html"
+        },
+        {
+          "title": "Unbiased is not the same as better, and one number says which",
+          "href": "lessons/0161-bias-variance-and-the-mse.html"
+        },
+        {
+          "title": "Maximum likelihood picks the parameter that makes your data least surprising",
+          "href": "lessons/0162-maximum-likelihood.html"
+        },
+        {
+          "title": "Setting the derivative to zero is a step in the recipe, not the recipe",
+          "href": "lessons/0163-mle-for-bernoulli-poisson-and-uniform.html"
+        },
+        {
+          "title": "The loss function you already use was a likelihood the whole time",
+          "href": "lessons/0164-mle-for-the-gaussian.html"
+        },
+        {
+          "title": "Every penalty term you have ever added was a prior",
+          "href": "lessons/0165-map-and-the-prior-you-were-using.html"
+        },
+        {
           "title": "The ninety-five per cent belongs to the rule, not to your interval",
           "href": "lessons/0166-confidence-intervals.html"
         },
