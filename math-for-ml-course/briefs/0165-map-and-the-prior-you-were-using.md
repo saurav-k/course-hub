@@ -33,7 +33,11 @@ Adding a penalty term to a loss is adding a prior, and which penalty you picked 
 2. Take the log of Bayes' theorem. The evidence has no `theta` in it, so it drops out of the argmax and what is left is `log L(theta) + log p(theta)`. One line of algebra, and the whole page hangs off it.
 3. **MLE is MAP with a flat prior**, said here, because it makes the two estimators one estimator with a knob.
 4. Put a `Normal(0, tau^2)` prior on each weight. Its log is `-w^2/(2 tau^2)` plus a constant. Add it to `0164`'s objective and ridge falls out, with `lambda = sigma^2/tau^2`.
-5. Swap the prior for a Laplace and the penalty becomes `|w|`. The lasso, with `lambda = sigma^2/b`.
+5. Swap the prior for a Laplace and the penalty becomes `|w|`. The lasso, with `lambda = 2 sigma^2/b`.
+   **Say why the 2 is there and ridge's constant has none**, because it reads as a slip otherwise: the
+   Gaussian log-prior `-w^2/(2 tau^2)` carries its own one-half, which cancels the 2 from `2 sigma^2`, and
+   the Laplace log-prior `-|w|/b` carries none, so the 2 survives. Under one fixed convention the two
+   penalties genuinely differ by a factor of two.
 6. **What `lambda` means now.** It is an exchange rate between the data and the belief, and a bigger `lambda` is a tighter prior. Show the fitted coefficients moving as `tau^2` shrinks.
 7. **The limit the result carries**, in a `.callout.warn`. These are posterior **modes**. Ridge is also the posterior mean because a Gaussian posterior is symmetric; the lasso is not. The Laplace posterior is absolutely continuous, so `P(w_j = 0) = 0` and its mean has no exact zero in it. The sparsity belongs to the mode alone.
 8. Tie to `0161`: a prior buys variance reduction with bias, which is the same trade with a different name.
@@ -43,11 +47,31 @@ Adding a penalty term to a loss is adding a prior, and which penalty you picked 
 **Theorem 1 (MAP is MLE plus a log-prior).** `argmax_theta p(theta | x) = argmax_theta [ log L(theta) + log p(theta) ]`.
 **Proof.** By Bayes' theorem `p(theta | x) = p(x | theta) p(theta) / p(x)`. The logarithm is strictly increasing so it preserves the argmax, and `log p(x)` is an additive constant in `theta`, which cannot move a maximum. []
 
+**The convention, fixed for both theorems.** The penalised objective is written
+`||y - Xw||^2 + lambda (penalty)`, with **no one-half on the squared-error term**, which is ESL's
+criterion 3.53. Every constant below is stated against that. A page that puts a one-half on the
+squared-error term halves both constants and must say so.
+
 **Theorem 2 (L2 is a Gaussian prior).** With `y = Xw + e`, `e ~ Normal(0, sigma^2 I)` and independent `w_j ~ Normal(0, tau^2)`, the MAP estimate minimises `||y - Xw||^2 + lambda ||w||^2` with `lambda = sigma^2/tau^2`.
 **Proof.** The log-prior of a `Normal(0, tau^2)` density is `-w_j^2/(2 tau^2)` plus a constant, so summing over `j` the MAP objective is `-(1/(2 sigma^2)) ||y - Xw||^2 - (1/(2 tau^2)) ||w||^2 + const`. Multiplying by `-2 sigma^2`, a positive constant, turns the argmax into an argmin and gives `||y - Xw||^2 + (sigma^2/tau^2) ||w||^2`. []
 
-**Theorem 3 (L1 is a Laplace prior).** With the same likelihood and independent `w_j ~ Laplace(0, b)`, density `(1/(2b)) exp(-|w_j|/b)`, the MAP estimate is the lasso with `lambda = sigma^2/b`.
-**Proof.** Identical substitution: the log-density contributes `-|w_j|/b`. []
+**Theorem 3 (L1 is a Laplace prior).** With the same likelihood and independent `w_j ~ Laplace(0, b)`, density `(1/(2b)) exp(-|w_j|/b)`, the MAP estimate minimises `||y - Xw||^2 + lambda ||w||_1` with **`lambda = 2 sigma^2/b`**.
+**Proof.** The log-prior contributes `-|w_j|/b`, so the MAP objective is
+`argmin [ (1/(2 sigma^2)) ||y - Xw||^2 + (1/b) ||w||_1 ]`. Multiplying by `2 sigma^2`, which is positive
+and so leaves the argmin alone, gives `||y - Xw||^2 + (2 sigma^2/b) ||w||_1`. []
+
+**Note the factor of two, and do not let a writer 'correct' it.** Theorem 2's constant has no 2 and this
+one does, under the same convention. The reason is that the Gaussian log-prior `-w^2/(2 tau^2)` carries
+its own one-half, which cancels the `2` from `2 sigma^2`, while the Laplace log-prior `-|w|/b` carries
+none. Verified numerically as well as algebraically: minimising the MAP objective directly by coordinate
+descent reproduces the lasso at `2 sigma^2/b` to six decimals on every coefficient, and `sigma^2/b` gives
+a strictly worse objective.
+
+**What ESL does and does not say here.** ESL 3.4.3 gives the Laplace prior `(1/2 tau) exp(-|beta|/tau)`
+with `tau = 1/lambda` and **no `sigma^2` anywhere**. That is not a competing answer: ESL is thinking of
+the penalty *as* the log-prior rather than deriving MAP against a noise model, so it never has a
+`sigma^2` to carry. Cite ESL for the correspondence and the posterior-mode caveat, and take the constant
+from the derivation above.
 
 **The honest boundary.** All three theorems are about the **mode** of the posterior, which is one summary among several. Ridge happens to coincide with the posterior mean; the lasso does not, and the difference is not cosmetic. So the defensible sentence is that these penalties are the log-densities of particular priors and the estimator is a particular summary of the resulting posterior. Anything stronger overstates it.
 
