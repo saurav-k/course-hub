@@ -305,58 +305,8 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
-      "n": "10",
-      "title": "Information, similarity, and dimension",
-      "lessons": [
-        {
-          "title": "Entropy is the average of your own surprise",
-          "href": "lessons/0180-entropy.html"
-        },
-        {
-          "title": "Cross-entropy is the bill for using the wrong codebook",
-          "href": "lessons/0181-cross-entropy.html"
-        },
-        {
-          "title": "KL divergence measures the excess, and it has a direction",
-          "href": "lessons/0182-kl-divergence.html"
-        },
-        {
-          "title": "Mutual information sees dependence that correlation cannot",
-          "href": "lessons/0183-mutual-information.html"
-        },
-        {
-          "title": "The exponential you write is never the one you compute",
-          "href": "lessons/0184-softmax-log-sum-exp.html"
-        },
-        {
-          "title": "Similar is a choice you make, not a fact you measure",
-          "href": "lessons/0185-distance-metrics.html"
-        },
-        {
-          "title": "A cosine score means nothing until you know its baseline",
-          "href": "lessons/0186-cosine-similarity.html"
-        },
-        {
-          "title": "A kernel is a dot product in a space you never build",
-          "href": "lessons/0187-kernels.html"
-        },
-        {
-          "title": "The curse is real, and it has a hypothesis your data may not meet",
-          "href": "lessons/0188-curse-of-dimensionality.html"
-        },
-        {
-          "title": "A decision tree is a greedy mutual-information maximiser",
-          "href": "lessons/0189-information-gain.html"
-        },
-        {
-          "title": "Perplexity is how many options the model is choosing among",
-          "href": "lessons/0190-perplexity.html"
-        }
-      ]
-    },
-    {
-      "n": "→",
-      "title": "The road ahead",
+      "n": "08",
+      "title": "Expectation, limits, and simulation",
       "lessons": [
         {
           "title": "Joint distributions, and what a marginal is",
@@ -421,7 +371,63 @@ window.COURSE_OUTLINE = {
         {
           "title": "Conditional expectation and MMSE",
           "href": "lessons/0155-conditional-expectation-and-mmse.html"
+        }
+      ]
+    },
+    {
+      "n": "10",
+      "title": "Information, similarity, and dimension",
+      "lessons": [
+        {
+          "title": "Entropy is the average of your own surprise",
+          "href": "lessons/0180-entropy.html"
         },
+        {
+          "title": "Cross-entropy is the bill for using the wrong codebook",
+          "href": "lessons/0181-cross-entropy.html"
+        },
+        {
+          "title": "KL divergence measures the excess, and it has a direction",
+          "href": "lessons/0182-kl-divergence.html"
+        },
+        {
+          "title": "Mutual information sees dependence that correlation cannot",
+          "href": "lessons/0183-mutual-information.html"
+        },
+        {
+          "title": "The exponential you write is never the one you compute",
+          "href": "lessons/0184-softmax-log-sum-exp.html"
+        },
+        {
+          "title": "Similar is a choice you make, not a fact you measure",
+          "href": "lessons/0185-distance-metrics.html"
+        },
+        {
+          "title": "A cosine score means nothing until you know its baseline",
+          "href": "lessons/0186-cosine-similarity.html"
+        },
+        {
+          "title": "A kernel is a dot product in a space you never build",
+          "href": "lessons/0187-kernels.html"
+        },
+        {
+          "title": "The curse is real, and it has a hypothesis your data may not meet",
+          "href": "lessons/0188-curse-of-dimensionality.html"
+        },
+        {
+          "title": "A decision tree is a greedy mutual-information maximiser",
+          "href": "lessons/0189-information-gain.html"
+        },
+        {
+          "title": "Perplexity is how many options the model is choosing among",
+          "href": "lessons/0190-perplexity.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Capstone: regression, end to end",
+      "lessons": [
         {
           "title": "Every module was asking one table a different question",
           "href": "lessons/0200-one-dataset-eleven-modules.html"
