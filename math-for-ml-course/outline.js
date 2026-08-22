@@ -59,6 +59,28 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "02",
+      "title": "Data and summaries",
+      "lessons": [
+        {
+          "title": "A column's scale decides which summaries mean anything",
+          "href": "lessons/0020-the-measurement-scale-ladder.html"
+        },
+        {
+          "title": "A histogram has a choice baked into it, and the choice can change the answer",
+          "href": "lessons/0021-frequency-tables-and-histograms.html"
+        },
+        {
+          "title": "Centre and spread are two questions, and the shape decides the answers",
+          "href": "lessons/0022-four-numbers-that-summarise-a-column.html"
+        },
+        {
+          "title": "A quantile answers only to rank, which is its strength and its blindness",
+          "href": "lessons/0023-quantiles-and-the-box-plot.html"
+        }
+      ]
+    },
+    {
       "n": "03",
       "title": "Vectors, matrices, and linear maps",
       "lessons": [
