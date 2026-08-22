@@ -441,3 +441,39 @@ Licence files, model configurations and repository dates were fetched as raw tex
 - **The Llama 2 monthly-active-user gate is measured on the release date**, not continuously, so a company that grew past 700 million afterwards is not caught by it. Read the clause rather than a summary of it.
 - **The QLoRA memory figures and its Guanaco benchmark result are different kinds of claim.** The memory is a measurement of a machine; the 99.3 percent is a benchmark judged by another model on eighty prompts, and the same abstract warns that chatbot benchmarks are not trustworthy. Lesson 0042 keeps them apart.
 - The `timeline` diagram type renders correctly in this design system and is used in lessons 0036, 0039 and 0041. Tables are used wherever a chart would be, following the note from the 0019 to 0026 range that `xychart-beta` is not themed by `hub.js`.
+
+---
+
+## Added while writing lessons 0027 to 0034
+
+Every entry below was opened and read before it was used in one of these lessons.
+arXiv identifiers, submission dates and author counts were confirmed against the arXiv metadata API, so each line carries the publisher's own record rather than a secondary summary.
+
+### Papers cited in lessons 0027 to 0034 and not already listed above
+
+- Chen et al., *Evaluating Large Language Models Trained on Code*, arXiv v1 7 July 2021. Section 3.1 is the primary source for the whitespace-run tokens and the roughly 30 per cent reduction quoted in lesson 0027. <https://arxiv.org/abs/2107.03374>
+- Ziegler, Stiennon, Wu, Brown, Radford, Amodei, Christiano and Irving, *Fine-Tuning Language Models from Human Preferences*, arXiv v1 18 September 2019. The first application of preference learning to a language model, and the source of the drift-penalty sample quoted in lesson 0034. <https://arxiv.org/abs/1909.08593>
+- Stiennon, Ouyang, Wu, Ziegler, Lowe, Voss, Radford, Amodei and Christiano, *Learning to summarize from human feedback*, arXiv v1 2 September 2020. The 64,832 comparisons and the labeller-management practice. <https://arxiv.org/abs/2009.01325>
+- Bai et al., *Training a Helpful and Harmless Assistant with Reinforcement Learning from Human Feedback*, Anthropic, arXiv v1 12 April 2022. The counterpoint on the alignment tax in lesson 0034. <https://arxiv.org/abs/2204.05862>
+
+### Non-paper sources cited in lessons 0027 to 0034
+
+- The `openai/gpt-2` repository README, whose footnote is the primary source for the corrected parameter counts used in lesson 0028. <https://github.com/openai/gpt-2>
+- The GPT-2 model card, last updated November 2019. The only place the subreddit blocklist and the outbound-links clarification are documented; neither is in the paper. <https://github.com/openai/gpt-2/blob/master/model_card.md>
+- `openai/gpt-2/domains.txt`, the top 1,000 domains in WebText with their link counts. <https://github.com/openai/gpt-2/blob/master/domains.txt>
+- The GPT-2 encoder, `openai/gpt-2/src/encoder.py`, with the published `encoder.json` and `vocab.bpe`. Every token count in lesson 0027 was produced by running this code against those files rather than quoted. <https://github.com/openai/gpt-2/blob/master/src/encoder.py>
+- OpenAI's `tiktoken` splitting rules. The `cl100k_base` pattern contains the three-digit cap on a run of digits, cited in lesson 0027 section 8. <https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py>
+- The Common Crawl Foundation about page, for the founding year and founder, the nonprofit status, the monthly crawl cadence and the ten-petabyte archive size. <https://commoncrawl.org/about>
+- The `huggingface/transformers` and `huggingface/datasets` repositories. Their creation dates, 29 October 2018 and 26 March 2020, are read from the GitHub API and are what settle the timeline in lesson 0029. <https://github.com/huggingface/transformers>
+
+### Sourcing notes from this range
+
+- **`openai.com` refuses automated requests.** Three claims in this range exist only in OpenAI blog posts: the February 2019 Release Strategy section, the June 2020 statement of why the model shipped as an interface, and the misuse-termination commitment. Each is cited to the Internet Archive's contemporaneous capture, which is the copy that was actually read, and each is labelled in the lesson as a blog post rather than a paper. Where the same claim also appears in an arXiv document, the arXiv document is preferred: the staged-release timeline in lesson 0030 comes from Appendix B of Solaiman et al. rather than from any blog post.
+- **The GPT-2 paper has no arXiv version.** It is read from the copy OpenAI hosts on its CDN, which is also the link the model card gives.
+- **Chinchilla's body text and its Table 3 disagree.** The text says a 175-billion model wants "over 4.2 trillion tokens"; Table 3 under Approach 1 gives 3.7 trillion. Lesson 0033 uses the table value throughout and says the text differs.
+
+### Corrections these lessons made to the scaffold's pointers
+
+- **The comparisons-beat-ratings quotation.** The wording "it was hard for humans to provide consistent fine-grained quantitative distinctions when asked for an absolute number" is footnote 1 of Ziegler et al. 2019, not Christiano et al. 2017. The substance is Christiano's and is stated there in different words: "We found comparisons to be easier for humans to provide in some domains, while being equally useful for learning human preferences", and later "we found it much easier for humans to provide consistent comparisons than consistent absolute scores". Lesson 0034 quotes Christiano's own wording and attributes it there.
+- **The GPT-2 parameter counts.** The paper's 117M, 345M, 762M and 1542M are wrong and OpenAI says so in the repository README. Counting the architecture the paper itself prints lands on the released names, 124M, 355M, 774M and 1558M, to the nearest million in all four cases. Lesson 0028 uses the corrected set and records the disagreement.
+- **Sennrich et al. is cited as both 2015 and 2016.** The arXiv preprint is 31 August 2015 and the published version is ACL 2016. Lesson 0027 gives both, since the GPT-2 paper cites it as 2015.

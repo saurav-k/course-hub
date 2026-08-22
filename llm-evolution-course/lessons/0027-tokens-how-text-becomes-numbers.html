@@ -41,10 +41,6 @@
   <div class="callout key"><span class="tag">Where this lesson starts</span>
     <p>This course keeps saying that a model reads text. This lesson says exactly what it reads. It assumes nothing beyond being able to follow a table of counts, and it explains a mechanism whose consequences reach the whole rest of the course.</p>
   </div>
-  <div class="card tldr stub-note">
-    <h2 class="h-label">This page is a stub</h2>
-    <p>The structure, the brief, the prerequisites, the figures and the sources are settled. The prose is not written yet. A writing crew replaces sections 2 and 3 below with the lesson itself, keeps the figures and fills them in, and leaves sections 1, 4 and 5 in place. Read <code>BUILDER-SPEC.md</code> before you start.</p>
-  </div>
   <h2>1. Where this lesson sits</h2>
   <h3>What you need first</h3>
   <ul class="prereqs">
@@ -52,57 +48,181 @@
   </ul>
   <h3>The one tight idea</h3>
   <p>A model never sees words: it sees pieces chosen by an algorithm that repeatedly merges the most frequent adjacent pair, and once you start from raw bytes nothing is ever out of vocabulary.</p>
-  <h2>2. What this lesson must cover</h2>
-  <p class="stub-todo">To write. Full prose, complete sentences, 1,400 to 2,000 words. Every bullet below is a beat the finished lesson owes the reader, in this order.</p>
-  <ul class="covers">
-    <li>Why not words: an unbounded vocabulary and an unknown token for everything unseen.</li>
-    <li>Why not characters: sequences become far too long.</li>
-    <li>Byte-pair encoding worked by hand on a small corpus, merge by merge, so the reader can follow every step.</li>
-    <li>The byte-level twist: start from the 256 possible bytes and nothing can ever be unknown.</li>
-    <li>Two consequences worth remembering: a leading space changes a token's identity, and the same sentence costs many more tokens in some languages than others.</li>
-    <li>That later tokenizers fixed several of the specific problems demonstrated here.</li>
-  </ul>
-  <div class="callout warn"><span class="tag">Do not overclaim</span>
-    <p>Do not state a token-count ratio between two languages without measuring it with a named tokenizer and reporting which one you used.</p>
-  </div>
-  <h2>3. The figures this lesson needs</h2>
-  <p>Each figure below renders today as a working sketch of the right shape. Replace the sketch with the finished diagram described in its caption. Do not remove a figure without saying why in the pull request.</p>
+
+  <h2>2. A network reads numbers, and text is not numbers</h2>
+  <p>A neural network is a very large pile of arithmetic.
+  Numbers go in, numbers are multiplied and added, numbers come out.
+  It has no facility for reading a letter, because a letter is not a quantity.</p>
+  <p>So before any of the machinery in this course can run, something has to convert a piece of writing into a list of whole numbers, and convert the list back afterwards.
+  That converter is called a <b>tokenizer</b>, the pieces it produces are called <b>tokens</b>, and the numbered list of every piece it knows about is called its <b>vocabulary</b>.</p>
+  <p>The tokenizer is not learned along with the model.
+  It is fixed before the first gradient step, it never changes afterwards, and every model in this course is stuck with whatever choice its authors made.
+  That is why a preprocessing step gets a whole lesson: it is the one decision in the pipeline that cannot be revised by training harder.</p>
+
+  <h2>3. Why not one number per word</h2>
+  <p>The obvious design is a dictionary.
+  Number every word in English, feed the model the numbers, and let it work.</p>
+  <p>The problem is that the list is never finished.
+  Someone will write <code>antidisestablishmentarianism</code>, or a URL, or a surname, or a typo, or an emoji, and the dictionary has no number for it.
+  The usual repair was a single catch-all symbol, conventionally written <code>&lt;UNK&gt;</code>, meaning <i>a word was here and we do not know which</i>.
+  Every rare word collapses into the same number, and the information is simply gone.</p>
+  <p>This was not a small annoyance.
+  Rico Sennrich, Barry Haddow and Alexandra Birch opened their 2015 paper on the problem by observing that neural translation systems of the day used a fixed vocabulary while translation is an open-vocabulary task, and that the standard fallback was to look the unknown word up in a dictionary afterwards.
+  Proper nouns, compounds and loanwords are exactly the words a translator most needs to get right, and they are exactly the words a fixed vocabulary does not contain.</p>
+
+  <h2>4. Why not one number per character</h2>
+  <p>The opposite design never runs out.
+  There are only so many characters, so number those instead.</p>
+  <p>Now nothing is unknown, and two new problems arrive.
+  The first is length: <code>the</code> becomes three steps rather than one, so every sentence is four or five times longer, and the model must learn spelling before it can learn anything about meaning.
+  The second is cost, and it is the harsher one.
+  Attention, the mechanism at the centre of the Transformer described in <a href="0024-the-transformer-drops-recurrence.html">The Transformer: what dropping recurrence unlocked</a>, compares every position with every other position, so its work grows with the square of the length.
+  Making sequences five times longer makes that step twenty-five times more expensive.</p>
+
+  <h2>5. Byte-pair encoding, ten merges by hand</h2>
+  <p>The compromise that won is an algorithm from somewhere else entirely.
+  Byte-pair encoding was published by Philip Gage in 1994 as a data compression technique: repeatedly find the most frequent pair of adjacent bytes in a file and replace it with a single unused byte.
+  Sennrich, Haddow and Birch took that idea and pointed it at words instead, merging characters rather than bytes.
+  Their description of the result is the clearest sentence anyone has written about tokenization: it "effectively interpolates between word level inputs for frequent symbol sequences and character level inputs for infrequent symbol sequences".</p>
+  <p>Here is the whole algorithm, worked by hand on the four-word corpus from the paper's own Algorithm 1.
+  Every word starts split into single characters, with <code>&lt;/w&gt;</code> marking where a word ends, and each word carries how often it occurs.</p>
+  <table>
+    <caption>The starting corpus. Four words, split into characters, with their frequencies.</caption>
+    <thead><tr><th>Word, as characters</th><th>Times it occurs</th></tr></thead>
+    <tbody>
+      <tr><td><code>l o w &lt;/w&gt;</code></td><td>5</td></tr>
+      <tr><td><code>l o w e r &lt;/w&gt;</code></td><td>2</td></tr>
+      <tr><td><code>n e w e s t &lt;/w&gt;</code></td><td>6</td></tr>
+      <tr><td><code>w i d e s t &lt;/w&gt;</code></td><td>3</td></tr>
+    </tbody>
+  </table>
+  <p>Count every adjacent pair across the whole corpus, weighted by how often each word occurs.
+  The pair <code>e</code> followed by <code>s</code> appears six times inside <code>newest</code> and three times inside <code>widest</code>, so it appears nine times in total, and no other pair beats that.
+  Merge it, write the merge down, and count again.
+  Ten rounds of that produce the trace in Figure 1.</p>
   <figure class="diagram" id="figure-1">
     <div class="mermaid">
 flowchart TB
-  S0["start: every character is a token"] --> S1["count adjacent pairs"]
-  S1 --> S2["merge the most frequent pair"]
-  S2 --> S3["add the merged pair to the vocabulary"]
-  S3 --> S1
-  S3 --> E["stop at the target vocabulary size"]
+  S["start: every word is a row of single characters"] --> M1["1. e + s, seen 9 times&lt;br/&gt;n e w es t / w i d es t"]
+  M1 --> M2["2. es + t, seen 9 times&lt;br/&gt;n e w est / w i d est"]
+  M2 --> M3["3. est + end-of-word, seen 9 times"]
+  M3 --> M4["4. l + o, seen 7 times&lt;br/&gt;lo w / lo w e r"]
+  M4 --> M5["5. lo + w, seen 7 times&lt;br/&gt;low / low e r"]
+  M5 --> M6["6. n + e, seen 6 times"]
+  M6 --> M7["7. ne + w, seen 6 times&lt;br/&gt;new est"]
+  M7 --> M8["8. new + est, seen 6 times&lt;br/&gt;newest is now one token"]
+  M8 --> M9["9. low + end-of-word, seen 5 times"]
+  M9 --> M10["10. w + i, seen 3 times&lt;br/&gt;wi d est"]
+  M10 --> E["stop: the vocabulary is the characters&lt;br/&gt;plus these ten merges, in this order"]
     </div>
-    <figcaption><b>Figure 1. A merge trace</b> <span class="fig-brief">Finished version: five merge steps on a small real corpus, each showing the pair chosen, its count, and the resulting vocabulary. Work it by hand and show the arithmetic.</span></figcaption>
+    <figcaption><b>Figure 1. Ten merges on four words</b> <span class="fig-brief">Read the counts down the left. The frequent word <code>newest</code>, which occurs six times, has collapsed into a single token by step 8, while the rare <code>lower</code>, which occurs twice, is still in pieces at the end. Frequency is the only thing buying a short representation, and that is the entire mechanism.</span></figcaption>
   </figure>
+  <p>The output of training is nothing but that ordered list of merges.
+  To handle a word the algorithm has never seen, split it into characters and apply the ten rules in order.
+  Running the trace above and then tokenizing gives:</p>
+  <table>
+    <caption>Applying the ten learned merges to words the training corpus never contained.</caption>
+    <thead><tr><th>Word</th><th>How it comes out</th></tr></thead>
+    <tbody>
+      <tr><td><code>lowest</code></td><td><code>low</code> + <code>est&lt;/w&gt;</code></td></tr>
+      <tr><td><code>lower</code></td><td><code>low</code> + <code>e</code> + <code>r</code> + <code>&lt;/w&gt;</code></td></tr>
+      <tr><td><code>wider</code></td><td><code>wi</code> + <code>d</code> + <code>e</code> + <code>r</code> + <code>&lt;/w&gt;</code></td></tr>
+    </tbody>
+  </table>
+  <p><code>lowest</code> never appeared in training, and it still comes out as two familiar pieces rather than as an unknown.
+  Nothing is lost, and nothing is guessed.
+  That is what an open vocabulary means, and it is the whole reason the field adopted this.</p>
+  <p>Notice also what the algorithm did <i>not</i> do.
+  <code>wider</code> splits after <code>wi</code>, which is not a prefix of anything.
+  The pieces are artefacts of counting, not units of language, and it is worth carrying that forward: a token is a statistical convenience and nothing more.</p>
+
+  <h2>6. The byte-level twist, and why nothing is ever unknown again</h2>
+  <p>Starting from characters solves English.
+  It does not solve writing.
+  There are over a hundred and thirty thousand Unicode characters, and a tokenizer that wanted to guarantee it could represent any of them would have to spend its whole vocabulary on the alphabet before learning a single merge.
+  The GPT-2 paper states the number and the objection plainly: a base vocabulary of over 130,000 is "prohibitively large compared to the 32,000 to 64,000 token vocabularies often used with BPE".</p>
+  <p>The fix in that paper is one sentence and it is genuinely elegant.
+  Do not start from characters. Start from <b>bytes</b>.</p>
+  <p>Every piece of digital text, in every script, is stored as a sequence of bytes, and there are exactly 256 possible bytes.
+  So the starting alphabet is finite, tiny and complete.
+  Learn merges on top of it and a common English word still ends up as one token, while a character the tokenizer has never encountered falls back to its two or three raw bytes rather than to an unknown symbol.
+  In the paper's words, "a byte-level version of BPE only requires a base vocabulary of size 256", and because the scheme can assign a probability to any Unicode string it lets a model be evaluated "on any dataset regardless of pre-processing, tokenization, or vocab size".</p>
+  <p>That is where GPT-2's often-quoted vocabulary size comes from, and it decomposes exactly:</p>
+  <table>
+    <caption>GPT-2's vocabulary of 50,257, taken apart. Counted from the published <code>encoder.json</code> and <code>vocab.bpe</code>.</caption>
+    <thead><tr><th>Part</th><th>How many</th></tr></thead>
+    <tbody>
+      <tr><td>One token per possible byte</td><td>256</td></tr>
+      <tr><td>Learned merges</td><td>50,000</td></tr>
+      <tr><td>The end-of-text marker</td><td>1</td></tr>
+      <tr><td><b>Total</b></td><td><b>50,257</b></td></tr>
+    </tbody>
+  </table>
+  <p>One guard was needed on top. Left alone, a frequency-driven merger will happily spend separate vocabulary slots on <code>dog.</code>, <code>dog!</code> and <code>dog?</code>, which the paper says it observed.
+  So GPT-2 chops the text into runs of one kind of character before merging, and forbids merges that cross from letters into punctuation or digits.
+  The single exception is a leading space, which is allowed to stick to the word after it, and that exception has consequences of its own.</p>
   <figure class="diagram" id="figure-2">
-    <div class="mermaid">
-flowchart LR
-  A["One sentence in English"] --> B["fewer tokens"]
-  C["The same sentence,&lt;br/&gt;a language under-represented&lt;br/&gt;in the tokenizer corpus"] --> D["many more tokens"]
-  D --> E["higher cost,&lt;br/&gt;shorter effective context"]
-    </div>
-    <figcaption><b>Figure 2. The same sentence, two languages</b> <span class="fig-brief">Finished version: a bar chart of token counts for one identical sentence in several languages, with the cause named as the training corpus rather than the algorithm.</span></figcaption>
-  </figure>
-  <figure class="diagram" id="figure-3">
     <div class="mermaid">
 sequenceDiagram
   autonumber
   participant T as Text
   participant B as Bytes
-  participant M as Merge rules
-  participant I as Token ids
-  T->>B: split into bytes
-  B->>M: apply the learned merges in order
-  M->>I: look up each piece
-  I-->>T: decode gives the original back exactly
+  participant M as Merges
+  participant I as Ids
+  T->>T: cut "hello world" at category boundaries
+  T->>B: "hello" and " world", separately
+  B->>M: raw bytes, one token each
+  M->>I: apply every merge that fits
+  I-->>T: 31373 and 995, decoding back exactly
     </div>
-    <figcaption><b>Figure 3. Encoding, step by step</b> <span class="fig-brief">Finished version: encode one real string and show the token identifiers, then decode them back.</span></figcaption>
+    <figcaption><b>Figure 2. One string, end to end, with its real numbers</b> <span class="fig-brief">Two words become two numbers, and running the published GPT-2 encoder returns exactly these two. The last step is the one to hold on to: decoding is a table lookup and a byte concatenation, so the original text comes back byte for byte. A tokenizer never loses anything - it only decides how many steps the text costs.</span></figcaption>
   </figure>
-  <h2>4. Where this hands off</h2>
+
+  <h2>7. Two consequences that outlive the algorithm</h2>
+  <h3>A leading space is part of the token</h3>
+  <p>Because a space is allowed to attach to the word that follows it, <code>hello</code> and <code>&nbsp;hello</code> are two different tokens with two unrelated identifiers: 31373 and 23748.
+  The model has no way to know they are the same word except by having seen both a great many times.
+  This is why a prompt that ends in a trailing space behaves oddly, and why capitalisation is not free either: <code>Hello</code> is one token, and <code>HELLO</code> is three.</p>
+  <p>The same effect makes indentation expensive.
+  Four leading spaces are four separate tokens, so a Python file pays a tax on every line.
+  This was not a theoretical worry: when OpenAI later fine-tuned this family on code, the Codex paper reports that "the largest source of inefficiency arises from encoding whitespace", and that adding tokens for whole runs of whitespace let them "represent code using approximately 30% fewer tokens".</p>
+  <h3>The same sentence costs far more in some languages than others</h3>
+  <p>Byte-level encoding guarantees that any language can be <i>represented</i>. It guarantees nothing about the price.
+  The merges were learned by counting, on a corpus that was overwhelmingly English, so scripts that were rare in that corpus received almost no merges and fall back to raw bytes, at two to four bytes a character.</p>
+  <p>Figure 3 shows one sentence measured through the published GPT-2 tokenizer.
+  The sentence is the same in every row; only the language changes.</p>
+  <figure class="diagram" id="figure-3">
+    <div class="mermaid">
+flowchart TB
+  S["One sentence - I am reading a book"] --> E["English: 6 tokens"]
+  E --> G["German: 8 tokens"]
+  G --> P["Spanish: 9 tokens"]
+  P --> J["Japanese: 15 tokens"]
+  J --> A["Arabic: 20 tokens"]
+  A --> H["Hindi: 38 tokens"]
+  H --> W["the merges were counted on an English&lt;br/&gt;corpus, so Devanagari gets none of them&lt;br/&gt;and falls back to raw bytes"]
+    </div>
+    <figcaption><b>Figure 3. The same sentence, six languages, one tokenizer</b> <span class="fig-brief">Measured with GPT-2's own published tokenizer, so the ratio belongs to this tokenizer and not to tokenization in general. A reader writing Hindi pays six times what an English reader pays for the same sentence, in money and in how much of a fixed context window is left. The cause is not the algorithm: it is which corpus the merges were counted on.</span></figcaption>
+  </figure>
+  <p>State that ratio carefully.
+  It is six to one <i>for this sentence, through this tokenizer</i>.
+  A different tokenizer trained on a more balanced corpus gives a different number, and quoting a language ratio without naming the tokenizer is meaningless.</p>
+
+  <h2>8. What later tokenizers fixed</h2>
+  <p>Several of the specific defects demonstrated above were repaired in the years afterwards, and knowing which ones were repaired is what stops this lesson becoming a permanent complaint.</p>
+  <p>Digits are the clearest case.
+  GPT-2 splits a long number wherever its merges happen to fall, so <code>1234567890</code> becomes <code>123</code>, <code>45</code>, <code>678</code>, <code>90</code>: four pieces with no arithmetic meaning at all.
+  OpenAI's later <code>cl100k_base</code> tokenizer, whose splitting rule is published in the <code>tiktoken</code> repository, caps a digit run at three characters, so numbers are at least cut into consistent chunks rather than arbitrary ones.
+  Whitespace runs got their own tokens, as the Codex paper describes.
+  Vocabularies grew, which buys back some of the cost for scripts other than English.</p>
+  <p>What has not changed is the shape of the problem.
+  The tokenizer is still frozen before training, its merges are still frequency artefacts rather than units of meaning, and its corpus still shows through in who pays more.
+  <a href="0029-where-the-data-actually-came-from.html">Where the data actually came from</a> traces that corpus back to its source, and it is a shorter chain than most readers expect.</p>
+
+  <div class="callout warn"><span class="tag">What this lesson does not claim</span>
+    <p>The token counts in Figure 3 were measured with GPT-2's own tokenizer, loaded from the <code>encoder.json</code> and <code>vocab.bpe</code> files OpenAI publishes. They describe that tokenizer. Do not carry the ratio over to a different model, and do not repeat a language-cost ratio you have seen quoted unless it names the tokenizer it was measured with.</p>
+  </div>
+  <h2>9. Where this hands off</h2>
   <p>This course owns chronology, causation, people and dates. It hands off for mechanism, maths and code rather than re-deriving them.</p>
   <ul class="handoff">
     <li><b>In this course:</b> <a href="0018-meaning-as-a-direction-in-space.html">Meaning as a direction in space</a></li>
@@ -110,15 +230,53 @@ sequenceDiagram
     <li><b>In this course:</b> <a href="0048-long-context-capacity-is-not-competence.html">Long context: capacity is not competence</a></li>
     <li><b>Hands off to:</b> <a href="../../llm-papers-course/lessons/0004-gpt-2.html">LLM Papers: gpt 2</a> <span class="pq-why">The papers course covers byte-level BPE in the GPT-2 lesson</span></li>
   </ul>
-  <h2>5. Sources to read first</h2>
+  <h2>10. Sources to read first</h2>
   <ul class="sources">
-    <li><a href="https://arxiv.org/abs/1508.07909">Sennrich, Haddow and Birch, Neural Machine Translation of Rare Words with Subword Units, 2015</a></li>
-    <li>Radford et al., Language Models are Unsupervised Multitask Learners, OpenAI, 2019</li>
+    <li><a href="https://arxiv.org/abs/1508.07909">Sennrich, Haddow and Birch, <i>Neural Machine Translation of Rare Words with Subword Units</i>, arXiv v1 31 August 2015, published at ACL 2016</a>. Section 1 for the open-vocabulary problem, section 3.2 and Algorithm 1 for the merge procedure and the four-word corpus used in section 5 above.</li>
+    <li><a href="https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf">Radford, Wu, Child, Luan, Amodei and Sutskever, <i>Language Models are Unsupervised Multitask Learners</i>, OpenAI, 14 February 2019</a>. Section 2.2 for byte-level BPE, the 130,000 figure, the <code>dog.</code> problem and the space exception; section 2.3 for the vocabulary size of 50,257.</li>
+    <li><a href="https://github.com/openai/gpt-2/blob/master/src/encoder.py">The GPT-2 encoder, <code>openai/gpt-2</code></a>, together with the published <code>encoder.json</code> and <code>vocab.bpe</code>. Every token count in this lesson was produced by running this code against those files.</li>
+    <li><a href="https://arxiv.org/abs/2107.03374">Chen et al., <i>Evaluating Large Language Models Trained on Code</i>, arXiv v1 7 July 2021</a>. Section 3.1 for the whitespace-run tokens and the roughly 30 per cent reduction.</li>
+    <li><a href="https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py">OpenAI, <code>tiktoken</code> splitting rules</a>. The <code>cl100k_base</code> pattern contains the three-digit cap quoted in section 8.</li>
   </ul>
-  <p class="src-warn">These are research pointers left by the scaffold, not citations. Open each one and confirm it says what the brief claims before it appears in prose.</p>
+  <p class="src-warn">Every source here was opened and checked before it was written into the prose. The GPT-2 paper has no arXiv version, so it is read from the copy OpenAI hosts. The merge trace, the vocabulary decomposition and all token counts were re-derived by running the published encoder rather than quoted from a secondary source.</p>
   <div class="quiz">
     <h3 class="h-label">Retrieval practice</h3>
-    <p class="stub-todo">To write: three or four questions that test whether the one tight idea landed, not whether a date was memorised. Four options each, matched in word and character count, with the answer index in <code>data-answer</code> and a one-sentence explanation in <code>.q-fb</code>. Copy the exact markup from a neighbouring finished lesson in <code>llm-papers-course</code>.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is one number per word a bad way to feed text to a model?</div>
+      <button class="q-opt">Words are ambiguous, so one number cannot carry a whole meaning</button>
+      <button class="q-opt">The list is never finished, so unseen words lose their information</button>
+      <button class="q-opt">Numbering is arbitrary, so nearby numbers are unrelated in meaning</button>
+      <button class="q-opt">Long words are rare, so the model never sees enough of them to learn</button>
+      <div class="q-fb">Every rare word, typo and name collapses into a single catch-all symbol, and what it was is simply gone.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What decides which pair of pieces gets merged at each step?</div>
+      <button class="q-opt">Whether the pair forms a prefix, a suffix or a root in the language</button>
+      <button class="q-opt">Whether the pair appears inside a word the model will be tested on</button>
+      <button class="q-opt">How often the pair occurs next to itself across the whole corpus</button>
+      <button class="q-opt">How much the pair reduces the loss when the model is trained on it</button>
+      <div class="q-fb">It is a count and nothing else, which is why the resulting pieces so often cut across what a linguist would call a unit.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why can a byte-level tokenizer never meet an unknown symbol?</div>
+      <button class="q-opt">There are only 256 bytes and all text is stored as bytes</button>
+      <button class="q-opt">There is a catch-all token reserved for any unseen character</button>
+      <button class="q-opt">There are enough merges learned to cover every writing system</button>
+      <button class="q-opt">There is a rule that adds a new token whenever one is needed</button>
+      <div class="q-fb">The starting alphabet is the complete set of byte values, so the worst case is falling back to raw bytes rather than failing.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does one sentence cost far more tokens in Hindi than in English?</div>
+      <button class="q-opt">Devanagari script uses more characters to write the same sentence</button>
+      <button class="q-opt">Byte-level encoding cannot represent scripts outside the Latin one</button>
+      <button class="q-opt">The algorithm assigns fewer vocabulary slots to non-European scripts</button>
+      <button class="q-opt">The merges were counted on a corpus that was overwhelmingly English</button>
+      <div class="q-fb">Nothing in the algorithm prefers English; the training corpus for the merges does, and the tokenizer carries that preference forever.</div>
+    </div>
   </div>
   <nav class="pager" data-pager-route="constraint" aria-label="Lesson navigation">
     <a href="0026-the-fork-gpt-1-and-bert.html"><span class="dir">&larr; Previous</span><span class="ttl">The fork: GPT-1 and BERT</span></a>
