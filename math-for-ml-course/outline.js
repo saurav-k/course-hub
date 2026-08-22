@@ -417,7 +417,7 @@ window.COURSE_OUTLINE = {
       "title": "Estimation, testing, and inference",
       "lessons": [
         {
-          "title": "A fitted slope is one draw from a distribution you can name",
+          "title": "A fitted slope is an estimate, so everything in this module applies to it",
           "href": "lessons/0172-inference-in-simple-linear-regression.html"
         },
         {
