@@ -445,7 +445,7 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0161-bias-variance-and-the-mse.html"
         },
         {
-          "title": "Pick the parameter that makes the data you actually saw least surprising",
+          "title": "Maximum likelihood picks the parameter that makes your data least surprising",
           "href": "lessons/0162-maximum-likelihood.html"
         },
         {
