@@ -54,6 +54,14 @@ MIN_ORIENTATION_LINES: int = 3
 MAX_PROSE_WORDS_PER_PAGE: int = 1800
 MAX_PROSE_WORDS_PER_FIGURE: int = 400
 
+# Two floors are newer than the seven courses that predate this checker, so a
+# course opts into them by name rather than inheriting them silently and turning
+# every legacy page red. Joining this set is the last step of a retrofit under
+# `retrofit.md`, not the first.
+EXTENDED_BAR_COURSES: frozenset[str] = frozenset({"math-for-ml-course"})
+MIN_PRACTICE_PER_PAGE: int = 1
+MIN_CHARTS_PER_PAGE: int = 1
+
 QUIZ_BLOCK = re.compile(r'<div class="q" data-answer="(\d+)">(.*?)</div>\s*</div>', re.S)
 OPTION = re.compile(r'<button class="q-opt">(.*?)</button>', re.S)
 FIGURE = re.compile(r"<figure[^>]*>(.*?)</figure>", re.S)
@@ -87,15 +95,42 @@ MAIN = re.compile(r"<main[^>]*>(.*?)</main>", re.S)
 FIGURE_BLOCK = re.compile(r"<figure[^>]*>.*?</figure>", re.S)
 PRE_BLOCK = re.compile(r"<pre[^>]*>.*?</pre>", re.S)
 SCRIPTISH = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.S)
-QUIZ_WRAPPER = re.compile(
-    r'<div class="quiz">.*?(?=<h2|<div class="teacher-note"|<(?:div|nav) class="pager"|\Z)', re.S
-)
+def block_of(css_class: str) -> re.Pattern[str]:
+    """A reading-column block that runs to the next structural boundary.
+
+    A quiz and a practice problem both nest <div>s, so a non-greedy close would
+    stop at the first inner one. Both are therefore anchored on the opening tag
+    and terminated by a lookahead at whatever comes next in the page contract.
+    """
+    return re.compile(
+        rf'<div class="{css_class}"[^>]*>.*?'
+        r'(?=<h2|<div class="teacher-note"|<(?:div|nav) class="pager"|\Z)',
+        re.S,
+    )
+
+
+QUIZ_WRAPPER = block_of("quiz")
 NAV_BLOCK = re.compile(r"<nav[^>]*>.*?</nav>", re.S)
 FOOTER_BLOCK = re.compile(r"<footer[^>]*>.*?</footer>", re.S)
 PAGER_BLOCK = re.compile(r'<(div|nav) class="pager".*?</\1>', re.S)
-NOT_PROSE = (SCRIPTISH, NAV_BLOCK, FOOTER_BLOCK, PAGER_BLOCK, QUIZ_WRAPPER, FIGURE_BLOCK, PRE_BLOCK)
+# A practice problem is work the reader does, not prose they read, so it is
+# excluded exactly as the quiz wrapper is. Without this every page carrying the
+# problems the course requires would breach the word ceiling and the
+# words-per-figure ceiling on the day it shipped: one 600-word practice section
+# added to a page that cleared both took it to 2,139 words and 535 words per
+PRACTICE_WRAPPER = block_of("practice")
+PRACTICE_OPEN = re.compile(r'<div class="practice"[^>]*>')
+PRACTICE_SOLUTION = re.compile(r'<details class="solution"[^>]*>')
+PRACTICE_CHECK = re.compile(r'class="p-check"')
+NOT_PROSE = (
+    SCRIPTISH, NAV_BLOCK, FOOTER_BLOCK, PAGER_BLOCK,
+    QUIZ_WRAPPER, PRACTICE_WRAPPER, FIGURE_BLOCK, PRE_BLOCK,
+)
 SECTION_HEADING = re.compile(r"<h2\b", re.I)
 SVG_TEXT = re.compile(r"<text\b", re.I)
+# Matched on the attribute rather than on one spelling of the tag, so that
+# <svg viewBox="..." class="chart"> counts as well as <svg class="chart">.
+CHART_SVG = re.compile(r'<svg\b[^>]*\bclass="[^"]*\bchart\b[^"]*"', re.I)
 
 
 @dataclass(frozen=True)
@@ -405,6 +440,64 @@ def check_word_load(page: Path, src: str) -> list[Finding]:
     return found
 
 
+def on_extended_bar(page: Path) -> bool:
+    """Whether this page's course has opted into the bars added after the seven."""
+    course = course_of(page)
+    return course is not None and course.name in EXTENDED_BAR_COURSES
+
+
+def check_practice(page: Path, src: str) -> list[Finding]:
+    """A quiz is answered in the head; a problem is worked on paper.
+
+    The reader attempts it before anything is revealed, so every problem owes a
+    hidden worked solution and the sanity check that lets them catch their own
+    arithmetic without being told the answer twice.
+    """
+    if not is_lesson(page) or not on_extended_bar(page):
+        return []
+    body = reading_column(src)
+    blocks = len(PRACTICE_OPEN.findall(body))
+    if blocks < MIN_PRACTICE_PER_PAGE:
+        return [
+            Finding(rel(page), "FAIL",
+                    f"{blocks} practice problem(s), the floor is {MIN_PRACTICE_PER_PAGE}; "
+                    "a quiz is answered in the head and a problem is worked on paper")
+        ]
+    found: list[Finding] = []
+    solutions = len(PRACTICE_SOLUTION.findall(body))
+    if solutions < blocks:
+        found.append(
+            Finding(rel(page), "FAIL",
+                    f"{blocks} practice problem(s) but {solutions} details.solution; "
+                    "every problem reveals its own worked solution")
+        )
+    checks = len(PRACTICE_CHECK.findall(body))
+    if checks < blocks:
+        found.append(
+            Finding(rel(page), "FAIL",
+                    f"{blocks} practice problem(s) but {checks} .p-check; every solution ends with "
+                    "the sanity check that lets a reader catch their own error")
+        )
+    return found
+
+
+def check_quantitative(page: Path, src: str) -> list[Finding]:
+    """Mermaid cannot draw a distribution, a density, a vector or a unit ball.
+
+    A mathematics page that states a quantity and draws only boxes and arrows has
+    made a claim it did not show.
+    """
+    if not is_lesson(page) or not on_extended_bar(page):
+        return []
+    if len(CHART_SVG.findall(reading_column(src))) >= MIN_CHARTS_PER_PAGE:
+        return []
+    return [
+        Finding(rel(page), "FAIL",
+                f"no hand-authored svg.chart, the floor is {MIN_CHARTS_PER_PAGE}; "
+                "Mermaid cannot draw a distribution, a density or a vector")
+    ]
+
+
 def check_math(page: Path, src: str) -> list[Finding]:
     return [
         Finding(rel(page), "FAIL", "a .math block has no .gloss naming its symbols")
@@ -563,6 +656,8 @@ def main() -> int:
         findings += check_orientation(page, src)
         findings += check_word_load(page, src)
         findings += check_math(page, src)
+        findings += check_practice(page, src)
+        findings += check_quantitative(page, src)
         findings += check_signposting(page, src)
         quiz_findings, answers = check_quizzes(page, src)
         findings += quiz_findings

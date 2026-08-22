@@ -371,7 +371,36 @@
   /* Chrome fires `beforeprint` and Safari changes the print media query, and a
      browser that does both would otherwise swap twice and stash the paper copy
      as the thing to restore afterwards. */
+  /* A closed <details> does not print its contents, so a practice page would go
+     to paper carrying its problems and none of its solutions. Open every one for
+     the print and put each back exactly as the reader left it, so pressing print
+     never silently spoils a problem they had not attempted yet.
+
+     Unlike the Mermaid swap above there is nothing asynchronous here: setting
+     `.open` reflows synchronously and the print snapshot sees it. Only the boxes
+     that were shut are recorded, so a solution the reader had already opened
+     stays open afterwards. This rides on toPaper and offPaper rather than on its
+     own listeners, which is what gets it the Safari media-query path as well. */
+  var reopened = null;
+
+  function revealSolutions() {
+    if (reopened) return;
+    reopened = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.practice details'), function (box) {
+      if (box.open) return;
+      box.open = true;
+      reopened.push(box);
+    });
+  }
+
+  function restoreSolutions() {
+    if (!reopened) return;
+    reopened.forEach(function (box) { box.open = false; });
+    reopened = null;
+  }
+
   function toPaper() {
+    revealSolutions();
     if (!printCopies || onPaper) return;
     onPaper = new Map();
     printCopies.forEach(function (svg, node) {
@@ -382,6 +411,7 @@
   }
 
   function offPaper() {
+    restoreSolutions();
     if (!onPaper) return;
     onPaper.forEach(function (svg, node) { node.innerHTML = svg; });
     onPaper = null;

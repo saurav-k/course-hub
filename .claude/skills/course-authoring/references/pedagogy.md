@@ -138,6 +138,26 @@ The strongest distractor is a true statement that answers a different question, 
 
 Quizzes come after the idea has been fully worked, never as a gate in front of it.
 
+## Practice problems
+
+A quiz checks that the idea landed. A problem checks that the reader can use it.
+
+| Bar | Value |
+|---|---|
+| practice problems per content page | **1 minimum** |
+| problems without a `details.solution` | **0** |
+| problems without a `.p-check` sanity line | **0** |
+| inline `svg.chart` per content page | **1 minimum** |
+
+These four are newer than the seven courses that predate this file, so a course **opts into them by name** in `EXTENDED_BAR_COURSES` at the top of `check_pages.py` rather than inheriting them and turning every legacy page red.
+Joining that set is the last step of a retrofit, not the first.
+
+The chart floor is the one that decides whether a quantitative course is quantitative.
+A page that states a distribution, a magnitude or a spread and draws only boxes and arrows has made a claim it did not show, and Mermaid cannot draw any of the three.
+
+`.p-check` exists because a reader working alone has no marker.
+One sentence saying what the answer should roughly be and why lets them catch their own arithmetic: "the trace is 4 and the eigenvalues sum to 4, so 3 and 1 is plausible and 3 and 2 is not."
+
 ## Sources
 
 | Bar | Value |
