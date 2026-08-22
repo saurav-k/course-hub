@@ -60,6 +60,18 @@
   if (PALETTE_KEYS.indexOf(palette) === -1) palette = 'paper';
   root.setAttribute('data-palette', palette);
 
+  /* The third axis: which course this page belongs to. Mode and palette are the
+     reader's choices; this one is a property of the page, and it is what stops
+     seven courses on one design system from looking interchangeable. The course
+     is its folder, which is in the path on the live site, on a bucket prefix and
+     on disk alike, so nothing has to be written into any page. The last match
+     wins because a course folder is the deepest one that can carry the suffix.
+     hub.css turns the name into a hue offset; a name it does not know, and the
+     hub landing page which has no course folder at all, both fall through to the
+     palette accent unrotated. */
+  var courseHits = location.pathname.match(/[^/]+-course(?=\/)/g);
+  if (courseHits) root.setAttribute('data-course', courseHits[courseHits.length - 1]);
+
   /* Mermaid renders itself on DOMContentLoaded unless told otherwise, and it
      would do so before the palette tokens have been read, producing a diagram
      in its own stock colours. Claim the render here, while the page is still
@@ -112,8 +124,38 @@
   /* ============================================================
      MERMAID - themed from the live tokens, re-rendered in place
      ============================================================ */
+  /* Mermaid colours a mindmap's branches and a timeline's periods from a
+     built-in twelve-step scale that it generates from its own theme rather than
+     from the variables handed to it, and two of those steps land within 1.1:1 of
+     the page - a near-black fill on a dark surface, a near-white one on a light
+     surface - so the branch vanishes and its labels float unattached. Naming the
+     scale explicitly is the whole fix. cScaleN is the branch fill and gets a
+     soft tint of the step, cScaleLabelN is the text Mermaid paints on it and
+     gets ordinary ink, and the rule that draws a branch's underline reads
+     cScaleInvN, which Mermaid otherwise derives by inverting the fill and which
+     therefore lands on a washed-out grey with none of the branch's hue in it.
+     cScalePeerN is named as well because the mindmap renderer reaches for it.
+     The eight steps come from --branch-0..7 in hub.css; 8 to 11 repeat the first
+     four, because a diagram that deep is better served by a repeated hue than by
+     a Mermaid default that may be invisible.
+
+     Mermaid numbers a section's colour one step ahead of the section itself -
+     the root is section -1 and takes step 0 - so twelve entries cover a diagram
+     with eleven branches. */
+  function branchScale() {
+    var scale = {};
+    for (var i = 0; i < 12; i += 1) {
+      var step = i % 8;
+      scale['cScale' + i] = token('--branch-' + step + '-soft');
+      scale['cScaleLabel' + i] = token('--ink');
+      scale['cScaleInv' + i] = token('--branch-' + step);
+      scale['cScalePeer' + i] = token('--branch-' + step);
+    }
+    return scale;
+  }
+
   function mermaidVars() {
-    return {
+    var vars = {
       fontFamily: getComputedStyle(root).getPropertyValue('--sans').trim() || 'sans-serif',
       fontSize: '15px',
       background: token('--surface-3'),
@@ -138,6 +180,9 @@
       noteTextColor: token('--ink'),
       noteBorderColor: token('--gold')
     };
+    var scale = branchScale();
+    for (var name in scale) { if (Object.prototype.hasOwnProperty.call(scale, name)) vars[name] = scale[name]; }
+    return vars;
   }
 
   /* Above this width the rail is a column in the grid. Below it, the rail is a
@@ -153,10 +198,27 @@
     return !!(window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
   }
 
+  /* Mermaid sizes every node from a measurement it takes at render time, so a
+     render that happens before the web font has been applied measures in the
+     fallback face. Inter is wider than the system fallback at the same size, so
+     the label then overflows the box that was cut for it and the last word or
+     two is clipped - on the published site, on 380 flowcharts. It looks perfect
+     on the next repaint, which is how it survived review. Waiting for the font
+     is the whole fix; the timeout is there so a font that never arrives leaves
+     a late diagram rather than none at all. */
+  function whenFontsReady(run) {
+    if (!document.fonts || !document.fonts.ready) { run(); return; }
+    var done = false;
+    var go = function () { if (!done) { done = true; run(); } };
+    document.fonts.ready.then(go, go);
+    setTimeout(go, 2000);
+  }
+
   function renderMermaid() {
     if (!window.mermaid) return;
     var nodes = document.querySelectorAll('.mermaid');
     if (!nodes.length) return;
+    repainting = true;
     Array.prototype.forEach.call(nodes, function (node) {
       // Rendering replaces the graph source with an <svg>, so the source is
       // stashed on the node the first time round and restored on every repaint.
@@ -174,16 +236,10 @@
     var release = function () {
       Array.prototype.forEach.call(nodes, function (node) { node.style.minHeight = ''; });
       settleDiagrams();   // the SVGs exist only now, and their width is final
+      repainting = false;
+      schedulePrintCopies();
     };
-    window.mermaid.initialize({
-      startOnLoad: false,
-      theme: isDark() ? 'dark' : 'neutral',
-      themeVariables: mermaidVars(),
-      flowchart: { curve: 'basis', htmlLabels: true, padding: 12, useMaxWidth: false },
-      sequence: { useMaxWidth: false, wrap: true },
-      state: { useMaxWidth: false }, class: { useMaxWidth: false }, er: { useMaxWidth: false },
-      mindmap: { useMaxWidth: false }, timeline: { useMaxWidth: false }
-    });
+    window.mermaid.initialize(mermaidConfig(isDark(), mermaidVars()));
     try {
       var done = window.mermaid.run({ querySelector: '.mermaid' });
       if (done && done.then) done.then(release, release); else release();
@@ -191,6 +247,144 @@
       if (window.mermaid.init) window.mermaid.init(undefined, nodes);
       release();
     }
+  }
+
+  /* ============================================================
+     PRINTING A DIAGRAM
+     Mermaid resolves every colour at render time and writes it into the SVG,
+     so a diagram drawn while the reader was in dark mode carries dark fills and
+     near-white labels into the printer. `hub.css` correctly forces the printed
+     page white, which is exactly what makes the problem visible: the ground is
+     paper and the labels are all but invisible on it.
+
+     Re-rendering on `beforeprint` does not fix it. `mermaid.run()` is
+     asynchronous and the browser takes its print snapshot long before the
+     promise settles, and the first thing a repaint does is put the graph source
+     back into the element - so the reader gets pages of raw Mermaid text, which
+     is worse than a faint diagram. The ink-on-paper copy is therefore drawn
+     ahead of time, while the browser is idle, and swapped in synchronously when
+     the print begins.
+
+     The print theme is fixed rather than read from the tokens, because the
+     print block in `hub.css` already flattens the whole page to black ink on
+     white paper and these are the same values. That also means the copy is
+     correct whichever mode the reader is in when they press print.
+     ============================================================ */
+  var PRINT_FILL = ['#ffffff', '#eeeeee', '#f7f7f7', '#e4e4e4', '#fbfbfb', '#ebebeb', '#f2f2f2', '#e8e8e8'];
+  var PRINT_EDGE = ['#000000', '#555555', '#222222', '#777777', '#333333', '#666666', '#111111', '#888888'];
+
+  function printVars() {
+    var vars = {
+      fontFamily: getComputedStyle(root).getPropertyValue('--sans').trim() || 'sans-serif',
+      fontSize: '15px',
+      background: '#ffffff',
+      primaryColor: '#ffffff', primaryTextColor: '#000000', primaryBorderColor: '#000000',
+      secondaryColor: '#ffffff', secondaryTextColor: '#000000', secondaryBorderColor: '#000000',
+      tertiaryColor: '#f6f6f6', tertiaryTextColor: '#000000', tertiaryBorderColor: '#888888',
+      lineColor: '#444444', textColor: '#000000',
+      mainBkg: '#ffffff', nodeBorder: '#000000',
+      clusterBkg: '#ffffff', clusterBorder: '#888888',
+      titleColor: '#000000', edgeLabelBackground: '#ffffff',
+      noteBkgColor: '#ffffff', noteTextColor: '#000000', noteBorderColor: '#333333'
+    };
+    for (var i = 0; i < 12; i += 1) {
+      var step = i % 8;
+      vars['cScale' + i] = PRINT_FILL[step];
+      vars['cScaleLabel' + i] = '#000000';
+      vars['cScaleInv' + i] = PRINT_EDGE[step];
+      vars['cScalePeer' + i] = PRINT_EDGE[step];
+    }
+    return vars;
+  }
+
+  var repainting = false;      // a themed repaint is in flight
+  var printCopies = null;      // node -> the SVG drawn for paper
+  var printPass = 0;           // 0 idle, 1 running, 2 done
+  var onPaper = null;          // node -> the SVG that was on screen before printing
+
+  function mermaidConfig(dark, vars) {
+    return {
+      startOnLoad: false,
+      theme: dark ? 'dark' : 'neutral',
+      themeVariables: vars,
+      flowchart: { curve: 'basis', htmlLabels: true, padding: 12, useMaxWidth: false },
+      sequence: { useMaxWidth: false, wrap: true },
+      state: { useMaxWidth: false }, class: { useMaxWidth: false }, er: { useMaxWidth: false },
+      mindmap: { useMaxWidth: false }, timeline: { useMaxWidth: false }
+    };
+  }
+
+  function schedulePrintCopies() {
+    if (printPass !== 0 || !window.mermaid || !window.mermaid.render) return;
+    var idle = window.requestIdleCallback || function (fn) { return setTimeout(fn, 400); };
+    idle(function () { buildPrintCopies(); });
+  }
+
+  /* Renders every diagram a second time in the print theme and keeps the markup.
+     A themed repaint starting mid-pass would leave half the copies drawn in the
+     screen theme, so the pass abandons what it has and asks to be run again. */
+  function buildPrintCopies() {
+    if (printPass !== 0 || repainting) return;
+    var nodes = Array.prototype.slice.call(document.querySelectorAll('.mermaid'));
+    if (!nodes.length) { printPass = 2; return; }
+    printPass = 1;
+    var copies = new Map();
+    /* Mermaid measures each label in whatever element it is handed, so the
+       measuring element has to carry the same font as the finished diagram.
+       Left to itself `render()` measures inside a bare container in the body
+       serif, and every label comes out a shade too wide for the box that was
+       cut for it. This is an off-screen `.mermaid`, so the `--sans` rule that
+       governs the real diagrams governs the measurement too. */
+    var stage = el('div', 'mermaid');
+    stage.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden';
+    document.body.appendChild(stage);
+    window.mermaid.initialize(mermaidConfig(false, printVars()));
+
+    var index = 0;
+    var finish = function (complete) {
+      printPass = complete ? 2 : 0;
+      if (complete) printCopies = copies;
+      if (stage.parentNode) stage.parentNode.removeChild(stage);
+      window.mermaid.initialize(mermaidConfig(isDark(), mermaidVars()));
+      if (!complete) schedulePrintCopies();
+    };
+    var step = function () {
+      if (repainting) { finish(false); return; }
+      if (index >= nodes.length) { finish(true); return; }
+      var node = nodes[index];
+      index += 1;
+      var source = node.dataset.mmd;
+      if (!source) { step(); return; }
+      var drawn;
+      try {
+        drawn = window.mermaid.render('mmd-print-' + index, source, stage);
+      } catch (e) { finish(false); return; }
+      if (!drawn || !drawn.then) { finish(false); return; }
+      drawn.then(function (out) {
+        copies.set(node, out.svg);
+        step();
+      }, function () { step(); });
+    };
+    step();
+  }
+
+  /* Chrome fires `beforeprint` and Safari changes the print media query, and a
+     browser that does both would otherwise swap twice and stash the paper copy
+     as the thing to restore afterwards. */
+  function toPaper() {
+    if (!printCopies || onPaper) return;
+    onPaper = new Map();
+    printCopies.forEach(function (svg, node) {
+      if (!node.isConnected) return;
+      onPaper.set(node, node.innerHTML);
+      node.innerHTML = svg;
+    });
+  }
+
+  function offPaper() {
+    if (!onPaper) return;
+    onPaper.forEach(function (svg, node) { node.innerHTML = svg; });
+    onPaper = null;
   }
 
   /* ============================================================
@@ -638,10 +832,25 @@
   }
 
   /* Only a box that genuinely overflows gets a tab stop, and it gives the stop
-     back when the column grows and it no longer does. */
+     back when the column grows and it no longer does.
+
+     Tables are here for the same reason the other three are. Below 720px
+     `hub.css` gives a table `display: block; overflow-x: auto`, which turns a
+     wide one into a scroll container with no way to reach its right-hand
+     columns from the keyboard - `scrollable-region-focusable`, serious, WCAG
+     2.1.1. Above that width the same table is an ordinary `display: table` that
+     may still be wider than its column but scrolls nothing, so the computed
+     overflow is checked as well: a box that cannot scroll never gets a tab stop
+     it would have nothing to do with. */
+  function scrolls(box) {
+    if (box.scrollWidth <= box.clientWidth + 1) return false;
+    var flow = getComputedStyle(box).overflowX;
+    return flow === 'auto' || flow === 'scroll';
+  }
+
   function markScrollables() {
-    Array.prototype.forEach.call(document.querySelectorAll('.diagram, pre, .math'), function (box) {
-      if (box.scrollWidth > box.clientWidth + 1) box.setAttribute('tabindex', '0');
+    Array.prototype.forEach.call(document.querySelectorAll('.diagram, pre, .math, table'), function (box) {
+      if (scrolls(box)) box.setAttribute('tabindex', '0');
       else if (box.getAttribute('tabindex') === '0') box.removeAttribute('tabindex');
     });
   }
@@ -680,7 +889,7 @@
     mountTopbar(hasRail);
     wireQuizzes();
     wireCopyButtons();
-    renderMermaid();
+    whenFontsReady(renderMermaid);
     syncSettings();
     settleDiagrams();     // code blocks and formulas are ready before Mermaid is
 
@@ -697,6 +906,18 @@
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
         if (!root.getAttribute('data-mode')) renderMermaid();
       });
+    }
+
+    window.addEventListener('beforeprint', toPaper);
+    window.addEventListener('afterprint', offPaper);
+    if (window.matchMedia) {
+      // Safari fires no print events; the print media query change is what it has.
+      var paper = window.matchMedia('print');
+      if (paper.addEventListener) {
+        paper.addEventListener('change', function (event) {
+          if (event.matches) toPaper(); else offPaper();
+        });
+      }
     }
   }
 
