@@ -63,7 +63,7 @@ Build a confounder on `sessions.csv`: `device` drives both `session_seconds` and
 
 ## Code and dataset
 
-`code/0026-what-a-correlation-does-not-license.py` against `datasets/sessions.csv`. Computes the overall correlation between two columns, then the same correlation within each `device` group, and prints both. Also reproduces Anscombe's four sets inline (they are eleven rows each, so they are written into the file rather than loaded) and asserts all four share a mean, variance and correlation to the printed precision.
+`code/0026-what-a-correlation-does-not-license.py` against `datasets/sessions.csv`. Computes the overall correlation between two columns, then the same correlation within each `device` group, and prints both. Also loads `datasets/anscombe.csv`, which #57 added as a committed dataset transcribed from the paper rather than the inline rows this brief originally assumed, and asserts all four sets share a mean, variance and correlation to the printed precision.
 
 ## Sources
 

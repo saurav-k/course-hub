@@ -33,7 +33,7 @@ import numpy as np
 import pandas as pd
 
 LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "population.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/population.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 PLAN_ORDER = ["free", "basic", "pro", "enterprise"]
 
@@ -44,11 +44,9 @@ def main() -> None:
     print(f"{'column':>18}  {'rung':>10}  {'what it licenses':>46}")
     for name, rung, note in (
         ("region", "nominal", "counts and the mode; no order, no arithmetic"),
-        ("plan", "ordinal", "order, median, quantiles; not differences"),
         ("satisfaction", "ordinal", "order, median; a mean is a common abuse"),
-        ("temp_c", "interval", "differences and the mean; not ratios"),
-        ("latency_ms", "ratio", "everything, ratios included"),
-        ("session_minutes", "ratio", "everything, ratios included"),
+        ("office_temp_c", "interval", "differences and the mean; not ratios"),
+        ("spend", "ratio", "everything, ratios included"),
     ):
         print(f"{name:>18}  {rung:>10}  {note:>46}")
 
