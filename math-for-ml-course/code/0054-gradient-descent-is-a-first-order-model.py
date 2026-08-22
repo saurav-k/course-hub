@@ -9,14 +9,80 @@ and running it here - before any optimizer exists - is the right place for it.
 Every optimizer in the rest of M06 trusts this gradient. If it is wrong,
 nothing downstream can be right, and nothing downstream will tell you.
 
-    python3 m06-03-gradient-descent.py
+    python3 0054-gradient-descent-is-a-first-order-model.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """
 
-import numpy as np
+from pathlib import Path
 
-from m06_common import load, mean_logistic_loss, sigmoid
+import numpy as np
+import pandas as pd
+
+# Self-contained on purpose: this file needs only numpy and pandas, so it
+# runs unchanged in a repo checkout, in Jupyter, or pasted straight into
+# Google Colab. The dataset loads locally if it is beside the code and
+# falls back to the published copy if it is not.
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "m06-credit.csv" \
+    if "__file__" in dir() else Path("m06-credit.csv")
+URL = ("https://saurav-k.github.io/course-hub/math-for-ml-course/"
+       "datasets/m06-credit.csv")
+
+FEATURES = [
+    "income_inr", "age_years", "utilisation_ratio", "enquiries_6m",
+    "tenure_months", "emi_to_income", "late_payments_12m", "card_count",
+    "noise_1", "noise_2", "noise_3", "noise_4",
+]
+
+
+def read_frame() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
+
+
+def sigmoid(z: np.ndarray) -> np.ndarray:
+    """Logistic function, written so it does not overflow on large |z|."""
+    out = np.empty_like(z, dtype=float)
+    positive = z >= 0
+    out[positive] = 1.0 / (1.0 + np.exp(-z[positive]))
+    exp_z = np.exp(z[~positive])
+    out[~positive] = exp_z / (1.0 + exp_z)
+    return out
+
+
+def mean_logistic_loss(design, target, theta) -> float:
+    """Mean logistic loss, written so it cannot overflow or take log(0).
+
+    The obvious form, -mean(y*log(p) + (1-y)*log(1-p)), is exact arithmetic
+    and a numerical trap: once |z| passes about 37 the sigmoid rounds to
+    exactly 0 or 1 and log(0) is -inf. Worse, the resulting nan compares
+    False against everything, so a test built on it reports success by
+    silently comparing nothing. The identity
+        -y*log(p) - (1-y)*log(1-p)  =  log(1 + exp(z)) - y*z
+    has no such point, and np.logaddexp(0, z) computes it stably.
+    """
+    logit = design @ theta
+    return float(np.mean(np.logaddexp(0.0, logit) - target * logit))
+
+
+def load(standardise: bool = True, add_intercept: bool = True):
+    """Design matrix (n rows by d columns, one row per sample) and the target."""
+    frame = read_frame()
+    matrix = frame[FEATURES].to_numpy(dtype=float)
+    if standardise:
+        matrix = (matrix - matrix.mean(axis=0)) / matrix.std(axis=0)
+    if add_intercept:
+        matrix = np.column_stack([np.ones(len(matrix)), matrix])
+    return matrix, frame["default"].to_numpy(dtype=float)
+
+
+def load_regression(standardise: bool = True):
+    """Design matrix and the continuous credit-limit target, centred."""
+    frame = read_frame()
+    matrix = frame[FEATURES].to_numpy(dtype=float)
+    if standardise:
+        matrix = (matrix - matrix.mean(axis=0)) / matrix.std(axis=0)
+    target = frame["credit_limit_inr"].to_numpy(dtype=float)
+    return matrix, target - target.mean()
 
 
 def objective(design: np.ndarray, target: np.ndarray, theta: np.ndarray) -> float:

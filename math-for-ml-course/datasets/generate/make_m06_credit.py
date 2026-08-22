@@ -2,10 +2,11 @@
 
 Seeded and reproducible. Run with:
 
+    cd math-for-ml-course/datasets/generate
     python3 make_m06_credit.py
 
-Writes m06-credit.csv beside this file: 20,000 rows, 12 feature columns,
-one binary target and one continuous target.
+Writes ../m06-credit.csv: 20,000 rows, 12 feature columns, one binary
+target and one continuous target.
 
 The dataset is built to make this module's optimization lessons real rather
 than illustrative, so three properties are deliberate and not accidental:
@@ -22,12 +23,14 @@ than illustrative, so three properties are deliberate and not accidental:
 Nothing here is a real person or a real lender's book. It is generated.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
 SEED = 20260822
 N_ROWS = 20_000
-OUT = "m06-credit.csv"
+OUT = Path(__file__).resolve().parent.parent / "m06-credit.csv"
 
 
 def generate(seed: int = SEED, n_rows: int = N_ROWS) -> pd.DataFrame:
@@ -112,7 +115,7 @@ def generate(seed: int = SEED, n_rows: int = N_ROWS) -> pd.DataFrame:
 def main() -> None:
     frame = generate()
     frame.to_csv(OUT, index=False)
-    print(f"wrote {OUT}: {len(frame):,} rows x {frame.shape[1]} columns")
+    print(f"wrote {OUT} - {len(frame):,} rows, {OUT.stat().st_size / 1024:.0f} KB")
     print(f"default rate: {frame['default'].mean():.4f}")
     print(f"correlation utilisation_ratio vs emi_to_income: "
           f"{frame['utilisation_ratio'].corr(frame['emi_to_income']):.4f}")

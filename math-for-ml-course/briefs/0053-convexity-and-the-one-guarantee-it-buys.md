@@ -1,6 +1,6 @@
 # M06 L02 - Convexity, and the one guarantee it buys
 
-**Provisional number `NNNN`.** Module M06, lesson 2 of 12. **Label:** `core` **Rung:** `med` / working **Target:** 10 min
+**Page `lessons/0053-convexity-and-the-one-guarantee-it-buys.html`** &middot; module M06, lesson 2 of 12 &middot; program `code/0053-convexity-and-the-one-guarantee-it-buys.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

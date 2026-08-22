@@ -1,6 +1,6 @@
 # M06 L11 - Regularization is a constraint you can draw
 
-**Provisional number `NNNN`.** Module M06, lesson 11 of 12. **Label:** `core` **Rung:** `med` / working **Target:** 12 min
+**Page `lessons/0062-regularization-is-a-constraint-you-can-draw.html`** &middot; module M06, lesson 11 of 12 &middot; program `code/0062-regularization-is-a-constraint-you-can-draw.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

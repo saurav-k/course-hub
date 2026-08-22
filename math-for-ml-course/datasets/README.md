@@ -28,6 +28,27 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 | `population.csv` | 30,000 | 1085 KB | M02 survey sampling designs, measurement scales | Four strata of unequal size and spread (means about 240 to 4,100), so the between-stratum share is 87.4 per cent and stratification measurably wins; 600 clusters with a within-cluster offset, so cluster sampling measurably loses. Also carries one column per measurement rung: `region` nominal, `satisfaction` ordinal, `office_temp_c` interval, `spend` ratio. The interval column exists nowhere else in the course. |
 | `anscombe.csv` | 44 | under 1 KB | M02 Anscombe | Not generated: transcribed from Anscombe (1973), The American Statistician 27(1), 17-21. Four sets agreeing on every standard summary and looking nothing alike. Regenerating it would defeat it. |
 | `tickets.csv` | 5,000 | 1.9 MB | M01 foundations, all nine lessons | Token counts are heavy-tailed on purpose, so short tickets survive a naive product of per-token probabilities in float64 and long ones underflow to exactly `0.0`: on the held-out split 8 tickets where **both** class scores underflow and 26 where **exactly one** does, which is the silent failure lesson 0007 is built on. `first_response_seconds` is exponential with median 420.3 s, so `lambda = ln(2)/median` is checkable. `score_urgent` is imperfect by design, held-out AUC 0.933, so a monotone transform can be shown leaving AUC alone while a fixed cutoff moves. `row_split` is per row, so 510 of 527 test customers also appear in train - that is lesson 0002's exercise. |
+| `m06-credit.csv` | 20,000 | 1.9 MB | M06 optimization | Twelve features whose raw scales span six orders of magnitude, from a ratio in [0, 1] to a rupee income in the hundreds of thousands, so the logistic Hessian's condition number is 2.82e12 raw and 26.5 standardised and the largest safe learning rate moves from 1.5e-9 to 3.85. Four columns are pure noise, independent of both targets, so an L1 path can be *tested* rather than described: it drops all four before any real predictor. `utilisation_ratio` and `emi_to_income` correlate at 0.921. Carries a binary `default` target for the logistic thread that runs through the whole module and a continuous `credit_limit_inr` target for the least-squares geometry. |
+
+### Why M06 needed a third one
+
+The rule below is reuse before you add, so the two existing datasets were measured against what
+M06 needs rather than passed over. Both fall short, and the shortfalls are not stylistic:
+
+- **`sessions.csv`** does carry a binary target (`returning`, rate 0.412) and does have a raw
+  condition number of 4.09e5 falling to 3.03 standardised. But it has **four numeric features**,
+  and a regularization path over four predictors is not a path. It also has no column known to be
+  irrelevant, so M06 lesson 0110's central claim - that an L1 path drives an irrelevant coefficient to
+  *exactly* zero - could only be described, not tested.
+- **`sensors.csv`** has eight features, a genuine scale spread and a correlated pair at 0.987, but
+  **no binary target at all**. M06's spine is one running objective, L2-regularised logistic
+  regression, introduced on page 0100 and carried to 0111. Splitting that across two datasets to
+  avoid adding one would cost the module the continuity that makes it read as a single argument.
+
+Neither has the known-null columns, which is the property that turns lesson 0110 from an assertion into a
+falsifiable test. That is what justified a third dataset, and the justification is checkable: the
+numbers above come from `code/0103-the-learning-rate-is-bounded-by-curvature.py` and
+`code/0110-regularization-is-a-constraint-you-can-draw.py`.
 
 ## Regenerating
 
@@ -40,6 +61,7 @@ python3 make_experiment.py
 python3 make_features.py
 python3 make_population.py
 python3 make_anscombe.py
+python3 make_m06_credit.py
 ```
 
 Requires only `numpy` and `pandas`.

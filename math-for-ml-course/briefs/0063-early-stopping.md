@@ -1,6 +1,6 @@
 # M06 L12 - Early stopping is the regularizer you did not write
 
-**Provisional number `NNNN`.** Module M06, lesson 12 of 12. **Label:** `core` **Rung:** `med` / working **Target:** 9 min
+**Page `lessons/0063-early-stopping.html`** &middot; module M06, lesson 12 of 12 &middot; program `code/0063-early-stopping.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

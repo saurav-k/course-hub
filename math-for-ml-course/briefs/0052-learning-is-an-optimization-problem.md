@@ -1,6 +1,6 @@
 # M06 L01 - Learning is an optimization problem
 
-**Provisional number `NNNN`.** File becomes `NNNN-learning-is-optimization.html` when the scaffold assigns numbers. Module M06, lesson 1 of 12.
+**Page `lessons/0052-learning-is-an-optimization-problem.html`** &middot; module M06, lesson 1 of 12 &middot; program `code/0052-learning-is-an-optimization-problem.py` &middot; dataset `datasets/m06-credit.csv`
 
 **Label:** `core`
 **Rung:** `med` / working

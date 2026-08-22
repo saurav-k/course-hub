@@ -1,6 +1,6 @@
 # M06 L10 - Constrained optimization: Lagrange multipliers and KKT
 
-**Provisional number `NNNN`.** Module M06, lesson 10 of 12. **Label:** `core` **Rung:** `med` / working **Target:** 12 min
+**Page `lessons/0061-lagrange-multipliers-and-kkt.html`** &middot; module M06, lesson 10 of 12 &middot; program `code/0061-lagrange-multipliers-and-kkt.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

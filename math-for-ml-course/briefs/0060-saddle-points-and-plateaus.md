@@ -1,6 +1,6 @@
 # M06 L09 - Saddle points and plateaus: what actually slows deep training
 
-**Provisional number `NNNN`.** Module M06, lesson 9 of 12. **Label:** `depth` **Rung:** `hard` / frontier **Target:** 11 min
+**Page `lessons/0060-saddle-points-and-plateaus.html`** &middot; module M06, lesson 9 of 12 &middot; program `code/0060-saddle-points-and-plateaus.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

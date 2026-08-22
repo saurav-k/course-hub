@@ -1,6 +1,6 @@
 # M06 L08 - Newton's method, and why nobody runs it at scale
 
-**Provisional number `NNNN`.** Module M06, lesson 8 of 12. **Label:** `depth` **Rung:** `hard` / frontier **Target:** 11 min
+**Page `lessons/0059-newtons-method-and-why-nobody-runs-it.html`** &middot; module M06, lesson 8 of 12 &middot; program `code/0059-newtons-method-and-why-nobody-runs-it.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

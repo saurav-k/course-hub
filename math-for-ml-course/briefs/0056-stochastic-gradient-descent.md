@@ -1,6 +1,6 @@
 # M06 L05 - Stochastic gradient descent: paying in noise to buy iterations
 
-**Provisional number `NNNN`.** Module M06, lesson 5 of 12. **Label:** `core` **Rung:** `med` / working **Target:** 11 min
+**Page `lessons/0056-stochastic-gradient-descent.html`** &middot; module M06, lesson 5 of 12 &middot; program `code/0056-stochastic-gradient-descent.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

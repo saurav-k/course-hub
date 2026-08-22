@@ -1,6 +1,6 @@
 # M06 L06 - Momentum: when averaging past gradients actually helps
 
-**Provisional number `NNNN`.** Module M06, lesson 6 of 12. **Label:** `core` **Rung:** `med` / working **Target:** 10 min
+**Page `lessons/0057-momentum-and-when-it-helps.html`** &middot; module M06, lesson 6 of 12 &middot; program `code/0057-momentum-and-when-it-helps.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 
