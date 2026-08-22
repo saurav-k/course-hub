@@ -29,8 +29,10 @@ THE WORDING THAT MATTERS. When the test does not reject, the conclusion is
 null. That distinction is the difference between "we did not detect an effect"
 and "we showed there is none", and only the first is ever earned.
 
-Datasets: the predecessor course's own numbers (A 300/1000, B 340/1000) and
-nimbus-experiment.csv.
+Datasets: nimbus-experiment.csv, plus one worked pair of counts
+(A 300/1000, B 340/1000) taken from the sibling course
+statistical-foundations-ml-course, lesson 0005, which is a separate live
+course in this hub and is not modified by anything here.
 
 Needs numpy and pandas only.
 """
@@ -74,13 +76,15 @@ def show(title: str, k_a: int, n_a: int, k_b: int, n_b: int) -> dict[str, float]
 
 
 def main() -> None:
-    print("1. THE DEBT THE PREDECESSOR COURSE LEFT")
-    print("   statistical-foundations-ml-course lesson 0005 computes two confidence")
-    print("   intervals, notes they overlap, and says the proper two-proportion test")
-    print("   is coming once hypothesis testing is built up. Its roadmap never builds")
-    print("   it. Here it is.\n")
+    print("1. A WORKED PAIR FROM THE SIBLING COURSE")
+    print("   The hub's Statistical Foundations course, lesson 0005, works an A/B")
+    print("   example to two confidence intervals, notes they overlap, and says the")
+    print("   sharper tool is a two-proportion test. Its own roadmap runs through")
+    print("   probability rather than inference, so that test is not on it. The two")
+    print("   courses sit side by side, and this is the page where that test gets")
+    print("   done, on the same numbers so the reader can carry them across.\n")
     r = show("grey button against gold button", 300, 1000, 340, 1000)
-    print(f"\n     The overlap heuristic and the proper test agree on the verdict, but")
+    print(f"\n     The overlap reading and the proper test agree on the verdict, but")
     print(f"     only the test tells you HOW close it was: p = {r['p_value']:.4f} is a hair")
     print("     above 0.05, not a comfortable null. 'Not established' is the honest")
     print("     report; 'no difference' would not be.")
