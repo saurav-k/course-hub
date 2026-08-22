@@ -1,4 +1,4 @@
-# 0113 - The curse of dimensionality
+# 0208 - The curse of dimensionality
 
 **Module** M10 - lesson 09  **Rung** frontier  **Class** depth
 
@@ -10,7 +10,7 @@ database works.
 
 ## Prerequisites
 
-0110 (distances). 0111 (what an embedding space actually looks like). M03 for norms. **M08 owns
+0205 (distances). 0206 (what an embedding space actually looks like). M03 for norms. **M08 owns
 concentration and tail bounds**, and this page consumes them: every theorem quoted here is a tail
 bound applied to a norm. This is the heaviest incoming edge in M10.
 
@@ -19,8 +19,8 @@ bound applied to a norm. This is the heaviest incoming edge in M10.
 1. **One-minute version.** Volume moves to the surface. Points concentrate on a thin shell. Random
    directions become orthogonal. Relative contrast decays like `1/sqrt(d)`. And none of it stops
    embedding search from working, for two reasons this page names.
-2. **Orientation figure.** 0110's three distance functions into "this page: what happens to all of
-   them as `d` grows" into 0112 (which adds dimensions on purpose) and 0111 (which searches in
+2. **Orientation figure.** 0205's three distance functions into "this page: what happens to all of
+   them as `d` grows" into 0207 (which adds dimensions on purpose) and 0206 (which searches in
    forty-eight of them anyway).
 3. **Three facts with three pictures, each derived rather than asserted.**
    - **Volume goes to the shell.** `vol((1-eps)A) = (1-eps)^d vol(A)` for any body, so the fraction
@@ -171,7 +171,7 @@ power `d` instead of `0.99`.
 
 ## Code and dataset plan
 
-`code/0113-curse-of-dimensionality.py` against `m10_embeddings.csv` plus generated points. Evaluates
+`code/0208-curse-of-dimensionality.py` against `m10_embeddings.csv` plus generated points. Evaluates
 the shell fraction; measures contrast against `d` and checks the `1/sqrt(d)` rate; measures mean
 `|cos|` against the closed form; **measures the Gaussian Annulus Theorem directly**, reporting that
 the standard deviation of `|x|` stays near 0.70 from `d = 10` to `d = 10,000`; and **measures the

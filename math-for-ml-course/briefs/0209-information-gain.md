@@ -1,4 +1,4 @@
-# 0114 - Information gain
+# 0209 - Information gain
 
 **Module** M10 - lesson 10  **Rung** working  **Class** depth
 
@@ -9,13 +9,13 @@ and that criterion has a bias you can see with one column.
 
 ## Prerequisites
 
-0105 (entropy), 0108 (mutual information, and the plug-in bias sweep this page pays off).
+0200 (entropy), 0203 (mutual information, and the plug-in bias sweep this page pays off).
 
 ## Beats, in order
 
 1. **One-minute version.** Entropy before the split, weighted entropy after, the difference is the
    gain - and the gain **is** the mutual information between the attribute and the class.
-2. **Orientation figure.** 0108's mutual information as an abstract quantity into "this page: the
+2. **Orientation figure.** 0203's mutual information as an abstract quantity into "this page: the
    same quantity as a greedy algorithm" into ID3, C4.5, CART and every gradient-boosted tree.
 3. **Mental model: twenty questions.** Each split is a question and you want the one that narrows
    things most on average. Draw the tree with the entropy written at each node before any formula.
@@ -23,8 +23,8 @@ and that criterion has a bias you can see with one column.
    the 1986 paper, worked in full below.
 5. **The identity, key callout, from Quinlan's footnote 3 verbatim:** "maximizing the gain is
    equivalent to minimizing `E(A)`, which is the mutual information of the attribute `A` and the
-   class." The reader has now met the same number three times: as a KL in 0108, as a
-   conditional-entropy reduction in 0108, and as a tree split here. **Named theorem, see proof.**
+   class." The reader has now met the same number three times: as a KL in 0203, as a
+   conditional-entropy reduction in 0203, and as a tree split here. **Named theorem, see proof.**
 6. **The trade-off, same section, and it is a proof rather than an anecdote.** Splitting one
    attribute value into two can only increase the gain. So gain systematically prefers attributes
    with more values, and an attribute with a distinct random value per row attains the maximum gain
@@ -52,7 +52,7 @@ E(A) = sum_a  P(A = a) * H(Y | A = a)
 ```
 
 That is precisely the definition of the conditional entropy `H(Y | A)`. So
-`gain(A) = H(Y) - H(Y | A)`, and page 0108 proved that this equals `I(A; Y)`.
+`gain(A) = H(Y) - H(Y | A)`, and page 0203 proved that this equals `I(A; Y)`.
 
 **The step that does the real work** is recognising that Quinlan's branch weights `(p_i + n_i)/(p + n)`
 are the empirical `P(A = a)`. Once you see that, `E(A)` is not a tree-specific quantity at all: it
@@ -106,7 +106,7 @@ while `H(churned)` is only 0.8902.
 3. **`svg.chart`, the four gains as a bar chart.** outlook 0.2467, humidity 0.1518, windy 0.0481,
    temperature 0.0292, winner in `signal`.
 4. **`svg.chart`, the bias.** Measured gain against the number of distinct values for a column
-   independent of the label by construction, using 0108's sweep, with the honest columns marked as
+   independent of the label by construction, using 0203's sweep, with the honest columns marked as
    points. The identifier towers over everything real.
 5. **`svg.chart`, gain against gain ratio**, four real columns as paired bars, so the reader sees
    both that the ratio helps and that it does not finish the job.
@@ -176,7 +176,7 @@ it positive and would be a different problem.
 
 ## Code and dataset plan
 
-`code/0114-information-gain.py`, carrying Quinlan's fourteen rows inline and loading
+`code/0209-information-gain.py`, carrying Quinlan's fourteen rows inline and loading
 `m10_signals.csv` for the scale-up. Asserts every one of the paper's four gains to within 1.5e-3
 and `E(outlook)` and `IV(outlook)` to their computed values; **asserts gain equals mutual
 information to 1e-12 on all four columns**, which is footnote 3 verified; measures the identifier

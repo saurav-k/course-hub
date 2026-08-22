@@ -1,4 +1,4 @@
-# 0111 - Cosine similarity and where it is the wrong tool
+# 0206 - Cosine similarity and where it is the wrong tool
 
 **Module** M10 - lesson 07  **Rung** frontier  **Class** depth
 
@@ -9,7 +9,7 @@ score a retrieval system reports has to be read against that space's own baselin
 
 ## Prerequisites
 
-0110 (metric axioms, and the `|x_hat - y_hat|^2 = 2 - 2cos` relation). 0108 for pointwise mutual
+0205 (metric axioms, and the `|x_hat - y_hat|^2 = 2 - 2cos` relation). 0203 for pointwise mutual
 information, which beat 7 needs. M03 for the dot product and the angle. M04 for SVD and low-rank
 approximation.
 
@@ -19,12 +19,12 @@ approximation.
    below chance. One subtraction fixes most of it. And the classic word embedding turns out to be a
    factorised mutual-information matrix.
 2. **Orientation figure.** A `mindmap` is allowed for an orientation figure and suits this page,
-   because it is the one that indexes what the rest of the module built: "cosine (0110)",
-   "PMI (0108)", "SVD (M04)", "concentration (0113)" as four branches into "reading a retrieval
+   because it is the one that indexes what the rest of the module built: "cosine (0205)",
+   "PMI (0203)", "SVD (M04)", "concentration (0208)" as four branches into "reading a retrieval
    score honestly".
 3. **What cosine is, and what it throws away.** The definition, then the ranking split: query
    `(1,1,0)`, `d1 = (10,10,0)` at cosine 1.0000 and Euclidean 12.7279, `d2 = (1,1,1)` at cosine
-   0.8165 and Euclidean 1.0000. Opposite orders. Then the repair from 0110: normalise and the two
+   0.8165 and Euclidean 1.0000. Opposite orders. Then the repair from 0205: normalise and the two
    orders become identical, every row, which the code file asserts.
 4. **Anisotropy, measured.** If a space were isotropic the average cosine between two random rows
    would be zero. On the committed dataset it is **0.6399**. Ethayarajh 2019 measured roughly 0.6
@@ -40,14 +40,14 @@ approximation.
 7. **The loop this page closes, key callout.** Levy and Goldberg 2014 prove that skip-gram with
    negative sampling implicitly factorises the word-context matrix whose cells are
    `PMI(w,c) - log k`. So a word2vec vector is a low-rank factor of a pointwise-mutual-information
-   matrix: 0108 defined PMI, M04 defined the factorisation, and they meet here.
+   matrix: 0203 defined PMI, M04 defined the factorisation, and they meet here.
 8. **Three practical consequences**, one line each, each traceable to beat 4: normalise before
    indexing; centre before comparing; and never compare cosines across two models or two layers.
 9. **Trade-off, same section.** Cosine measures whatever the training objective made "similar",
    which is co-occurrence, not truth and not relevance. The highest-scoring chunk can be the wrong
    chunk. Cross-link to `../../llm-papers-course/lessons/0031-rag.html`.
 
-**Do not do here:** the curse of dimensionality (0113 owns it), ANN index structures, training
+**Do not do here:** the curse of dimensionality (0208 owns it), ANN index structures, training
 objectives for sentence encoders.
 
 ## The stated proof (D4)
@@ -87,7 +87,7 @@ with exactly one cone. Real spaces have more structure than that, and the honest
    sitting just below the baseline is the whole page in one figure.
 4. **`svg.chart`, before and after centring**, the same three histograms after the subtraction, so
    the 0.2734-to-0.7608 gap is visible rather than asserted.
-5. **`flowchart LR`, the factorisation loop.** Corpus co-occurrence counts -> PMI matrix (0108) ->
+5. **`flowchart LR`, the factorisation loop.** Corpus co-occurrence counts -> PMI matrix (0203) ->
    shifted by `-log k` -> low-rank factorisation (M04 SVD) -> the word vectors you use.
 
 ## The worked example, with its numbers
@@ -149,7 +149,7 @@ excess came out negative, the pair scored below chance, which is a real and repo
 
 ## Code and dataset plan
 
-`code/0111-cosine-similarity.py` against `m10_embeddings.csv`. Cosine from the definition against
+`code/0206-cosine-similarity.py` against `m10_embeddings.csv`. Cosine from the definition against
 the unit-row dot product; the 200,000-pair baseline; the same-topic and different-topic means;
 centring and the recomputation; the ranking-split example; and the threshold experiment. Asserts
 that once rows are normalised the cosine order and the Euclidean order are **identical for every

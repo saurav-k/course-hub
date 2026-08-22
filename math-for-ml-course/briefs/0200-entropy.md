@@ -1,4 +1,4 @@
-# 0105 - Entropy: how surprised you should expect to be
+# 0200 - Entropy: how surprised you should expect to be
 
 **Module** M10 Information, similarity, and dimension - lesson 01
 **Rung** working  **Class** core  **Number** PROVISIONAL, see `briefs/README.md`
@@ -39,7 +39,7 @@ ask to learn the outcome, and every other quantity in this module is that one nu
    at `log2 n` for the uniform distribution. **Named theorem: the maximum-entropy bound.**
 8. **Trade-off, in the same section.** Entropy is a property of a distribution, not of a sample.
    Estimating it from counts is biased downward, and the bias grows with the number of categories.
-   One line, forward-link to page 0108, which measures the bias.
+   One line, forward-link to page 0203, which measures the bias.
 9. **Warning callout, one only.** Differential entropy is not the limit of discrete entropy. The
    `ln D` term is dropped, so the continuous version can be negative: a Gaussian's is
    `0.5(1 + ln 2*pi*sigma^2)`, below zero whenever `sigma^2 < 1/(2*pi*e)`.
@@ -60,12 +60,12 @@ log2 n - H(p) = sum_i p_i log2 n + sum_i p_i log2 p_i      (since sum p_i = 1)
               = sum_i p_i log2 (p_i / u_i)
 ```
 
-That last expression is `KL(p || u)`, which page 0107 proves is non-negative and zero only when
+That last expression is `KL(p || u)`, which page 0202 proves is non-negative and zero only when
 `p = u`. So `log2 n - H(p) >= 0`. **The step that does the real work** is the first line: writing
 the constant `log2 n` as `sum_i p_i log2 n`, which is legal only because the probabilities sum to
 one, turns a comparison of two numbers into a single sum over outcomes. Everything after that is
 the definition of KL. *Forward reference is deliberate and stated on the page: this page uses a
-result page 0107 proves, and 0107 does not use this one, so there is no circle.*
+result page 0202 proves, and 0202 does not use this one, so there is no circle.*
 
 **Theorem 2 (Shannon 1948).** The only `H` satisfying the three requirements in beat 5 is
 `H = -K sum p_i log p_i` for a positive constant `K`.
@@ -110,7 +110,7 @@ per second. Noise flips one symbol in a hundred. The intuitive answer, 990 bits 
 5. Over 1,000 symbols: 80.8, so the rate is `1000 - 81 = 919` bits per second (Shannon prints 919).
 6. **Sanity check.** At a 50 per cent error rate the equivocation is exactly 1 bit per symbol and
    the rate is zero, which is right: the output is then independent of the input.
-7. **What changes if** the error rate falls to 0.1 per cent? `H(0.001) = 0.0114` bits, so the rate
+7. **What changes if** the error rate falls to 0.1 per cent? `H(0.001) = 0.0209` bits, so the rate
    is 989 bits per second. Ten times fewer errors buys back only about nine tenths of the loss,
    because `-p log p` does not scale linearly in `p`.
 8. **Derived against quoted.** 919 is Shannon's. `0.08079` is this page's recomputation and agrees.
@@ -155,7 +155,7 @@ something above 1 you summed the surprises instead of averaging them.
 
 ## Code and dataset plan
 
-`code/0105-entropy.py` against `datasets/m10_signals.csv` and `datasets/m10_classifier.csv`.
+`code/0200-entropy.py` against `datasets/m10_signals.csv` and `datasets/m10_classifier.csv`.
 Computes `H` with a Python loop and again vectorised and asserts they agree; checks `H = 0` for a
 certainty and `H = log2(k)` for the uniform at `k = 2, 3, 5, 8`; **checks the grouping axiom
 numerically** on the `plan` column, which is the axiom that forces the `-log` form; then scales to

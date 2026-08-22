@@ -77,47 +77,38 @@ appear in `outline.js`, and `widgets.md` requires a planned page to be plain tex
 and never a link. Together those mean a planned page can have **no file at all**. The deploy
 excludes `*.md` and the validator ignores it, and **no page ever links a brief**.
 
-## The numbers, and where they came from
+## The numbers
 
-M10's block is **0105 to 0115**, and it is derived rather than chosen. Adding up the planned page
-counts the course map declares for the modules before this one, starting from lesson zero at 0000:
+M10's block is **0200 to 0219**, taken from the definitive block table on issue #42: **module N
+starts at `N x 20`**, roughly twenty slots each, sparse so a surprise costs a gap rather than a
+rename across nine crews. That table supersedes every block proposed or claimed before it,
+including the tighter 0105-0115 this module briefly used.
 
-```
-0000  lesson zero
-0001-0009  M01   9 pages      0052-0063  M06  12 pages
-0010-0017  M02   8 pages      0064-0077  M07  14 pages
-0018-0030  M03  13 pages      0078-0092  M08  15 pages
-0031-0040  M04  10 pages      0093-0104  M09  12 pages
-0041-0051  M05  11 pages      0105-0115  M10  11 pages   <- this module
-                              0116-0117  M11   2 pages
-```
+Eleven of the twenty slots are used, 0200 to 0210, leaving nine spare. The headroom also settles a
+question this module had raised: the course map's roadmap lists M10 as ten pages because it merged
+"Information gain" and "Perplexity" onto one line, while issue #53, the spec for this module's
+scope, lists them as two of eleven lessons. They are two ideas with two theorems, two worked
+examples and two datasets' worth of results, so this module ships eleven. Under the sparse blocks
+that costs nobody anything: M11 starts at 0220 either way.
 
-**One thing this changes for another crew, and it needs to be seen rather than discovered.** The
-course map's roadmap lists M10 as ten pages because it merged "Information gain" and "Perplexity"
-onto one line. Issue #53, which is the spec for this module's scope, lists them as two of eleven
-lessons, and they are two ideas with two theorems, two worked examples and two datasets' worth of
-results. This module ships **eleven**, so **M11 moves from 0115-0116 to 0116-0117**. M11 has no
-files yet, so the cost is this sentence. If the captain prefers ten, the merge to make is
-`0114` and `0115` into one page, and this module owner recommends against it.
-
-| Provisional | Slug | Class |
+| Real | Slug | Class |
 |---|---|---|
-| 0105 | entropy | core |
-| 0106 | cross-entropy | core |
-| 0107 | kl-divergence | core |
-| 0108 | mutual-information | core |
-| 0109 | softmax-log-sum-exp | core |
-| 0110 | distance-metrics | core |
-| 0111 | cosine-similarity | depth |
-| 0112 | kernels | depth |
-| 0113 | curse-of-dimensionality | depth |
-| 0114 | information-gain | depth |
-| 0115 | perplexity | core |
+| 0200 | entropy | core |
+| 0201 | cross-entropy | core |
+| 0202 | kl-divergence | core |
+| 0203 | mutual-information | core |
+| 0204 | softmax-log-sum-exp | core |
+| 0205 | distance-metrics | core |
+| 0206 | cosine-similarity | depth |
+| 0207 | kernels | depth |
+| 0208 | curse-of-dimensionality | depth |
+| 0209 | information-gain | depth |
+| 0210 | perplexity | core |
 
 Teaching order is file order, and file order is a topological order of the prerequisite graph:
-0105 -> 0106 -> 0107 -> 0108 -> 0114, with 0109 needing 0106, 0115 needing 0105 and 0106, and the
-geometry arc 0110 -> 0111 -> 0112 -> 0113 needing only 0110 inside this module. No page needs a
-page that comes after it.
+0200 -> 0201 -> 0202 -> 0203 -> 0209, with 0204 needing 0201, 0210 needing 0200 and 0201, and the
+geometry arc 0205 -> 0206 -> 0207 -> 0208 needing only 0205 from inside this module. No page needs
+a page that comes after it.
 
 ## What every M10 page owes
 
@@ -131,7 +122,7 @@ at least one practice problem with a hint, a hidden solution and a `.p-check` li
 ## `statistical-foundations-ml-course` is frozen
 
 Per captain update 3. This module creates, modifies, renames and deletes **nothing** under that
-folder. One-way links out to its pages are allowed and one is planned, from 0108 to its
+folder. One-way links out to its pages are allowed and one is planned, from 0203 to its
 `lessons/0007-leading-indicators-and-correlation.html`, because that page teaches correlation as a
-diagnostic and 0108 is where the reader learns what correlation cannot see. No reverse link, because
+diagnostic and 0203 is where the reader learns what correlation cannot see. No reverse link, because
 that would edit a frozen file.

@@ -1,4 +1,4 @@
-# 0109 - Softmax and log-sum-exp
+# 0204 - Softmax and log-sum-exp
 
 **Module** M10 - lesson 05  **Rung** working  **Class** core
 
@@ -9,7 +9,7 @@ computable also hands you the most-used gradient in machine learning.
 
 ## Prerequisites
 
-0106 (cross-entropy, which this page produces the `q` for). M01 for the exponential and for the
+0201 (cross-entropy, which this page produces the `q` for). M01 for the exponential and for the
 arithmetic case for log space; **M01 stops short of the log-sum-exp identity and this page owns
 it**, per the boundary M01's own brief proposes. M03 for the dot product, since logits are a
 matrix-vector product. M05 for the chain rule and the gradient.
@@ -20,7 +20,7 @@ matrix-vector product. M05 for the chain rule and the gradient.
    logit changes nothing. It is a softened **argmax**, not a softened max. You never evaluate it
    as written: `LSE(z) = a + log sum_j e^{z_j - a}` with `a = max z`. And the loss gradient is `p - y`.
 2. **Orientation figure.** M03's dot product produces logits, into "this page: logits become a
-   probability vector, safely", into 0106 (which scores it), 0115 (which reports it) and M06
+   probability vector, safely", into 0201 (which scores it), 0210 (which reports it) and M06
    (which descends on the gradient it produces).
 3. **Mental model.** Exponentiate to make everything positive, then divide by the total to make it
    sum to one. Two steps, no magic. Bar chart before and after.
@@ -171,7 +171,7 @@ these logits cannot produce.
 
 ## Code and dataset plan
 
-`code/0109-softmax-log-sum-exp.py` against `m10_classifier.csv`. Naive against shifted in float64
+`code/0204-softmax-log-sum-exp.py` against `m10_classifier.csv`. Naive against shifted in float64
 and again in float16; shift invariance; the `log softmax = z - LSE` identity to 3.6e-15 over
 100,000 entries; **both gradients checked against central differences**; and the temperature table.
 
