@@ -79,7 +79,14 @@ Correct: it lowers the condition number, so a larger step is safe. Distractors: 
 ## Code and dataset
 
 **Program:** `code/m06-04-learning-rate.py`. **Dataset:** `datasets/m06-credit.csv`.
-**What it computes twice:** the largest safe learning rate, once analytically as `2/lambda_max` from `numpy.linalg.eigvalsh` of the Hessian, and once empirically by running gradient descent at a ladder of step sizes and reporting the largest that does not overflow in 200 iterations. The two must bracket each other. The empirical route is what a practitioner actually has, and seeing it land on the analytic answer is the point.
+**What it computes twice:** the largest safe learning rate, once analytically as `2/lambda_max` from `numpy.linalg.eigvalsh` of the Hessian, and once empirically by running gradient descent at a ladder of step sizes and finding the largest that survives. The empirical route is what a practitioner actually has, and seeing it land on the analytic answer is the point.
+
+**And they do not always agree, which turned out to be a better beat than the one first planned.** Measured:
+
+- **On least squares** the Hessian is `X'X/n`, constant everywhere, so `2/L` is exact. Analytic `2/L = 9.6228e-01`; the empirical boundary sits between `0.99x` and `1.01x` of it, and every rate at or above `1.01x` diverges. **The two routes agree to one per cent.**
+- **On logistic regression they do not.** The empirical limit is `2.00x` the analytic one. The reason is measurable and the program measures it: the logistic Hessian carries weights `p*(1-p)`, which shrink as the model grows confident, so the largest eigenvalue falls from `5.1960e-01` at `theta = 0` to `3.0657e-01` at the optimum, a factor of `1.695`. **The bound moved while we were walking towards it.**
+
+**The page must carry this contrast rather than hide it.** `2/L` is exact on a quadratic and a conservative guide on anything else, and a reader who takes it as a law will be puzzled the first time a logistic run survives a step size the formula forbade. Stating the scope of a threshold is part of teaching the threshold. This also gives the page an honest reason to introduce the least-squares objective, where the geometry it draws is exactly right.
 
 ## Sources, primary only
 

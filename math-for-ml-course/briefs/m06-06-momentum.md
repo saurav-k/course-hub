@@ -73,7 +73,23 @@ Correct: once gradient noise, not curvature, limits progress. Distractors: "once
 ## Code and dataset
 
 **Program:** `code/m06-06-momentum.py`. **Dataset:** `datasets/m06-credit.csv`, standardised, using the naturally ill-conditioned subset of columns so the zigzag is real.
-**What it computes twice:** the number of iterations to reach a fixed objective gap, once for plain gradient descent and once for momentum at the same `eta`, on the same problem from the same start. Reporting the ratio is what turns "momentum helps" into a number. The program also verifies the terminal-velocity formula directly by feeding a constant gradient and comparing the converged velocity against `-eta*g/(1 - alpha)`.
+**What it computes twice:** the number of iterations to reach a fixed objective gap, once for plain gradient descent and once for momentum at the same `eta`, from the same start. The program also verifies the terminal-velocity formula directly by feeding a constant gradient and comparing the converged velocity against `-eta*g/(1 - alpha)`; the two agree exactly at every `alpha` tested.
+
+**The measured result changed this page's beat 3, and for the better.** Running the comparison on `f(x) = 0.5*(x1^2 + gamma*x2^2)` at `eta = 1/lambda_max` from `x0 = (gamma, 1)`, iterations to a `1e-8` gap:
+
+| `kappa` | plain GD | momentum(0.9) | Nesterov(0.9) | speed-up |
+|---|---|---|---|---|
+| 2 | 14 | 150 | 18 | **0.1x** |
+| 10 | 106 | 190 | 94 | 0.6x |
+| 50 | 633 | 199 | 134 | 3.2x |
+| 200 | 2,826 | 234 | 184 | **12.1x** |
+| 1,000 | 15,764 | 1,421 | 1,437 | 11.1x |
+
+**Momentum is ten times SLOWER at `kappa = 2` and twelve times faster at `kappa = 200`.** On the real credit problem, where `kappa` is only 26.5, it is behind plain gradient descent at two of three targets and ahead at the third.
+
+So the page must not say "momentum helps". It must say **momentum is a cure for a stretched bowl**, show the table, and name the two reasons it can lose: a well-conditioned problem has little zigzag to cancel, and the extra effective step size can overshoot. Nesterov is the more stable of the two at every `kappa` measured, which is a concrete reason to prefer it and one the page can now state from evidence rather than from authority.
+
+**This is also where beat 5's honesty lands.** A reader who has seen momentum lose a race will believe the noise-floor caveat. A reader who has only been told it accelerates will not.
 
 ## Sources, primary only
 
