@@ -223,6 +223,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "The gradient points uphill, and it is steepest only in the Euclidean sense",
           "href": "lessons/0084-the-gradient-points-uphill.html"
+        },
+        {
+          "title": "The Jacobian is the chain rule when both ends are vectors",
+          "href": "lessons/0085-the-jacobian.html"
         }
       ]
     },
