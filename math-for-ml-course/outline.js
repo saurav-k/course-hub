@@ -49,6 +49,14 @@ window.COURSE_OUTLINE = {
         {
           "title": "A derivative is the exchange rate between a small input change and a small output change",
           "href": "lessons/0080-derivative-as-a-limit.html"
+        },
+        {
+          "title": "The chain rule is the only differentiation rule that matters at scale",
+          "href": "lessons/0081-the-chain-rule.html"
+        },
+        {
+          "title": "Where the derivative does not exist, and why machine learning ships anyway",
+          "href": "lessons/0082-where-the-derivative-does-not-exist.html"
         }
       ]
     },
