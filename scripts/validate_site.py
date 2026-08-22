@@ -8,6 +8,8 @@ Eight checks, all deterministic and offline:
 3. Every course ``outline.js`` names exactly the lessons that are on disk.
 4. Every relative ``href``/``src`` in every page resolves to a file on disk.
 5. No published page links a local ``.md`` file, which the deploy excludes.
+6. Every course map's module sections are balanced and none nests inside another,
+   which is the one structural break that renders correctly and reaches no console.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -53,6 +55,17 @@ PAGER_PATTERN: re.Pattern[str] = re.compile(
 )
 
 ANCHOR_HREF: re.Pattern[str] = re.compile(r'<a\b[^>]*href="(?P<href>[^"]*)"', re.IGNORECASE)
+
+MAIN_BLOCK: re.Pattern[str] = re.compile(r"<main[^>]*>(?P<body>.*)</main>", re.DOTALL)
+
+HTML_COMMENT: re.Pattern[str] = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# `section` and `div` are the two elements a course map nests, and neither may be
+# self-closing in HTML, so counting open and close tags is exact rather than an
+# approximation.
+NESTING_TAG: re.Pattern[str] = re.compile(r"<(?P<close>/?)(?P<tag>section|div)\b[^>]*>", re.IGNORECASE)
+
+MODULE_SECTION: re.Pattern[str] = re.compile(r'<section class="module">')
 
 
 @dataclass(frozen=True)
@@ -353,6 +366,111 @@ def check_lessons_carry_zone_metadata() -> list[Problem]:
     return problems
 
 
+def check_course_map_sections_are_balanced() -> list[Problem]:
+    """A course map's module sections must not nest inside one another.
+
+    This is the failure with no symptom. A ``section.module`` that never closes
+    still renders: the browser repairs the tree, every link still resolves, and
+    ``gen_outline.py`` still finds every heading, because it splits the page at
+    each ``.module-h`` rather than at each section. So the page looks right, the
+    outline is right, and the pull request is green, while every module after
+    the broken one has quietly become a *child* of it.
+
+    What that costs is the document outline a screen reader navigates by, and
+    the CSS, where a nested ``.module`` inherits spacing meant for a top-level
+    one. It reached ``main`` twice before anything caught it, both times the
+    same way: a card list ended with ``</a>`` and the next module's ``.module-h``
+    followed immediately, with the ``</div></section>`` pair missing between them.
+
+    Three mechanical assertions, because the first two alone let a case through:
+
+    1. Every close tag matches the element it closes. A ``</section>`` written
+       where a ``</div>`` belongs keeps the depth count balanced and is invisible
+       to any check that only counts, so the tags are matched on a stack instead.
+    2. ``<main>`` closes with nothing left open.
+    3. Every ``section.module`` opens at the same depth as the first one on the
+       page. Deliberately *relative* rather than fixed at zero, because
+       ``llm-evolution-course`` wraps all twenty-nine of its module sections in
+       per-route containers and opens every one at depth two, which is correct
+       and must stay legal.
+    """
+    problems: list[Problem] = []
+
+    # The hub landing page carries the same section.module shape as a course map
+    # and is exposed to the same break, so it is checked alongside them.
+    maps = [course / "index.html" for course in course_directories()]
+    maps.append(REPO_ROOT / "index.html")
+
+    for page in maps:
+        if not page.is_file():
+            continue
+        source = HTML_COMMENT.sub("", page.read_text(encoding="utf-8"))
+        body = MAIN_BLOCK.search(source)
+        if body is None:
+            continue
+
+        # Line numbers are counted from the start of the file so that a reported
+        # line is the line an editor jumps to.
+        offset = source[: body.start("body")].count("\n") + 1
+        text = body.group("body")
+
+        stack: list[tuple[str, int]] = []
+        opened_at: list[int] = []
+        mismatched = False
+
+        for tag in NESTING_TAG.finditer(text):
+            line = offset + text[: tag.start()].count("\n")
+            name = tag.group("tag").lower()
+            if tag.group("close"):
+                if not stack:
+                    problems.append(
+                        Problem(relative(page), f"line {line}: </{name}> closes nothing")
+                    )
+                    mismatched = True
+                    break
+                opened, opened_line = stack.pop()
+                if opened != name:
+                    problems.append(
+                        Problem(
+                            relative(page),
+                            f"line {line}: </{name}> closes a <{opened}> opened on line {opened_line}",
+                        )
+                    )
+                    mismatched = True
+                    break
+            else:
+                if MODULE_SECTION.match(tag.group(0)):
+                    opened_at.append(len(stack))
+                stack.append((name, line))
+
+        if mismatched:
+            continue
+
+        if stack:
+            name, line = stack[0]
+            problems.append(
+                Problem(
+                    relative(page),
+                    f"{len(stack)} element(s) never closed inside main; the first is "
+                    f"<{name}> opened on line {line}",
+                )
+            )
+
+        if len(set(opened_at)) > 1:
+            expected = opened_at[0]
+            strays = sorted({depth for depth in opened_at if depth != expected})
+            problems.append(
+                Problem(
+                    relative(page),
+                    f"module sections open at mixed nesting depths {sorted(set(opened_at))}; "
+                    f"the first opens at {expected} and {len(opened_at) - opened_at.count(expected)} "
+                    f"open at {strays}, so a section above them never closed",
+                )
+            )
+
+    return problems
+
+
 def check_no_local_markdown_links() -> list[Problem]:
     """The deploy syncs the repository minus ``*.md``, so a page that links a
     local Markdown file works from disk and returns a 404 on the published site."""
@@ -393,6 +511,7 @@ def main() -> int:
         + check_routes_cover_the_pool()
         + check_pagers_match_the_owning_route()
         + check_lessons_carry_zone_metadata()
+        + check_course_map_sections_are_balanced()
         + check_local_links_resolve()
         + check_no_local_markdown_links()
     )

@@ -29,6 +29,8 @@ Owes:
 - A card for each `reference/` sheet.
 - A footer linking the glossary, any sibling course, and `../index.html`.
 
+**Every `section.module` closes before the next one opens.** This is the one structural break in a course map that has no symptom: the browser repairs the tree, every card still renders and is clickable, every link resolves, and `gen_outline.py` is unaffected because it splits the page at each `.module-h` rather than at each section. It reached `main` twice. Both times a card list ended with `</a>` and the next module's `.module-h` followed immediately, with the `</div></section>` pair missing between them, and the result was a module with no section of its own: its heading and all its cards became children of the module above it, so a screen reader navigating by region found one fewer region than the page appears to have. `scripts/validate_site.py` now matches the tags on a stack and fails the pull request on it.
+
 This file is the course's single source of truth for its own map, and it is a **generator input**.
 `scripts/gen_outline.py` parses it into `<course>/outline.js`, which every page in the course loads and the sidebar rail renders from, so the shapes in [`widgets.md`](widgets.md) are a parsing contract and not only a styling one.
 Re-run the generator after every change here and commit the result; `validate_site.py` fails the pull request when the outline and the lessons on disk disagree.
