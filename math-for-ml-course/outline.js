@@ -219,6 +219,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Partial derivatives put every dial on its own axis, and the gradient collects them",
           "href": "lessons/0083-partial-derivatives-and-the-gradient.html"
+        },
+        {
+          "title": "The gradient points uphill, and it is steepest only in the Euclidean sense",
+          "href": "lessons/0084-the-gradient-points-uphill.html"
         }
       ]
     },
