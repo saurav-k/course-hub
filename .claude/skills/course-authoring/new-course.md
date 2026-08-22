@@ -90,9 +90,14 @@ Then three registrations, none of which the course can do for itself:
    ```
 
    `hub.js` reads the course folder out of the URL and writes it onto `<html>`, and `hub.css` rotates whichever palette the reader chose by that offset in OKLCH.
-   The spread in use is -75 to +75 in steps of 25, and each of the seven existing courses holds one, so a new course takes a free step or the block is re-spread.
+   The grid is 25 degrees. The first seven courses filled -75 to +75, so the eighth extended the same grid outwards rather than re-spreading it, and `math-for-ml-course` holds +125.
+   A new course takes a free step on that grid, extends it again, or re-spreads the block; extending is cheapest, because re-spreading changes the accent of every course already published.
    A course with no line here silently wears the plain palette accent, which is dull rather than broken.
+
    Check the new hue against every palette in both modes before you ship it: six palettes times two modes is what "verified" means here.
+   Looking is the check, and there is a cheaper one worth doing first, because hue rotation preserves lightness and chroma while the OKLCH gamut is not a cylinder: at some hues the rotated colour falls outside sRGB and the browser clips it, which quietly changes what the reader sees.
+   Render the candidate against all twelve combinations, read the painted pixel back through a canvas, and compare its chroma with the unrotated accent's.
+   The seven original hues lose between 0 and 8 percent of their chroma on average, and up to 55 percent in their worst cell, so a candidate inside that range is no worse than what is already published.
 
 2. **Generate the outline.** `python3 scripts/gen_outline.py <course>` reads the map you wrote in step 2 and writes `<course>/outline.js`, which is what the sidebar rail renders from. Commit it. Re-run it after every change to `index.html`; `validate_site.py` fails the pull request when the outline and the lessons on disk disagree.
 

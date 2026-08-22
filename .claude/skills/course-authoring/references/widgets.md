@@ -290,6 +290,54 @@ The caption names the file and says what it is, so a reader knows whether to run
 Exactly four options, matched to within 12 characters. The counts and the answer-index rule are in [`pedagogy.md`](pedagogy.md).
 `hub.js` writes the tick, the cross and their screen-reader labels itself; the page supplies nothing but the four buttons and the feedback.
 
+## Practice problems
+
+A quiz is a quick check the reader answers in their head.
+A practice problem needs paper and several minutes, so it is a different widget and it sits **after** the quizzes, under its own `<h2>Practice</h2>`.
+
+```html
+<h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+<div class="practice">
+  <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+  <div class="p-stem">
+    <p>A dataset has two features whose covariance matrix is:</p>
+    <div class="math">
+      S = [[2, 1], [1, 2]]
+      <span class="gloss">Read as: a 2 by 2 covariance matrix. Each feature has variance
+      <i>2</i>, and the covariance between the two is <i>1</i>.</span>
+    </div>
+    <p><b>Find</b> the two principal directions and the share of variance the first one carries.</p>
+  </div>
+
+  <details class="hint"><summary>Hint</summary>
+    <p>A principal direction is an eigenvector of the covariance matrix.
+    Start from det(S - &lambda;I) = 0.</p></details>
+
+  <details class="solution"><summary>Show the worked solution</summary>
+    <ol class="worked">
+      <li><b>Write the characteristic equation.</b> det(S - &lambda;I) = (2 - &lambda;)<sup>2</sup> - 1 = 0.</li>
+      <li><b>Solve it.</b> (2 - &lambda;)<sup>2</sup> = 1, so &lambda; = 3 or &lambda; = 1.</li>
+      <li><b>Take the variance share.</b> 3 &divide; (3 + 1) = 0.75.</li>
+    </ol>
+    <p class="p-check"><b>Sanity check.</b> The trace is 4 and the eigenvalues sum to 4, as they must.
+    Both are positive, as they must be for a covariance matrix.</p>
+  </details>
+</div>
+```
+
+Six rules.
+
+- **Reveal-only.** There is no answer box and no checker. The reader attempts the problem, then opens the solution. `<details>` carries the disclosure, the keyboard behaviour and the expanded state a screen reader announces, so no JavaScript is involved and nothing breaks with scripting off.
+- **`details.hint` before `details.solution`.** Zero or more hints, exactly one solution. A hint names the next move without making it, so a reader who is stuck can unstick themselves without being shown the answer.
+- **Every problem ends in `.p-check`,** one sentence saying what the answer should roughly be and why. It is what lets a reader catch their own arithmetic, and `check_pages.py` fails a problem without one.
+- **The solution is an `ol.worked`,** one arithmetic step per `<li>`, each opening with a bolded imperative. `.keynum` marks a number quoted from a source; a number derived here is plain.
+- **Practice text is not prose.** `check_pages.py` excludes the block from the word ceiling and from the words-per-figure ceiling, exactly as it excludes the quiz. Without that exclusion a single problem takes a clean page over both.
+- **`hub.js` opens every disclosure for printing** and closes again afterwards, so a printed page carries its solutions and the reader's own open/closed state survives. Nothing on the page needs to arrange that.
+
+The floors, and which courses are held to them, are in [`pedagogy.md`](pedagogy.md).
+
 ## Course map
 
 The course `index.html`, and the same card shape on the hub landing page.
@@ -318,8 +366,14 @@ A roadmap entry that has since been written is marked `class="written"`.
 
 Where a course nests a level deeper, a lecture hub card is followed by `<ul class="parts">` listing its parts, each numbered with `<span class="pn">`.
 
-`.roadmap`, `.parts` and `.pn` are styled in `statistical-foundations-ml-course/assets/course-extras.css` and not in the hub sheet.
-A new course that uses them gets unstyled markup, so promote the rules into `assets/hub.css` in the same pull request rather than copying the extras file.
+`.roadmap` is now in `assets/hub.css`, because a second course needed it and an unstyled roadmap is invisible markup.
+**It is currently declared twice**: the copy in `statistical-foundations-ml-course/assets/course-extras.css` is still there, and on that course's own pages it wins on cascade order. The two declarations are equivalent, so nothing renders differently, but the duplication is real and the extras copy should be deleted the next time that course is touched for another reason.
+`.parts` and `.pn` are still only in that extras sheet, so a new course that uses them gets unstyled markup and must promote them the same way rather than copying the file.
+
+Two more small shapes live in the hub sheet and are worth knowing, because both were being written as inline styles before they existed:
+
+- **`.note-sm`** is the quiet line under a heading: the instruction above a quiz, the time estimate beside a `Practice` heading, an aside under a module title.
+- **`.module-note`** is a paragraph of prose under a `.module-h` on a course map, where a `.sub` would be unstyled because `.sub` is only styled inside a `.hero`.
 
 ## Page foot
 

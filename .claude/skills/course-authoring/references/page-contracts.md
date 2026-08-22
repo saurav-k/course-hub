@@ -56,10 +56,17 @@ Owes, in this order:
 7. The mechanism, every symbol named in words.
 8. The trade-off, named in the same section as the technique that incurs it.
 9. Quizzes, after the idea is fully worked.
+9b. **Practice problems**, under their own `<h2>Practice</h2>`, after the quizzes.
 10. `.teacher-note`.
 11. `Primary source to go deeper`.
 12. `.pager`.
 13. `<footer>`.
+
+Item 9b comes after item 9 because the two ask different things of the reader.
+A quiz is a conceptual check answered in the head, so it can close a reading session.
+A practice problem needs paper and several minutes, so a reader can leave after the quizzes and come back for it.
+That order also keeps the reading-time pill honest: the pill estimates reading, and practice is not reading, so the estimate for it goes in the heading (`<h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>`) and never into the pill.
+The markup is in [`widgets.md`](widgets.md).
 
 Item 5 is the one that decides whether the page reads as a wall.
 The reader gets the big picture before the detail, and every paragraph after it that the figure already says is a paragraph to cut.
