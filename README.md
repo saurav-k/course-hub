@@ -31,13 +31,13 @@ Or just use the live site above.
 
 ```
 index.html                    the hub landing page; every course is a card here
-assets/                       shared CSS and JS for the landing page only
+assets/                       the hub design system: hub.css, hub.js, fonts/. Every page links these.
 scripts/validate_site.py      structure and link checker that gates every pull request
 .github/workflows/            validate on pull request, publish on merge to main
 
 <course-name>/
   index.html                  the course map; every lesson is linked from here
-  assets/                     CSS and JS owned by that course
+  assets/                     optional course-extras.css only, for rules unique to this course
   lessons/NNNN-kebab.html     the lessons, zero-padded and in teaching order
   reference/*.html            print-friendly cheat sheets and glossaries
   learning-records/*.md       progress notes; never published to the site

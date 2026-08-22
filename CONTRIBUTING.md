@@ -77,6 +77,48 @@ scripts/gen_outline.py   generates a course outline.js from its index.html
   BUILDER-SPEC.md        the authoring spec for that course
 ```
 
+## How a course gets built here
+
+This section is orientation only.
+Every rule it mentions is written somewhere else, and that other file is the authoritative one.
+
+### Which file governs what
+
+| What you need to know | Read |
+|---|---|
+| The workflow: branch, validate, pull request, review | This file |
+| What a page must contain to be one of these courses | [`.claude/skills/course-authoring/SKILL.md`](.claude/skills/course-authoring/SKILL.md) and the `references/` beside it |
+| How the shared design system behaves, and the traps in it | The "Editing the shared assets" section of [`AGENTS.md`](AGENTS.md) |
+| This course's voice, scope, cadence, and trusted sources | That course's `MISSION.md`, `NOTES.md`, `RESOURCES.md`, and `BUILDER-SPEC.md` |
+| The one course that presents its lessons along several routes | [`llm-evolution-course/routes/README.md`](llm-evolution-course/routes/README.md) |
+
+The course-authoring skill lives under `.claude/` because Claude Code loads it from there on its own.
+That path is the only thing about it that is agent-specific.
+It is the house standard for every published page, whoever or whatever writes that page.
+
+### Three constraints, and the cost behind each one
+
+The rules below look arbitrary until you know what they were paid for.
+
+**A course owns a hue, not a stylesheet.**
+The hub used to carry six byte-identical copies of an earlier design system, one per course.
+They drifted, one copy received a rendering fix that the other five never got, and because a broken diagram here reaches no console, the pages that rendered wrong stayed that way until somebody looked at a figure.
+De-forking them ran from pull request #14 to #32, and it is why there is now one `assets/hub.css` and one `assets/hub.js`.
+So a new course adds a hue offset to the course-accent block of `assets/hub.css` and nothing else.
+A shape the design system does not have is added to the design system and documented in [`references/widgets.md`](.claude/skills/course-authoring/references/widgets.md), in the same pull request that uses it.
+Never by forking the sheet, and never by an inline style.
+
+**A lesson may not assume what the reader read before it.**
+`llm-evolution-course` writes each lesson once and presents that one pool of pages along four named routes, so two readers can reach the same lesson from different neighbours.
+That is what makes "as we saw in the previous lesson" wrong there: name the lesson and link it instead.
+`llm-evolution-course/BUILDER-SPEC.md` states the rule and gives a grep that finds every phrasing of it.
+The habit is worth keeping in single-route courses too, because a reader who arrives from a search engine has no previous lesson either.
+
+**Verification here is looking, not counting.**
+The defects that matter most are silent: the page validates, the browser reports nothing, and the figure is an error box or a run-together label.
+Two of those defect classes are inverses of each other, one wrong on the first paint and one wrong only after a repaint, which is why a page has to be checked in both render states rather than one.
+The skill lists the five of them, and `AGENTS.md` carries the mechanism behind each.
+
 ## Authoring rules
 
 These keep the courses consistent, so read the course's own `MISSION.md`, `NOTES.md`, and `BUILDER-SPEC.md` before you write a lesson.
