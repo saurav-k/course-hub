@@ -128,7 +128,7 @@ tint as `--course-soft`, and only the chrome uses them - the wordmark, the two p
 rail's current-lesson chip, a course-map section number and a card's hover border. Verify a new
 hue against every palette surface in both modes before you ship it.
 
-Seven traps in that design system, all found on the published site:
+Eight traps in that design system, all found on the published site:
 
 - **Theme tokens are declared four times** (`:root`, the `prefers-color-scheme: dark` block, and
   the two explicit-choice selectors, because the toggle must beat the OS). A token added to
@@ -169,6 +169,15 @@ Seven traps in that design system, all found on the published site:
   raw Mermaid text. `hub.js` draws an ink-on-paper copy of every diagram while the browser is idle
   and swaps it in synchronously on `beforeprint`. Anything that changes how diagrams are rendered
   has to keep that copy correct too.
+- **Some chart classes are modifiers that colour nothing on their own.** `.ref` sets a dash pattern
+  and a width but no stroke, because it is meant to ride on an `s-*` class that already carries the
+  colour - `class="s-signal ref"`, not `class="ref"`. Written alone it computes to `stroke: none`
+  and draws nothing at all, in every mode, every palette and print, and nothing warns you: the
+  element is in the DOM, `getBBox` returns a real box, and a figcaption can happily describe a line
+  no reader can see. `hub.css` now gives `.ref` a `var(--ink-faint)` default through
+  `.chart :where(.ref)`, held at zero specificity so an `s-*` pairing still wins the colour. Before
+  you add a chart class, check whether it sets a paint property or only modifies one, and **look at
+  the figure** rather than trusting that the markup is present.
 
 Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
 tolerate Mermaid's async draw. `hub.js` drives the render itself and awaits `mermaid.run()`, so it
