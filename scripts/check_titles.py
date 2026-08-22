@@ -66,7 +66,6 @@ SWEEP_PENDING: frozenset[str] = frozenset(
     {
         "llm-inference-course",
         "llm-papers-course",
-        "math-for-ml-course",
     }
 )
 
