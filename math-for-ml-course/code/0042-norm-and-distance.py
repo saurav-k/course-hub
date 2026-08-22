@@ -1,4 +1,4 @@
-"""Lesson 62 - norm, distance, and why the units decide the answer.
+"""Lesson 42 - norm, distance, and why the units decide the answer.
 
 Two results, each checked twice.
 

@@ -1,4 +1,4 @@
-"""Lesson 60 - shape is the contract: axes, indexing, and broadcasting.
+"""Lesson 40 - shape is the contract: axes, indexing, and broadcasting.
 
 The result this checks twice is NumPy's broadcasting rule. Once by letting NumPy
 apply it, and once by expanding both operands by hand with np.repeat, which is

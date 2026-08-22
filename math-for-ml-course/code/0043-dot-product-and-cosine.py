@@ -1,4 +1,4 @@
-"""Lesson 63 - the dot product, the angle, and cosine similarity.
+"""Lesson 43 - the dot product, the angle, and cosine similarity.
 
 Two results, each checked twice.
 

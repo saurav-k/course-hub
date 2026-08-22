@@ -1,4 +1,4 @@
-"""Lesson 64 - a matrix product is a bag of dot products.
+"""Lesson 44 - a matrix product is a bag of dot products.
 
 Two results, each checked twice.
 

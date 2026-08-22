@@ -1,4 +1,4 @@
-"""Lesson 61 - adding and scaling are the only two operations.
+"""Lesson 41 - adding and scaling are the only two operations.
 
 The result this checks twice is that a linear combination is exactly what those
 two operations build. Once with NumPy's vectorised arithmetic, and once with a

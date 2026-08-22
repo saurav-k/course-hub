@@ -1,4 +1,4 @@
-"""Lesson 65 - what a matrix multiply costs.
+"""Lesson 45 - what a matrix multiply costs.
 
 The result this checks twice is the 2mnp flop count: once as arithmetic from the
 shapes, and once as measured wall-clock time, which scales the same way even
