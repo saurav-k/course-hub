@@ -27,6 +27,7 @@
 7. Shape algebra: why one chain of widths composes and a mismatched one does not. This is where a reader's first shape error stops being mysterious.
 8. Inverses exist only for one-to-one functions. ReLU has none, which is one honest reason a network is hard to run backwards.
 9. The inverse pair the reader will meet constantly: sigmoid and logit.
+10. **Where the mathematics and the arithmetic part company**, which the program for this page measured: the image of a sigmoid is open, so it never returns exactly 1, and yet in float64 it rounds to exactly `1.0` from an input of about **36.74** upward, and in float32 from about **16.64**. State both facts and say which is which. This is where `log(1 - yhat)` becomes `-inf` in a real training run, and knowing which of the two facts you are looking at is the whole skill.
 
 ## Figures (4, at least one `svg.chart`)
 
