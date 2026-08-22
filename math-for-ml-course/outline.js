@@ -239,6 +239,18 @@ window.COURSE_OUTLINE = {
         {
           "title": "Curvature is the second derivative, and the Hessian holds it for every direction at once",
           "href": "lessons/0088-curvature-and-the-hessian.html"
+        },
+        {
+          "title": "Taylor expansion: every loss is a quadratic if you stand close enough",
+          "href": "lessons/0089-taylor-and-the-quadratic-model.html"
+        },
+        {
+          "title": "Integrals in machine learning: the area you report is a number you actually compute",
+          "href": "lessons/0090-integrals-and-the-area-you-report.html"
+        },
+        {
+          "title": "Six matrix-calculus identities, and the layout convention that breaks them",
+          "href": "lessons/0091-matrix-calculus-identities.html"
         }
       ]
     },

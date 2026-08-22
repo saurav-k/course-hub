@@ -1,6 +1,11 @@
 """Lesson 0090 - the area under a curve, computed two ways that must agree.
 
-Implements two named results.
+Implements three named results.
+
+0.  The fundamental theorem of calculus, on a pair machine learning already
+    owns: the sigmoid is the derivative of the softplus. Rectangles under the
+    sigmoid are summed at three widths and compared with the exact answer that
+    the theorem gives in one line, softplus(2) - softplus(0).
 
 1.  The trapezoid rule for a definite integral, applied to the ROC curve. This
     is what a library means when it reports an area: sort by score, sweep the
@@ -43,6 +48,22 @@ def sigmoid(z: np.ndarray) -> np.ndarray:
     e = np.exp(z[~pos])
     out[~pos] = e / (1.0 + e)
     return out
+
+
+def softplus(z: float) -> float:
+    """The antiderivative of the sigmoid, evaluated stably for large z."""
+    return float(max(z, 0.0) + np.log1p(np.exp(-abs(z))))
+
+
+def rectangles_under_sigmoid(strips: int, hi: float = 2.0) -> float:
+    """Left-rectangle sum of the sigmoid on [0, hi].
+
+    Left rectangles rather than midpoints because the point is to watch a
+    crude rule converge, not to converge quickly.
+    """
+    width = hi / strips
+    left_edges = np.arange(strips) * width
+    return float(np.sum(sigmoid(left_edges) * width))
 
 
 def fitted_scores(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
@@ -147,6 +168,15 @@ def auc_by_brute_force(label: np.ndarray, score: np.ndarray) -> float:
 
 
 def main() -> None:
+    print("0. an accumulation, and the theorem that evaluates it without adding up")
+    exact = softplus(2.0) - softplus(0.0)
+    for strips in (2, 4, 8, 64, 1024):
+        total = rectangles_under_sigmoid(strips)
+        print(f"   {strips:5d} left rectangles: {total:.4f}   error {abs(total - exact):.4f}")
+    print(f"   exact, as softplus(2) - softplus(0): {exact:.4f}")
+    print("   the sigmoid is the derivative of the softplus, so the whole area")
+    print("   is two evaluations and there is nothing to add up.\n")
+
     frame = load()
     label, score = fitted_scores(frame)
     label = label.astype(int)
