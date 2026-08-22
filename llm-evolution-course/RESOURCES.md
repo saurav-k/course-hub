@@ -182,10 +182,10 @@ The papers were read as PDFs, not as abstracts, because most of the numbers quot
 
 ## Sources this course still needs
 
-Several lessons in the moving zone carry no sources at all, because the scaffold refused to assert what it could not verify.
-Those lessons are, by number: 0038, 0041, 0054, 0055, 0056 and 0057.
-Whoever writes them finds and dates the sources, and adds them here.
-0046 and 0047 were on that list and are no longer: their sources were found while writing lessons 0043 to 0050 and are recorded below.
+None.
+Every lesson from 0001 to 0057 is written and carries its own "Sources to read first" list, and the per-range sections below record what each range added to this file.
+This heading used to name 0038, 0041, 0046, 0047, 0054, 0055, 0056 and 0057 as unsourced; all eight were written and sourced, and the list outlived the work.
+Leave the heading in place and list a lesson under it only while that lesson genuinely lacks a source.
 
 ## Known sourcing traps
 
@@ -200,6 +200,7 @@ Each of these is also repeated in the "Do not overclaim" block of the lesson it 
 - **AlexNet's headline error rate.** Two competition tracks give two different real numbers. Always name the track.
 - **GPT-2's parameter counts.** OpenAI corrected them. The older figures are still in wide circulation, including in this repository before they were fixed.
 - **Who invented attention.** Content-based addressing appears in several places in late 2014. Present it as convergent, not singular.
+- **Where attention came from.** The wrong institution is as common an error as the wrong person, and it runs the other way: page 1 of arXiv:1409.0473 puts Bahdanau at Jacobs University Bremen and Cho and Bengio at the Université de Montréal, none of them at Google. Google's paper is the 2017 Transformer. Never let the two collapse into one Google invention.
 
 ## Added while writing lessons 0011 to 0018
 
@@ -233,6 +234,10 @@ Journal citations were confirmed against Crossref, and arXiv identifiers against
 - He, Zhang, Ren and Sun, *Deep Residual Learning for Image Recognition*, arXiv v1 10 December 2015, for the 3.57 per cent ImageNet figure quoted in its abstract. <https://arxiv.org/abs/1512.03385>
 - *NVIDIA CUDA Programming Guide, version 1.0*, dated 6/23/2007. Chapter 1 is the primary source for the "wide, not fast" argument. <https://developer.download.nvidia.com/compute/cuda/1.0/NVIDIA_CUDA_Programming_Guide_1.0.pdf>
 - ILSVRC official results pages, the source for every top-five error figure in lesson 0017: <https://image-net.org/challenges/LSVRC/2011/results>, <https://image-net.org/challenges/LSVRC/2012/results.html>, <https://image-net.org/challenges/LSVRC/2013/results>
+- Cireşan, Meier, Masci, Gambardella and Schmidhuber, *High-Performance Neural Networks for Visual Object Classification*, arXiv, 1 February 2011. <https://arxiv.org/abs/1102.0183>
+  Reference [5] of the AlexNet paper, and the work AlexNet's own architecture section calls the closest precedent to its two-column design. Used in lesson 0017 to make "the method was not new" concrete.
+- IDSIA, *2011: DanNet triggers deep CNN revolution*, read 22 August 2026. <https://people.idsia.ch/~juergen/DanNet-triggers-deep-CNN-revolution-2011.html>
+  The four contest wins and their dates: 15 May 2011, 6 August 2011, 1 March 2012, 10 September 2012. A first-party page written by one of the authors, so use it for contest names and dates only, never for a priority claim.
 
 ### Corrections these lessons made to the scaffold's pointers
 
@@ -355,6 +360,13 @@ arXiv identifiers, titles, submission dates and first authors were confirmed aga
 - Greshake et al., *Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection*, arXiv, 23 February 2023. <https://arxiv.org/abs/2302.12173>
 - Wu, Liu, Zhang et al., *MCPMark*, arXiv, 28 September 2025. 52.56 percent pass@1 against 33.86 percent pass^4, and 16.2 turns and 17.4 tool calls per task. <https://arxiv.org/abs/2509.24002>
 - Kwa, West, Becker et al. (METR), *Measuring AI Ability to Complete Long Software Tasks*, arXiv, 18 March 2025 <https://arxiv.org/abs/2503.14499>, read together with METR's own page for the result, which carries a banner saying the doubling time in its text is out of date <https://metr.org/blog/2025-03-19-measuring-ai-ability-to-complete-long-tasks/>
+  Still the origin of the metric and the right citation for how it is defined. It is no longer the right citation for any number.
+- METR, *Time Horizon 1.1*, 29 January 2026, read 22 August 2026. <https://metr.org/blog/2026-1-29-time-horizon-1-1/>
+  The restated figures: 228 tasks against the original 170, 31 tasks of eight hours or more against 14, and P50 doubling times of 196 days over the full trend, 131 days from 2023 and 89 days from 2024.
+- Alexander Barry (METR), *Impact of modelling assumptions on time horizon results*, 20 March 2026, read 22 August 2026. <https://metr.org/notes/2026-03-20-impact-of-modelling-assumptions-on-time-horizon-results/>
+  METR auditing its own metric: a regularisation mistake fixed on 3 March 2026 that lowered recent models' 50 percent time horizons by up to 20 percent, followed by a sensitivity analysis of every other modelling assumption. Cited in 0054 as an example of source discipline rather than for a number.
+- METR's live time-horizon dashboard, read 22 August 2026, last updated by METR 8 May 2026. <https://metr.org/time-horizons/>
+  Carries the sixteen-hour reliability ceiling ("Measurements above 16 hrs are unreliable with our current task suite"). This is the perishable one: cite it live, never freeze a model's horizon out of it.
 - Rabanser, Kapoor, Kirgis et al., *Towards a Science of AI Agent Reliability*, arXiv, 18 February 2026. <https://arxiv.org/abs/2602.16666>
 - Khanal, Tao, Zhou et al., *Beyond pass@1: A Reliability Science Framework for Long-Horizon LLM Agents*, arXiv, 31 March 2026. <https://arxiv.org/abs/2603.29231>
 - Wang, Bai, Sun et al., *The Long-Horizon Task Mirage? Diagnosing Where and Why Agentic Systems Break*, arXiv, 13 April 2026. <https://arxiv.org/abs/2604.11978>
@@ -466,6 +478,8 @@ arXiv identifiers, submission dates and author counts were confirmed against the
 - The `openai/gpt-2` repository README, whose footnote is the primary source for the corrected parameter counts used in lesson 0028. <https://github.com/openai/gpt-2>
 - The GPT-2 model card, last updated November 2019. The only place the subreddit blocklist and the outbound-links clarification are documented; neither is in the paper. <https://github.com/openai/gpt-2/blob/master/model_card.md>
 - `openai/gpt-2/domains.txt`, the top 1,000 domains in WebText with their link counts. <https://github.com/openai/gpt-2/blob/master/domains.txt>
+- Gokaslan and Cohen, *OpenWebText Corpus*, Brown University, 2019, read 22 August 2026. <https://skylion007.github.io/OpenWebTextCorpus/>
+  The community reproduction of WebText, in its authors' own words, with its method and its 8,013,769 documents and 38 GB. WebText itself was never distributed, so every downloadable dataset under that name is this one. Lesson 0029 states the distinction.
 - The GPT-2 encoder, `openai/gpt-2/src/encoder.py`, with the published `encoder.json` and `vocab.bpe`. Every token count in lesson 0027 was produced by running this code against those files rather than quoted. <https://github.com/openai/gpt-2/blob/master/src/encoder.py>
 - OpenAI's `tiktoken` splitting rules. The `cl100k_base` pattern contains the three-digit cap on a run of digits, cited in lesson 0027 section 8. <https://github.com/openai/tiktoken/blob/main/tiktoken_ext/openai_public.py>
 - The Common Crawl Foundation about page, for the founding year and founder, the nonprofit status, the monthly crawl cadence and the ten-petabyte archive size. <https://commoncrawl.org/about>
