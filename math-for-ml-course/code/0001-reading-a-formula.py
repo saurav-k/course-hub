@@ -10,19 +10,18 @@ Needs only numpy and pandas. Run it anywhere:
     python3 0001-reading-a-formula.py
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-LOCAL = "../datasets/tickets.csv"
-REMOTE = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/tickets.csv"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "tickets.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/tickets.csv"
 
 
 def load() -> pd.DataFrame:
-    """Relative path first so the repository works offline, URL so Colab works."""
-    try:
-        return pd.read_csv(LOCAL)
-    except FileNotFoundError:
-        return pd.read_csv(REMOTE)
+    """Relative to this file so the repository works offline, URL so Colab works."""
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 
 
 def feature_matrix(frame: pd.DataFrame, vocab: list[str]) -> np.ndarray:

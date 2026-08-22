@@ -23,6 +23,7 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 |---|---|---|---|---|
 | `sessions.csv` | 20,000 | 691 KB | M02 descriptive statistics and correlation, M09 estimation | `session_seconds` is lognormal, so mean 171.7 against median 98.9 makes the mean visibly the wrong summary. `spend` correlates with it at r = 0.487 while `screen_brightness` correlates at r = 0.002, so the course can show a real correlation and a null one in the same table. One session in four hundred is a bot with up to 897 page views, which is what makes a trimmed summary differ from an untrimmed one. |
 | `sensors.csv` | 12,000 | 754 KB | M03 vectors and matrices, M04 eigen, SVD and PCA | Eight sensors generated from three latent factors, so the standardised covariance matrix has eigenvalues 5.36, 1.40, 0.92 and then a cliff: the scree elbow at three is built in and the first three components carry 96.0%. Unstandardised, PC1 carries 98.9% because `pressure_kpa` is on a scale of hundreds, so the page on standardising has a dataset that punishes skipping it. `vibration_x` and `vibration_y` correlate at 0.987, so near rank deficiency is visible. |
+| `tickets.csv` | 5,000 | 1.9 MB | M01 foundations, all nine lessons | Token counts are heavy-tailed on purpose, so short tickets survive a naive product of per-token probabilities in float64 and long ones underflow to exactly `0.0`: on the held-out split 8 tickets where **both** class scores underflow and 26 where **exactly one** does, which is the silent failure lesson 0007 is built on. `first_response_seconds` is exponential with median 420.3 s, so `lambda = ln(2)/median` is checkable. `score_urgent` is imperfect by design, held-out AUC 0.933, so a monotone transform can be shown leaving AUC alone while a fixed cutoff moves. `row_split` is per row, so 510 of 527 test customers also appear in train - that is lesson 0002's exercise. |
 
 ## Regenerating
 
@@ -30,6 +31,7 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 cd math-for-ml-course/datasets/generate
 python3 make_sessions.py
 python3 make_sensors.py
+python3 make_tickets.py
 ```
 
 Requires only `numpy` and `pandas`.
@@ -39,5 +41,10 @@ Each script prints the path and the size it wrote. Re-running must leave `git st
 
 Only when an existing dataset genuinely cannot carry the lesson.
 Two datasets serving eleven modules is the goal, because a reader who already knows the columns can concentrate on the mathematics instead of re-reading a schema.
+
+`tickets.csv` is the one exception so far, and the reasoning is recorded here so the next author has a bar to measure against.
+M01 needs text (to build a product of per-token probabilities and watch it underflow), a repeated entity (so a split can leak above the row), and a genuinely exponential column (so fitting a rate from a median fits the right family).
+`sessions.csv` is lognormal, has no text and has no repeated entity, so it cannot carry lessons 0002, 0006 or 0007.
+Wanting different column names is not a reason; needing a property no existing file has is.
 
 A new one needs: a `generate/make_<name>.py` with a seed and a docstring naming its teaching properties, the generated file committed beside it, a row in the table above, and a row in `../reference/datasets.html`.

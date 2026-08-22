@@ -11,25 +11,40 @@ concordant pairs, and the two are asserted equal.
 Needs only numpy and pandas.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-LOCAL = "../datasets/tickets.csv"
-REMOTE = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/tickets.csv"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "tickets.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/tickets.csv"
 
 
 def load() -> pd.DataFrame:
-    try:
-        return pd.read_csv(LOCAL)
-    except FileNotFoundError:
-        return pd.read_csv(REMOTE)
+    """Relative to this file so the repository works offline, URL so Colab works."""
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 
 
 def auc_by_ranks(labels: np.ndarray, scores: np.ndarray) -> float:
-    """The Mann-Whitney form: mean rank of the positives, shifted and scaled."""
+    """The Mann-Whitney form: mean rank of the positives, shifted and scaled.
+
+    Tied scores must share the AVERAGE of the ranks they span. Handing them
+    ordinal ranks instead silently breaks the tie in whatever order the sort
+    happened to produce, and the answer stops matching the pair-counting
+    definition below - which is how this was caught.
+    """
     order = np.argsort(scores, kind="mergesort")
     ranks = np.empty(len(scores), dtype=float)
     ranks[order] = np.arange(1, len(scores) + 1, dtype=float)
+
+    ordered = scores[order]
+    start = 0
+    for stop in range(1, len(ordered) + 1):
+        if stop == len(ordered) or ordered[stop] != ordered[start]:
+            if stop - start > 1:                       # a run of tied scores
+                ranks[order[start:stop]] = ranks[order[start:stop]].mean()
+            start = stop
+
     n_pos = int(labels.sum())
     n_neg = len(labels) - n_pos
     return (ranks[labels == 1].sum() - n_pos * (n_pos + 1) / 2) / (n_pos * n_neg)
@@ -60,7 +75,9 @@ def main() -> None:
     by_pairs = auc_by_pairs(labels, scores)
     print(f"\nAUC from ranks           = {by_ranks:.6f}")
     print(f"AUC by counting pairs    = {by_pairs:.6f}")
-    assert np.isclose(by_ranks, by_pairs), "the two AUC definitions disagree"
+    assert np.isclose(by_ranks, by_pairs, rtol=0, atol=1e-12), (
+        "the two AUC definitions disagree - check the tie handling"
+    )
 
     cutoff = 0.5
     before_auc = by_ranks
