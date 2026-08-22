@@ -12,7 +12,7 @@ your trust where only one is.
 It also runs the page's central surprise: from the same start near a saddle,
 gradient descent leaves and Newton arrives.
 
-    python3 0060-saddle-points-and-plateaus.py
+    python3 0128-saddle-points-and-plateaus.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

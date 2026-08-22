@@ -16,7 +16,7 @@ lambda, and on this dataset no single alpha reproduces early stopping at all.
 The tidy reciprocal tau*eta ~ 1/alpha needs every eigenvalue to be small
 RELATIVE TO alpha, and this program shows that regime is out of reach here.
 
-    python3 0063-early-stopping.py
+    python3 0131-early-stopping.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

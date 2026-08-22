@@ -9,7 +9,7 @@ Sampling can only ever FAIL TO FIND a counterexample. An eigenvalue is a
 proof at the point where it was taken. Knowing which of your checks is which
 is a habit worth more than either check.
 
-    python3 0053-convexity-and-the-one-guarantee-it-buys.py
+    python3 0121-convexity-and-the-one-guarantee-it-buys.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

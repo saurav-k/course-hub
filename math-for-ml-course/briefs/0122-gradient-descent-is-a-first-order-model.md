@@ -1,6 +1,6 @@
 # M06 L03 - Gradient descent is a first-order model, taken one step at a time
 
-**Page `lessons/0054-gradient-descent-is-a-first-order-model.html`** &middot; module M06, lesson 3 of 12 &middot; program `code/0054-gradient-descent-is-a-first-order-model.py` &middot; dataset `datasets/m06-credit.csv`
+**Page `lessons/0122-gradient-descent-is-a-first-order-model.html`** &middot; module M06, lesson 3 of 12 &middot; program `code/0122-gradient-descent-is-a-first-order-model.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

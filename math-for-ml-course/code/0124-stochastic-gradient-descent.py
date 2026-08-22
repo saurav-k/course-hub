@@ -11,7 +11,7 @@ size SGD settles into a band around the optimum and stops improving, and the
 width of that band is proportional to the step size. With a decaying step it
 keeps going. That band is the reason schedules exist.
 
-    python3 0056-stochastic-gradient-descent.py
+    python3 0124-stochastic-gradient-descent.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """

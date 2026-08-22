@@ -1,6 +1,6 @@
 # M06 L04 - The learning rate is bounded by curvature
 
-**Page `lessons/0055-the-learning-rate-is-bounded-by-curvature.html`** &middot; module M06, lesson 4 of 12 &middot; program `code/0055-the-learning-rate-is-bounded-by-curvature.py` &middot; dataset `datasets/m06-credit.csv`
+**Page `lessons/0123-the-learning-rate-is-bounded-by-curvature.html`** &middot; module M06, lesson 4 of 12 &middot; program `code/0123-the-learning-rate-is-bounded-by-curvature.py` &middot; dataset `datasets/m06-credit.csv`
 
 ## The single tight idea
 

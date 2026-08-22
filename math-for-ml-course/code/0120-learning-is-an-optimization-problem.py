@@ -8,7 +8,7 @@ the page teaches, and once as a vectorised NumPy expression, which is what a
 codebase runs. They must agree to machine precision. If they ever disagree,
 the loop is right and the vector form has a broadcasting bug.
 
-    python3 0052-learning-is-an-optimization-problem.py
+    python3 0120-learning-is-an-optimization-problem.py
 
 Needs numpy and pandas. Dataset: ../datasets/m06-credit.csv
 """
