@@ -1,0 +1,267 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A long chain of Jacobians - Mathematics for Machine Learning and Data Science</title>
+<meta name="description" content="The gradient costs about what the forward pass costs in time, far more in memory, and the signal travelling a long chain decays or explodes geometrically.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">MATHEMATICS FOR ML</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/notation.html">Notation</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+
+<div class="eyebrow">Module 05 &middot; Calculus for machine learning &middot; Lesson 87</div>
+<h1>A long chain of Jacobians: what backprop costs, and how the signal decays</h1>
+<p class="paper-meta">
+  <span class="pill hard">frontier</span>
+  <span class="pill">13 min</span>
+  Why reverse mode won, what you pay for it, and why depth used to be unusable.
+</p>
+
+<div class="card tldr">
+  <h2 class="h-label">The one-minute version</h2>
+  <ul>
+    <li>Forward mode costs one sweep <b>per input</b>. Reverse mode costs one <b>per output</b>. Machine learning has millions of inputs and one loss, so the choice is not close.</li>
+    <li>You pay for it in <b>memory</b>: every intermediate a backward rule needs must stay alive.</li>
+    <li>Backpropagation is <b>neither symbolic nor numerical</b> differentiation, and confusing it with either gives a wrong model of what it costs.</li>
+    <li>A gradient reaching back <i>k</i> steps carries <b>a product of <i>k</i> Jacobians</b>, and products shrink or blow up geometrically.</li>
+  </ul>
+</div>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  P["Lesson 86&lt;br/&gt;backpropagation&lt;br/&gt;works"] --> T["THIS PAGE&lt;br/&gt;what it costs&lt;br/&gt;and where it breaks"]
+  T --> N["Module 06&lt;br/&gt;gradient clipping"]
+  T --> A["Architecture&lt;br/&gt;residuals and&lt;br/&gt;gated cells"]
+  W["Lesson 85&lt;br/&gt;one Jacobian&lt;br/&gt;product"] -.- T
+  </div>
+  <figcaption>Where this page sits: Lesson 86 showed the sweep is correct and cheap for one graph. <b>This page asks what happens when the graph is very deep, and the answer is that the time is fine, the memory is not, and the signal itself may not survive the trip.</b></figcaption>
+</figure>
+
+<h2>1. Two modes, and why only one of them scales here</h2>
+
+<p>The chain rule is a product of Jacobians and matrix multiplication is associative, so you may bracket the product however you like. Bracketing from the input end is <b>forward mode</b>; from the output end is <b>reverse mode</b>. Same answer, wildly different cost.</p>
+
+<div class="math">cost of the m by n Jacobian: &nbsp; forward &nbsp; n &middot; c &middot; ops(f) &nbsp;&nbsp; reverse &nbsp; m &middot; c &middot; ops(f)
+  <span class="gloss"><b>n</b>: the number of inputs, for us the number of parameters. <b>m</b>: the number of outputs, for us one, because a loss is a single number. <b>ops(f)</b>: how many operations it takes to evaluate the function once. <b>c</b>: a constant, guaranteed below 6 and usually between 2 and 3. The whole content is which of <i>n</i> and <i>m</i> multiplies the cost.</span>
+</div>
+
+<p>Substitute the numbers a real model has. Ten million parameters and one scalar loss:</p>
+
+<figure class="diagram">
+  <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two horizontal bars on a logarithmic scale comparing the cost of obtaining the gradient. Forward mode needs thirty million function evaluations and reverse mode needs three.">
+    <line class="axis" x1="140" y1="60" x2="140" y2="220"/>
+    <rect class="m-alarm" x="140" y="86" width="439.3" height="34"/>
+    <rect class="m-stat" x="140" y="156" width="28.0" height="34"/>
+    <text class="lbl-sm" x="134" y="107" text-anchor="end">forward mode</text>
+    <text class="lbl-sm" x="134" y="177" text-anchor="end">reverse mode</text>
+    <text class="lbl-b t-alarm" x="574" y="107" text-anchor="end">30,000,000</text>
+    <text class="lbl-b t-stat" x="182" y="177">3</text>
+    <text class="lbl-sm" x="140" y="248">function evaluations to obtain one gradient, log scale</text>
+    <text class="lbl-sm" x="140" y="268">10,000,000 parameters, one scalar loss, c = 3</text>
+  </svg>
+  <div class="chart-legend"><span><i class="sw-alarm"></i>one sweep per input</span><span><i class="sw-stat"></i>one sweep per output</span></div>
+  <figcaption>The same Jacobian, the same constant, the two bracketings. Forward mode pays once per parameter and reverse mode once per loss. <b>Seven orders of magnitude, and that single inequality is the reason backpropagation exists rather than being one option among several.</b></figcaption>
+</figure>
+
+<p>The rule generalises: reverse mode wins when outputs are few and inputs many, and forward mode wins the other way round. Training a network is the extreme case of the first.</p>
+
+<h2>2. What you pay instead</h2>
+
+<p>Reverse mode has to run the function forwards before it can walk backwards, and the backward rules need the intermediate values. So every activation stays alive until its gradient has been used.</p>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart TD
+  F["forward pass&lt;br/&gt;produces an activation&lt;br/&gt;at every layer"] --> C{"keep it, or&lt;br/&gt;recompute later"}
+  C -->|"keep"| K["memory grows with depth&lt;br/&gt;time stays minimal"]
+  C -->|"recompute"| R["memory stays small&lt;br/&gt;one extra forward pass"]
+  K --> O["out of memory&lt;br/&gt;at a batch size that&lt;br/&gt;looked fine yesterday"]
+  R --> S["checkpointing:&lt;br/&gt;keep every k-th,&lt;br/&gt;rebuild the rest"]
+  </div>
+  <figcaption>The trade every deep-learning framework exposes and most readers meet as an error message. Memory is the resource backpropagation actually spends. <b>Activations, not weights, are usually what runs out first, which is why the fix is a batch size or a checkpointing flag rather than a smaller model.</b></figcaption>
+</figure>
+
+<h2>3. What it is not</h2>
+
+<p>Two confusions, both of which give a wrong mental model of the cost.</p>
+
+<figure class="diagram">
+  <div class="mermaid">
+quadrantChart
+  title Ways to get a derivative
+  x-axis "Poor at scale" --> "Scales to millions"
+  y-axis "Approximate" --> "Exact"
+  quadrant-1 "what training needs"
+  quadrant-2 "exact but does not scale"
+  quadrant-3 "neither"
+  quadrant-4 "scales but approximate"
+  "By hand": [0.14, 0.92]
+  "Symbolic": [0.26, 0.88]
+  "Finite differences": [0.30, 0.18]
+  "Reverse-mode autodiff": [0.86, 0.90]
+  </div>
+  <figcaption>The four ways to obtain a derivative, placed by whether the answer is exact and whether the method survives a million parameters. <b>Only one corner is occupied, and it is occupied by exactly one method.</b></figcaption>
+</figure>
+
+<p><b>It is not symbolic differentiation.</b> Symbolic methods build an expression for the derivative, which suffers what the literature calls expression swell, and they need the model written as a closed form, which rules out branching and loops. Backpropagation carries numbers, not expressions.</p>
+
+<p><b>It is not finite differences.</b> Those are approximate, they inherit the round-off floor from Lesson 80, and they need one function evaluation per parameter, which is the forward-mode cost with worse accuracy.</p>
+
+<div class="card callout key"><span class="tag">The reframing</span>Automatic differentiation is exact like symbolic differentiation and numeric like finite differences, and it is neither. It applies symbolic rules while keeping only values, which is why it costs a small constant factor and gets the right answer.</div>
+
+<h2>4. The decay, and the theorem behind it</h2>
+
+<p>Now the failure mode. A gradient reaching back from step <i>t</i> to step <i>k</i> is multiplied by a product of <i>t</i> &minus; <i>k</i> Jacobians. Products of matrices behave like products of numbers: they shrink towards nothing or grow without bound, and only a knife edge does neither.</p>
+
+<p><b>Theorem (sufficient condition for vanishing).</b> Consider <b>x</b><sub><i>k</i>+1</sub> = &sigma;(W<b>x</b><sub><i>k</i></sub>) with |&sigma;&prime;| bounded by &gamma;. If the largest singular value of W satisfies &lambda;<sub>1</sub> &lt; 1/&gamma;, the contribution of step <i>k</i> to the gradient at step <i>t</i> decays exponentially in <i>t</i> &minus; <i>k</i>.</p>
+
+<p><b>What is assumed:</b> a bound on the activation's slope, and a bound on the weight matrix. <b>The shape of the argument:</b> bound one factor, then multiply the bound by itself. The step that does the real work is submultiplicativity of the operator norm, which is what lets a bound on one Jacobian become a bound on a product of them.</p>
+
+<ol class="worked">
+  <li><b>Write one link's Jacobian.</b> d<b>x</b><sub><i>k</i>+1</sub>/d<b>x</b><sub><i>k</i></sub> = diag(&sigma;&prime;(W<b>x</b><sub><i>k</i></sub>)) W.</li>
+  <li><b>Bound its norm.</b> The operator norm of a product is at most the product of the norms, and a diagonal matrix's operator norm is its largest absolute entry, so the bound is &gamma; &times; &lambda;<sub>1</sub>. Call it &eta;.</li>
+  <li><b>Use the hypothesis.</b> &lambda;<sub>1</sub> &lt; 1/&gamma; gives &eta; &lt; 1. This is the only place the assumption is spent.</li>
+  <li><b>Multiply the bounds.</b> By induction on <i>t</i> &minus; <i>k</i>, the product of that many Jacobians has norm at most &eta;<sup><i>t</i>&minus;<i>k</i></sup>.</li>
+  <li><b>Read the consequence.</b> &eta; &lt; 1, so &eta; raised to a growing power tends to zero exponentially fast. <b>QED</b></li>
+</ol>
+
+<div class="callout warn"><span class="tag">The converse says less than people quote</span>Running the argument backwards gives that &lambda;<sub>1</sub> &gt; 1/&gamma; is <b>necessary</b> for the gradient to explode, not sufficient. The bound controls the largest growth <em>any</em> direction can see; a typical direction does worse. Measured on thirty independent random Jacobians at spectral radius exactly 1.00, a unit gradient still arrives with norm 0.063. "Spectral radius above one means exploding gradients" is the slogan, and it is not the theorem.</div>
+
+<figure class="diagram">
+  <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Gradient magnitude against depth on a logarithmic scale for three values of the product of the activation bound and the spectral radius. At zero point nine it falls steadily, at one it stays flat, and at one point one it rises.">
+    <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+    <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+    <line class="grid" x1="70" y1="202.3" x2="610" y2="202.3"/>
+    <line class="grid" x1="70" y1="154.7" x2="610" y2="154.7"/>
+    <line class="grid" x1="70" y1="107" x2="610" y2="107"/>
+    <line class="grid" x1="70" y1="59.3" x2="610" y2="59.3"/>
+    <polyline class="s-stat thick" fill="none" points="70,107 124,114 178,120 232,127 286,133 340,140 394,146 448,153 502,159 556,166 610,172"/>
+    <polyline class="s-sky thick" fill="none" points="70,107 610,107"/>
+    <polyline class="s-alarm thick" fill="none" points="70,107 124,101 178,95 232,89 286,83 340,77 394,71 448,66 502,60 556,54 610,48"/>
+    <circle class="m-stat" cx="610" cy="172" r="5"/>
+    <circle class="m-alarm" cx="610" cy="48" r="5"/>
+    <text class="lbl-sm" x="62" y="63" text-anchor="end">10</text>
+    <text class="lbl-sm" x="62" y="111" text-anchor="end">1</text>
+    <text class="lbl-sm" x="62" y="159" text-anchor="end">0.1</text>
+    <text class="lbl-sm" x="62" y="206" text-anchor="end">0.01</text>
+    <text class="lbl-sm" x="70" y="268">layer 0</text>
+    <text class="lbl-sm" x="340" y="268" text-anchor="middle">layer 15</text>
+    <text class="lbl-sm" x="604" y="268" text-anchor="end">layer 30</text>
+    <text class="lbl-b t-alarm" x="604" y="40" text-anchor="end">1.1 gives 17.45</text>
+    <text class="lbl-b t-stat" x="604" y="188" text-anchor="end">0.9 gives 0.0424</text>
+    <text class="lbl-sm" x="500" y="100">1.0 gives 1</text>
+    <text class="lbl-sm" x="130" y="290">gradient magnitude after passing back through this many layers</text>
+  </svg>
+  <div class="chart-legend"><span><i class="sw-stat"></i>base 0.9</span><span><i class="sw-sky"></i>base 1.0</span><span><i class="sw-alarm"></i>base 1.1</span></div>
+  <figcaption>The same thirty layers at three values of the per-layer bound. Nothing about any single layer is pathological in any of the three cases. <b>Depth multiplies, so the base is the thing to look at and the exponent is just how deep you went.</b></figcaption>
+</figure>
+
+<h2>5. Worked: why the field abandoned sigmoid recurrent units</h2>
+
+<div class="math">&eta; = &gamma; &times; &lambda;<sub>1</sub> , &nbsp; vanishing is guaranteed when &eta; &lt; 1 , that is &lambda;<sub>1</sub> &lt; 1/&gamma;
+  <span class="gloss"><b>&gamma;</b>: the largest the activation's slope can be, a property of the function alone. <b>&lambda;<sub>1</sub></b>: the largest singular value of the recurrent weight matrix, a property of the weights. <b>&eta;</b>: their product, the per-layer factor. <b>1/&gamma;</b>: the threshold the weights have to beat, and the whole point is that the activation sets it.</span>
+</div>
+
+<ol class="worked">
+  <li><b>Take tanh.</b> Its derivative is at most 1, so <span class="keynum">&gamma; = 1</span> and the threshold is &lambda;<sub>1</sub> &lt; 1.</li>
+  <li><b>Take the logistic sigmoid.</b> Its derivative is at most 0.25, from Lesson 81, so <span class="keynum">&gamma; = 1/4</span> and the threshold is &lambda;<sub>1</sub> &lt; 4.</li>
+  <li><b>Compare the two thresholds.</b> A sigmoid network vanishes for any recurrent matrix with largest singular value below 4, and almost every sensible initialisation is below 4.</li>
+  <li><b>Put a depth on it.</b> At &eta; = 0.9 over thirty steps: 0.9<sup>30</sup> = 0.0424, a 24-fold shrink. Over a hundred steps: 2.66 &times; 10<sup>&minus;5</sup>.</li>
+  <li><b>Do the other side.</b> At &eta; = 1.1 over thirty steps: 1.1<sup>30</sup> = 17.45. Over a hundred: 13,781.</li>
+</ol>
+
+<p><b>Sanity check.</b> 0.9<sup>30</sup> must sit between 0.9<sup>40</sup> = 0.0148 and 0.9<sup>20</sup> = 0.122, and 0.0424 does. An answer above 0.9 or below 0.001 is an exponent error rather than a surprising result.</p>
+
+<p><b>What changes if</b> you keep the sigmoid but scale the recurrent matrix up so that &lambda;<sub>1</sub> = 8? The sufficient condition no longer applies, so vanishing is not guaranteed. It also does not follow that gradients explode, because that direction of the theorem is only necessary. What you get is a network whose behaviour depends on the data, which is worse than either failure.</p>
+
+<p><b>In words.</b> The activation function sets the threshold and the weights decide which side of it you are on. That is why the fix was architectural rather than a matter of tuning: no learning rate rescues a factor applied thirty times.</p>
+
+<div class="code-cap">code/0087-a-long-chain-of-jacobians.py &middot; NumPy only &middot; <a href="../code/0087-a-long-chain-of-jacobians.py">download</a></div>
+<pre><code># Both modes, run on the same function, R^60 -> R with 12 layers:
+#   the two modes agree to 2.776e-16
+#   reverse mode :    0.106 ms
+#   forward mode :    3.408 ms
+#   ratio        :     32.2 x   (the bound predicts about n = 60)</code></pre>
+
+<div class="callout"><span class="tag">Why the measurement is below the bound, and it is not an error</span>The bound predicts a factor of about <i>n</i> = 60 and the clock says 32. NumPy's forward-mode sweeps share the same underlying matrix multiplies, so the constant differs between the two modes. The bound is on operation counts and the measurement is of wall-clock on vectorised hardware, and quoting one as if it were the other is the mistake to avoid.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <h3 class="h-label">Retrieval practice</h3>
+  <p class="note-sm">Answer from memory before revealing.</p>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">For a scalar loss over n parameters, how many reverse-mode sweeps does the full gradient need?</div>
+    <button class="q-opt">n of them, one for each of the parameters</button>
+    <button class="q-opt">Two, one forwards and one more backwards</button>
+    <button class="q-opt">One, because the output is a single number</button>
+    <button class="q-opt">It depends on how deep the network happens to be</button>
+    <div class="q-fb">Reverse mode costs one sweep per output and a loss is one number. The first is the forward-mode count and is the trap the whole page is built around. The second confuses a sweep with a phase: the forward pass is not a reverse-mode sweep. The fourth confuses the cost of one sweep, which does grow with depth, with the number of sweeps, which does not.</div>
+  </div>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">A recurrent network uses the logistic sigmoid. Vanishing is guaranteed when the largest singular value is below what?</div>
+    <button class="q-opt">Four, because the sigmoid's slope caps at a quarter</button>
+    <button class="q-opt">One, the same threshold that tanh networks have</button>
+    <button class="q-opt">A quarter, which is the sigmoid's largest slope</button>
+    <button class="q-opt">Zero, since the condition can never actually hold</button>
+    <div class="q-fb">The threshold is one over gamma, and gamma is 0.25 for the sigmoid, so the threshold is 4. The second is the tanh answer, where gamma is 1. The third quotes gamma itself rather than its reciprocal, which is the arithmetic slip this question exists to catch. The fourth is false and the whole point is that the condition holds far too easily.</div>
+  </div>
+</div>
+
+<h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+
+<div class="practice">
+  <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+  <div class="p-stem">
+    <p>A thirty-layer network has a per-layer Jacobian whose largest singular value is 0.9.</p>
+    <div class="math">bound on the product = &eta;<sup>t &minus; k</sup>
+      <span class="gloss">Read as: the bound on the gradient reaching back from step <i>t</i> to step <i>k</i>, where <b>&eta;</b> is the per-layer factor and <b>t &minus; k</b> is how many layers it crossed.</span>
+    </div>
+    <p><b>Compute</b> the shrink factor across all thirty layers. <b>Repeat</b> for 1.1. Then <b>name</b> the mitigation each case motivates, without describing how it works.</p>
+  </div>
+
+  <details class="hint"><summary>Hint</summary>
+    <p>One power each. And before you reach for a calculator, decide whether each answer should be bigger or smaller than 1, so you can tell immediately if the arithmetic slipped.</p></details>
+
+  <details class="solution"><summary>Show the worked solution</summary>
+    <ol class="worked">
+      <li><b>The shrinking case.</b> 0.9<sup>30</sup> = 0.0424, so the signal arrives at about 4 per cent of its size, a shrink of roughly 24 times.</li>
+      <li><b>The growing case.</b> 1.1<sup>30</sup> = 17.45, so it arrives about 17 times larger.</li>
+      <li><b>The mitigations.</b> Vanishing motivates residual connections and gated recurrent cells, which give the gradient a path that does not pass through every factor. Exploding motivates gradient clipping, which bounds the step regardless of the gradient's size.</li>
+      <li><b>Where they live.</b> Clipping is Module 06's. Residuals and gates belong to the architecture courses in this hub, not to a calculus module.</li>
+    </ol>
+    <p class="p-check"><b>Sanity check.</b> The two answers are not reciprocals, because 0.9 and 1.1 are not reciprocals: 0.0424 &times; 17.45 = 0.74, not 1. Getting exactly 1 means 1/0.9 was used in place of 1.1.</p>
+  </details>
+</div>
+
+<div class="teacher-note"><b>Your teacher.</b> If the two modes still feel interchangeable, ask an agent to write the chain rule for a three-layer network as a product of three matrices and then to count the multiplications for left-to-right against right-to-left when the last factor is a column vector. That is the whole argument, in one concrete matrix product.</div>
+
+<h2 class="h-label">Primary source to go deeper</h2>
+<p>Baydin, Pearlmutter, Radul and Siskind, <a href="https://arxiv.org/abs/1502.05767">"Automatic Differentiation in Machine Learning: a Survey"</a>, <i>JMLR</i> 18(153), 2018, is the reference for sections 1 to 3: section 2 for why automatic differentiation is neither symbolic nor numerical, and section 3 for the cost bound with <i>c</i> below 6 and typically between 2 and 3. Pascanu, Mikolov and Bengio, <a href="https://arxiv.org/abs/1211.5063">"On the difficulty of training Recurrent Neural Networks"</a>, section 2.1, states and proves the vanishing condition of section 4 and gives the two activation bounds. Goodfellow, Bengio and Courville, <a href="https://www.deeplearningbook.org/contents/mlp.html"><i>Deep Learning</i></a>, section 6.5.9, has the matrix-ordering analogy behind the two modes.</p>
+
+<div class="pager">
+  <a href="0086-backpropagation.html"><span class="dir">&larr; Previous</span><span class="ttl">Backpropagation on a computation graph</span></a>
+  <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+</div>
+
+<footer><p>Mathematics for Machine Learning and Data Science &middot; Lesson 87 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+
+</main>
+</body>
+</html>
