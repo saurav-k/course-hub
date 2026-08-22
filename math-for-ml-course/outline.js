@@ -165,6 +165,70 @@ window.COURSE_OUTLINE = {
       "title": "The road ahead",
       "lessons": [
         {
+          "title": "Joint distributions, and what a marginal is",
+          "href": "lessons/0140-joint-distributions.html"
+        },
+        {
+          "title": "Conditional distributions: PMF and PDF",
+          "href": "lessons/0141-conditional-distributions.html"
+        },
+        {
+          "title": "Expectation, and the properties that hold even under dependence",
+          "href": "lessons/0142-expectation.html"
+        },
+        {
+          "title": "Variance, and the computational form",
+          "href": "lessons/0143-variance.html"
+        },
+        {
+          "title": "Covariance and correlation",
+          "href": "lessons/0144-covariance-and-correlation.html"
+        },
+        {
+          "title": "The covariance matrix",
+          "href": "lessons/0145-the-covariance-matrix.html"
+        },
+        {
+          "title": "The multivariate Gaussian",
+          "href": "lessons/0146-the-multivariate-gaussian.html"
+        },
+        {
+          "title": "Sums of independent random variables",
+          "href": "lessons/0147-sums-of-independent-variables.html"
+        },
+        {
+          "title": "Moment generating functions",
+          "href": "lessons/0148-moment-generating-functions.html"
+        },
+        {
+          "title": "Markov's inequality",
+          "href": "lessons/0149-markovs-inequality.html"
+        },
+        {
+          "title": "Chebyshev's inequality, one-sided and two-sided",
+          "href": "lessons/0150-chebyshevs-inequality.html"
+        },
+        {
+          "title": "The law of large numbers",
+          "href": "lessons/0151-the-law-of-large-numbers.html"
+        },
+        {
+          "title": "The Central Limit Theorem, for the sum and for the sample mean",
+          "href": "lessons/0152-the-central-limit-theorem.html"
+        },
+        {
+          "title": "Sampling and Monte Carlo",
+          "href": "lessons/0153-sampling-and-monte-carlo.html"
+        },
+        {
+          "title": "Markov chains",
+          "href": "lessons/0154-markov-chains.html"
+        },
+        {
+          "title": "Conditional expectation and MMSE",
+          "href": "lessons/0155-conditional-expectation-and-mmse.html"
+        },
+        {
           "title": "Every module was asking one table a different question",
           "href": "lessons/0200-one-dataset-eleven-modules.html"
         },
