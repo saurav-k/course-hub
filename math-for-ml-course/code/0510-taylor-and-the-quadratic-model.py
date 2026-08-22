@@ -1,4 +1,4 @@
-"""M05 lesson 10 - the Taylor model, the largest safe step, and conditioning.
+"""Lesson 0510 - the Taylor model, the largest safe step, and conditioning.
 
 Implements three named results.
 
@@ -16,7 +16,7 @@ Implements three named results.
     columns, and what it does to the largest tolerable step. This is the
     lesson's punchline: feature scaling is a curvature fix.
 
-    python3 m05_10_taylor_step.py
+    python3 0510-taylor-and-the-quadratic-model.py
 """
 
 from __future__ import annotations
@@ -26,13 +26,22 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[1] / "datasets" / "m05-housing.csv"
-FEATURES = ["area_sqft", "bedrooms", "age_years", "lot_sqft"]
-TARGET = "price_k"
+SENSORS = Path(__file__).resolve().parent.parent / "datasets" / "sensors.csv"
+FAILURES = Path(__file__).resolve().parent.parent / "datasets" / "failures.csv"
+SENSORS_URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/sensors.csv"
+FAILURES_URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/failures.csv"
+
+FEATURES = ["vibration_x", "vibration_y", "current_amp",
+            "humidity_pct", "dust_index", "pressure_kpa"]
+TARGET = "temp_c"
+
+
+def read(local: Path, url: str) -> pd.DataFrame:
+    return pd.read_csv(local) if local.exists() else pd.read_csv(url)
 
 
 def build(standardise: bool) -> tuple[np.ndarray, np.ndarray]:
-    frame = pd.read_csv(DATA)
+    frame = read(SENSORS, SENSORS_URL)
     x = frame[FEATURES].to_numpy(dtype=float)
     if standardise:
         x = (x - x.mean(axis=0)) / x.std(axis=0)
@@ -64,12 +73,16 @@ def taylor2(theta: np.ndarray, step: np.ndarray, f0: float, g: np.ndarray, h: np
 def main() -> None:
     x, y = build(standardise=False)
     n = len(y)
-    theta = np.array([50.0, 0.10, 5.0, -0.5, 0.01])
+    # Start from the intercept-only model: predict every reading's temperature
+    # as the overall average and nothing else. It is the honest zero-knowledge
+    # guess, and it is defined whatever the column count happens to be.
+    theta = np.zeros(x.shape[1])
+    theta[0] = float(y.mean())
     f0 = loss(theta, x, y)
     g = gradient(theta, x, y)
     h = hessian(x, n)
 
-    print(f"loaded {DATA.name}: {n} rows\n")
+    print(f"loaded sensors.csv: {n} rows\n")
 
     print("1a. a squared-error loss is exactly quadratic, so the second-order")
     print("    Taylor model is not an approximation of it - it IS it")
@@ -86,10 +99,13 @@ def main() -> None:
     print("    third derivative of a quadratic is zero and there is no error to shrink.")
 
     print("\n1b. the error rates, on a loss that is not quadratic")
-    print("    logistic regression on the score table, two parameters")
-    scores = pd.read_csv(DATA.with_name("m05-scores.csv"))
-    sx = np.column_stack([np.ones(len(scores)), scores["logit"].to_numpy(dtype=float)])
-    sy = scores["label"].to_numpy(dtype=float)
+    print("    logistic regression on the failures table, two parameters")
+    scores = read(FAILURES, FAILURES_URL)
+    sx = np.column_stack([
+        np.ones(len(scores)),
+        np.log(scores["hours_since_service"].to_numpy(dtype=float)),
+    ])
+    sy = scores["failed"].to_numpy(dtype=float)
 
     def log_loss(t: np.ndarray) -> float:
         z = sx @ t

@@ -1,4 +1,4 @@
-"""M05 lesson 5 - the gradient is steepest, and only in one sense.
+"""Lesson 0505 - the gradient is steepest, and only in one sense.
 
 Implements the named result:
 
@@ -13,7 +13,7 @@ Euclidean norm. Measure length with a different norm and a different direction
 wins. The program computes the steepest direction under the norm defined by the
 Hessian and reports the angle between the two, which is not small.
 
-    python3 m05_05_steepest_ascent.py
+    python3 0505-the-gradient-points-uphill.py
 """
 
 from __future__ import annotations
@@ -23,9 +23,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[1] / "datasets" / "m05-housing.csv"
-FEATURES = ["area_sqft", "bedrooms", "age_years", "lot_sqft"]
-TARGET = "price_k"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sensors.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/sensors.csv"
+
+# Predicting one sensor from the others is what a real monitoring system does,
+# and it gives this module a design matrix whose columns are on wildly
+# different scales: pressure runs in the hundreds, dust index around one. That
+# disparity is the whole subject of lessons 0509 and 0510, so it is load
+# bearing rather than incidental.
+FEATURES = ["vibration_x", "vibration_y", "current_amp",
+            "humidity_pct", "dust_index", "pressure_kpa"]
+TARGET = "temp_c"
+
+
+def load() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 SEED = 20260822
 
 
@@ -58,28 +70,49 @@ def random_unit_vectors(count: int, dim: int, seed: int) -> np.ndarray:
 
 
 def main() -> None:
-    frame = pd.read_csv(DATA)
+    frame = load()
     x, y = design_matrix(frame)
-    theta = np.array([50.0, 0.10, 5.0, -0.5, 0.01])
+    # Start from the intercept-only model: predict every reading's temperature
+    # as the overall average and nothing else. It is the honest zero-knowledge
+    # guess, and it is defined whatever the column count happens to be.
+    theta = np.zeros(x.shape[1])
+    theta[0] = float(y.mean())
 
     grad = gradient(theta, x, y)
     norm = float(np.linalg.norm(grad))
     steepest = -grad / norm
-    print(f"loaded {DATA.name}: {x.shape[0]} rows, {x.shape[1]} parameters")
+    print(f"loaded sensors.csv: {x.shape[0]} rows, {x.shape[1]} parameters")
     print(f"||grad f|| = {norm:,.4f}\n")
 
     print("named directions, and how fast the loss falls along each")
+    def axis(name: str) -> np.ndarray:
+        """The best downhill step that moves one named parameter and nothing else.
+
+        Its sign is the sign that descends, which is the opposite of that
+        parameter's gradient component. Picking the sign by hand instead would
+        make the comparison meaningless: half the axes would point uphill and
+        the table would be measuring the choice rather than the direction.
+        """
+        v = np.zeros(len(grad))
+        j = (["intercept"] + FEATURES).index(name)
+        v[j] = -np.sign(grad[j])
+        return v
+
     named = {
         "-grad / ||grad||": steepest,
-        "area only": np.array([0.0, -1.0, 0.0, 0.0, 0.0]),
-        "bedrooms only": np.array([0.0, 0.0, -1.0, 0.0, 0.0]),
-        "lot only": np.array([0.0, 0.0, 0.0, 0.0, -1.0]),
-        "equal on all five": -np.ones(5) / np.sqrt(5.0),
+        "pressure only": axis("pressure_kpa"),
+        "vibration_x only": axis("vibration_x"),
+        "humidity only": axis("humidity_pct"),
+        # Equal magnitude on every dial, each in its own descending sign.
+        # This is not an arbitrary comparison: it is the normalised steepest
+        # descent direction under the L-infinity norm, so the row quietly makes
+        # the same point as the ellipse figure.
+        "equal on every dial": -np.sign(grad) / np.sqrt(len(grad)),
     }
     for label, u in named.items():
         u = u / np.linalg.norm(u)
         dd = directional_derivative(grad, u)
-        print(f"  {label:>18}  u.grad = {dd:16,.4f}   {100 * dd / -norm:6.2f}% of the best")
+        print(f"  {label:>20}  u.grad = {dd:14,.4f}   {100 * dd / -norm:7.2f}% of the best")
 
     print("\nbrute force: 50,000 random unit directions")
     sample = random_unit_vectors(50_000, len(grad), SEED)

@@ -1,4 +1,4 @@
-"""M05 lesson 7 - backpropagation is the chain rule on a computation graph.
+"""Lesson 0507 - backpropagation is the chain rule on a computation graph.
 
 Implements reverse-mode accumulation for a small network, and the proposition
 that makes it trustworthy:
@@ -13,7 +13,7 @@ measured against the forward pass rather than asserted.
 
 The network is a 4-32-1 regressor on the housing table. Rows are samples.
 
-    python3 m05_07_backprop.py
+    python3 0507-backpropagation.py
 """
 
 from __future__ import annotations
@@ -24,21 +24,33 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[1] / "datasets" / "m05-housing.csv"
-FEATURES = ["area_sqft", "bedrooms", "age_years", "lot_sqft"]
-TARGET = "price_k"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sensors.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/sensors.csv"
+
+# Predicting one sensor from the others is what a real monitoring system does,
+# and it gives this module a design matrix whose columns are on wildly
+# different scales: pressure runs in the hundreds, dust index around one. That
+# disparity is the whole subject of lessons 0509 and 0510, so it is load
+# bearing rather than incidental.
+FEATURES = ["vibration_x", "vibration_y", "current_amp",
+            "humidity_pct", "dust_index", "pressure_kpa"]
+TARGET = "temp_c"
+
+
+def load() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 HIDDEN = 32
 SEED = 20260822
 
 
-def load() -> tuple[np.ndarray, np.ndarray]:
-    """Standardised features and a centred target.
+def training_arrays() -> tuple[np.ndarray, np.ndarray]:
+    """Standardised features and a standardised target.
 
     Standardising here is not cosmetic and it is not the lesson: an unscaled
     design matrix makes the tanh saturate and the gradient check meaningless.
-    Lesson 10 is where the scaling itself gets explained.
+    Lesson 0510 is where the scaling itself gets explained.
     """
-    frame = pd.read_csv(DATA)
+    frame = load()
     x = frame[FEATURES].to_numpy(dtype=float)
     y = frame[TARGET].to_numpy(dtype=float)
     x = (x - x.mean(axis=0)) / x.std(axis=0)
@@ -62,6 +74,9 @@ def forward(p: dict[str, np.ndarray], x: np.ndarray, y: np.ndarray) -> tuple[flo
     """
     z1 = x @ p["W1"] + p["b1"]
     h = np.tanh(z1)
+    # h is kept, not just z1: the tanh derivative is 1 - h^2, so the backward
+    # pass needs no exp at all. Recomputing tanh there instead measured 12x the
+    # forward pass rather than 2x, which is the whole reason a cache exists.
     z2 = h @ p["w2"] + p["b2"][0]
     residual = z2 - y
     loss = float(residual @ residual / len(y))
@@ -79,7 +94,7 @@ def backward(p: dict[str, np.ndarray], cache: dict) -> dict[str, np.ndarray]:
     d_w2 = cache["h"].T @ d_z2                   # through h . w2
     d_b2 = np.array([d_z2.sum()])
     d_h = np.outer(d_z2, p["w2"])                # gradient flowing into h
-    d_z1 = d_h * (1.0 - np.tanh(cache["z1"]) ** 2)   # through tanh
+    d_z1 = d_h * (1.0 - cache["h"] ** 2)         # through tanh, reusing h
     d_W1 = cache["x"].T @ d_z1                   # through x . W1
     d_b1 = d_z1.sum(axis=0)
     return {"W1": d_W1, "b1": d_b1, "w2": d_w2, "b2": d_b2}
@@ -90,11 +105,11 @@ def flat(params: dict[str, np.ndarray]) -> np.ndarray:
 
 
 def main() -> None:
-    x, y = load()
+    x, y = training_arrays()
     rng = np.random.default_rng(SEED)
     p = init_params(rng, x.shape[1])
     total = sum(v.size for v in p.values())
-    print(f"loaded {DATA.name}: {len(y)} rows")
+    print(f"loaded sensors.csv: {len(y)} rows")
     print(f"network 4-{HIDDEN}-1, {total} parameters\n")
 
     loss, cache = forward(p, x, y)

@@ -1,4 +1,4 @@
-"""M05 lesson 9 - curvature, the Hessian, and the second-derivative test.
+"""Lesson 0509 - curvature, the Hessian, and the second-derivative test.
 
 Implements three named results.
 
@@ -15,7 +15,7 @@ Implements three named results.
     eigenvalue with the rest one sign is inconclusive. Applied to the housing
     loss, and to three constructed surfaces that exercise every branch.
 
-    python3 m05_09_hessian_test.py
+    python3 0509-curvature-and-the-hessian.py
 """
 
 from __future__ import annotations
@@ -25,9 +25,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[1] / "datasets" / "m05-housing.csv"
-FEATURES = ["area_sqft", "bedrooms", "age_years", "lot_sqft"]
-TARGET = "price_k"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sensors.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/sensors.csv"
+
+# Predicting one sensor from the others is what a real monitoring system does,
+# and it gives this module a design matrix whose columns are on wildly
+# different scales: pressure runs in the hundreds, dust index around one. That
+# disparity is the whole subject of lessons 0509 and 0510, so it is load
+# bearing rather than incidental.
+FEATURES = ["vibration_x", "vibration_y", "current_amp",
+            "humidity_pct", "dust_index", "pressure_kpa"]
+TARGET = "temp_c"
+
+
+def load() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 SEED = 20260822
 
 
@@ -84,14 +96,18 @@ def classify(eigenvalues: np.ndarray) -> str:
 
 
 def main() -> None:
-    frame = pd.read_csv(DATA)
+    frame = load()
     x, y = design_matrix(frame)
     n = len(y)
     h = hessian(x, n)
-    print(f"loaded {DATA.name}: {n} rows, {x.shape[1]} parameters\n")
+    print(f"loaded sensors.csv: {n} rows, {x.shape[1]} parameters\n")
 
     print("1. Schwarz: the Hessian is symmetric")
-    theta = np.array([50.0, 0.10, 5.0, -0.5, 0.01])
+    # Start from the intercept-only model: predict every reading's temperature
+    # as the overall average and nothing else. It is the honest zero-knowledge
+    # guess, and it is defined whatever the column count happens to be.
+    theta = np.zeros(x.shape[1])
+    theta[0] = float(y.mean())
     print(f"   analytic asymmetry ||H - H^T||_max : {np.abs(h - h.T).max():.3e}")
     pairs = [(0, 1), (1, 3), (2, 4)]
     for i, j in pairs:
@@ -120,7 +136,7 @@ def main() -> None:
         print(f"   {'':>16} {quad:16.6f} {numeric:18.6f}")
     print(f"   every one lies between {values[0]:.4e} and {values[-1]:.4e}, as it must")
 
-    print("\n3. the second-derivative test on the housing loss")
+    print("\n3. the second-derivative test on the sensor-regression loss")
     print(f"   {classify(values)}")
     print("   the loss is quadratic, so this verdict holds at every point, "
           "including its one critical point")

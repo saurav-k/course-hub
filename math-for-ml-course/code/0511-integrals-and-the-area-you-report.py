@@ -1,4 +1,4 @@
-"""M05 lesson 12 - the area under a curve, computed two ways that must agree.
+"""Lesson 0511 - the area under a curve, computed two ways that must agree.
 
 Implements two named results.
 
@@ -14,11 +14,11 @@ Implements two named results.
     with geometry. The program computes it by counting ranked pairs, with ties
     counted as one half, and the two answers agree to fourteen decimal places.
 
-    Twenty thousand rows is 6,175 x 13,825 = 85,369,375 pairs. Counting them
+    Twenty thousand rows is 3,401 x 16,599 = 56,453,199 pairs. Counting them
     directly is possible here and is deliberately included, because seeing the
     brute-force count agree with the rank-sum shortcut is the point.
 
-    python3 m05_12_auc_two_ways.py
+    python3 0511-integrals-and-the-area-you-report.py
 """
 
 from __future__ import annotations
@@ -28,7 +28,51 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[1] / "datasets" / "m05-scores.csv"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "failures.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/failures.csv"
+
+
+def load() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
+
+
+def sigmoid(z: np.ndarray) -> np.ndarray:
+    out = np.empty_like(z, dtype=float)
+    pos = z >= 0
+    out[pos] = 1.0 / (1.0 + np.exp(-z[pos]))
+    e = np.exp(z[~pos])
+    out[~pos] = e / (1.0 + e)
+    return out
+
+
+def fitted_scores(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    """Fit a logistic model by Newton's method and return (label, score).
+
+    The dataset ships features and a label, not scores. Scores are what a model
+    produces, so the program produces them, in ten lines and no library. A
+    reader who has read lesson 0502 has already seen this fit.
+    """
+    y = frame["failed"].to_numpy(dtype=float)
+    raw = np.column_stack([
+        np.ones(len(frame)),
+        np.log(frame["hours_since_service"].to_numpy(dtype=float)),
+        frame["load_pct"].to_numpy(dtype=float) ** 2,
+        np.log(frame["vibration_mm_s"].to_numpy(dtype=float)),
+        frame["coolant_c"].to_numpy(dtype=float),
+    ])
+    centre, scale = raw.mean(axis=0), raw.std(axis=0)
+    centre[0], scale[0] = 0.0, 1.0
+    x = (raw - centre) / scale
+
+    w = np.zeros(x.shape[1])
+    for _ in range(50):
+        p = sigmoid(x @ w)
+        weights = np.clip(p * (1.0 - p), 1e-12, None)
+        w -= np.linalg.solve(
+            (x * weights[:, None]).T @ x / len(y) + 1e-10 * np.eye(len(w)),
+            x.T @ (p - y) / len(y),
+        )
+    return y, sigmoid(x @ w)
 
 
 def roc_points(label: np.ndarray, score: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
@@ -103,12 +147,12 @@ def auc_by_brute_force(label: np.ndarray, score: np.ndarray) -> float:
 
 
 def main() -> None:
-    frame = pd.read_csv(DATA)
-    label = frame["label"].to_numpy()
-    score = frame["score"].to_numpy(dtype=float)
+    frame = load()
+    label, score = fitted_scores(frame)
+    label = label.astype(int)
     n_pos = int(label.sum())
     n_neg = len(label) - n_pos
-    print(f"loaded {DATA.name}: {len(frame)} rows, {n_pos} positive, {n_neg} negative")
+    print(f"loaded failures.csv: {len(frame)} rows, {n_pos} positive, {n_neg} negative")
     print(f"that is {n_pos * n_neg:,} positive-negative pairs\n")
 
     fpr, tpr = roc_points(label, score)
@@ -131,12 +175,29 @@ def main() -> None:
         print(f"    every {k:5d}th point ({len(idx):5d} points): {coarse:.10f}  "
               f"error {abs(coarse - area):.2e}")
 
-    print("\nrectangles instead of trapezoids, for comparison")
+    print("\nrectangles instead of trapezoids, and when the choice matters")
     left = float(np.sum(np.diff(fpr) * tpr[:-1]))
     right = float(np.sum(np.diff(fpr) * tpr[1:]))
     print(f"  left rectangles  : {left:.10f}   error {abs(left - area):.2e}")
     print(f"  right rectangles : {right:.10f}   error {abs(right - area):.2e}")
-    print(f"  their average is the trapezoid rule: {(left + right) / 2:.14f}")
+    print("  All three agree exactly, and that is not luck: the fitted scores are")
+    print("  all distinct, so every step of the sweep moves either right or up and")
+    print("  never both. With no sloped segment there is nothing for a rectangle to")
+    print("  get wrong.")
+
+    print("\n  Now round the scores to two decimals, which creates ties:")
+    tied = np.round(score, 2)
+    f2, t2 = roc_points(label, tied)
+    a2 = auc_trapezoid(f2, t2)
+    l2 = float(np.sum(np.diff(f2) * t2[:-1]))
+    r2 = float(np.sum(np.diff(f2) * t2[1:]))
+    print(f"    {len(f2)} curve points instead of {len(fpr)}")
+    print(f"    trapezoid        : {a2:.10f}")
+    print(f"    left rectangles  : {l2:.10f}   error {abs(l2 - a2):.2e}")
+    print(f"    right rectangles : {r2:.10f}   error {abs(r2 - a2):.2e}")
+    print(f"    and the rank-sum answer is still {auc_by_ranks(label, tied):.10f}")
+    print("    The trapezoid tracks the rank sum through the ties. The rectangles")
+    print("    bracket it, one low and one high. THAT is why the rule is a trapezoid.")
 
 
 if __name__ == "__main__":

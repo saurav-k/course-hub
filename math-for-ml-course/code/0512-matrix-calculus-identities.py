@@ -1,4 +1,4 @@
-"""M05 lesson 13 - six matrix-calculus identities, each checked numerically.
+"""Lesson 0512 - six matrix-calculus identities, each checked numerically.
 
 Implements the six identities the rest of this course leans on, and verifies
 every one against a finite-difference derivative rather than asserting it:
@@ -17,7 +17,7 @@ one answer, checked against each other on eight thousand real rows.
 Layout convention, held everywhere in this course: a gradient has the shape of
 the thing you differentiate by. d(scalar)/dx for a column x is a column.
 
-    python3 m05_13_matrix_calculus.py
+    python3 0512-matrix-calculus-identities.py
 """
 
 from __future__ import annotations
@@ -27,9 +27,21 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parents[1] / "datasets" / "m05-housing.csv"
-FEATURES = ["area_sqft", "bedrooms", "age_years", "lot_sqft"]
-TARGET = "price_k"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sensors.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/sensors.csv"
+
+# Predicting one sensor from the others is what a real monitoring system does,
+# and it gives this module a design matrix whose columns are on wildly
+# different scales: pressure runs in the hundreds, dust index around one. That
+# disparity is the whole subject of lessons 0509 and 0510, so it is load
+# bearing rather than incidental.
+FEATURES = ["vibration_x", "vibration_y", "current_amp",
+            "humidity_pct", "dust_index", "pressure_kpa"]
+TARGET = "temp_c"
+
+
+def load() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 SEED = 20260822
 
 
@@ -108,7 +120,7 @@ def main() -> None:
     )
 
     print("\nthe payoff: identity 5, set to zero, is the normal equations")
-    frame = pd.read_csv(DATA)
+    frame = load()
     xd = np.hstack([np.ones((len(frame), 1)), frame[FEATURES].to_numpy(dtype=float)])
     yd = frame[TARGET].to_numpy(dtype=float)
 

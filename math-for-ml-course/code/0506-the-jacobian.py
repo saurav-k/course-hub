@@ -1,4 +1,4 @@
-"""M05 lesson 6 - the Jacobian, the vector chain rule, and the volume factor.
+"""Lesson 0506 - the Jacobian, the vector chain rule, and the volume factor.
 
 Implements three named results.
 
@@ -16,7 +16,7 @@ Implements three named results.
 The map is the one a single neural network layer applies, tanh(W x + b), so
 none of this is an abstract exercise.
 
-    python3 m05_06_jacobian.py
+    python3 0506-the-jacobian.py
 """
 
 from __future__ import annotations
