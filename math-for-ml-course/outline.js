@@ -419,6 +419,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "A fitted slope is one draw from a distribution you can name",
           "href": "lessons/0172-inference-in-simple-linear-regression.html"
+        },
+        {
+          "title": "Your validation score is itself an estimate",
+          "href": "lessons/0171-cross-validation-as-an-estimator.html"
         }
       ]
     },
@@ -469,10 +473,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "Perplexity is how many options the model is choosing among",
           "href": "lessons/0190-perplexity.html"
-        },
-        {
-          "title": "Your validation score is itself an estimate",
-          "href": "lessons/0171-cross-validation-as-an-estimator.html"
         }
       ]
     },
