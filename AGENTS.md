@@ -49,6 +49,10 @@ The hub is published as a static website on Amazon S3. A merge into `main` deplo
 
 Read, in this order:
 
+0. `.claude/skills/course-authoring/SKILL.md` - the house standard for every page: the page
+   contracts, the widget markup, the teaching bar, and the verification gate. Read it before the
+   course-specific files below. Claude Code loads it on its own; every other agent has to open it.
+
 1. The target course's `MISSION.md` - why the course exists and what is out of scope. This is canonical.
 2. Its `NOTES.md` - teaching style, cadence, and known gotchas.
 3. Its `BUILDER-SPEC.md` - the authoring spec, including exact widget markup.
@@ -103,8 +107,8 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 
 There is now **one** design system and one copy of it: `assets/hub.css` plus `assets/hub.js`,
 linked by every page in the hub. The old `assets/course.css` / `course.js` pair and its six
-byte-identical copies are gone. A course owns only its palette, not the design system: the two
-`assets/course-extras.css` files that remain, in `llm-inference-course` and
+byte-identical copies are gone. A course owns only its palette, not the design system: the three
+`assets/course-extras.css` files that remain, in `llm-evolution-course`, `llm-inference-course` and
 `statistical-foundations-ml-course`, carry rules genuinely unique to those courses and are layered
 *after* the hub sheet. They still restyle shared elements - `.lab h4` and `.stub-note h4` among
 them - so before you change any element or widget selector, grep **every** `*.css` in the
