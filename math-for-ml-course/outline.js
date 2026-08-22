@@ -59,6 +59,64 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Vectors, matrices, and linear maps",
+      "lessons": [
+        {
+          "title": "Everything is a rectangular array, and its shape is the first thing to read",
+          "href": "lessons/0040-shape-is-the-contract.html"
+        },
+        {
+          "title": "A vector is a list and an arrow, and there are only two operations",
+          "href": "lessons/0041-a-vector-is-an-arrow.html"
+        },
+        {
+          "title": "Norm and distance: how big, how far, and why the units decide the answer",
+          "href": "lessons/0042-norm-and-distance.html"
+        },
+        {
+          "title": "The dot product, the angle, and cosine similarity",
+          "href": "lessons/0043-dot-product-and-cosine.html"
+        },
+        {
+          "title": "A matrix is a stack of vectors, and multiplying by one is a bag of dot products",
+          "href": "lessons/0044-matrix-times-vector.html"
+        },
+        {
+          "title": "What a matrix multiply costs",
+          "href": "lessons/0045-what-a-matmul-costs.html"
+        },
+        {
+          "title": "A matrix is a function: rotate, scale, shear, and collapse",
+          "href": "lessons/0046-a-matrix-is-a-function.html"
+        },
+        {
+          "title": "Ax = b, and the three answers a system can have",
+          "href": "lessons/0047-linear-systems.html"
+        },
+        {
+          "title": "Span, independence, and basis: how much space a set of vectors covers",
+          "href": "lessons/0048-span-independence-basis.html"
+        },
+        {
+          "title": "Rank: the number of directions a matrix really has",
+          "href": "lessons/0049-rank.html"
+        },
+        {
+          "title": "Orthogonality and projection: the closest point you can actually reach",
+          "href": "lessons/0050-orthogonality-and-projection.html"
+        },
+        {
+          "title": "Least squares: the normal equations, and why they are a projection",
+          "href": "lessons/0051-least-squares.html"
+        },
+        {
+          "title": "The data matrix, and how a thing that has no numbers becomes a vector",
+          "href": "lessons/0052-the-data-matrix.html"
+        }
+      ]
+    },
+    {
       "n": "04",
       "title": "Eigenvalues, SVD, and PCA",
       "lessons": [
