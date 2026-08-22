@@ -23,6 +23,10 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 |---|---|---|---|---|
 | `sessions.csv` | 20,000 | 691 KB | M02 descriptive statistics and correlation, M09 estimation | `session_seconds` is lognormal, so mean 171.7 against median 98.9 makes the mean visibly the wrong summary. `spend` correlates with it at r = 0.487 while `screen_brightness` correlates at r = 0.002, so the course can show a real correlation and a null one in the same table. One session in four hundred is a bot with up to 897 page views, which is what makes a trimmed summary differ from an untrimmed one. |
 | `sensors.csv` | 12,000 | 754 KB | M03 vectors and matrices, M04 eigen, SVD and PCA | Eight sensors generated from three latent factors, so the standardised covariance matrix has eigenvalues 5.36, 1.40, 0.92 and then a cliff: the scree elbow at three is built in and the first three components carry 96.0%. Unstandardised, PC1 carries 98.9% because `pressure_kpa` is on a scale of hundreds, so the page on standardising has a dataset that punishes skipping it. `vibration_x` and `vibration_y` correlate at 0.987, so near rank deficiency is visible. |
+| `experiment.csv` | 24,000 | 616 KB | M09 hypothesis testing, p-values, A/B, Bayesian | True rates 0.0500 and 0.0560, a real 12 per cent lift, deliberately under-powered at 0.546 so the test misses it (z = 1.371, p = 0.1703) while the 95 per cent interval still covers the truth. The stream offset was searched for that realisation and the generator's docstring says so. Device mix matched across arms so a sample-ratio check is meaningful. |
+| `features.csv` | 4,000 | 896 KB | M09 MAP and regularization, bias-variance, regression inference | Thirty predictors, only `x01`-`x05` real with coefficients (4.0, -2.5, 1.5, -1.0, 0.6) and `x06`-`x30` exactly zero. Noise sd 3.0, so the irreducible error is 9.0 and bias can be measured against a known truth instead of estimated. |
+| `population.csv` | 30,000 | 1085 KB | M02 survey sampling designs, measurement scales | Four strata of unequal size and spread (means about 240 to 4,100), so the between-stratum share is 87.4 per cent and stratification measurably wins; 600 clusters with a within-cluster offset, so cluster sampling measurably loses. Also carries one column per measurement rung: `region` nominal, `satisfaction` ordinal, `office_temp_c` interval, `spend` ratio. The interval column exists nowhere else in the course. |
+| `anscombe.csv` | 44 | under 1 KB | M02 Anscombe | Not generated: transcribed from Anscombe (1973), The American Statistician 27(1), 17-21. Four sets agreeing on every standard summary and looking nothing alike. Regenerating it would defeat it. |
 
 ## Regenerating
 
@@ -30,6 +34,10 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 cd math-for-ml-course/datasets/generate
 python3 make_sessions.py
 python3 make_sensors.py
+python3 make_experiment.py
+python3 make_features.py
+python3 make_population.py
+python3 make_anscombe.py
 ```
 
 Requires only `numpy` and `pandas`.
@@ -38,6 +46,6 @@ Each script prints the path and the size it wrote. Re-running must leave `git st
 ## Adding one
 
 Only when an existing dataset genuinely cannot carry the lesson.
-Two datasets serving eleven modules is the goal, because a reader who already knows the columns can concentrate on the mathematics instead of re-reading a schema.
+A small number of datasets serving eleven modules is the goal, because a reader who already knows the columns can concentrate on the mathematics instead of re-reading a schema.
 
 A new one needs: a `generate/make_<name>.py` with a seed and a docstring naming its teaching properties, the generated file committed beside it, a row in the table above, and a row in `../reference/datasets.html`.
