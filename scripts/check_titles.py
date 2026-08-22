@@ -1,23 +1,42 @@
 #!/usr/bin/env python3
-"""Check that a lesson's h1 agrees with every place its title is echoed.
+"""Check that a lesson's NAME agrees everywhere it is echoed.
 
-A title lives in four places: the page's own ``h1``, its card in the course
-index, the sidebar rail generated from that card, and the ``.ttl`` of every
-pager that points at it. When one is edited and the others are not, a reader
-clicks a link expecting one page and lands on a differently titled one, and
-neither ``validate_site.py`` nor ``check_pages.py`` notices.
+A lesson has a **name** and it has a **claim**, and they are different objects.
 
-That is the defect class this catches. It was found by walking the pager chain
-of M02 and M09 by hand, where one stale card title was echoed into the rail as
-well, so a single edit produced two visible wrong titles.
+The name is what the course map calls the lesson. It is echoed into the sidebar
+rail, which ``gen_outline.py`` generates from the map, and into the ``.ttl`` of
+every pager that points at the lesson. Those three must agree: they are one
+object written down three times, and when one is edited and the others are not,
+a reader clicks a link expecting one page and lands on a differently named one
+while every link still resolves.
 
-**A pager label may be a faithful abbreviation of the destination's h1**,
-because the control is narrow and shortening is an editorial choice the hub
-makes widely. The test is that the h1 begins with the label once both are
-reduced to lower-case alphanumerics. It may not be a *different* title, which
-is almost always a superseded one left behind by a rewrite. A card and a rail
-entry get no such latitude: they have the room, and the rail is generated from
-the card, so a difference there is always a mistake rather than a choice.
+The claim is the page's ``<h1>``, which ``page-contracts.md`` requires to be
+"the one idea, phrased as a claim with a verb in it rather than a topic". **A
+claim is not a name and this checker does not compare them.** Requiring them
+equal would force the h1 to stop being a claim or the card to stop being a
+name, and either way it would break a rule older than this file.
+
+That distinction was measured rather than assumed. Across the hub the pager
+label tracks the map, not the h1: 111 of 111 in llm-evolution-course, 8 of 8,
+10 of 10, 67 of 74. An earlier version of this check compared everything to the
+h1 and reported 183 defects, of which most were the contract working correctly.
+
+**A pager label and the name may differ by truncation, in either direction.**
+The control is narrow so a pager shortens, and a map sometimes carries the
+shorter form instead, so the test is symmetric: one must be a prefix of the
+other once both are reduced to lower-case alphanumerics. It may not be a
+*different* name, which is almost always a superseded one left by a rewrite.
+Symmetry was checked against the corpus before being allowed: it clears the two
+remaining defects in production-systems-course, where the map abbreviates and
+the pager does not, and it changes none of the fifty-one in math-for-ml-course,
+which are genuinely different titles rather than truncations.
+A rail entry gets no latitude at all: it is generated from the map, so any
+difference means a stale ``outline.js``.
+
+The name is read exactly as ``gen_outline.py`` reads it - the ``.lt`` of a card,
+or the anchor text where a course links its lessons from a parts list instead.
+Using the generator's own definition is what makes the rail comparison mean
+anything.
 
 Usage:
 
@@ -48,13 +67,20 @@ SWEEP_PENDING: frozenset[str] = frozenset(
         "llm-inference-course",
         "llm-papers-course",
         "math-for-ml-course",
-        "production-systems-course",
-        "statistical-foundations-ml-course",
     }
 )
 
-H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
-CARD = re.compile(r'<a class="lcard" href="lessons/([^"]+)".*?<div class="lt">(.*?)</div>', re.S)
+# A frozen course cannot be swept, so listing it above would promise work nobody
+# is allowed to do. statistical-foundations-ml-course is closed by a captain
+# decision that no file under it may be modified, and its one defect is a pager
+# label naming the destination's h1 rather than its map name, which was that
+# course's convention before this rule existed.
+FROZEN: frozenset[str] = frozenset({"statistical-foundations-ml-course"})
+
+# The same two patterns gen_outline.py uses, so "the name" means the same thing
+# here as it does in the file this compares against.
+LESSON_LINK = re.compile(r'<a\b[^>]*href="(lessons/[^"#?]+)"[^>]*>(.*?)</a>', re.S)
+CARD_TITLE = re.compile(r'<div class="lt">(.*?)</div>', re.S)
 RAIL = re.compile(r'"title"\s*:\s*"((?:[^"\\]|\\.)*)"\s*,\s*"href"\s*:\s*"lessons/([^"]+)"')
 PAGER = re.compile(
     r'<a[^>]*href="([^"]+\.html)"[^>]*>\s*<span class="dir">[^<]*</span><span class="ttl">(.*?)</span>',
@@ -83,22 +109,36 @@ def audit(course: pathlib.Path, low: int, high: int) -> list[tuple[str, str, str
     if not lessons.is_dir():
         return []
 
-    titles: dict[str, str] = {}
-    for page in sorted(lessons.glob("*.html")):
-        match = H1.search(page.read_text(encoding="utf-8"))
-        if match:
-            titles[page.name] = clean(match.group(1))
-
+    # A map may link the same lesson several times. A routed course carries every
+    # route's outline as static markup, so one lesson has one card per route it
+    # appears in, and it also carries a "Start this route" call to action. The
+    # card is the registration and the call to action is navigation, so a .lt
+    # always wins over bare anchor text.
+    #
+    # Every card for the same lesson must agree with every other. Taking the
+    # first or the last would hide a disagreement between two route outlines,
+    # which is a real defect and one a reader meets by switching route.
     index = course / "index.html"
-    cards = (
-        {m.group(1): clean(m.group(2)) for m in CARD.finditer(index.read_text(encoding="utf-8"))}
-        if index.is_file()
-        else {}
-    )
+    cards: dict[str, list[str]] = {}
+    bare: dict[str, str] = {}
+    if index.is_file():
+        for m in LESSON_LINK.finditer(index.read_text(encoding="utf-8")):
+            page = m.group(1).split("/")[-1]
+            card = CARD_TITLE.search(m.group(2))
+            if card:
+                cards.setdefault(page, []).append(clean(card.group(1)))
+            elif page not in bare:
+                bare[page] = clean(m.group(2))
 
+    names: dict[str, str] = {page: titles[0] for page, titles in cards.items()}
+    for page, title in bare.items():
+        names.setdefault(page, title)
+
+    # A routed course derives its outline from routes.js at load time, so its
+    # outline.js holds logic rather than a literal and there is nothing to read.
     rail: dict[str, str] = {}
     outline = course / "outline.js"
-    if outline.is_file():
+    if outline.is_file() and not (course / "routes.js").is_file():
         for m in RAIL.finditer(outline.read_text(encoding="utf-8")):
             rail[m.group(2)] = m.group(1).encode().decode("unicode_escape")
 
@@ -108,20 +148,20 @@ def audit(course: pathlib.Path, low: int, high: int) -> list[tuple[str, str, str
             pagers.setdefault(m.group(1).split("/")[-1], []).append((page.name, clean(m.group(2))))
 
     defects: list[tuple[str, str, str, str]] = []
-    for name in sorted(n for n in titles if in_range(n, low, high)):
-        wanted = titles[name]
-        if name in cards and cards[name] != wanted:
-            defects.append(("CARD", name, cards[name], wanted))
-        if name in rail and rail[name] != wanted:
-            defects.append(("RAIL", name, rail[name], wanted))
-        for source, shown in pagers.get(name, []):
-            # A pager pointing at the course map is labelled for the map, whose
-            # h1 is a claim rather than the course's name by contract.
+    for page in sorted(n for n in names if in_range(n, low, high)):
+        wanted = names[page]
+        for other in cards.get(page, [])[1:]:
+            if other != wanted:
+                defects.append(("CARD disagrees with another card", page, other, wanted))
+        if page in rail and rail[page] != wanted:
+            defects.append(("RAIL", page, rail[page], wanted))
+        for source, shown in pagers.get(page, []):
             if shown in ("Course map", wanted):
                 continue
-            if norm(wanted).startswith(norm(shown)):
+            label, name = norm(shown), norm(wanted)
+            if name.startswith(label) or label.startswith(name):
                 continue
-            defects.append((f"PAGER in {source}", name, shown, wanted))
+            defects.append((f"PAGER in {source}", page, shown, wanted))
     return defects
 
 
@@ -145,18 +185,20 @@ def main() -> int:
         if not defects:
             print(f"  ok      {course.name}")
             continue
-        waived = course.name in SWEEP_PENDING
-        print(f"  {'PENDING' if waived else 'FAIL   '} {course.name}: {len(defects)} defect(s)")
+        waived = course.name in SWEEP_PENDING or course.name in FROZEN
+        state = "FROZEN " if course.name in FROZEN else "PENDING" if waived else "FAIL   "
+        print(f"  {state} {course.name}: {len(defects)} defect(s)")
         for kind, name, shown, wanted in defects:
-            print(f"      {kind}\n         on   : {name}\n         shows: {shown}\n         h1   : {wanted}")
+            print(f"      {kind}\n         on   : {name}\n         shows: {shown}\n         name : {wanted}")
         if waived:
             pending += len(defects)
         else:
             blocking += len(defects)
 
-    print(f"\n{blocking} blocking defect(s), {pending} waived while a sweep is pending")
+    print(f"\n{blocking} blocking defect(s), {pending} waived")
     if pending:
-        print("Courses in SWEEP_PENDING are debt, not exemptions. Delete the entry when the sweep lands.")
+        print("SWEEP_PENDING is debt, not exemption: delete the entry when the sweep lands.")
+        print("FROZEN is a course nobody may edit, so its entry is permanent.")
     return 1 if blocking else 0
 
 

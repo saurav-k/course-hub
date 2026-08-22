@@ -10,8 +10,9 @@ Eight checks, all deterministic and offline:
 5. No published page links a local ``.md`` file, which the deploy excludes.
 6. Every course map's module sections are balanced and none nests inside another,
    which is the one structural break that renders correctly and reaches no console.
-7. Every lesson's title agrees with its card, its rail entry and every pager that
-   points at it, by the rules in ``scripts/check_titles.py``.
+7. Every lesson's name agrees between the course map, the generated rail and every
+   pager that points at it, by the rules in ``scripts/check_titles.py``. The page's
+   ``h1`` is a claim rather than a name and is not compared.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -488,14 +489,17 @@ def _titles() -> object:
     return check_titles
 
 
-def check_titles_agree_with_h1() -> list[Problem]:
-    """A lesson's title must agree everywhere it is echoed.
+def check_titles_agree() -> list[Problem]:
+    """A lesson's NAME must agree everywhere it is echoed.
 
-    A title lives in four places: the page's own ``h1``, its ``.lt`` card in the
-    course map, the rail entry ``gen_outline.py`` generates from that card, and
-    the ``.ttl`` of every pager that points at it. Rewrite the ``h1`` alone and a
-    reader clicks one title and lands on another, while every link still
+    The name is what the course map calls the lesson. It is echoed into the rail
+    ``gen_outline.py`` generates from that map, and into the ``.ttl`` of every
+    pager pointing at the lesson. Edit one and a reader clicks a link expecting
+    one page and lands on a differently named one, while every link still
     resolves and every other check here stays green.
+
+    The page's ``h1`` is a *claim* rather than a name, by the content-page
+    contract, and is deliberately not compared with any of them.
 
     The rules live in ``scripts/check_titles.py`` and are called from here rather
     than duplicated, so there is one definition of what a faithful title is. This
@@ -511,13 +515,13 @@ def check_titles_agree_with_h1() -> list[Problem]:
     problems: list[Problem] = []
 
     for course in course_directories():
-        if course.name in titles.SWEEP_PENDING:
+        if course.name in titles.SWEEP_PENDING or course.name in titles.FROZEN:
             continue
         for kind, page, shown, wanted in titles.audit(course, 0, 9999):
             problems.append(
                 Problem(
                     relative(course / "lessons" / page),
-                    f"{kind} shows {shown!r} but the page's h1 is {wanted!r}",
+                    f"{kind} shows {shown!r} but the course map names it {wanted!r}",
                 )
             )
     return problems
@@ -528,7 +532,7 @@ def waived_title_defects() -> dict[str, int]:
     titles = _titles()
     waived: dict[str, int] = {}
     for course in course_directories():
-        if course.name not in titles.SWEEP_PENDING:
+        if course.name not in titles.SWEEP_PENDING and course.name not in titles.FROZEN:
             continue
         count = len(titles.audit(course, 0, 9999))
         if count:
@@ -577,7 +581,7 @@ def main() -> int:
         + check_pagers_match_the_owning_route()
         + check_lessons_carry_zone_metadata()
         + check_course_map_sections_are_balanced()
-        + check_titles_agree_with_h1()
+        + check_titles_agree()
         + check_local_links_resolve()
         + check_no_local_markdown_links()
     )
@@ -593,9 +597,9 @@ def main() -> int:
         total = sum(waived.values())
         listing = ", ".join(f"{name} {count}" for name, count in sorted(waived.items()))
         print(
-            f"Note: {total} title defect(s) waived while a sweep is pending ({listing}). "
-            "These are debt, not exemptions; the entry leaves SWEEP_PENDING in "
-            "scripts/check_titles.py when the sweep lands."
+            f"Note: {total} title defect(s) waived ({listing}). SWEEP_PENDING is debt "
+            "and its entry leaves scripts/check_titles.py when the sweep lands; FROZEN "
+            "is a course nobody may edit, so its entry is permanent."
         )
 
     print(f"Course Hub validation passed: {len(html_pages())} pages checked.")
