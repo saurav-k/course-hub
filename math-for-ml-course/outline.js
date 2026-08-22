@@ -43,6 +43,28 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "Calculus for machine learning",
+      "lessons": [
+        {
+          "title": "A derivative is the exchange rate between a small input change and a small output change",
+          "href": "lessons/0080-derivative-as-a-limit.html"
+        },
+        {
+          "title": "The chain rule is the only differentiation rule that matters at scale",
+          "href": "lessons/0081-the-chain-rule.html"
+        },
+        {
+          "title": "Where the derivative does not exist, and why machine learning ships anyway",
+          "href": "lessons/0082-where-the-derivative-does-not-exist.html"
+        },
+        {
+          "title": "Partial derivatives put every dial on its own axis, and the gradient collects them",
+          "href": "lessons/0083-partial-derivatives-and-the-gradient.html"
+        }
+      ]
+    },
+    {
       "n": "→",
       "title": "The road ahead",
       "lessons": [

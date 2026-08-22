@@ -1,64 +1,68 @@
-# Briefs
+# M05 Calculus briefs
 
-One file per planned page. A writer picks up `NNNN-slug.md` and writes `lessons/NNNN-slug.html` from it without needing to ask anything.
+Twelve briefs, one per planned page, written from `mlm-calculus-r5`'s scout report
+and reconciled against `mlm-audit-r1`'s architecture.
 
-## Why a brief is markdown and not a stub page
+## Numbers, from the definitive block table
 
-A planned page has **no file under `lessons/`**, because two rules in this repository make that impossible together:
+The block table on issue #42 is the single source of truth. **M05's block is `0080-0099`,
+twenty slots**, and these twelve pages take `0080` to `0091`. Eight slots of headroom
+remain, which is what the sparse scheme is for.
 
-- `scripts/validate_site.py` requires every `lessons/*.html` to be a registered card in the course `index.html` and to appear in `outline.js`.
-- `.claude/skills/course-authoring/references/widgets.md` requires a page that is planned and unwritten to be plain text in a `.roadmap`, **never a link**.
+**A warning for the next crew that reads that comment.** Its prose says "module N starts
+at `N x 20`", and that sentence does not match its own table: the table gives M01
+`0001-0019`, which would be `N x 20 = 20` under the prose. The blocks are twenty wide
+counting from zero, so module N starts at `(N - 1) x 20`, and M01 begins at `0001` only
+because `0000` is lesson zero. **Read the table rows, not the sentence.** These briefs were
+renamed twice before that was spotted, first to `0041-0052` from a roadmap count and then
+to `0100-0111` from the sentence, which is M06's block.
 
-So a stub page would have to be simultaneously registered and unregistered. The brief lives here instead. The deploy excludes `*.md`, the validator ignores this folder, and **no published page ever links a brief** - a local `.md` link fails the validator.
+**M05 writes twelve pages where the roadmap planned eleven**, which the block absorbs
+without touching M06. The reasons are in the roadmap commit: the rules of differentiation
+fold into the chain-rule page, and two pages the roadmap missed are added.
 
-## Writing the brief claims the number
+| Number | Report label | Page |
+|---|---|---|
+| 0080 | C01 | A derivative is the exchange rate between a small input change and a small output change |
+| 0081 | C02 | The chain rule is the only differentiation rule that matters at scale |
+| 0082 | C03 | Where the derivative does not exist, and why machine learning ships anyway |
+| 0083 | C04 | Partial derivatives put every dial on its own axis, and the gradient collects them |
+| 0084 | C05 | The gradient points uphill, and it is steepest only in the Euclidean sense |
+| 0085 | C06 | The Jacobian is the chain rule when both ends are vectors |
+| 0086 | C07 | Backpropagation is the chain rule run right to left on a computation graph |
+| 0087 | C08 | A long chain of Jacobians: what backprop costs, and how the signal decays |
+| 0088 | C09 | Curvature is the second derivative, and the Hessian holds it for every direction at once |
+| 0089 | C10 | Taylor expansion: every loss is a quadratic if you stand close enough |
+| 0090 | C12 | Integrals in machine learning: the area you report is a number you actually compute |
+| 0091 | C13 | Six matrix-calculus identities, and the layout convention that breaks them |
 
-The page number appears in the file name, the `.eyebrow`, the `<footer>` and the `.pager`. Two crews both taking `0034` is the one merge conflict this layout cannot absorb.
+`C11` in the report is deliberately absent. It was a loss-surface page and it is
+withdrawn to `mlm-optim-r6` L09, which declares the same beats from the same source.
+Its one unclaimed asset, filter normalisation, is beat 8 of brief 0088.
 
-**The brief is the register.** If `0034-something.md` exists, that number is taken. Create the brief before you start writing the page, and in the same pull request as any change to the course map's `.roadmap`.
+## Module boundaries, from `mlm-audit-r1` section 4.4
 
-## Which numbers you may use
+- Owns the derivative, the chain rule, and backpropagation as the chain rule (edge 11).
+  M10 owns the softmax gradient. 0081 stops at the binary logit.
+- Owns the gradient and its picture (edge 12). M06 owns everything that descends along it.
+- Owns Taylor (edge 13). M06 owns "gradient descent is the first-order model".
+- Owns integrals (edge 14). **M07 depends on 0090**: a density integrating to one is an integral.
+- Does not own the normal equations (edge 31). M03 derives them by projection.
+  0091 reaches the same answer by calculus and says so explicitly.
+- **Amendment on edge 8, proposed in the scout report section 12.2:** this module owns the
+  second-derivative test, because M05 precedes M06 and M06's saddle page consumes it.
+  M06 owns the consequences.
 
-Page numbers come from **one table**. Blocks are sparse on purpose: the tooling only ever sorts, so a gap costs nothing, while a collision costs a rename across the file name, the `.eyebrow`, the `<footer>` and the `.pager`.
+## Every brief owes, per #42 and #48
 
-| Module | Block | | Module | Block |
-|---|---|---|---|---|
-| M01 Foundations | `0001-0019` | | M07 Probability | `0120-0139` |
-| M02 Data and summaries | `0020-0039` | | M08 Expectation, limits, simulation | `0140-0159` |
-| M03 Vectors, matrices, linear maps | `0040-0059` | | M09 Estimation, testing, inference | `0160-0179` |
-| M04 Eigenvalues, SVD, PCA | `0060-0079` | | M10 Information, similarity, dimension | `0180-0199` |
-| M05 Calculus for machine learning | `0080-0099` | | M11 Capstone: regression | `0200-0219` |
-| M06 Optimization | `0100-0119` | | | |
+Single idea, prerequisites, beats, **a stated proof for every named theorem (D4)**,
+figures by widget kind with an orientation figure and at least one `svg.chart`,
+a worked example in the eight parts of r1 5.4, two quiz seeds of which one tests a
+misconception, one practice seed with hint and `.p-check`, the code and dataset plan,
+primary sources, and the `core` or `depth` label.
 
-**Read your row. Do not compute your block.** A mnemonic published beside this table was off by one and sent three crews into the next module's block before anyone noticed, because a rule and a table are two sources of truth and they disagreed silently. The rows are the only source. M01 starts at `0001` rather than `0000` because lesson zero already holds `0000`, which is exactly the kind of exception an arithmetic rule loses.
+## Code and datasets
 
-Fill your block from the bottom upwards in teaching order and leave the headroom at the top, so a page discovered later lands beside its neighbours rather than at the end of the course.
-
-**Reference another module by its module, not by a number, until that module's briefs exist.** Writing "`0016` needs this" while M02 is unwritten is a guess that will be wrong, and it will be wrong silently. Write "M02 needs this" and let the crew that claims the number make it specific.
-
-## Numbering is a topological order
-
-File order is a valid reading order: no page needs a page that comes after it. That is a property to preserve, not a coincidence. If a new page belongs logically in the middle, it takes the next free number at the end and the course map's module grouping carries the teaching order instead, per `AGENTS.md` rule 6.
-
-## What every brief carries
-
-| Section | What it is for |
-|---|---|
-| **Module, rung, class** | which module, `foundation`/`working`/`frontier`, and `core` or `depth` |
-| **One tight idea** | one sentence. If it takes two, it is two pages |
-| **Prerequisites** | by page number, all of them earlier |
-| **Downstream** | who breaks if this page is wrong |
-| **Boundaries** | what this page must NOT teach, and who owns it instead |
-| **Beats** | the page in order, one line each |
-| **Stated proof** | required by D4 wherever the page names a theorem |
-| **Figures** | each named by widget kind, including the orientation figure and at least one `svg.chart` |
-| **Worked example** | the setting and the actual numbers |
-| **Quiz seeds** | at least two, one testing a misconception |
-| **Practice seed** | stem, hint, solution path, and the `.p-check` sanity line |
-| **Code and dataset** | which program, which dataset, what it computes twice |
-| **Sources** | primary only |
-| **Word budget** | prose only; practice and quiz text do not count |
-
-## What a brief is not
-
-It is not a draft of the page. It carries decisions, numbers and sources, not prose. A writer who finds themselves copying sentences out of a brief should stop: the brief was written at the wrong altitude.
+Committed and verified. Three generators plus three datasets in `../datasets/`,
+twelve programs in `../code/`. Every number quoted in these briefs is that program's
+actual output, reproducible from the committed seed.
