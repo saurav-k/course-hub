@@ -417,6 +417,26 @@ window.COURSE_OUTLINE = {
       "title": "Estimation, testing, and inference",
       "lessons": [
         {
+          "title": "The ninety-five per cent belongs to the rule, not to your interval",
+          "href": "lessons/0166-confidence-intervals.html"
+        },
+        {
+          "title": "The null is the hypothesis you can compute under",
+          "href": "lessons/0167-hypothesis-testing.html"
+        },
+        {
+          "title": "A p-value answers one question, and it is not the one you asked",
+          "href": "lessons/0168-the-p-values-job.html"
+        },
+        {
+          "title": "The design decides the answer before the data arrives",
+          "href": "lessons/0169-ab-testing.html"
+        },
+        {
+          "title": "Three things add up to your test error, and you control two",
+          "href": "lessons/0170-the-bias-variance-tradeoff.html"
+        },
+        {
           "title": "A fitted slope is an estimate, so everything in this module applies to it",
           "href": "lessons/0172-inference-in-simple-linear-regression.html"
         },
