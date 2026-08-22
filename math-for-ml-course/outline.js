@@ -227,6 +227,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "The Jacobian is the chain rule when both ends are vectors",
           "href": "lessons/0085-the-jacobian.html"
+        },
+        {
+          "title": "Backpropagation is the chain rule run right to left on a computation graph",
+          "href": "lessons/0086-backpropagation.html"
         }
       ]
     },
