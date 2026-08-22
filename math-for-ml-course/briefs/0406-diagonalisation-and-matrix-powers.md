@@ -85,7 +85,7 @@ Formally this is an induction: it holds for `k = 1`; and if `A^k = P D^k P^-1` t
 Computes twice:
 1. **From the definition.** Build `P` and `D` from the eigendecomposition of the 24x24 channel covariance, then form `P D^k P^-1` for `k = 8`.
 2. **The library way.** `numpy.linalg.matrix_power` on the same matrix and the same `k`.
-3. **Assert they agree** to a relative tolerance, and **print the wall-clock cost of each**, which is where the point lands: the sandwich does one eigendecomposition and then `k` scalar powers, so its cost barely moves as `k` grows to 200, while repeated multiplication grows with `k`.
+3. **Assert they agree** to a relative tolerance, and **print the wall-clock cost of each** at `k = 10`, `200` and `4000`. Be accurate about what the timing shows: the sandwich is genuinely flat, because it pays for one eigendecomposition and then raises 24 scalars to the power `k`. Repeated multiplication does grow, but only logarithmically, because `numpy.linalg.matrix_power` squares repeatedly rather than multiplying `k` times. The page must not claim a linear cost it did not measure; the honest statement is that one route is constant in `k` and the other is not.
 
 The program then does the honest counterpart: it runs the same routine on the defective `[[1,1],[0,1]]`, catches the near-singular `P`, and reports the condition number of `P` rather than crashing, showing that defectiveness announces itself numerically as an eigenvector matrix that is almost not invertible.
 

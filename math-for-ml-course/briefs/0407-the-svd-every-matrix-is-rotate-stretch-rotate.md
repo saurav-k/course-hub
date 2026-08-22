@@ -92,7 +92,7 @@ Computes twice:
 2. **The library way.** `numpy.linalg.svd` on the same matrix.
 3. **Assert they agree** on the singular values to tolerance, and on the singular *vectors* **up to sign**, with a comment saying that the sign freedom is exactly the non-uniqueness the proof's boundary paragraph named. It also asserts `A = U Sigma V^T` reproduces the original to tolerance.
 
-The program prints the rank two ways: `numpy.linalg.matrix_rank`, and a count of singular values above an explicit threshold, and shows they disagree if the threshold is chosen naively. That disagreement is the hook page `0409` picks up.
+The program then prints the rank as a **threshold sweep** rather than as one number: `numpy.linalg.matrix_rank` says 24, and counting singular values above 0.5, 1.0, 5.0 and 10.0 gives 24, 24, 4 and 3. Every singular value is non-zero because noise is present, so the numerical rank is genuinely full; only a threshold placed inside the cliff recovers the four components the data was built from. Rank here is a choice about where signal stops, and that is the hook page `0409` picks up.
 
 ## Sources
 

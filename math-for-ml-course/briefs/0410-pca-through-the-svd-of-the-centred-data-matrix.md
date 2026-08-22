@@ -16,6 +16,8 @@ Take the SVD of the centred data matrix and the principal components fall out of
 
 **Ownership, so nothing is derived twice.** M08 owns the covariance matrix as a statistical object, meaning what `Cov(X_i, X_j)` says about random variables. This page owns its linear algebra and takes the matrix as given. **M06 owns the variational route:** maximising `b^T S b` subject to `||b|| = 1` using a Rayleigh quotient or a Lagrange multiplier arrives at the same answer, and it is presented there as a second explanation of a result the reader already has. Deriving PCA through the SVD is what keeps this page calculus-free, which is what lets the whole of M04 precede M05. This page names that second route and does not walk it.
 
+**A note on `statistical-foundations-ml-course` (captain update 3).** That course is **frozen**: no file under it is created, modified, renamed or deleted by this build, and it stays a separate live course. The correlation prerequisite for this page is therefore M02's, inside this course, which is what keeps the new course self-contained. A one-way link out to `../../statistical-foundations-ml-course/lessons/0007-leading-indicators-and-correlation.html` is *permitted* as optional enrichment, since it works Pearson correlation on two columns by hand and this page diagonalises the matrix version. It is not required, and it must stay one-way: nothing in that course may be edited to point back.
+
 **Notation.** `X` is `n x d`: one row per sample, one column per feature, per the course-wide convention (D7). Every formula here is in that orientation, and the page says so where a source the reader might open uses the other one.
 
 ## Beats, in order
@@ -115,7 +117,7 @@ It then verifies Result 2 directly rather than trusting it: for `M = 1, 2, 3, 4,
 
 It prints the scree table with cumulative variance `69.98, 91.47, 96.82, 98.16` percent for the first four components, and prints the noise floor so the elbow at four is visible as a number.
 
-Finally it makes beat 9 concrete without depending on library behaviour: it asserts that `-v` satisfies the eigenvector equation exactly as well as `v` does, which is a mathematical fact rather than an accident of a routine. It also prints a short note that on this dataset the two routines happen to return the **same** signs, which is precisely why relying on that agreement is unsafe.
+Finally it makes beat 9 concrete without depending on library behaviour: it asserts that `-v` satisfies the eigenvector equation exactly as well as `v` does, which is a mathematical fact rather than an accident of a routine. It then counts how many of the 24 directions the two routes gave the same sign for. **Measured: 12 of 24.** The two routes agree on every eigenvalue to `7.2e-16` and on every direction up to sign, and still disagree on the sign of half of them. That number is the page's evidence for beat 9 and it is worth printing on the page, because "the signs happened to match when I tried it" is exactly the reasoning it has to defeat.
 
 ## Sources
 
