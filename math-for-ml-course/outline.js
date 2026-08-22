@@ -27,6 +27,18 @@ window.COURSE_OUTLINE = {
         {
           "title": "One polynomial holds every eigenvalue",
           "href": "lessons/0061-the-characteristic-equation-trace-and-determinant.html"
+        },
+        {
+          "title": "Symmetric matrices are the well-behaved ones",
+          "href": "lessons/0062-the-spectral-theorem-for-symmetric-matrices.html"
+        },
+        {
+          "title": "A matrix is a landscape once you feed it a vector twice",
+          "href": "lessons/0063-quadratic-forms-bowl-saddle-or-valley.html"
+        },
+        {
+          "title": "The matrix version of a positive number",
+          "href": "lessons/0064-positive-definiteness-and-its-eigenvalue-test.html"
         }
       ]
     }
