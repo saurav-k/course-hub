@@ -473,6 +473,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0202-what-a-coefficient-is-worth.html"
         }
       ]
+    },
+    {
+      "n": "02",
+      "title": "Data and summaries",
+      "lessons": [
+        {
+          "title": "Shape is the part the summary throws away",
+          "href": "lessons/0024-shape-is-what-the-summary-throws-away.html"
+        },
+        {
+          "title": "Covariance and correlation, and why the units do not matter",
+          "href": "lessons/0025-covariance-and-correlation.html"
+        },
+        {
+          "title": "Anscombe, and what a correlation does not license",
+          "href": "lessons/0026-what-a-correlation-does-not-license.html"
+        },
+        {
+          "title": "Survey sampling designs, and which question each one answers",
+          "href": "lessons/0027-survey-sampling-designs.html"
+        }
+      ]
     }
   ],
   "extras": [
