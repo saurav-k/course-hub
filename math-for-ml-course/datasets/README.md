@@ -50,6 +50,8 @@ falsifiable test. That is what justified a third dataset, and the justification 
 numbers above come from `code/0103-the-learning-rate-is-bounded-by-curvature.py` and
 `code/0110-regularization-is-a-constraint-you-can-draw.py`.
 
+| `inference_runs.csv` | 40,000 | 2.2 MB | M08 expectation, variance, covariance, the limit theorems | `latency_ms` is lognormal, so mean 201.342 ms against median 156.127 ms with skew 3.097 gives the limit-theorem pages a column whose sample mean converges slowly enough to measure rather than assert. `cache_hit` is Bernoulli at 0.012, deliberately rare, so a nominal 95 per cent interval on it covers 0.304 at n = 30 and the Central Limit Theorem page can show the failure. `log_resid` and `resid_energy` are exactly dependent, one the square of the other, and correlate at 0.0202 while the absolute value correlates at 0.9356. `screen_dpi` is a null column at r = -0.0006, and `tier` has three levels whose latency distributions genuinely differ. |
+| `lifecycle_states.csv` | 240,000 | 3.5 MB | M08 Markov chains | 6,000 users over 40 weeks from a known four-state transition matrix, so the matrix can be estimated by counting and checked against the truth: the largest gap is 0.005 over 234,000 observed transitions. `churned` is absorbing in the generator, which makes the chain reducible, so the page can show why irreducibility is a condition to check rather than a formality, and why repairing it takes two edges rather than one. |
 ## Regenerating
 
 ```bash
@@ -62,6 +64,8 @@ python3 make_features.py
 python3 make_population.py
 python3 make_anscombe.py
 python3 make_m06_credit.py
+python3 make_inference_runs.py
+python3 make_lifecycle_states.py
 ```
 
 Requires only `numpy` and `pandas`.
