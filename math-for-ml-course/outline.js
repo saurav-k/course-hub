@@ -17,336 +17,68 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
-      "n": "01",
-      "title": "Foundations",
+      "n": "07",
+      "title": "Probability",
       "lessons": [
         {
-          "title": "Every formula is a loop you already know how to write",
-          "href": "lessons/0001-reading-a-formula.html"
+          "title": "A probability means two different things, and the mathematics does not care",
+          "href": "lessons/0120-what-a-probability-is.html"
         },
         {
-          "title": "A split is a partition, and leakage is a non-empty intersection",
-          "href": "lessons/0002-sets-and-splits.html"
+          "title": "Three rules generate the whole subject, and the hard part is the set they talk about",
+          "href": "lessons/0121-the-axioms.html"
         },
         {
-          "title": "A model is a function, and depth is composition",
-          "href": "lessons/0003-a-model-is-a-function.html"
+          "title": "Counting outcomes and dividing is a model, and it is often the wrong one",
+          "href": "lessons/0122-equally-likely-outcomes.html"
         },
         {
-          "title": "A monotone change moves every number and no ordering",
-          "href": "lessons/0004-the-shape-of-a-function.html"
+          "title": "Conditioning does not change the world, it changes what counts as everything",
+          "href": "lessons/0123-conditional-probability.html"
         },
         {
-          "title": "Training is an argmin, and prediction is an argmax",
-          "href": "lessons/0005-argmax-and-what-training-is.html"
+          "title": "Independence is an equation, not a story about the world",
+          "href": "lessons/0124-independence.html"
         },
         {
-          "title": "A logarithm answers one question: what exponent?",
-          "href": "lessons/0006-logs-and-exponentials.html"
+          "title": "Bayes' theorem is two lines of algebra, and it reverses the only bar that matters",
+          "href": "lessons/0125-bayes-theorem.html"
         },
         {
-          "title": "Log space is where the arithmetic still works",
-          "href": "lessons/0007-why-ml-lives-in-log-space.html"
+          "title": "A detector that catches 92 percent of abuse can still be wrong three times in four",
+          "href": "lessons/0126-the-base-rate-trap.html"
         },
         {
-          "title": "Three questions decide every counting problem",
-          "href": "lessons/0008-counting-what-you-cannot-enumerate.html"
+          "title": "A random variable is neither random nor a variable",
+          "href": "lessons/0127-random-variables.html"
         },
         {
-          "title": "A bound is a claim about growth, not about your data",
-          "href": "lessons/0009-limits-and-reading-big-o.html"
-        }
-      ]
-    },
-    {
-      "n": "03",
-      "title": "Vectors, matrices, and linear maps",
-      "lessons": [
-        {
-          "title": "Everything is a rectangular array, and its shape is the first thing to read",
-          "href": "lessons/0040-shape-is-the-contract.html"
-        },
-        {
-          "title": "A vector is a list and an arrow, and there are only two operations",
-          "href": "lessons/0041-a-vector-is-an-arrow.html"
-        },
-        {
-          "title": "Norm and distance: how big, how far, and why the units decide the answer",
-          "href": "lessons/0042-norm-and-distance.html"
-        },
-        {
-          "title": "The dot product, the angle, and cosine similarity",
-          "href": "lessons/0043-dot-product-and-cosine.html"
-        },
-        {
-          "title": "A matrix is a stack of vectors, and multiplying by one is a bag of dot products",
-          "href": "lessons/0044-matrix-times-vector.html"
-        },
-        {
-          "title": "What a matrix multiply costs",
-          "href": "lessons/0045-what-a-matmul-costs.html"
-        },
-        {
-          "title": "A matrix is a function: rotate, scale, shear, and collapse",
-          "href": "lessons/0046-a-matrix-is-a-function.html"
-        },
-        {
-          "title": "Ax = b, and the three answers a system can have",
-          "href": "lessons/0047-linear-systems.html"
-        },
-        {
-          "title": "Span, independence, and basis: how much space a set of vectors covers",
-          "href": "lessons/0048-span-independence-basis.html"
-        },
-        {
-          "title": "Rank: the number of directions a matrix really has",
-          "href": "lessons/0049-rank.html"
-        },
-        {
-          "title": "Orthogonality and projection: the closest point you can actually reach",
-          "href": "lessons/0050-orthogonality-and-projection.html"
-        },
-        {
-          "title": "Least squares: the normal equations, and why they are a projection",
-          "href": "lessons/0051-least-squares.html"
-        },
-        {
-          "title": "The data matrix, and how a thing that has no numbers becomes a vector",
-          "href": "lessons/0052-the-data-matrix.html"
-        }
-      ]
-    },
-    {
-      "n": "04",
-      "title": "Eigenvalues, SVD, and PCA",
-      "lessons": [
-        {
-          "title": "Some directions a matrix only stretches",
-          "href": "lessons/0060-eigenvectors-the-directions-a-matrix-does-not-turn.html"
-        },
-        {
-          "title": "One polynomial holds every eigenvalue",
-          "href": "lessons/0061-the-characteristic-equation-trace-and-determinant.html"
-        },
-        {
-          "title": "Symmetric matrices are the well-behaved ones",
-          "href": "lessons/0062-the-spectral-theorem-for-symmetric-matrices.html"
-        },
-        {
-          "title": "A matrix is a landscape once you feed it a vector twice",
-          "href": "lessons/0063-quadratic-forms-bowl-saddle-or-valley.html"
-        },
-        {
-          "title": "The matrix version of a positive number",
-          "href": "lessons/0064-positive-definiteness-and-its-eigenvalue-test.html"
-        }
-      ]
-    },
-    {
-      "n": "06",
-      "title": "Optimization",
-      "lessons": [
-        {
-          "title": "Learning is an optimization problem",
-          "href": "lessons/0100-learning-is-an-optimization-problem.html"
-        },
-        {
-          "title": "Convexity, and the one guarantee it buys",
-          "href": "lessons/0101-convexity-and-the-one-guarantee-it-buys.html"
-        },
-        {
-          "title": "Gradient descent is a first-order model, taken one step at a time",
-          "href": "lessons/0102-gradient-descent-is-a-first-order-model.html"
-        },
-        {
-          "title": "The learning rate is bounded by curvature",
-          "href": "lessons/0103-the-learning-rate-is-bounded-by-curvature.html"
-        },
-        {
-          "title": "Stochastic gradient descent: paying in noise to buy iterations",
-          "href": "lessons/0104-stochastic-gradient-descent.html"
-        },
-        {
-          "title": "Momentum, and when averaging past gradients actually helps",
-          "href": "lessons/0105-momentum-and-when-it-helps.html"
-        },
-        {
-          "title": "Adaptive learning rates: one step size per parameter",
-          "href": "lessons/0106-adaptive-learning-rates.html"
-        },
-        {
-          "title": "Newton's method, and why nobody runs it at scale",
-          "href": "lessons/0107-newtons-method-and-why-nobody-runs-it.html"
-        },
-        {
-          "title": "Saddle points and plateaus: what actually slows deep training",
-          "href": "lessons/0108-saddle-points-and-plateaus.html"
-        },
-        {
-          "title": "Constrained optimization: Lagrange multipliers and KKT",
-          "href": "lessons/0109-lagrange-multipliers-and-kkt.html"
-        },
-        {
-          "title": "Regularization is a constraint you can draw",
-          "href": "lessons/0110-regularization-is-a-constraint-you-can-draw.html"
-        },
-        {
-          "title": "Early stopping is the regularizer you did not write",
-          "href": "lessons/0111-early-stopping.html"
-        }
-      ]
-    },
-    {
-      "n": "05",
-      "title": "Calculus for machine learning",
-      "lessons": [
-        {
-          "title": "A derivative is the exchange rate between a small input change and a small output change",
-          "href": "lessons/0080-derivative-as-a-limit.html"
-        },
-        {
-          "title": "The chain rule is the only differentiation rule that matters at scale",
-          "href": "lessons/0081-the-chain-rule.html"
-        },
-        {
-          "title": "Where the derivative does not exist, and why machine learning ships anyway",
-          "href": "lessons/0082-where-the-derivative-does-not-exist.html"
-        },
-        {
-          "title": "Partial derivatives put every dial on its own axis, and the gradient collects them",
-          "href": "lessons/0083-partial-derivatives-and-the-gradient.html"
-        }
-      ]
-    },
-    {
-      "n": "10",
-      "title": "Information, similarity, and dimension",
-      "lessons": [
-        {
-          "title": "Entropy is the average of your own surprise",
-          "href": "lessons/0180-entropy.html"
-        },
-        {
-          "title": "Cross-entropy is the bill for using the wrong codebook",
-          "href": "lessons/0181-cross-entropy.html"
-        },
-        {
-          "title": "KL divergence measures the excess, and it has a direction",
-          "href": "lessons/0182-kl-divergence.html"
-        },
-        {
-          "title": "Mutual information sees dependence that correlation cannot",
-          "href": "lessons/0183-mutual-information.html"
-        },
-        {
-          "title": "The exponential you write is never the one you compute",
-          "href": "lessons/0184-softmax-log-sum-exp.html"
-        },
-        {
-          "title": "Similar is a choice you make, not a fact you measure",
-          "href": "lessons/0185-distance-metrics.html"
-        },
-        {
-          "title": "A cosine score means nothing until you know its baseline",
-          "href": "lessons/0186-cosine-similarity.html"
-        },
-        {
-          "title": "A kernel is a dot product in a space you never build",
-          "href": "lessons/0187-kernels.html"
-        },
-        {
-          "title": "The curse is real, and it has a hypothesis your data may not meet",
-          "href": "lessons/0188-curse-of-dimensionality.html"
-        },
-        {
-          "title": "A decision tree is a greedy mutual-information maximiser",
-          "href": "lessons/0189-information-gain.html"
-        },
-        {
-          "title": "Perplexity is how many options the model is choosing among",
-          "href": "lessons/0190-perplexity.html"
-        }
-      ]
-    },
-    {
-      "n": "→",
-      "title": "The road ahead",
-      "lessons": [
-        {
-          "title": "Joint distributions, and what a marginal is",
-          "href": "lessons/0140-joint-distributions.html"
-        },
-        {
-          "title": "Conditional distributions: PMF and PDF",
-          "href": "lessons/0141-conditional-distributions.html"
-        },
-        {
-          "title": "Expectation, and the properties that hold even under dependence",
-          "href": "lessons/0142-expectation.html"
-        },
-        {
-          "title": "Variance, and the computational form",
-          "href": "lessons/0143-variance.html"
-        },
-        {
-          "title": "Covariance and correlation",
-          "href": "lessons/0144-covariance-and-correlation.html"
-        },
-        {
-          "title": "The covariance matrix",
-          "href": "lessons/0145-the-covariance-matrix.html"
-        },
-        {
-          "title": "The multivariate Gaussian",
-          "href": "lessons/0146-the-multivariate-gaussian.html"
-        },
-        {
-          "title": "Sums of independent random variables",
-          "href": "lessons/0147-sums-of-independent-variables.html"
-        },
-        {
-          "title": "Moment generating functions",
-          "href": "lessons/0148-moment-generating-functions.html"
-        },
-        {
-          "title": "Markov's inequality",
-          "href": "lessons/0149-markovs-inequality.html"
-        },
-        {
-          "title": "Chebyshev's inequality, one-sided and two-sided",
-          "href": "lessons/0150-chebyshevs-inequality.html"
-        },
-        {
-          "title": "The law of large numbers",
-          "href": "lessons/0151-the-law-of-large-numbers.html"
-        },
-        {
-          "title": "The Central Limit Theorem, for the sum and for the sample mean",
-          "href": "lessons/0152-the-central-limit-theorem.html"
+          "title": "One object, three descriptions, and a density is not a probability",
+          "href": "lessons/0128-pmf-pdf-cdf.html"
         },
         {
-          "title": "Sampling and Monte Carlo",
-          "href": "lessons/0153-sampling-and-monte-carlo.html"
+          "title": "Three distributions that are one idea at three widths",
+          "href": "lessons/0129-bernoulli-binomial-categorical.html"
         },
         {
-          "title": "Markov chains",
-          "href": "lessons/0154-markov-chains.html"
+          "title": "The flattest distribution there is, and the one that proves a density is not a probability",
+          "href": "lessons/0130-the-uniform-distribution.html"
         },
         {
-          "title": "Conditional expectation and MMSE",
-          "href": "lessons/0155-conditional-expectation-and-mmse.html"
+          "title": "The wait so far tells you nothing about the wait remaining",
+          "href": "lessons/0131-the-geometric-distribution.html"
         },
         {
-          "title": "Every module was asking one table a different question",
-          "href": "lessons/0200-one-dataset-eleven-modules.html"
+          "title": "Two distributions that are one process read two ways",
+          "href": "lessons/0132-poisson-and-exponential.html"
         },
         {
-          "title": "Two modules compute the same two numbers by different means",
-          "href": "lessons/0201-three-routes-same-coefficients.html"
+          "title": "The default distribution, and the tail where it stops being true",
+          "href": "lessons/0133-the-normal-distribution.html"
         },
         {
-          "title": "The same slope is worthless on eight rows and decisive on twenty thousand",
-          "href": "lessons/0202-what-a-coefficient-is-worth.html"
+          "title": "You choose a distribution by asking three questions, not by looking at a histogram",
+          "href": "lessons/0134-choosing-a-distribution.html"
         }
       ]
     }
