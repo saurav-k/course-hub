@@ -8,19 +8,19 @@ shows the naive softmax failing where the stabilised one does not.
 Needs only numpy and pandas.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-LOCAL = "../datasets/tickets.csv"
-REMOTE = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/tickets.csv"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "tickets.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/tickets.csv"
 CLASSES = ["urgent", "normal", "spam"]
 
 
 def load() -> pd.DataFrame:
-    try:
-        return pd.read_csv(LOCAL)
-    except FileNotFoundError:
-        return pd.read_csv(REMOTE)
+    """Relative to this file so the repository works offline, URL so Colab works."""
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 
 
 def softmax_naive(z: np.ndarray) -> np.ndarray:

@@ -27,6 +27,7 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 | `features.csv` | 4,000 | 896 KB | M09 MAP and regularization, bias-variance, regression inference | Thirty predictors, only `x01`-`x05` real with coefficients (4.0, -2.5, 1.5, -1.0, 0.6) and `x06`-`x30` exactly zero. Noise sd 3.0, so the irreducible error is 9.0 and bias can be measured against a known truth instead of estimated. |
 | `population.csv` | 30,000 | 1085 KB | M02 survey sampling designs, measurement scales | Four strata of unequal size and spread (means about 240 to 4,100), so the between-stratum share is 87.4 per cent and stratification measurably wins; 600 clusters with a within-cluster offset, so cluster sampling measurably loses. Also carries one column per measurement rung: `region` nominal, `satisfaction` ordinal, `office_temp_c` interval, `spend` ratio. The interval column exists nowhere else in the course. |
 | `anscombe.csv` | 44 | under 1 KB | M02 Anscombe | Not generated: transcribed from Anscombe (1973), The American Statistician 27(1), 17-21. Four sets agreeing on every standard summary and looking nothing alike. Regenerating it would defeat it. |
+| `tickets.csv` | 5,000 | 1.9 MB | M01 foundations, all nine lessons | Token counts are heavy-tailed on purpose, so short tickets survive a naive product of per-token probabilities in float64 and long ones underflow to exactly `0.0`: on the held-out split 8 tickets where **both** class scores underflow and 26 where **exactly one** does, which is the silent failure lesson 0007 is built on. `first_response_seconds` is exponential with median 420.3 s, so `lambda = ln(2)/median` is checkable. `score_urgent` is imperfect by design, held-out AUC 0.933, so a monotone transform can be shown leaving AUC alone while a fixed cutoff moves. `row_split` is per row, so 510 of 527 test customers also appear in train - that is lesson 0002's exercise. |
 
 ## Regenerating
 
@@ -34,6 +35,7 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 cd math-for-ml-course/datasets/generate
 python3 make_sessions.py
 python3 make_sensors.py
+python3 make_tickets.py
 python3 make_experiment.py
 python3 make_features.py
 python3 make_population.py
@@ -44,6 +46,11 @@ Requires only `numpy` and `pandas`.
 Each script prints the path and the size it wrote. Re-running must leave `git status` clean; if it does not, the generator is not seeded properly and that is a bug.
 
 ## Adding one
+
+`tickets.csv` is the one dataset added for a reason other than a new subject, and the reasoning is recorded so the next author has a bar to measure against.
+M01 needs text (to build a product of per-token probabilities and watch it underflow), a repeated entity (so a split can leak above the row), and a genuinely exponential column (so fitting a rate from a median fits the right family).
+`sessions.csv` is lognormal, has no text and has no repeated entity, so it cannot carry lessons 0002, 0006 or 0007.
+Wanting different column names is not a reason; needing a property no existing file has is.
 
 Only when an existing dataset genuinely cannot carry the lesson.
 A small number of datasets serving eleven modules is the goal, because a reader who already knows the columns can concentrate on the mathematics instead of re-reading a schema.

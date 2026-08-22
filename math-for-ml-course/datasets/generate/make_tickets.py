@@ -27,8 +27,8 @@ import numpy as np
 import pandas as pd
 
 SEED = 20260822
-N_TICKETS = 9000
-N_CUSTOMERS = 1800
+N_TICKETS = 5000
+N_CUSTOMERS = 1000
 MEDIAN_RESPONSE_SECONDS = 415.0
 
 # A small closed vocabulary keeps the file a few megabytes rather than tens.
@@ -71,7 +71,7 @@ def main() -> None:
     # Heavy tail: lognormal, clipped, so most tickets are short and a real
     # minority are long enough to underflow a naive product.
     n_tokens = np.clip(
-        np.round(rng.lognormal(mean=3.45, sigma=0.88, size=N_TICKETS)), 8, 600
+        np.round(rng.lognormal(mean=3.35, sigma=0.95, size=N_TICKETS)), 8, 600
     ).astype(int)
 
     urgent_w = token_weights(rng, urgent=True)
@@ -106,11 +106,11 @@ def main() -> None:
             "row_split": row_split,
             "label": np.where(is_urgent, "urgent", "normal"),
             "n_tokens": n_tokens,
-            "first_response_seconds": np.round(first_response, 3),
-            "score_urgent": np.round(score_urgent, 6),
-            "logit_urgent": np.round(logit_urgent, 6),
-            "logit_normal": np.round(logit_normal, 6),
-            "logit_spam": np.round(logit_spam, 6),
+            "first_response_seconds": np.round(first_response, 2),
+            "score_urgent": np.round(score_urgent, 5),
+            "logit_urgent": np.round(logit_urgent, 4),
+            "logit_normal": np.round(logit_normal, 4),
+            "logit_spam": np.round(logit_spam, 4),
             "tokens": tokens,
         }
     )
