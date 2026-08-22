@@ -59,13 +59,15 @@ So a merged pull request is a live deployment. Treat it that way.
 
 ```
 index.html               the hub landing page; every course is a card here
-assets/                  shared CSS and JS for the landing page only
+assets/                  the hub design system: hub.css, hub.js, fonts/. Every page links these.
 scripts/validate_site.py the structure and link checker that gates every pull request
+scripts/gen_outline.py   generates a course outline.js from its index.html
 .github/workflows/       validate on pull request, publish on merge to main
 
 <course-name>/
   index.html             the course map; every lesson is linked from here
-  assets/                CSS and JS owned by that course
+  assets/                optional course-extras.css only, for rules unique to this course
+  outline.js             generated from index.html by scripts/gen_outline.py; the sidebar reads it
   lessons/NNNN-kebab.html    the lessons, zero-padded and in teaching order
   reference/*.html       print-friendly cheat sheets and glossaries
   learning-records/*.md  progress notes; never published to the site
@@ -84,18 +86,20 @@ These keep the courses consistent, so read the course's own `MISSION.md`, `NOTES
 - **Quiz options must match in length.** If the correct answer is visibly longer than the distractors, the formatting gives it away.
 - **Number lessons `NNNN-kebab-case.html`,** continuing the existing sequence in that course. Do not renumber existing lessons; their URLs are public.
 - **Register the lesson.** Add it to the course `index.html`. The validator fails the pull request if you forget.
-- **Reuse the course assets.** Link `../assets/course.css` and `../assets/course.js`. Do not inline a private copy of the design system.
+- **Link the hub design system.** From a lesson, link `../../assets/hub.css`, then `../../assets/hub.js` and `../outline.js` in the head. Do not inline a private copy, and do not add a second stylesheet unless the rule is genuinely unique to this course, in which case put it in `<course>/assets/course-extras.css`. A course owns only its palette, not the design system.
+- **Regenerate the outline.** After adding or renaming a lesson, run `python3 scripts/gen_outline.py <course-name>` and commit the result. The validator fails the pull request if the outline and the lessons on disk disagree.
 - **Use relative links only.** Courses are siblings under one bucket root, so cross-course links look like `../../llm-papers-course/index.html`. Absolute paths break the site.
 - **Cite primary sources.** Link the paper, the RFC, or the vendor documentation - not a blog post summarising it. Add anything new to the course `RESOURCES.md`.
 - **Write full prose.** Lessons are teaching material: complete sentences, no shorthand.
 
 ## Adding a whole new course
 
-1. Create `<course-name>/` with its own `index.html`, `assets/`, and `lessons/`.
+1. Create `<course-name>/` with its own `index.html` and `lessons/`. It needs no `assets/` folder unless it has rules of its own; it links the hub design system like every other course. Give it a hue in the course-accent block of `assets/hub.css` so it does not wear the same accent as its neighbours.
 2. Write its `MISSION.md` first: why it exists, what "done" looks like, and what is out of scope.
 3. Add a card for it in the hub `index.html`.
-4. Run the validator. It checks that the hub links your course and that your course links every one of its lessons.
-5. Open a pull request. No deploy configuration change is needed - the workflow syncs the whole hub.
+4. Generate its `outline.js` with `python3 scripts/gen_outline.py <course-name>`.
+5. Run the validator. It checks that the hub links your course and that your course links every one of its lessons.
+6. Open a pull request. No deploy configuration change is needed - the workflow syncs the whole hub.
 
 ## What not to commit
 
