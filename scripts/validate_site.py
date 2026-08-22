@@ -10,6 +10,8 @@ Eight checks, all deterministic and offline:
 5. No published page links a local ``.md`` file, which the deploy excludes.
 6. Every course map's module sections are balanced and none nests inside another,
    which is the one structural break that renders correctly and reaches no console.
+7. Every lesson's title agrees with its card, its rail entry and every pager that
+   points at it, by the rules in ``scripts/check_titles.py``.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -471,6 +473,69 @@ def check_course_map_sections_are_balanced() -> list[Problem]:
     return problems
 
 
+def _titles() -> object:
+    """``check_titles`` as a module, imported from beside this file.
+
+    It sits in the same directory, which is on ``sys.path`` whenever this file
+    is run as a script. The insert makes the import work when it is not, such as
+    when a test imports this module by path.
+    """
+    directory = str(Path(__file__).resolve().parent)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
+    import check_titles
+
+    return check_titles
+
+
+def check_titles_agree_with_h1() -> list[Problem]:
+    """A lesson's title must agree everywhere it is echoed.
+
+    A title lives in four places: the page's own ``h1``, its ``.lt`` card in the
+    course map, the rail entry ``gen_outline.py`` generates from that card, and
+    the ``.ttl`` of every pager that points at it. Rewrite the ``h1`` alone and a
+    reader clicks one title and lands on another, while every link still
+    resolves and every other check here stays green.
+
+    The rules live in ``scripts/check_titles.py`` and are called from here rather
+    than duplicated, so there is one definition of what a faithful title is. This
+    runs inside ``validate_site.py`` on purpose: the Validate workflow already
+    runs this file, so titles are gated with no change to ``.github/workflows``.
+
+    Courses named in that script's ``SWEEP_PENDING`` are mid-sweep. Their defects
+    are counted by :func:`waived_title_defects` and reported as debt rather than
+    failing the run, so a sweep in flight does not block everyone. Every other
+    course, and every course added later, gates at zero.
+    """
+    titles = _titles()
+    problems: list[Problem] = []
+
+    for course in course_directories():
+        if course.name in titles.SWEEP_PENDING:
+            continue
+        for kind, page, shown, wanted in titles.audit(course, 0, 9999):
+            problems.append(
+                Problem(
+                    relative(course / "lessons" / page),
+                    f"{kind} shows {shown!r} but the page's h1 is {wanted!r}",
+                )
+            )
+    return problems
+
+
+def waived_title_defects() -> dict[str, int]:
+    """Title defects in courses still being swept, so the debt stays visible."""
+    titles = _titles()
+    waived: dict[str, int] = {}
+    for course in course_directories():
+        if course.name not in titles.SWEEP_PENDING:
+            continue
+        count = len(titles.audit(course, 0, 9999))
+        if count:
+            waived[course.name] = count
+    return waived
+
+
 def check_no_local_markdown_links() -> list[Problem]:
     """The deploy syncs the repository minus ``*.md``, so a page that links a
     local Markdown file works from disk and returns a 404 on the published site."""
@@ -512,6 +577,7 @@ def main() -> int:
         + check_pagers_match_the_owning_route()
         + check_lessons_carry_zone_metadata()
         + check_course_map_sections_are_balanced()
+        + check_titles_agree_with_h1()
         + check_local_links_resolve()
         + check_no_local_markdown_links()
     )
@@ -521,6 +587,16 @@ def main() -> int:
         for problem in problems:
             print(f"  - {problem.render()}")
         return 1
+
+    waived = waived_title_defects()
+    if waived:
+        total = sum(waived.values())
+        listing = ", ".join(f"{name} {count}" for name, count in sorted(waived.items()))
+        print(
+            f"Note: {total} title defect(s) waived while a sweep is pending ({listing}). "
+            "These are debt, not exemptions; the entry leaves SWEEP_PENDING in "
+            "scripts/check_titles.py when the sweep lands."
+        )
 
     print(f"Course Hub validation passed: {len(html_pages())} pages checked.")
     return 0
