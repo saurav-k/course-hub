@@ -23,8 +23,12 @@ the world:
     a naive Bayes classifier built in lesson 0007 genuinely separates them.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
+
+OUT = Path(__file__).resolve().parent.parent / "tickets.csv"
 
 SEED = 20260822
 N_TICKETS = 5000
@@ -114,8 +118,8 @@ def main() -> None:
             "tokens": tokens,
         }
     )
-    frame.to_csv("../tickets.csv", index=False, lineterminator="\n")
-    print(f"wrote ../tickets.csv  rows={len(frame)}  columns={len(frame.columns)}")
+    frame.to_csv(OUT, index=False, lineterminator="\n")
+    print(f"wrote {OUT} - {len(frame):,} rows, {OUT.stat().st_size / 1024:.0f} KB")
 
 
 if __name__ == "__main__":
