@@ -57,6 +57,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Where the derivative does not exist, and why machine learning ships anyway",
           "href": "lessons/0082-where-the-derivative-does-not-exist.html"
+        },
+        {
+          "title": "Partial derivatives put every dial on its own axis, and the gradient collects them",
+          "href": "lessons/0083-partial-derivatives-and-the-gradient.html"
         }
       ]
     },
