@@ -171,14 +171,18 @@ Rules:
 - Events go in `reference/chronicle.html`, never straight into a lesson.
   A lesson about a mechanism needs editing when the mechanism changes, not when another model ships.
   Getting that split right is what makes the spine survive.
+- Unanswered questions go in `reference/what-to-watch.html`, the second living page.
+  The chronicle records what has already happened; the frontier watch records what has not happened yet and what would count as it happening.
+  Every entry carries six fields in a fixed order: the question, the meta pills, the claim, why it matters, the source with a read date, and any correction appended underneath.
+  The page states its own five append-only rules and the promotion rule, so read the page before you append to it.
 - Every numeric claim about a model that does not come from a document the reader can open carries a claim label: `known`, `inferred`, `marketing` or `unverifiable`.
   Anything not `known` carries a link to whatever evidence does exist.
 - **Do not name the current frontier model in body prose.**
-  Say "the frontier models of 2026" and put the names in a table or the chronicle.
+  Say "the frontier models of 2026" and put the names in a table, the chronicle, or the frontier watch.
   This one habit prevents most of the rot.
 - Do not put dates in URLs, and do not version the course.
 
-The promotion ritual, every six months, recorded in the chronicle: sweep the review dates, promote or rewrite each moving lesson, fold chronicle entries that changed a meaning into their lesson, retire answered open questions with their answers, and move the horizon only if it is warranted.
+The promotion ritual, every six months, recorded in the chronicle: sweep the review dates, promote or rewrite each moving lesson, fold chronicle entries that changed a meaning into their lesson, move each frontier-watch entry that has been confirmed across two cycles into the lesson its third pill names, retire answered open questions with their answers, and move the horizon only if it is warranted.
 
 ---
 
