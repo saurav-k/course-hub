@@ -30,7 +30,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 PLAN_ORDER = ["free", "basic", "pro", "enterprise"]
 
 

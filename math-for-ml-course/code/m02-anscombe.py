@@ -24,9 +24,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "anscombe.csv"
-
-
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "anscombe.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/anscombe.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 def summarise(x: np.ndarray, y: np.ndarray) -> dict[str, float]:
     n = x.size
     sxx = float(((x - x.mean()) ** 2).sum())

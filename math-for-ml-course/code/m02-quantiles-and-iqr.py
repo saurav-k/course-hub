@@ -28,9 +28,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-
-
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 def quantile_lower(x: np.ndarray, q: float) -> float:
     """The 'lower' convention: the smallest order statistic at or past the cut."""
     s = np.sort(x)

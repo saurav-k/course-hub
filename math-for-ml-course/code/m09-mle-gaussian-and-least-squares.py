@@ -43,8 +43,18 @@ import numpy as np
 import pandas as pd
 
 HERE = pathlib.Path(__file__).resolve().parent.parent / "datasets"
-ADSPEND = HERE / "nimbus-adspend.csv"
-SESSIONS = HERE / "nimbus-sessions.csv"
+URL_BASE = "https://<hub>/math-for-ml-course/datasets"
+
+
+def data(name: str) -> str:
+    """Local file when the repo is present, published URL when it is not.
+
+    This is what lets the program be pasted straight into Colab.
+    """
+    local = HERE / name
+    return str(local) if local.exists() else f"{URL_BASE}/{name}"
+ADSPEND = data("nimbus-adspend.csv")
+SESSIONS = data("nimbus-sessions.csv")
 TRUE_INTERCEPT, TRUE_SLOPE, TRUE_SIGMA = 12.5, 3.20, 8.0
 SEED = 20260822
 

@@ -33,6 +33,16 @@ import numpy as np
 import pandas as pd
 
 HERE = pathlib.Path(__file__).resolve().parent.parent / "datasets"
+URL_BASE = "https://<hub>/math-for-ml-course/datasets"
+
+
+def data(name: str) -> str:
+    """Local file when the repo is present, published URL when it is not.
+
+    This is what lets the program be pasted straight into Colab.
+    """
+    local = HERE / name
+    return str(local) if local.exists() else f"{URL_BASE}/{name}"
 SEED = 20260822
 Z95 = 1.959963985
 # Student t two-sided 0.975 quantiles, for the small-n comparison.
@@ -50,7 +60,7 @@ def wald_interval(k: int, n: int, z: float = Z95) -> tuple[float, float]:
 
 
 def main() -> None:
-    df = pd.read_csv(HERE / "nimbus-sessions.csv")
+    df = pd.read_csv(data("nimbus-sessions.csv"))
     conv = df["converted"].to_numpy(int)
     p_true = float(conv.mean())
     rng = np.random.default_rng(SEED)
@@ -104,7 +114,7 @@ def main() -> None:
     print("   is the n = 10 row, not the n = 200 row.")
 
     print("\n5. A REAL COMPARISON: two arms of the committed experiment")
-    exp = pd.read_csv(HERE / "nimbus-experiment.csv")
+    exp = pd.read_csv(data("nimbus-experiment.csv"))
     table = exp.groupby("variant").converted.agg(["sum", "count"])
     for variant, row in table.iterrows():
         k, n = int(row["sum"]), int(row["count"])

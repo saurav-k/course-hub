@@ -38,7 +38,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 TRUE_LAMBDA = 7.4          # stated in datasets/generate_nimbus.py
 TRUE_VARIANCE = TRUE_LAMBDA  # Poisson: variance equals the mean
 SEED = 20260822

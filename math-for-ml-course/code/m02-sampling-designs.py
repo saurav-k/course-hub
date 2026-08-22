@@ -40,7 +40,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-population.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-population.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/nimbus-population.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 SAMPLE_SIZE = 600
 TRIALS = 4000
 SEED = 20260822

@@ -50,6 +50,16 @@ import numpy as np
 import pandas as pd
 
 HERE = pathlib.Path(__file__).resolve().parent.parent / "datasets"
+URL_BASE = "https://<hub>/math-for-ml-course/datasets"
+
+
+def data(name: str) -> str:
+    """Local file when the repo is present, published URL when it is not.
+
+    This is what lets the program be pasted straight into Colab.
+    """
+    local = HERE / name
+    return str(local) if local.exists() else f"{URL_BASE}/{name}"
 SEED = 20260822
 Z95 = 1.959963985
 DRAWS = 400_000
@@ -70,7 +80,7 @@ def credible(rng: np.random.Generator, a: float, b: float) -> tuple[float, float
 
 def main() -> None:
     rng = np.random.default_rng(SEED)
-    exp = pd.read_csv(HERE / "nimbus-experiment.csv")
+    exp = pd.read_csv(data("nimbus-experiment.csv"))
     t = exp.groupby("variant").converted.agg(["sum", "count"])
     k, n = int(t.loc["control", "sum"]), int(t.loc["control", "count"])
 

@@ -39,7 +39,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-features.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-features.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/nimbus-features.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 TRUE_BETA = np.array([4.0, -2.5, 1.5, -1.0, 0.6])
 NOISE_SD = 3.0
 SEED = 20260822

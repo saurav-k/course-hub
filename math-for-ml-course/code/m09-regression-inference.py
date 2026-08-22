@@ -49,7 +49,9 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-DATA = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-adspend.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-adspend.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/nimbus-adspend.csv"
+DATA = LOCAL if LOCAL.exists() else URL
 TRUE_INTERCEPT, TRUE_SLOPE, TRUE_SIGMA = 12.5, 3.20, 8.0
 SEED = 20260822
 # Two-sided 0.975 t quantiles.
