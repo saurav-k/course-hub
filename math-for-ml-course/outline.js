@@ -77,6 +77,22 @@ window.COURSE_OUTLINE = {
         {
           "title": "A quantile answers only to rank, which is its strength and its blindness",
           "href": "lessons/0023-quantiles-and-the-box-plot.html"
+        },
+        {
+          "title": "Shape is the part the summary throws away",
+          "href": "lessons/0024-shape-is-what-the-summary-throws-away.html"
+        },
+        {
+          "title": "Covariance and correlation, and why the units do not matter",
+          "href": "lessons/0025-covariance-and-correlation.html"
+        },
+        {
+          "title": "Anscombe, and what a correlation does not license",
+          "href": "lessons/0026-what-a-correlation-does-not-license.html"
+        },
+        {
+          "title": "Survey sampling designs, and which question each one answers",
+          "href": "lessons/0027-survey-sampling-designs.html"
         }
       ]
     },
@@ -471,28 +487,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "The same slope is worthless on eight rows and decisive on twenty thousand",
           "href": "lessons/0202-what-a-coefficient-is-worth.html"
-        }
-      ]
-    },
-    {
-      "n": "02",
-      "title": "Data and summaries",
-      "lessons": [
-        {
-          "title": "Shape is the part the summary throws away",
-          "href": "lessons/0024-shape-is-what-the-summary-throws-away.html"
-        },
-        {
-          "title": "Covariance and correlation, and why the units do not matter",
-          "href": "lessons/0025-covariance-and-correlation.html"
-        },
-        {
-          "title": "Anscombe, and what a correlation does not license",
-          "href": "lessons/0026-what-a-correlation-does-not-license.html"
-        },
-        {
-          "title": "Survey sampling designs, and which question each one answers",
-          "href": "lessons/0027-survey-sampling-designs.html"
         }
       ]
     }
