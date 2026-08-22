@@ -1,4 +1,4 @@
-"""Lesson 0507 - backpropagation is the chain rule on a computation graph.
+"""Lesson 0047 - backpropagation is the chain rule on a computation graph.
 
 Implements reverse-mode accumulation for a small network, and the proposition
 that makes it trustworthy:
@@ -13,7 +13,7 @@ measured against the forward pass rather than asserted.
 
 The network is a 4-32-1 regressor on the housing table. Rows are samples.
 
-    python3 0507-backpropagation.py
+    python3 0047-backpropagation.py
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-co
 # Predicting one sensor from the others is what a real monitoring system does,
 # and it gives this module a design matrix whose columns are on wildly
 # different scales: pressure runs in the hundreds, dust index around one. That
-# disparity is the whole subject of lessons 0509 and 0510, so it is load
+# disparity is the whole subject of lessons 0049 and 0050, so it is load
 # bearing rather than incidental.
 FEATURES = ["vibration_x", "vibration_y", "current_amp",
             "humidity_pct", "dust_index", "pressure_kpa"]
@@ -48,7 +48,7 @@ def training_arrays() -> tuple[np.ndarray, np.ndarray]:
 
     Standardising here is not cosmetic and it is not the lesson: an unscaled
     design matrix makes the tanh saturate and the gradient check meaningless.
-    Lesson 0510 is where the scaling itself gets explained.
+    Lesson 0050 is where the scaling itself gets explained.
     """
     frame = load()
     x = frame[FEATURES].to_numpy(dtype=float)

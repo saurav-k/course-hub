@@ -1,13 +1,13 @@
-# 0505 - The gradient points uphill, and it is steepest only in the Euclidean sense
+# 0045 - The gradient points uphill, and it is steepest only in the Euclidean sense
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C05.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C05.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0504. M03: dot product, unit vector, Euclidean norm. |
+| Prerequisites | 0044. M03: dot product, unit vector, Euclidean norm. |
 | Enables | M06's entire descent family |
 
 ## The single tight idea
@@ -20,7 +20,7 @@ depends on how you measure length.
 1. **The question.** You are on a surface and may step one unit in any direction. Which
    direction rises the most? Make the reader want the answer before deriving it.
 2. **The directional derivative,** defined as the derivative of `f(x + alpha u)` at
-   `alpha = 0`, which the chain rule from 0502 collapses to `u . grad f`. One line, and
+   `alpha = 0`, which the chain rule from 0042 collapses to `u . grad f`. One line, and
    it reuses the previous page rather than introducing machinery.
 3. **The cos-theta argument, worked in full.** `u . grad f = ||u|| ||grad f|| cos theta`.
    With `||u|| = 1` everything turns on `cos theta`, which is smallest at `180` degrees.
@@ -77,7 +77,7 @@ single most repeated wrong thing in this territory.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The gradient exists (0504)" into "THIS PAGE: what it
+1. **Orientation, `flowchart LR`.** "The gradient exists (0044)" into "THIS PAGE: what it
    is optimal for" into "gradient descent (M06)", with "why Adam is not just a heuristic"
    dotted in.
 2. **`svg.chart`, quantitative.** Directional derivative against the angle `theta` from
@@ -106,7 +106,7 @@ single most repeated wrong thing in this territory.
    directions for exactly this reason.
 7. **What changes if** the columns are standardised first? The gradient rotates, and the
    "lot only" direction stops being nearly optimal. The ranking is a fact about units,
-   not about the features, and 0510 is where that becomes a number.
+   not about the features, and 0050 is where that becomes a number.
 8. **In words.** On this table, stepping along the lot-size axis alone recovers 97 per
    cent of the best possible rate of descent, and stepping along the bedrooms axis alone
    recovers 0.04 per cent. Neither number says anything about which feature predicts price.
@@ -123,7 +123,7 @@ unit vector" is false; "so that cos theta stays between -1 and 1" reverses the m
 **Q2, misconception.** On the raw housing regression, `-g/||g||` gives a directional
 derivative of `-3,474,082.69` and "bedrooms only" gives `+1,239.50`. What does the gap say?
 *Answer:* the loss is overwhelmingly sensitive to the columns with large units, which is
-a symptom of unscaled features and reappears in 0510 as a condition number.
+a symptom of unscaled features and reappears in 0050 as a condition number.
 *Distractors:* "bedrooms do not predict price" confuses gradient scale with importance;
 "the gradient is wrong" is not a thing; "the loss has no minimum in that direction" is
 unsupported and false.

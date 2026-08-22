@@ -1,4 +1,4 @@
-"""Lesson 0509 - curvature, the Hessian, and the second-derivative test.
+"""Lesson 0049 - curvature, the Hessian, and the second-derivative test.
 
 Implements three named results.
 
@@ -15,7 +15,7 @@ Implements three named results.
     eigenvalue with the rest one sign is inconclusive. Applied to the housing
     loss, and to three constructed surfaces that exercise every branch.
 
-    python3 0509-curvature-and-the-hessian.py
+    python3 0049-curvature-and-the-hessian.py
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-co
 # Predicting one sensor from the others is what a real monitoring system does,
 # and it gives this module a design matrix whose columns are on wildly
 # different scales: pressure runs in the hundreds, dust index around one. That
-# disparity is the whole subject of lessons 0509 and 0510, so it is load
+# disparity is the whole subject of lessons 0049 and 0050, so it is load
 # bearing rather than incidental.
 FEATURES = ["vibration_x", "vibration_y", "current_amp",
             "humidity_pct", "dust_index", "pressure_kpa"]

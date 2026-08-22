@@ -1,4 +1,4 @@
-"""Lesson 0501 - the derivative is a limit, and what a machine does to it.
+"""Lesson 0041 - the derivative is a limit, and what a machine does to it.
 
 Implements: the definition of the derivative as a limit of difference
 quotients, and the two ways to evaluate it numerically.
@@ -15,7 +15,7 @@ not a slope, and the bottom of the V is where a gradient check should sit.
 Runs on numpy alone. No dataset: this lesson's object is a function, not a
 table. The dataset arrives in lesson 2.
 
-    python3 0501-derivative-as-a-limit.py
+    python3 0041-derivative-as-a-limit.py
 """
 
 from __future__ import annotations

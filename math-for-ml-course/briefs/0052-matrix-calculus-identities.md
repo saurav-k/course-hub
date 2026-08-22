@@ -1,13 +1,13 @@
-# 0512 - Six matrix-calculus identities, and the layout convention that breaks them
+# 0052 - Six matrix-calculus identities, and the layout convention that breaks them
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C13.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C13.
 
 | | |
 |---|---|
 | Module | M05 Calculus, and it is the module's last page |
 | Rung | frontier (`pill hard`) |
 | Label | `depth` |
-| Prerequisites | 0504, 0506, 0509. M03: matrix multiplication, transpose, the data matrix, and its L12 least-squares page. M04: quadratic forms. |
+| Prerequisites | 0044, 0046, 0049. M03: matrix multiplication, transpose, the data matrix, and its L12 least-squares page. M04: quadratic forms. |
 | Enables | M06's derivations, M09's estimator algebra, the M11 capstone |
 
 ## Provenance, which the writer needs to know
@@ -41,7 +41,7 @@ thing that reliably goes wrong is which layout convention you are in.
    written both ways, from two sources that genuinely disagree, and say plainly that
    neither is wrong.
 3. **The house rule, once, and held everywhere:** a gradient has the shape of the thing
-   you differentiate by. This is the rule 0504 declared, and this page is where it earns
+   you differentiate by. This is the rule 0044 declared, and this page is where it earns
    its keep.
 4. **The six identities, each with its shape check.**
 5. **Worked, and it is the page's reason to exist:** `d/d theta ||y - X theta||^2` in
@@ -76,7 +76,7 @@ the house rule applies: `d(scalar)/dx` is a column.
 >
 > **4. `d(A x)/dx = A`.** This one is a Jacobian, not a gradient: the output is a vector.
 > Entry `(i, j)` is `d(sum_k A_{ik} x_k)/dx_j = A_{ij}`. So the Jacobian is `A` itself,
-> shape `m x n` for `A` in `R^{m x n}`, exactly as 0506's shape rule says.
+> shape `m x n` for `A` in `R^{m x n}`, exactly as 0046's shape rule says.
 >
 > **5. `d(||y - X b||^2)/db = -2 X^T (y - X b)`.**
 > Expand: `||y - Xb||^2 = y^T y - 2 y^T X b + b^T X^T X b`. The first term is constant.
@@ -98,7 +98,7 @@ the house rule applies: `d(scalar)/dx` is a column.
 > `X^T X b = X^T y`. The Hessian is `2 X^T X` by identity 2, and for any non-zero `h`,
 > `h^T (X^T X) h = ||X h||^2 > 0` because full column rank means `X h != 0`. So the
 > Hessian is positive definite, the loss is strictly convex, and the single critical point
-> is the unique global minimum by 0509's Theorem 2. **QED**
+> is the unique global minimum by 0049's Theorem 2. **QED**
 >
 > **The same theorem, M03's way, in one line for the comparison beat.** The minimiser of
 > `||y - Xb||` is the point of the column space closest to `y`, and the closest point is
@@ -107,7 +107,7 @@ the house rule applies: `d(scalar)/dx` is a column.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The gradient and the Jacobian (0504, 0506)" into
+1. **Orientation, `flowchart LR`.** "The gradient and the Jacobian (0044, 0046)" into
    "THIS PAGE: doing it in matrix form, once" into "every derivation in M06 and M09", with
    "M03 L12, the same answer without calculus" dotted in.
 2. **`flowchart TB`.** The layout fork drawn as a fork: one identity, two branches, two
@@ -205,7 +205,7 @@ from `1.22e9` to `5.99e7` while `||theta||` falls from `43.13` to `5.45`.
 
 - Deisenroth, Faisal and Ong, *Mathematics for Machine Learning*, sections 5.4 and 5.5 for
   gradients of matrices and the useful identities, and section 9.2 for the least-squares
-  gradient and the normal equations. **Note the slip flagged in brief 0509**: section 9.2
+  gradient and the normal equations. **Note the slip flagged in brief 0049**: section 9.2
   states the Hessian of `||y - X theta||^2 / (2 sigma^2)` is `X^T X`, dropping the
   `1/sigma^2`. `https://mml-book.github.io/book/mml-book.pdf`
 - Goodfellow, Bengio and Courville, *Deep Learning*, section 4.3.1, for the Jacobian and

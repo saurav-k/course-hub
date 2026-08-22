@@ -1,14 +1,14 @@
-# 0503 - Where the derivative does not exist, and why machine learning ships anyway
+# 0043 - Where the derivative does not exist, and why machine learning ships anyway
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C03.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C03.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0501, 0502. |
-| Enables | 0507 (ReLU gating in the backward pass), M06's L1 geometry |
+| Prerequisites | 0041, 0042. |
+| Enables | 0047 (ReLU gating in the backward pass), M06's L1 geometry |
 
 ## The single tight idea
 
@@ -79,8 +79,8 @@ stopping at "a median works".
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The rules work everywhere (0502)" into "THIS PAGE:
-   the points where they stop" into "ReLU networks (0507)" and "the L1 corner (M06)".
+1. **Orientation, `flowchart LR`.** "The rules work everywhere (0042)" into "THIS PAGE:
+   the points where they stop" into "ReLU networks (0047)" and "the L1 corner (M06)".
 2. **`svg.chart`, quantitative, real data.** Two panels over the same spend table.
    Left: total squared error against `c`, a parabola with one bottom at the mean.
    Right: total absolute error against `c`, piecewise linear with a **flat bottom**

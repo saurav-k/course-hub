@@ -1,14 +1,14 @@
-# 0506 - The Jacobian is the chain rule when both ends are vectors
+# 0046 - The Jacobian is the chain rule when both ends are vectors
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C06.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C06.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0502, 0504. M03: matrix multiplication, shapes, the matrix as a linear map. |
-| Enables | 0507, 0508, 0512, and M08's change of variables |
+| Prerequisites | 0042, 0044. M03: matrix multiplication, shapes, the matrix as a linear map. |
+| Enables | 0047, 0048, 0052, and M08's change of variables |
 
 ## The single tight idea
 
@@ -55,7 +55,7 @@ becomes matrix multiplication.
 > (||s(k)||/||k||)(||k||/||h||) -> 0` as well (when `k = 0` the term is zero and there is
 > nothing to bound). Hence `f . g` is differentiable at `a` with derivative `A B`. **QED**
 >
-> The scalar chain rule of 0502 is the case `m = n = p = 1`, where the matrix product is
+> The scalar chain rule of 0042 is the case `m = n = p = 1`, where the matrix product is
 > a product of numbers.
 
 **Theorem 2. The Jacobian determinant is the local volume factor.**
@@ -75,8 +75,8 @@ becomes matrix multiplication.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The chain rule for scalars (0502)" into "THIS PAGE:
-   the chain rule for vectors" into "backpropagation (0507)" and "change of variables (M08)".
+1. **Orientation, `flowchart LR`.** "The chain rule for scalars (0042)" into "THIS PAGE:
+   the chain rule for vectors" into "backpropagation (0047)" and "change of variables (M08)".
 2. **`flowchart LR`.** Two composed maps `R^5 -> R^3 -> R^1` with the Jacobian shapes on
    the edges, `3 x 5` then `1 x 3`, and the composed shape `1 x 5` beneath.
    *Kills:* transpose-and-shape confusion, by making the shapes the visible content.

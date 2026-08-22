@@ -1,14 +1,14 @@
-# 0509 - Curvature is the second derivative, and the Hessian holds it for every direction at once
+# 0049 - Curvature is the second derivative, and the Hessian holds it for every direction at once
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C09.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C09.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | frontier (`pill hard`) |
 | Label | `core` |
-| Prerequisites | 0504. M04: symmetric matrices, eigenvalues and eigenvectors, positive definiteness, quadratic forms. |
-| Enables | 0510, and M06's L08 and L09 |
+| Prerequisites | 0044. M04: symmetric matrices, eigenvalues and eigenvectors, positive definiteness, quadratic forms. |
+| Enables | 0050, and M06's L08 and L09 |
 
 ## The single tight idea
 
@@ -89,7 +89,7 @@ beats 6 and 7 here and cross-link forward instead.
 > (iii) If some `l_i > 0` and some `l_j < 0` then `a` is a saddle.
 > (iv) If some `l_i = 0` and the non-zero eigenvalues share a sign, the test is silent.
 >
-> *Proof.* Taylor with remainder (0510, Theorem 1) at a critical point gives, for small `h`,
+> *Proof.* Taylor with remainder (0050, Theorem 1) at a critical point gives, for small `h`,
 >
 >   `f(a + h) = f(a) + (1/2) h^T H h + o(||h||^2)`,
 >
@@ -112,8 +112,8 @@ beats 6 and 7 here and cross-link forward instead.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The gradient's promise (0504, 0505)" into "THIS PAGE:
-   whether the promise is kept" into "the quadratic model (0510)" and "Newton-type
+1. **Orientation, `flowchart LR`.** "The gradient's promise (0044, 0045)" into "THIS PAGE:
+   whether the promise is kept" into "the quadratic model (0050)" and "Newton-type
    methods (M06)".
 2. **`svg.chart`.** Three panels: negative, zero and positive curvature, each with the
    true function solid, the gradient's straight-line prediction dashed, and the gap

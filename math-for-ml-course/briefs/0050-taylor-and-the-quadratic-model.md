@@ -1,13 +1,13 @@
-# 0510 - Taylor expansion: every loss is a quadratic if you stand close enough
+# 0050 - Taylor expansion: every loss is a quadratic if you stand close enough
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C10.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C10.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | frontier (`pill hard`) |
 | Label | `core` |
-| Prerequisites | 0505, 0509. |
+| Prerequisites | 0045, 0049. |
 | Enables | M06's step sizes, trust regions and Newton's method |
 
 ## The single tight idea
@@ -78,7 +78,7 @@ this course actually uses.**
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "Gradient (0505) and curvature (0509)" into "THIS
+1. **Orientation, `flowchart LR`.** "Gradient (0045) and curvature (0049)" into "THIS
    PAGE: the local model that uses both" into "step sizes, trust regions and Newton (M06)".
 2. **`svg.chart`.** One function with its first-order and second-order Taylor
    approximations at a point, all three drawn, with the interval where each stays within

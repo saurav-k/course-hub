@@ -1,14 +1,14 @@
-# 0502 - The chain rule is the only differentiation rule that matters at scale
+# 0042 - The chain rule is the only differentiation rule that matters at scale
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C02.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C02.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | foundation (`pill easy`) |
 | Label | `core` |
-| Prerequisites | 0501. M01: `exp` and `log` algebra. |
-| Enables | 0506 (Jacobian), 0507 (backpropagation), M09's MLE, M10's softmax gradient |
+| Prerequisites | 0041. M01: `exp` and `log` algebra. |
+| Enables | 0046 (Jacobian), 0047 (backpropagation), M09's MLE, M10's softmax gradient |
 
 ## The single tight idea
 
@@ -26,7 +26,7 @@ multiplied along a path.
    one chain. A model with 200 layers is a 200-link chain and nothing else.
 4. **Worked: the sigmoid.** Differentiate `sigma(z) = 1/(1 + e^-z)` by the quotient rule
    and land on `sigma' = sigma(1 - sigma)`. Plot it. Its maximum is `0.25` at `z = 0`,
-   and that number is the whole vanishing-gradient story in 0508.
+   and that number is the whole vanishing-gradient story in 0048.
 5. **Worked: cross-entropy on a logit,** four steps, ending at `dL/dz = sigma(z) - y`.
    The sigmoid and the logarithm cancel, which is exactly why frameworks ship a fused
    operation instead of two.
@@ -34,7 +34,7 @@ multiplied along a path.
 6. **The trade-off, in the same section.** Writing a chained derivative out by hand
    explodes. Show the four-line derivative of
    `f(x) = sqrt(x^2 + exp(x^2)) + cos(x^2 + exp(x^2))` as the cautionary example.
-   That is the debt 0507 pays.
+   That is the debt 0047 pays.
 
 ## Named theorem and its stated proof
 
@@ -68,8 +68,8 @@ the page and it takes forty words.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The derivative of one function (0501)" into
-   "THIS PAGE: the derivative of a composition" into "backpropagation (0507)" and
+1. **Orientation, `flowchart LR`.** "The derivative of one function (0041)" into
+   "THIS PAGE: the derivative of a composition" into "backpropagation (0047)" and
    "maximum likelihood (M09)".
 2. **`flowchart LR`.** `x -> u -> v -> y`, each edge labelled with its local derivative,
    the product written beneath. *Kills:* the chain rule as a formula to memorise.

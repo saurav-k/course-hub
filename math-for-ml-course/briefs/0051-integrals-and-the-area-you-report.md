@@ -1,13 +1,13 @@
-# 0511 - Integrals in machine learning: the area you report is a number you actually compute
+# 0051 - Integrals in machine learning: the area you report is a number you actually compute
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C12.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C12.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0501. M01: set notation and summation. |
+| Prerequisites | 0041. M01: set notation and summation. |
 | Enables | **M07, as a hard scheduling edge** (a density integrating to one is an integral, and a CDF is an integral), and M08's expectation |
 
 ## The single tight idea
@@ -100,7 +100,7 @@ reframing beat and it is the reason the page exists, so it gets the full argumen
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The derivative (0501)" into "THIS PAGE: its inverse,
+1. **Orientation, `flowchart LR`.** "The derivative (0041)" into "THIS PAGE: its inverse,
    and the areas machine learning reports" into "densities (M07)" and "expectation (M08)".
 2. **`svg.chart`.** Rectangles under a curve at three widths converging on the smooth
    area, with the running total printed for each.

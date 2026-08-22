@@ -1,13 +1,13 @@
-# 0508 - A long chain of Jacobians: what backprop costs, and how the signal decays
+# 0048 - A long chain of Jacobians: what backprop costs, and how the signal decays
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C08.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C08.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | frontier (`pill hard`) |
 | Label | `depth` |
-| Prerequisites | 0506, 0507. |
+| Prerequisites | 0046, 0047. |
 | Enables | nothing in this module; it motivates clipping, residual connections and gated cells, all owned elsewhere |
 
 ## The single tight idea
@@ -83,7 +83,7 @@ and it is the reason the condition has the shape it does.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "Backpropagation works (0507)" into "THIS PAGE: what
+1. **Orientation, `flowchart LR`.** "Backpropagation works (0047)" into "THIS PAGE: what
    it costs and where it breaks" into "clipping, residuals and gated cells".
 2. **`svg.chart`, quantitative, log axis.** Two bars: Jacobian cost by forward mode and by
    reverse mode for `n = 10^7` parameters and `m = 1` loss at `c = 3`. Seven orders of

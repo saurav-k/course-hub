@@ -1,14 +1,14 @@
-# 0504 - Partial derivatives put every dial on its own axis, and the gradient collects them
+# 0044 - Partial derivatives put every dial on its own axis, and the gradient collects them
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C04.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C04.
 
 | | |
 |---|---|
 | Module | M05 Calculus |
 | Rung | foundation (`pill easy`) |
 | Label | `core` |
-| Prerequisites | 0501, 0502. M03: vector, transpose, matrix-vector product, the data matrix. |
-| Enables | 0505, 0506, 0509, and everything M06 descends along |
+| Prerequisites | 0041, 0042. M03: vector, transpose, matrix-vector product, the data matrix. |
+| Enables | 0045, 0046, 0049, and everything M06 descends along |
 
 ## The single tight idea
 
@@ -33,9 +33,9 @@ vector object with a shape you can check.
    squared-error loss at one parameter point on real data and assemble them.
    **Boundary:** do not derive the normal equations. M03 owns them and derives them by
    projection precisely so that module needs no calculus (r1 edge 31). Say "set the
-   gradient to zero is the move", link to M03 for the answer, and let 0512 show the
+   gradient to zero is the move", link to M03 for the answer, and let 0052 show the
    calculus route.
-7. **The trade-off.** A zero gradient is a critical point, not a minimum. 0509 owns the
+7. **The trade-off.** A zero gradient is a critical point, not a minimum. 0049 owns the
    test that tells them apart. Do not let the reader leave believing otherwise.
 
 ## Named theorem and its stated proof
@@ -66,15 +66,15 @@ Put the counterexample in a `.callout.warn`. It costs four lines and it is the r
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "One dial (0501 to 0503)" into "THIS PAGE: many dials
-   at once" into "which way to move (0505)" and "the object every optimiser reads (M06)".
+1. **Orientation, `flowchart LR`.** "One dial (0041 to 0043)" into "THIS PAGE: many dials
+   at once" into "which way to move (0045)" and "the object every optimiser reads (M06)".
 2. **`svg.chart`.** Contour map of a two-parameter squared-error surface. At one point,
    the two axis-aligned partial arrows drawn, and their vector sum drawn as the gradient.
    *Kills:* "the gradient is a slope". It is a vector assembled from slopes.
 3. **`flowchart TD`.** The shape ledger as four boxes, operand shape to derivative shape.
    *Kills:* the shape confusion that ruins every hand-derived backward pass.
 4. **`svg.chart`.** The same contour map with the gradient drawn at four points, each
-   perpendicular to the contour through it. Sets up 0505.
+   perpendicular to the contour through it. Sets up 0045.
 
 ## Worked example, in eight parts
 
@@ -128,7 +128,7 @@ should move and why the two magnitudes differ so much.
 **Solution.** `dL/da = -2 sum (y_i - a - b d_i) = -4,500` and
 `dL/db = -2 sum d_i (y_i - a - b d_i) = -17,120`. Both negative, so both dials rise.
 The magnitudes differ because the day column runs `1` to `10` against an all-ones
-intercept column. That is a scale artefact, not a statement about importance, and 0510
+intercept column. That is a scale artefact, not a statement about importance, and 0050
 turns it into a condition number.
 
 **`.p-check`.** `dL/da` must be `-2` times the total residual. The total residual is
@@ -145,7 +145,7 @@ Verified output to quote: relative agreement between the closed form and the def
 is between `3.9e-11` and `1.2e-09` across all five parameters; the gradient components
 run from `-1,239.50` (bedrooms) to `-3,385,060.34` (lot size), a spread of `9,130`; and
 a step of `1e-7` along the negative gradient raises the loss from `39,589.63` to
-`8,331,538.24`, which is the curvature limit 0510 explains and is worth flagging here
+`8,331,538.24`, which is the curvature limit 0050 explains and is worth flagging here
 without explaining it.
 
 ## Sources

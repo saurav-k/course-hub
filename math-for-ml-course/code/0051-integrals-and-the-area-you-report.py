@@ -1,4 +1,4 @@
-"""Lesson 0511 - the area under a curve, computed two ways that must agree.
+"""Lesson 0051 - the area under a curve, computed two ways that must agree.
 
 Implements two named results.
 
@@ -18,7 +18,7 @@ Implements two named results.
     directly is possible here and is deliberately included, because seeing the
     brute-force count agree with the rank-sum shortcut is the point.
 
-    python3 0511-integrals-and-the-area-you-report.py
+    python3 0051-integrals-and-the-area-you-report.py
 """
 
 from __future__ import annotations
@@ -50,7 +50,7 @@ def fitted_scores(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
 
     The dataset ships features and a label, not scores. Scores are what a model
     produces, so the program produces them, in ten lines and no library. A
-    reader who has read lesson 0502 has already seen this fit.
+    reader who has read lesson 0042 has already seen this fit.
     """
     y = frame["failed"].to_numpy(dtype=float)
     raw = np.column_stack([

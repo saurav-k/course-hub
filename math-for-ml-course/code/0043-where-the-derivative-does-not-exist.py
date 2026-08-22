@@ -1,4 +1,4 @@
-"""Lesson 0503 - two losses, two minimisers, and one missing derivative.
+"""Lesson 0043 - two losses, two minimisers, and one missing derivative.
 
 Implements the two named results:
 
@@ -15,7 +15,7 @@ The interval is the part worth seeing. For an even number of points every c
 between the two middle values gives exactly the same total absolute error, so
 "the median" names one point of a flat bottom.
 
-    python3 0503-where-the-derivative-does-not-exist.py
+    python3 0043-where-the-derivative-does-not-exist.py
 """
 
 from __future__ import annotations

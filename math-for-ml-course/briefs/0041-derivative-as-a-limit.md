@@ -1,6 +1,6 @@
-# 0501 - A derivative is the exchange rate between a small input change and a small output change
+# 0041 - A derivative is the exchange rate between a small input change and a small output change
 
-> **PLACEHOLDER NUMBER.** Real number assigned by the scaffold (#41). Report label C01.
+> Number claimed under #42 from the roadmap count in `../index.html`. Report label C01.
 
 | | |
 |---|---|
@@ -8,7 +8,7 @@
 | Rung | foundation (`pill easy`) |
 | Label | `core` |
 | Prerequisites | M01: functions and composition, limit intuition. Nothing else. |
-| Enables | 0502 (chain rule), and every page after it |
+| Enables | 0042 (chain rule), and every page after it |
 
 ## The single tight idea
 
@@ -34,7 +34,7 @@ output moves when you nudge the input, and it is different at every point.
 6. **The trade-off, in the same section as the technique.** On a real machine the
    limit does not converge. Truncation error falls as `h` shrinks and round-off error
    rises, so the error curve is a V with a floor you cannot get under.
-7. **Close by naming the debt.** Real models are compositions. 0502 pays it.
+7. **Close by naming the debt.** Real models are compositions. 0042 pays it.
 
 ## Named theorem and its stated proof
 
@@ -52,12 +52,12 @@ the one that makes beat 4 more than an assertion.
 > `lim_{x -> a} f(x) = f(a)`, the definition of continuity at `a`. **QED**
 
 State the converse is false and give the one-line witness: `|x|` is continuous at 0
-and not differentiable there. That witness is 0503's whole page, so name it and move on.
+and not differentiable there. That witness is 0043's whole page, so name it and move on.
 
 ## Figures
 
 1. **Orientation, `flowchart LR`.** "A function you can evaluate (M01)" into
-   "THIS PAGE: how fast it changes" into "the chain rule (0502)" and "every gradient
+   "THIS PAGE: how fast it changes" into "the chain rule (0042)" and "every gradient
    in this course". Dotted: "Calculus for machine learning".
 2. **`svg.chart`.** `f(x) = sin(x) e^(x/3)` with three secants at `h = 1.0, 0.5, 0.1`
    collapsing onto the tangent at `x = 1.2`, each labelled with its slope.
