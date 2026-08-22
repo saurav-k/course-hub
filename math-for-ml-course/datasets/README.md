@@ -29,6 +29,7 @@ Thousands to tens of thousands of rows, and under about 2 MB each.
 | `anscombe.csv` | 44 | under 1 KB | M02 Anscombe | Not generated: transcribed from Anscombe (1973), The American Statistician 27(1), 17-21. Four sets agreeing on every standard summary and looking nothing alike. Regenerating it would defeat it. |
 | `tickets.csv` | 5,000 | 1.9 MB | M01 foundations, all nine lessons | Token counts are heavy-tailed on purpose, so short tickets survive a naive product of per-token probabilities in float64 and long ones underflow to exactly `0.0`: on the held-out split 8 tickets where **both** class scores underflow and 26 where **exactly one** does, which is the silent failure lesson 0007 is built on. `first_response_seconds` is exponential with median 420.3 s, so `lambda = ln(2)/median` is checkable. `score_urgent` is imperfect by design, held-out AUC 0.933, so a monotone transform can be shown leaving AUC alone while a fixed cutoff moves. `row_split` is per row, so 510 of 527 test customers also appear in train - that is lesson 0002's exercise. |
 | `m06-credit.csv` | 20,000 | 1.9 MB | M06 optimization | Twelve features whose raw scales span six orders of magnitude, from a ratio in [0, 1] to a rupee income in the hundreds of thousands, so the logistic Hessian's condition number is 2.82e12 raw and 26.5 standardised and the largest safe learning rate moves from 1.5e-9 to 3.85. Four columns are pure noise, independent of both targets, so an L1 path can be *tested* rather than described: it drops all four before any real predictor. `utilisation_ratio` and `emi_to_income` correlate at 0.921. Carries a binary `default` target for the logistic thread that runs through the whole module and a continuous `credit_limit_inr` target for the least-squares geometry. |
+| `documents.csv` | 8,000 | 866 KB | M03 the dot product and cosine page | Word counts over a 40-word vocabulary in four topics. Length is drawn from a lognormal **independently of topic**, so the corpus holds 52-word and 5,965-word documents on every subject, and eight shared stopwords take about a third of every document's mass. That is what makes a raw dot product rank by length rather than by subject: over 500 random queries the top ten share the query's topic 50.3% of the time by dot product against 100.0% by cosine, and the nearest neighbour of a 93-word astronomy document is a 5,760-word football document. `sensors.csv` cannot carry that lesson, because a sensor reading has no analogue of document length. |
 
 ### Why M06 needed a third one
 
@@ -66,6 +67,7 @@ python3 make_anscombe.py
 python3 make_m06_credit.py
 python3 make_inference_runs.py
 python3 make_lifecycle_states.py
+python3 make_documents.py
 ```
 
 Requires only `numpy` and `pandas`.
