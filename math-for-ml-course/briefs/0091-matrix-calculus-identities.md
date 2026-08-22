@@ -1,4 +1,4 @@
-# 0052 - Six matrix-calculus identities, and the layout convention that breaks them
+# 0091 - Six matrix-calculus identities, and the layout convention that breaks them
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C13.
 
@@ -7,7 +7,7 @@
 | Module | M05 Calculus, and it is the module's last page |
 | Rung | frontier (`pill hard`) |
 | Label | `depth` |
-| Prerequisites | 0044, 0046, 0049. M03: matrix multiplication, transpose, the data matrix, and its L12 least-squares page. M04: quadratic forms. |
+| Prerequisites | 0083, 0085, 0088. M03: matrix multiplication, transpose, the data matrix, and its L12 least-squares page. M04: quadratic forms. |
 | Enables | M06's derivations, M09's estimator algebra, the M11 capstone |
 
 ## Provenance, which the writer needs to know
@@ -17,7 +17,7 @@ moves it out of M04 and into M05 as the module's last page, to break a slice-lev
 M05's Hessian needs M04's quadratic forms, and M04's matrix-calculus identities need M05's
 gradient. Moving one page breaks the cycle without splitting a module.
 
-**M04's report still carries it as its Lesson 11**, because M04 finalised before r1's
+**M04's report still carries it as its Lesson 11 (M04 block, 0060-0079)**, because M04 finalised before r1's
 report existed and says explicitly that r1 may re-slot its boundaries. Two reports
 currently plan one page. This is an open question for the captain (scout report section
 11, Q3). If the captain leaves it with M04, delete this brief and the module is eleven
@@ -41,7 +41,7 @@ thing that reliably goes wrong is which layout convention you are in.
    written both ways, from two sources that genuinely disagree, and say plainly that
    neither is wrong.
 3. **The house rule, once, and held everywhere:** a gradient has the shape of the thing
-   you differentiate by. This is the rule 0044 declared, and this page is where it earns
+   you differentiate by. This is the rule 0083 declared, and this page is where it earns
    its keep.
 4. **The six identities, each with its shape check.**
 5. **Worked, and it is the page's reason to exist:** `d/d theta ||y - X theta||^2` in
@@ -76,7 +76,7 @@ the house rule applies: `d(scalar)/dx` is a column.
 >
 > **4. `d(A x)/dx = A`.** This one is a Jacobian, not a gradient: the output is a vector.
 > Entry `(i, j)` is `d(sum_k A_{ik} x_k)/dx_j = A_{ij}`. So the Jacobian is `A` itself,
-> shape `m x n` for `A` in `R^{m x n}`, exactly as 0046's shape rule says.
+> shape `m x n` for `A` in `R^{m x n}`, exactly as 0085's shape rule says.
 >
 > **5. `d(||y - X b||^2)/db = -2 X^T (y - X b)`.**
 > Expand: `||y - Xb||^2 = y^T y - 2 y^T X b + b^T X^T X b`. The first term is constant.
@@ -98,7 +98,7 @@ the house rule applies: `d(scalar)/dx` is a column.
 > `X^T X b = X^T y`. The Hessian is `2 X^T X` by identity 2, and for any non-zero `h`,
 > `h^T (X^T X) h = ||X h||^2 > 0` because full column rank means `X h != 0`. So the
 > Hessian is positive definite, the loss is strictly convex, and the single critical point
-> is the unique global minimum by 0049's Theorem 2. **QED**
+> is the unique global minimum by 0088's Theorem 2. **QED**
 >
 > **The same theorem, M03's way, in one line for the comparison beat.** The minimiser of
 > `||y - Xb||` is the point of the column space closest to `y`, and the closest point is
@@ -107,7 +107,7 @@ the house rule applies: `d(scalar)/dx` is a column.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The gradient and the Jacobian (0044, 0046)" into
+1. **Orientation, `flowchart LR`.** "The gradient and the Jacobian (0083, 0085)" into
    "THIS PAGE: doing it in matrix form, once" into "every derivation in M06 and M09", with
    "M03 L12, the same answer without calculus" dotted in.
 2. **`flowchart TB`.** The layout fork drawn as a fork: one identity, two branches, two
@@ -132,9 +132,9 @@ the house rule applies: `d(scalar)/dx` is a column.
    zero. Then solve on the real table and compare with the projection route.
 5. **`.keynum`** on nothing: derived here.
 6. **Sanity check.** `X^T X` must be symmetric, and its determinant must be non-zero for
-   the solve to be unique. For the five-parameter housing table both hold, and the fitted
-   coefficients must land near the rule the dataset was generated from:
-   area `0.152`, bedrooms `11.0`, age `-0.85`, lot `0.021`. They do.
+   the solve to be unique. For the seven-parameter sensor table both hold, and the two
+   routes must agree to rounding on every coefficient. They do, to between `9.60e-15` and
+   `4.70e-12`.
 7. **What changes if** you switch to numerator layout in step 4? Every gradient becomes a
    row, both identities transpose, and the final line reads `theta^T X^T X = y^T X`, which
    is the same equation. Nothing about the answer changes; only the shape of every
@@ -188,24 +188,30 @@ by-product happens to be the ridge estimator, and the page links both ways.
 
 ## Code and dataset
 
-`../code/m05_13_matrix_calculus.py` against `../datasets/m05-housing.csv`. Every one of
-the six identities is checked against a finite-difference derivative, then the normal
+`../code/0091-matrix-calculus-identities.py` against `../datasets/sensors.csv`. Every one
+of the six identities is checked against a finite-difference derivative, then the normal
 equations are solved twice, once by the calculus route and once by the projection route,
 and the residual is checked for perpendicularity.
 
 Verified output to quote: the six identities agree with the definition to between
-`1.1e-10` and `2.5e-09`; the two routes to the normal equations agree to between
-`5.9e-16` and `1.3e-12` on all five coefficients; the fitted values are intercept
-`41.83`, area `0.15166`, bedrooms `10.478`, age `-0.84937`, lot `0.021063` against a
-generating rule of `40, 0.152, 11.0, -0.85, 0.021`; `max |X^T r| = 6.59e-06`, so the
-residual is perpendicular to every column; and ridge at `lambda = 10,000` drops `kappa`
-from `1.22e9` to `5.99e7` while `||theta||` falls from `43.13` to `5.45`.
+`1.098e-10` and `2.453e-09`; the two routes to the normal equations agree to between
+`9.60e-15` and `4.70e-12` on all seven coefficients; the fitted values are intercept
+`35.96331766`, `vibration_x` `0.37622718`, `vibration_y` `0.44567939`, `current_amp`
+`0.75434178`, `humidity_pct` `0.30747471`, `dust_index` `0.37424901` and `pressure_kpa`
+`0.01949510`; and `max |X^T r| = 1.219e-08`, so the residual is perpendicular to every
+column.
+
+For the ridge beat: at `lambda = 0` the norm of the coefficient vector is `35.9792` and
+`kappa = 35,382,028.8`; at `lambda = 100` they are `9.0688` and `8,908,135.1`; at
+`lambda = 10,000` they are `0.3909` and `118,657.8`. Every eigenvalue rises by the same
+amount, so the smallest moves furthest in relative terms, which is the sentence the page
+wants.
 
 ## Sources
 
 - Deisenroth, Faisal and Ong, *Mathematics for Machine Learning*, sections 5.4 and 5.5 for
   gradients of matrices and the useful identities, and section 9.2 for the least-squares
-  gradient and the normal equations. **Note the slip flagged in brief 0049**: section 9.2
+  gradient and the normal equations. **Note the slip flagged in brief 0088**: section 9.2
   states the Hessian of `||y - X theta||^2 / (2 sigma^2)` is `X^T X`, dropping the
   `1/sigma^2`. `https://mml-book.github.io/book/mml-book.pdf`
 - Goodfellow, Bengio and Courville, *Deep Learning*, section 4.3.1, for the Jacobian and

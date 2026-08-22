@@ -1,4 +1,4 @@
-# 0042 - The chain rule is the only differentiation rule that matters at scale
+# 0081 - The chain rule is the only differentiation rule that matters at scale
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C02.
 
@@ -7,8 +7,8 @@
 | Module | M05 Calculus |
 | Rung | foundation (`pill easy`) |
 | Label | `core` |
-| Prerequisites | 0041. M01: `exp` and `log` algebra. |
-| Enables | 0046 (Jacobian), 0047 (backpropagation), M09's MLE, M10's softmax gradient |
+| Prerequisites | 0080. M01: `exp` and `log` algebra. |
+| Enables | 0085 (Jacobian), 0086 (backpropagation), M09's MLE, M10's softmax gradient |
 
 ## The single tight idea
 
@@ -26,7 +26,7 @@ multiplied along a path.
    one chain. A model with 200 layers is a 200-link chain and nothing else.
 4. **Worked: the sigmoid.** Differentiate `sigma(z) = 1/(1 + e^-z)` by the quotient rule
    and land on `sigma' = sigma(1 - sigma)`. Plot it. Its maximum is `0.25` at `z = 0`,
-   and that number is the whole vanishing-gradient story in 0048.
+   and that number is the whole vanishing-gradient story in 0087.
 5. **Worked: cross-entropy on a logit,** four steps, ending at `dL/dz = sigma(z) - y`.
    The sigmoid and the logarithm cancel, which is exactly why frameworks ship a fused
    operation instead of two.
@@ -34,7 +34,7 @@ multiplied along a path.
 6. **The trade-off, in the same section.** Writing a chained derivative out by hand
    explodes. Show the four-line derivative of
    `f(x) = sqrt(x^2 + exp(x^2)) + cos(x^2 + exp(x^2))` as the cautionary example.
-   That is the debt 0047 pays.
+   That is the debt 0086 pays.
 
 ## Named theorem and its stated proof
 
@@ -68,8 +68,8 @@ the page and it takes forty words.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The derivative of one function (0041)" into
-   "THIS PAGE: the derivative of a composition" into "backpropagation (0047)" and
+1. **Orientation, `flowchart LR`.** "The derivative of one function (0080)" into
+   "THIS PAGE: the derivative of a composition" into "backpropagation (0086)" and
    "maximum likelihood (M09)".
 2. **`flowchart LR`.** `x -> u -> v -> y`, each edge labelled with its local derivative,
    the product written beneath. *Kills:* the chain rule as a formula to memorise.
@@ -133,16 +133,20 @@ the cancellation went wrong.
 
 ## Code and dataset
 
-`../code/m05_02_chain_rule.py` against `../datasets/m05-scores.csv` (20,000 rows).
-It differentiates the composition two ways for every row and reports the largest
-disagreement, then shows why the fused form exists.
 
-Verified output to quote: largest disagreement between the closed form and a central
-difference across all 20,000 rows is `3.876e-11`, and no row disagrees by more than
-`1e-7`. Mean cross-entropy `0.489236`. The mean gradient `+0.145320` equals the mean
-score minus the base rate exactly, which is the calibration residual. Evaluated naively
-the loss returns `inf` at `|logit| = 40` and above, where the stable form returns the
-correct `40.0` and `800.0`.
+`../code/0081-the-chain-rule.py` against `../datasets/failures.csv` (20,000 rows). The
+dataset ships features and a label, not scores, so the program fits the logistic model
+itself by Newton's method in ten lines. It then differentiates the composition two ways
+for every row and asserts they agree, and finally shows why the fused form exists.
+
+Verified output to quote: 20,000 rows, 3,401 positive; the fitted logits run from
+`-10.637` to `4.906`; the largest disagreement between the closed form and a central
+difference across all rows is `7.241e-11` and the mean is `1.799e-12`; the mean
+cross-entropy is `0.301045`. The mean gradient is `-7.283063e-18`, exactly zero, and the
+reason is worth a sentence on the page: it **is** the intercept's partial derivative, and
+Newton drove it to zero. The gradient is bounded by one in both directions, running from
+`-0.997907` to `+0.967737`. Evaluated naively the loss returns `inf` at a logit of 40 and
+above, where the stable form returns the correct `40.0` and `800.0`.
 
 ## Sources
 

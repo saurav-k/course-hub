@@ -1,4 +1,4 @@
-# 0047 - Backpropagation is the chain rule run right to left on a computation graph
+# 0086 - Backpropagation is the chain rule run right to left on a computation graph
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C07.
 
@@ -7,8 +7,8 @@
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0042, 0044, 0046. |
-| Enables | 0048, and every training loop in the hub |
+| Prerequisites | 0081, 0083, 0085. |
+| Enables | 0087, and every training loop in the hub |
 
 ## The single tight idea
 
@@ -34,7 +34,7 @@ local derivatives and accumulating.
 7. **The quantitative beat, which r1 5.3 makes mandatory.** Operation count against
    depth, naive re-evaluation against reverse accumulation.
 8. **Gradient checking, as the closing practice.** Compare an analytic partial against a
-   central difference, and point back to 0041's V-curve for why `h = 1e-6` and not `1e-12`.
+   central difference, and point back to 0080's V-curve for why `h = 1e-6` and not `1e-12`.
 
 ## Named result and its stated proof
 
@@ -55,7 +55,7 @@ for every `i`.
 > **Base.** `i = N`: `dL/du_N = dL/dL = 1 = abar_N`.
 > **Step.** Suppose the claim holds for every index above `i`. Every path from `u_i` to
 > `L` leaves `u_i` through exactly one child, so the total derivative of `L` with respect
-> to `u_i` decomposes over the children. The multivariate chain rule (0046, Theorem 1)
+> to `u_i` decomposes over the children. The multivariate chain rule (0085, Theorem 1)
 > applied to `L` as a function of the children of `u_i`, each of which is a function of
 > `u_i`, gives
 >
@@ -85,15 +85,15 @@ order as the forward pass.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The vector chain rule (0046)" into "THIS PAGE:
-   running it on a graph" into "training any network" and "what it costs (0048)".
+1. **Orientation, `flowchart LR`.** "The vector chain rule (0085)" into "THIS PAGE:
+   running it on a graph" into "training any network" and "what it costs (0087)".
 2. **`flowchart LR`.** The graph of the worked 2-2-1 network, every node labelled with
    its forward value. *Kills:* "the graph is a metaphor". It is the data structure.
 3. **`flowchart RL`.** The same graph backwards, every edge labelled with its local
    derivative and every node with its accumulated adjoint. Same shape, different numbers.
    *Kills:* backpropagation as magic.
 4. **`sequenceDiagram`.** Forward phase then backward phase, with a note over the boundary
-   listing what had to be stored. *Kills:* "the backward pass is free", and sets up 0048.
+   listing what had to be stored. *Kills:* "the backward pass is free", and sets up 0087.
 5. **`svg.chart`, quantitative, log axis. Not optional:** operation count against chain
    length for naive re-evaluation of shared subexpressions and for reverse accumulation.
    Linear against exponential. This is the page's `svg.chart` and without it the page is
@@ -120,7 +120,7 @@ order as the forward pass.
    the first hidden unit. **This is the dead-ReLU phenomenon, visible rather than described.**
 7. **What changes if** `W1[0][0]` is raised from `0.5` to `1.0`? Then `z1[0] = 0`, the
    unit sits exactly on the kink, and the framework returns one of the one-sided
-   derivatives from 0043. Raise it further and the whole first row of `dL/dW1` becomes
+   derivatives from 0082. Raise it further and the whole first row of `dL/dW1` becomes
    non-zero and the unit starts learning again.
 8. **In words.** A hidden unit that is off contributes nothing to the output and receives
    nothing from the gradient. Backpropagation routes the signal only along paths that
@@ -160,14 +160,24 @@ returns exactly `0.0000000000`, matching the analytic `0`.
 
 ## Code and dataset
 
-`../code/m05_07_backprop.py` against `../datasets/m05-housing.csv`. It scales the hand
-example up to a 4-32-1 network and gradient-checks **every** parameter, not one, then
-measures what the backward pass costs against the forward pass.
+`../code/0086-backpropagation.py` against `../datasets/sensors.csv`. It scales the hand
+example up to a 6-32-1 network on standardised columns and gradient-checks **every**
+parameter, not one, then measures what the backward pass costs against the forward pass.
 
-Verified output to quote: 193 parameters, all of them checked; worst relative error
-`1.582e-06` (in `W1`), best `6.658e-10`; the backward pass costs `1.58x` the forward pass;
-and a full finite-difference gradient would need `386` forward passes, which measured
-`0.71 s` against `0.00475 s` for one forward-and-backward pair.
+Verified output to quote: 257 parameters, all of them checked; worst relative error
+`1.088e-05` (in `b1`), best `7.232e-09`; the backward pass costs **`3.23x`** the forward
+pass, which sits inside the `c` in `[2, 3]` band Baydin et al. quote and is consistent
+with the `O(#edges)` proposition above. A full finite-difference gradient would need
+`514` forward passes, measured at `2.27 s` against `0.01870 s` for one
+forward-and-backward pair, a factor of about 120.
+
+**A defect worth teaching from, found by running the code rather than reviewing it.** A
+first version recomputed `tanh` in the backward pass instead of reusing the activation the
+forward pass had already stored. It measured `12.21x` the forward pass, which flatly
+contradicts the `O(#edges)` claim this page makes. Reusing `h` and writing the tanh
+derivative as `1 - h^2` brought it to `3.23x`. The page should say this: the cache is not
+an optimisation bolted on afterwards, it is the reason the cost claim is true, and the
+number moves by a factor of four when you get it wrong.
 
 ## Sources
 

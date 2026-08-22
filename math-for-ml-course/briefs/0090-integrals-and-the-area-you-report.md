@@ -1,4 +1,4 @@
-# 0051 - Integrals in machine learning: the area you report is a number you actually compute
+# 0090 - Integrals in machine learning: the area you report is a number you actually compute
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C12.
 
@@ -7,7 +7,7 @@
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0041. M01: set notation and summation. |
+| Prerequisites | 0080. M01: set notation and summation. |
 | Enables | **M07, as a hard scheduling edge** (a density integrating to one is an integral, and a CDF is an integral), and M08's expectation |
 
 ## The single tight idea
@@ -100,7 +100,7 @@ reframing beat and it is the reason the page exists, so it gets the full argumen
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The derivative (0041)" into "THIS PAGE: its inverse,
+1. **Orientation, `flowchart LR`.** "The derivative (0080)" into "THIS PAGE: its inverse,
    and the areas machine learning reports" into "densities (M07)" and "expectation (M08)".
 2. **`svg.chart`.** Rectangles under a curve at three widths converging on the smooth
    area, with the running total printed for each.
@@ -179,19 +179,28 @@ must say they were computed here.
 
 ## Code and dataset
 
-`../code/m05_12_auc_two_ways.py` against `../datasets/m05-scores.csv` (20,000 rows).
-It builds the ROC curve, integrates it by the trapezoid rule, computes the same number by
-the Mann-Whitney rank sum, and then counts every pair by brute force as a third check.
+`../code/0090-integrals-and-the-area-you-report.py` against `../datasets/failures.csv`
+(20,000 rows). The dataset ships features and a label, not scores, so the program fits the
+logistic model itself, then builds the ROC curve, integrates it by the trapezoid rule,
+computes the same number by the Mann-Whitney rank sum, and counts every pair by brute
+force as a third check.
 
-Verified output to quote: 6,175 positives and 13,825 negatives, which is `85,369,375`
-pairs; the ROC curve has `19,798` points; and the three routes give
-**`0.85650938055948` each, with a largest gap of `0.000e+00`**. Coarsening the curve to
-eleven points gives `0.8521946365`, an error of `4.31e-03`, and the error falls
-monotonically as points are added. Left rectangles give `0.8565091170` and right
-rectangles `0.8565096441`, and their average is the trapezoid answer exactly.
+Verified output to quote: 3,401 positives and 16,599 negatives, which is `56,453,199`
+pairs; the ROC curve has `20,001` points; and the three routes give
+**`0.87805013494452` each, with a largest gap of `0.000e+00`**. Coarsening the curve to
+eleven points gives `0.8719288964`, an error of `6.12e-03`, and the error falls
+monotonically as points are added.
 
-Three independent routes agreeing to fourteen decimals is the strongest evidence this
-module produces, and the page should say so plainly.
+**Three independent routes agreeing to fourteen decimals is the strongest evidence this
+module produces, and the page should say so plainly.**
+
+On rectangles against trapezoids, the honest version. With the fitted scores all distinct
+there are no sloped segments, so left rectangles, right rectangles and trapezoids agree
+**exactly** and the comparison says nothing. Round the scores to two decimals to create
+ties and the curve drops to 101 points: the trapezoid gives `0.8777700091`, which is
+exactly what the rank sum gives, while left rectangles give `0.8725317408` and right
+rectangles `0.8830082774`, bracketing it at plus and minus `5.24e-03`. **That is why the
+rule is a trapezoid**, and the page should show the tied case rather than the tie-free one.
 
 ## Sources
 

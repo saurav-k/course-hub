@@ -1,4 +1,4 @@
-# 0049 - Curvature is the second derivative, and the Hessian holds it for every direction at once
+# 0088 - Curvature is the second derivative, and the Hessian holds it for every direction at once
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C09.
 
@@ -7,8 +7,8 @@
 | Module | M05 Calculus |
 | Rung | frontier (`pill hard`) |
 | Label | `core` |
-| Prerequisites | 0044. M04: symmetric matrices, eigenvalues and eigenvectors, positive definiteness, quadratic forms. |
-| Enables | 0050, and M06's L08 and L09 |
+| Prerequisites | 0083. M04: symmetric matrices, eigenvalues and eigenvectors, positive definiteness, quadratic forms. |
+| Enables | 0089, and M06's L08 and L09 |
 
 ## The single tight idea
 
@@ -89,7 +89,7 @@ beats 6 and 7 here and cross-link forward instead.
 > (iii) If some `l_i > 0` and some `l_j < 0` then `a` is a saddle.
 > (iv) If some `l_i = 0` and the non-zero eigenvalues share a sign, the test is silent.
 >
-> *Proof.* Taylor with remainder (0050, Theorem 1) at a critical point gives, for small `h`,
+> *Proof.* Taylor with remainder (0089, Theorem 1) at a critical point gives, for small `h`,
 >
 >   `f(a + h) = f(a) + (1/2) h^T H h + o(||h||^2)`,
 >
@@ -112,8 +112,8 @@ beats 6 and 7 here and cross-link forward instead.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The gradient's promise (0044, 0045)" into "THIS PAGE:
-   whether the promise is kept" into "the quadratic model (0050)" and "Newton-type
+1. **Orientation, `flowchart LR`.** "The gradient's promise (0083, 0084)" into "THIS PAGE:
+   whether the promise is kept" into "the quadratic model (0089)" and "Newton-type
    methods (M06)".
 2. **`svg.chart`.** Three panels: negative, zero and positive curvature, each with the
    true function solid, the gradient's straight-line prediction dashed, and the gap
@@ -121,16 +121,17 @@ beats 6 and 7 here and cross-link forward instead.
 3. **`stateDiagram-v2`.** From `critical point`, four transitions labelled by the
    eigenvalue signature to `local minimum`, `local maximum`, `saddle`, and `inconclusive`.
    *Kills:* the reader who learned the test and forgot it has a failure case.
-4. **`svg.chart`, quantitative, log axis.** The five Hessian eigenvalues of the housing
-   loss before scaling and after. *Kills:* "condition number is an abstraction".
+4. **`svg.chart`, quantitative, log axis.** The seven Hessian eigenvalues of the
+   sensor-regression loss before scaling and after, on a log axis because they span eight
+   orders of magnitude. *Kills:* "condition number is an abstraction".
 5. **`flowchart LR`, inherited from the withdrawn loss-surface page.** The
    filter-normalisation pipeline, with a second branch showing what an unnormalised plot
    claims. *Kills:* trusting any loss-surface picture that does not say how it was normalised.
 
 ## Worked example, in eight parts
 
-1. **Setting.** The five-parameter housing regression. Is its critical point a minimum,
-   and how badly conditioned is it?
+1. **Setting.** The seven-parameter sensor regression, predicting `temp_c` from six
+   sensors. Is its critical point a minimum, and how badly conditioned is it?
 2. **Symbolic.** `.math` for `H[i][j] = d^2 f/dx_i dx_j` and for `H = (2/n) X^T X`, with a
    `.gloss` naming every symbol including `n` and the shape of `X`.
 3. **Picture.** Figure 2, then figure 3, before any eigenvalue.
@@ -171,33 +172,37 @@ and compute the condition number.
 **Hint.** For a symmetric `2 x 2` you do not need a solver: the eigenvalues are the roots
 of `l^2 - (trace) l + (determinant) = 0`.
 
-**Solution.** For the centred five-house table, `H` has eigenvalues `0.6` and `5,000,005`.
-Both positive, so the critical point is a local minimum, and because the loss is quadratic
-it is the global one. `kappa = 5,000,005 / 0.6 = 8.33e6`.
+**Solution.** For a two-column cut of the sensor table, `H = 2 X^T X` is symmetric with
+both eigenvalues positive, so the critical point is a local minimum, and because the loss
+is quadratic it is the global one. On the full seven-parameter problem the eigenvalues run
+from `5.6081e-03` to `1.9843e+05`, giving `kappa = 35,382,028.8`.
 
 **`.p-check`.** The two eigenvalues must sum to the trace of `H`. Compute the trace
 independently and check. If they do not sum to it, the quadratic was solved wrongly.
 
 ## Code and dataset
 
-`../code/m05_09_hessian_test.py` against `../datasets/m05-housing.csv`. It verifies
+`../code/0088-curvature-and-the-hessian.py` against `../datasets/sensors.csv`. It verifies
 Schwarz numerically on three index pairs, checks `d^T H d` against a second central
-difference along random rays, and runs the classifier on the housing loss and on four
-constructed surfaces that exercise every branch of the test.
+difference along random rays, and runs the classifier on the sensor-regression loss and on
+four constructed surfaces that exercise every branch of the test.
 
 Verified output to quote: the analytic Hessian is exactly symmetric and all three numeric
-mixed-partial pairs agree to `0.00e+00`; the five eigenvalues are
-`1.2916e-01, 9.4741e-01, 6.0993e+02, 7.4028e+05, 1.5742e+08` giving
-`kappa = 1,218,855,367.6`; every random-direction `d^T H d` matches its second central
+mixed-partial pairs agree to `0.00e+00`; the seven eigenvalues are `5.6081e-03`,
+`7.2374e-01`, `7.2996e-01`, `5.2127e+00`, `1.4314e+01`, `1.1628e+02` and `1.9843e+05`,
+giving `kappa = 35,382,028.8`; every random-direction `d^T H d` matches its second central
 difference and lies inside the eigenvalue bracket; and the verdict is **local minimum**.
+The four constructed surfaces return minimum, maximum, saddle and inconclusive in turn,
+and the page should show `x^2 + y^4` as the inconclusive case together with the remark
+that it really is a minimum and the test cannot see it.
 
 **A correction worth recording, because it was found by running the code.** A first
 version used a tolerance of `1e-9` times the largest eigenvalue to decide when an
-eigenvalue counts as zero. On a Hessian with `kappa = 1.2e9` that threshold is `0.157`
-and the smallest true eigenvalue is `0.129`, so a genuinely positive definite matrix was
-classified "inconclusive". The tolerance must be tied to machine epsilon, not to a
-fraction of the spectrum. With `eps * n * lambda_max = 1.75e-07` the smallest eigenvalue
-clears it by a factor of `738,988` and the verdict is correct. **Put this in the page as a
+eigenvalue counts as zero. On a Hessian with `kappa = 3.5e7` that threshold is larger than
+the smallest true eigenvalue, so a genuinely positive definite matrix was classified
+"inconclusive". The tolerance must be tied to machine epsilon, not to a fraction of the
+spectrum. With `eps * n * lambda_max = 3.0842e-10` the smallest eigenvalue clears it by a
+factor of `18,183,564` and the verdict is correct. **Put this on the page as a
 `.callout.warn`:** on a badly conditioned Hessian, "is this eigenvalue zero" is a
 numerical question and not only a mathematical one.
 

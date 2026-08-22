@@ -1,4 +1,4 @@
-"""Lesson 0048 - what a long chain of Jacobians costs, and how it decays.
+"""Lesson 0087 - what a long chain of Jacobians costs, and how it decays.
 
 Implements two named results.
 
@@ -19,7 +19,7 @@ Implements two named results.
     long-term contribution to vanish. The program builds recurrent matrices at
     chosen spectral radii and measures the decay.
 
-    python3 0048-a-long-chain-of-jacobians.py
+    python3 0087-a-long-chain-of-jacobians.py
 """
 
 from __future__ import annotations

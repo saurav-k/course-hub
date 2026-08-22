@@ -1,4 +1,4 @@
-"""Lesson 0045 - the gradient is steepest, and only in one sense.
+"""Lesson 0084 - the gradient is steepest, and only in one sense.
 
 Implements the named result:
 
@@ -13,7 +13,7 @@ Euclidean norm. Measure length with a different norm and a different direction
 wins. The program computes the steepest direction under the norm defined by the
 Hessian and reports the angle between the two, which is not small.
 
-    python3 0045-the-gradient-points-uphill.py
+    python3 0084-the-gradient-points-uphill.py
 """
 
 from __future__ import annotations
@@ -29,7 +29,7 @@ URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-co
 # Predicting one sensor from the others is what a real monitoring system does,
 # and it gives this module a design matrix whose columns are on wildly
 # different scales: pressure runs in the hundreds, dust index around one. That
-# disparity is the whole subject of lessons 0049 and 0050, so it is load
+# disparity is the whole subject of lessons 0088 and 0089, so it is load
 # bearing rather than incidental.
 FEATURES = ["vibration_x", "vibration_y", "current_amp",
             "humidity_pct", "dust_index", "pressure_kpa"]

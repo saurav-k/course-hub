@@ -1,4 +1,4 @@
-"""Lesson 0050 - the Taylor model, the largest safe step, and conditioning.
+"""Lesson 0089 - the Taylor model, the largest safe step, and conditioning.
 
 Implements three named results.
 
@@ -16,7 +16,7 @@ Implements three named results.
     columns, and what it does to the largest tolerable step. This is the
     lesson's punchline: feature scaling is a curvature fix.
 
-    python3 0050-taylor-and-the-quadratic-model.py
+    python3 0089-taylor-and-the-quadratic-model.py
 """
 
 from __future__ import annotations

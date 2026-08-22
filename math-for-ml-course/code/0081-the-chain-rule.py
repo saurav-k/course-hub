@@ -1,4 +1,4 @@
-"""Lesson 0042 - the chain rule, checked on a real cross-entropy.
+"""Lesson 0081 - the chain rule, checked on a real cross-entropy.
 
 Implements the identity every binary classifier depends on:
 
@@ -19,7 +19,7 @@ nothing about where scores come from.
 
 Needs only numpy and pandas. Runs in a codebase, in Jupyter, or in Colab.
 
-    python3 0042-the-chain-rule.py
+    python3 0081-the-chain-rule.py
 """
 
 from __future__ import annotations
@@ -66,7 +66,7 @@ def design(frame: pd.DataFrame) -> np.ndarray:
     ]
     x = np.column_stack(columns)
     # Standardise every column but the intercept, so Newton's method is not
-    # fighting the same conditioning problem lesson 0050 is about.
+    # fighting the same conditioning problem lesson 0089 is about.
     scale = x.std(axis=0)
     scale[0] = 1.0
     centre = x.mean(axis=0)
@@ -77,7 +77,7 @@ def design(frame: pd.DataFrame) -> np.ndarray:
 def fit_logistic(x: np.ndarray, y: np.ndarray, steps: int = 50) -> np.ndarray:
     """Newton's method on the cross-entropy. Ten lines, no library.
 
-    The gradient and the Hessian are exactly the objects lessons 0044 and 0049
+    The gradient and the Hessian are exactly the objects lessons 0083 and 0088
     define, which is why this fit belongs in the module rather than in a
     dependency.
     """

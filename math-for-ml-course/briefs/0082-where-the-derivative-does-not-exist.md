@@ -1,4 +1,4 @@
-# 0043 - Where the derivative does not exist, and why machine learning ships anyway
+# 0082 - Where the derivative does not exist, and why machine learning ships anyway
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C03.
 
@@ -7,8 +7,8 @@
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0041, 0042. |
-| Enables | 0047 (ReLU gating in the backward pass), M06's L1 geometry |
+| Prerequisites | 0080, 0081. |
+| Enables | 0086 (ReLU gating in the backward pass), M06's L1 geometry |
 
 ## The single tight idea
 
@@ -79,8 +79,8 @@ stopping at "a median works".
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The rules work everywhere (0042)" into "THIS PAGE:
-   the points where they stop" into "ReLU networks (0047)" and "the L1 corner (M06)".
+1. **Orientation, `flowchart LR`.** "The rules work everywhere (0081)" into "THIS PAGE:
+   the points where they stop" into "ReLU networks (0086)" and "the L1 corner (M06)".
 2. **`svg.chart`, quantitative, real data.** Two panels over the same spend table.
    Left: total squared error against `c`, a parabola with one bottom at the mean.
    Right: total absolute error against `c`, piecewise linear with a **flat bottom**
@@ -113,9 +113,9 @@ stopping at "a median works".
 6. **Sanity check.** The mean of a right-skewed table must exceed its median, and
    `583.02 > 410.49`. If they came out the other way round the tail would be on the
    wrong side and the arithmetic is wrong.
-7. **What changes if** the single largest spend, `Rs 43,173.06`, is multiplied by ten?
-   The mean moves from `583.02` to `660.73`. The median does not move at all. One point
-   owns the mean and no point owns the median.
+7. **What changes if** the single longest session, `6,050.4` seconds, is multiplied by
+   ten? The mean moves from `171.7490` to `174.4717`. The median does not move at all.
+   One point owns the mean and no point owns the median.
 8. **In words.** Choosing squared error is choosing to let the biggest day decide what a
    typical day looks like.
 
@@ -157,16 +157,33 @@ the bulk of the data would mean the `8500` was dropped.
 
 ## Code and dataset
 
-`../code/m05_03_subgradient_median.py` against `../datasets/m05-spend.csv` (5,000 rows).
-It evaluates both losses, differentiates the first, computes the subdifferential of the
-second as a closed interval, and demonstrates the flat bottom and the robustness gap.
 
-Verified output to quote: mean `583.0216`, median `410.4850`, middle values `410.41` and
-`410.56`; squared-loss derivative at the mean `+5.966e-10` and at the median `-1.73e+06`;
-total absolute error `1,413,229.85` across the whole interval and `1,413,247.57` one
-rupee below it; the subdifferential is `[0, 0]` inside the interval and `[-26, -26]` a
-rupee below; multiplying the largest spend by ten moves the mean to `660.73` and leaves
-the median exactly where it was.
+`../code/0082-where-the-derivative-does-not-exist.py` against `../datasets/sessions.csv`
+(20,000 rows, column `session_seconds`). It evaluates both losses, differentiates the
+first, computes the subdifferential of the second as a closed interval, and demonstrates
+the flat bottom and the robustness gap.
+
+Verified output to quote: mean `171.7490`, median `98.9000`. The squared loss's
+derivative at the mean is `-2.519300e-10`, zero to rounding, and at the median it is
+`-2.913960e+06`. Total absolute error is `2,433,263.20` at the median against
+`2,765,028.63` at the mean, and it rises to `2,433,330.40` one second below and
+`2,433,340.60` one second above. The subdifferential at the median is `[-2, 16]`, which
+**contains** zero, and `[-162, -146]` one second below, which does not. Multiplying the
+longest session by ten moves the mean to `174.4717` and leaves the median exactly where
+it was.
+
+**The two cases are split across the two examples, and the page must not mix them up.**
+`session_seconds` is rounded to one decimal, so many rows tie at `98.90` and both middle
+order statistics are that same value. The minimiser is therefore the **single point**
+`98.90`, and what is an interval there is the **subdifferential**, `[-2, 16]`, because the
+one-sided derivatives at a tied value differ by twice the multiplicity. The other case,
+where the **minimising set itself** is an interval, needs an even count with distinct
+middle values, and the ten-number practice problem supplies it: every `c` in `[410, 420]`
+gives the same total.
+
+So the dataset shows "no derivative here, but zero is in the subdifferential", and the
+hand example shows "a whole interval of minimisers". A page that claimed the dataset
+demonstrated the second would be wrong, and the numbers above are what caught it.
 
 ## Sources
 

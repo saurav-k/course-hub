@@ -1,4 +1,4 @@
-# 0050 - Taylor expansion: every loss is a quadratic if you stand close enough
+# 0089 - Taylor expansion: every loss is a quadratic if you stand close enough
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C10.
 
@@ -7,7 +7,7 @@
 | Module | M05 Calculus |
 | Rung | frontier (`pill hard`) |
 | Label | `core` |
-| Prerequisites | 0045, 0049. |
+| Prerequisites | 0084, 0088. |
 | Enables | M06's step sizes, trust regions and Newton's method |
 
 ## The single tight idea
@@ -78,7 +78,7 @@ this course actually uses.**
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "Gradient (0045) and curvature (0049)" into "THIS
+1. **Orientation, `flowchart LR`.** "Gradient (0084) and curvature (0088)" into "THIS
    PAGE: the local model that uses both" into "step sizes, trust regions and Newton (M06)".
 2. **`svg.chart`.** One function with its first-order and second-order Taylor
    approximations at a point, all three drawn, with the interval where each stays within
@@ -94,7 +94,7 @@ this course actually uses.**
 
 ## Worked example, in eight parts
 
-1. **Setting.** The housing regression at a starting guess. How big a step can the
+1. **Setting.** The sensor regression at the intercept-only guess. How big a step can the
    curvature tolerate, and what does standardising change?
 2. **Symbolic.** `.math` for the three-term expansion and for `eps* = g^T g / (g^T H g)`,
    with a `.gloss` naming `eps`, `g`, `H`, and saying what each of the three terms is.
@@ -122,9 +122,9 @@ downhill step increase the loss?
 *Distractors:* "the first" is a constant; "the second" is always a decrease for
 `eps > 0`; "none of them, a downhill step always decreases the loss" is the misconception.
 
-**Q2.** Standardising the housing columns drops the Hessian condition number from
-`1.22e9` to `10.8`. What follows for the step the curvature will tolerate?
-*Answer:* it rises from about `6.4e-9` to about `0.22`, roughly thirty-four million times
+**Q2.** Standardising the sensor columns drops the Hessian condition number from
+`35,382,029` to `304.2`. What follows for the step the curvature will tolerate?
+*Answer:* it rises from about `5.0e-6` to about `0.13`, roughly twenty-six thousand times
 larger.
 *Distractors:* "it is unchanged, scaling only relabels the axes" is the trap; "it falls"
 has the sign backwards; "it cannot be known without the gradient" ignores the worst-case
@@ -132,45 +132,47 @@ bound `1/lambda_max`.
 
 ## Practice seed
 
-**Stem.** Starting from `theta = 0` on the raw housing regression, with
-`g = (-850000, -862)` in the two-feature cut-down: compute `g^T g`, compute `g^T H g`
-given `H = 2 X^T X`, compute `eps* = g^T g / (g^T H g)`, then compare it with
-`1/lambda_max` and explain why they nearly agree.
+**Stem.** Starting from the intercept-only guess on the raw sensor regression, compute
+`g^T g`, compute `g^T H g` given `H = 2 X^T X`, compute `eps* = g^T g / (g^T H g)`, then
+compare it with `1/lambda_max` and explain why they nearly agree.
 
 **Hint.** They agree when the gradient is nearly parallel to the top eigenvector. Compute
 that cosine before you try to explain the coincidence.
 
-**Solution.** `g^T g = 7.225e11`, `g^T H g = 3.6125e18`, so `eps* = 2.0e-7`. And
-`1/lambda_max = 2.0e-7`. They agree because `g` is almost exactly parallel to the top
-eigenvector, which is what unscaled columns guarantee: the biggest column dominates both
-the gradient and the curvature.
+**Solution.** `g^T g = 6.143982e+05`, `g^T H g = 1.199192e+11`, so
+`eps* = 5.123437e-06`. And `1/lambda_max = 5.039641e-06`. They nearly agree because `g` is
+almost parallel to the top eigenvector, with `|cos| = 0.991784`, which is what unscaled
+columns guarantee: the biggest column dominates both the gradient and the curvature.
 
 **`.p-check`.** `eps*` can never be smaller than `1/lambda_max`, because
 `g^T H g <= lambda_max g^T g`. An answer below `1/lambda_max` is an arithmetic error.
 
 ## Code and dataset
 
-`../code/m05_10_taylor_step.py` against `../datasets/m05-housing.csv` and
-`../datasets/m05-scores.csv`. It measures how far each Taylor order stays accurate,
-computes `eps*` and scans the true loss along the descent ray, and repeats the
-conditioning analysis with standardised columns.
+`../code/0089-taylor-and-the-quadratic-model.py` against `../datasets/sensors.csv` and
+`../datasets/failures.csv`. It measures how far each Taylor order stays accurate, computes
+`eps*` and scans the true loss along the descent ray, and repeats the conditioning
+analysis with standardised columns.
 
-Verified output to quote. **A squared-error loss is exactly quadratic, so its second-order
-Taylor model is not an approximation of it, it is it**: the second-order error column sits
-at the floating-point floor (`0` to `2.2e-11`) and does not fall, because the third
-derivative is zero. The rate demonstration therefore runs on a logistic loss instead,
-where the measured error ratios per decade are `100.0` for first order and `1001.8` for
-second, matching the distance squared and the distance cubed. Then `g^T g = 1.207e13`,
-`g^T H g = 1.900e21`, `eps* = 6.352990e-09` against `1/lambda_max = 6.352310e-09` with
-`|cos| = 0.999946`. The scan along `-g` gives loss `39,589.63` at `eps = 0`, `1,251.71`
-at `eps*`, and **exactly `39,589.628830` again at `2 eps*`**, which is the quadratic's
-exact symmetry and is worth showing. Standardising moves `kappa` from `1.22e9` to `10.8`
-and `1/lambda_max` from `6.35e-9` to `0.218`.
+**A squared-error loss is exactly quadratic, so its second-order Taylor model is not an
+approximation of it, it is it.** The second-order error column sits at the floating-point
+floor, between `0` and `2.2e-11`, and does not fall as the distance shrinks, because the
+third derivative is zero and there is no error left to shrink. The rate demonstration
+therefore runs on a logistic loss instead, where the measured error ratios per decade are
+`100.2` for first order and `1004.0` for second, matching the distance squared and the
+distance cubed.
 
-**This correction is worth a `.callout` on the page.** The obvious demonstration of
-Taylor error rates does not work on a squared-error loss, and a page that claimed a cubic
-rate there while its own numbers sat at the floating-point floor would be teaching a
-confident wrong thing. Use the logistic loss for the rates and say why.
+Then `g^T g = 6.143982e+05`, `g^T H g = 1.199192e+11`, `eps* = 5.123437e-06` against
+`1 / lambda_max = 5.039641e-06`, with `|cos angle(g, v_max)| = 0.991784`. The scan along
+`-g` gives loss `54.275914` at `eps = 0`, `52.701999` at `eps*`, and **exactly
+`54.275914` again at `2 eps*`**, which is the quadratic's exact symmetry and is worth
+showing. Standardising moves `kappa` from `35,382,028.8` to `304.2` and `1 / lambda_max`
+from `5.040e-06` to `1.312e-01`, a factor of `26,038`.
+
+**This correction belongs in a `.callout` on the page.** The obvious demonstration of
+Taylor error rates does not work on a squared-error loss, and a page claiming a cubic rate
+there while its own numbers sat at the floating-point floor would be teaching a confident
+wrong thing.
 
 ## Sources
 

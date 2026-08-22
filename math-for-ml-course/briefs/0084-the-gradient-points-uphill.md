@@ -1,4 +1,4 @@
-# 0045 - The gradient points uphill, and it is steepest only in the Euclidean sense
+# 0084 - The gradient points uphill, and it is steepest only in the Euclidean sense
 
 > Number claimed under #42 from the roadmap count in `../index.html`. Report label C05.
 
@@ -7,7 +7,7 @@
 | Module | M05 Calculus |
 | Rung | working (`pill med`) |
 | Label | `core` |
-| Prerequisites | 0044. M03: dot product, unit vector, Euclidean norm. |
+| Prerequisites | 0083. M03: dot product, unit vector, Euclidean norm. |
 | Enables | M06's entire descent family |
 
 ## The single tight idea
@@ -20,7 +20,7 @@ depends on how you measure length.
 1. **The question.** You are on a surface and may step one unit in any direction. Which
    direction rises the most? Make the reader want the answer before deriving it.
 2. **The directional derivative,** defined as the derivative of `f(x + alpha u)` at
-   `alpha = 0`, which the chain rule from 0042 collapses to `u . grad f`. One line, and
+   `alpha = 0`, which the chain rule from 0081 collapses to `u . grad f`. One line, and
    it reuses the previous page rather than introducing machinery.
 3. **The cos-theta argument, worked in full.** `u . grad f = ||u|| ||grad f|| cos theta`.
    With `||u|| = 1` everything turns on `cos theta`, which is smallest at `180` degrees.
@@ -77,7 +77,7 @@ single most repeated wrong thing in this territory.
 
 ## Figures
 
-1. **Orientation, `flowchart LR`.** "The gradient exists (0044)" into "THIS PAGE: what it
+1. **Orientation, `flowchart LR`.** "The gradient exists (0083)" into "THIS PAGE: what it
    is optimal for" into "gradient descent (M06)", with "why Adam is not just a heuristic"
    dotted in.
 2. **`svg.chart`, quantitative.** Directional derivative against the angle `theta` from
@@ -87,13 +87,13 @@ single most repeated wrong thing in this territory.
    an ellipse with a visibly different one, with the angle between them labelled.
    *Kills:* "the negative gradient is the steepest direction", full stop.
 4. **`svg.chart`, quantitative.** Horizontal bars: five candidate unit directions against
-   their directional derivatives on the housing loss. *Kills:* "any downhill direction is
+   their directional derivatives on the sensor-regression loss. *Kills:* "any downhill direction is
    about as good".
 
 ## Worked example, in eight parts
 
-1. **Setting.** At `theta = 0`-ish on the five-parameter housing regression, you may step
-   one unit in any direction. Which?
+1. **Setting.** At the intercept-only guess on the seven-parameter sensor regression, you
+   may step one unit in any direction. Which?
 2. **Symbolic.** `.math` for `D_u f = u . grad f = ||grad f|| cos theta` with a `.gloss`
    naming `u`, `theta`, and why `||u|| = 1` is required for the question to have an answer.
 3. **Picture.** Figure 2.
@@ -105,11 +105,13 @@ single most repeated wrong thing in this territory.
    that range is an arithmetic error, and the program checks it against 50,000 random
    directions for exactly this reason.
 7. **What changes if** the columns are standardised first? The gradient rotates, and the
-   "lot only" direction stops being nearly optimal. The ranking is a fact about units,
-   not about the features, and 0050 is where that becomes a number.
-8. **In words.** On this table, stepping along the lot-size axis alone recovers 97 per
-   cent of the best possible rate of descent, and stepping along the bedrooms axis alone
-   recovers 0.04 per cent. Neither number says anything about which feature predicts price.
+   "pressure only" direction stops being nearly optimal. The ranking is a fact about
+   units, not about the features, and 0089 is where that becomes a number.
+8. **In words.** On this table, descending along the pressure axis alone recovers 99.13
+   per cent of the best possible rate, and descending along the humidity axis alone
+   recovers 1.28 per cent. Neither number says anything about which sensor predicts
+   temperature. Pressure is measured in the hundreds and humidity around one, and the
+   gradient is reporting the units.
 
 ## Quiz seeds
 
@@ -120,43 +122,55 @@ question has no maximum.
 *Distractors:* "because the dot product requires it" is false; "because the gradient is a
 unit vector" is false; "so that cos theta stays between -1 and 1" reverses the mechanism.
 
-**Q2, misconception.** On the raw housing regression, `-g/||g||` gives a directional
-derivative of `-3,474,082.69` and "bedrooms only" gives `+1,239.50`. What does the gap say?
+**Q2, misconception.** On the raw sensor regression, "pressure only" reaches 99.13 per
+cent of the best possible rate of descent and "humidity only" reaches 1.28 per cent.
+What does that gap say?
 *Answer:* the loss is overwhelmingly sensitive to the columns with large units, which is
-a symptom of unscaled features and reappears in 0050 as a condition number.
-*Distractors:* "bedrooms do not predict price" confuses gradient scale with importance;
+a symptom of unscaled features and reappears in 0089 as a condition number.
+*Distractors:* "humidity does not predict temperature" confuses gradient scale with importance;
 "the gradient is wrong" is not a thing; "the loss has no minimum in that direction" is
 unsupported and false.
 
 ## Practice seed
 
-**Stem.** With `grad f = (-850000, -862)` in two dimensions, compute the directional
-derivative for the unit vectors `(1, 0)`, `(0, 1)` and `(0.7071, 0.7071)`, then confirm
-that `-g/||g||` attains `-||grad f||`.
+**Stem.** With `grad f = (-777.00, -10.02)` for the two most and least sensitive columns,
+compute the directional derivative for the unit vectors `(1, 0)`, `(0, 1)` and
+`(0.7071, 0.7071)` pointing downhill, then confirm that `-g/||g||` attains `-||grad f||`.
 
-**Hint.** Four dot products and one norm. Do the norm first: it is the number every
-other answer is measured against.
+**Hint.** Four dot products and one norm. Do the norm first: it is the number every other
+answer is measured against.
 
-**Solution.** `||grad f|| = 850,000.44`. The three directions give `-850,000.00`,
-`-862.00` and `-601,650.29`. `-g/||g|| = (0.99999, 0.00101)` gives `-850,000.44`, which
-is exactly `-||grad f||` and therefore the best available.
+**Solution.** `||grad f|| = 777.0660`. Descending along the first axis alone gives
+`-777.0013`, along the second alone `-10.0239`, and equally along both `-556.5108`. The
+unit vector `-g/||g|| = (0.99992, 0.01290)` gives `-777.0660`, which is exactly
+`-||grad f||` and therefore the best available.
 
-**`.p-check`.** No answer may be more negative than `-850,000.44`. If one is, the
-direction was not normalised.
+**`.p-check`.** No answer may be more negative than `-777.0660`, by Cauchy-Schwarz. If one
+is, the direction was not normalised.
 
 ## Code and dataset
 
-`../code/m05_05_steepest_ascent.py` against `../datasets/m05-housing.csv`.
-It computes the gradient, ranks five named directions, then brute-forces 50,000 random
-unit directions to confirm none beats the bound, then computes the steepest direction
-under the Hessian's own norm and reports the angle.
 
-Verified output to quote: `||grad f|| = 3,474,082.69`; lot-only reaches `97.44%` of the
-best rate, equal-on-all-five `53.77%`, bedrooms-only `0.04%`; across 50,000 random unit
-directions the most negative found is `-3,472,017.29`, none beats the bound, and the best
-random direction reaches `99.94%`; and **the steepest direction under the quadratic norm
-sits 89.9 degrees from the Euclidean one**, which is very nearly perpendicular and is the
-strongest single number on the page.
+`../code/0084-the-gradient-points-uphill.py` against `../datasets/sensors.csv`. It
+computes the gradient, ranks five named directions, brute-forces 50,000 random unit
+directions to confirm none beats the bound, then computes the steepest direction under
+the Hessian's own norm and reports the angle.
+
+Verified output to quote: `||grad f|| = 783.8356`; descending along pressure alone reaches
+`99.13%` of the best rate, equally along every dial `46.65%`, along `vibration_x` alone
+`8.92%`, and along humidity alone `1.28%`. Across 50,000 random unit directions the most
+negative found is `-776.5780`, none beats the bound, and the best random direction reaches
+`99.07%`.
+
+**The strongest single number on the page: the steepest direction under the quadratic norm
+sits 88.8 degrees from the Euclidean one**, which is very nearly perpendicular. Same point,
+same function, different answer, because "unit" changed.
+
+One note on the axis directions. Each is signed so that it descends, which is the opposite
+of that parameter's gradient component. Choosing the sign by hand instead would make the
+table measure the choice rather than the direction. The equal-on-every-dial row is then
+exactly the normalised steepest descent direction under the L-infinity norm, so it quietly
+makes the same point as the ellipse figure.
 
 ## Sources
 

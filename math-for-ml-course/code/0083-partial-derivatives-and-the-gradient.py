@@ -1,4 +1,4 @@
-"""Lesson 0044 - partial derivatives and the gradient, on a real design matrix.
+"""Lesson 0083 - partial derivatives and the gradient, on a real design matrix.
 
 Implements: the partial derivative of a squared-error loss with respect to each
 parameter, and the gradient as the vector that collects them.
@@ -10,12 +10,12 @@ parameters of an eight thousand row table.
 
 It also shows the thing a two-parameter toy cannot: the components of a real
 gradient differ by five orders of magnitude, and that is a fact about the units
-of the columns, not about which feature matters. Lesson 10 turns that
+of the columns, not about which feature matters. Lesson 0089 turns that
 observation into a condition number.
 
 Rows are samples and columns are features, which is this course's convention.
 
-    python3 0044-partial-derivatives-and-the-gradient.py
+    python3 0083-partial-derivatives-and-the-gradient.py
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-co
 # Predicting one sensor from the others is what a real monitoring system does,
 # and it gives this module a design matrix whose columns are on wildly
 # different scales: pressure runs in the hundreds, dust index around one. That
-# disparity is the whole subject of lessons 0049 and 0050, so it is load
+# disparity is the whole subject of lessons 0088 and 0089, so it is load
 # bearing rather than incidental.
 FEATURES = ["vibration_x", "vibration_y", "current_amp",
             "humidity_pct", "dust_index", "pressure_kpa"]
@@ -119,7 +119,7 @@ def main() -> None:
 
     print("\nthe gradient points uphill, so the loss falls against it")
     print("until the step is large enough for curvature to take over, which is")
-    print("lesson 0050's subject and is visible here at the last row:")
+    print("lesson 0089's subject and is visible here at the last row:")
     for step in (1e-8, 1e-7, 1e-6, 1e-5, 1e-4):
         moved = loss(theta - step * analytic, x, y)
         print(f"  step {step:.0e}: loss {loss(theta, x, y):.6f} -> {moved:.6f}")

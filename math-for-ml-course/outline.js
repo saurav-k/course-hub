@@ -43,6 +43,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "Calculus for machine learning",
+      "lessons": [
+        {
+          "title": "A derivative is the exchange rate between a small input change and a small output change",
+          "href": "lessons/0080-derivative-as-a-limit.html"
+        }
+      ]
+    },
+    {
       "n": "→",
       "title": "The road ahead",
       "lessons": [
