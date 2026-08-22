@@ -32,8 +32,7 @@ Delete the ones that do not apply. An empty deltas list is a legitimate outcome 
 
 Do not restate it here.
 Every one of the seven pre-existing courses kept a second copy of its map in this file, and every one of those copies went out of date.
-The map in `index.html` is also what `scripts/gen_outline.py` reads to build the sidebar, so it is the copy that cannot silently drift.
-`index.html` is the deployed artefact and the validator checks it, so it is the one that cannot silently drift.
+`index.html` is the deployed artefact, the validator checks it, and `scripts/gen_outline.py` reads it to build the sidebar, so it is the copy that cannot silently drift.
 
 ## Cross-linking
 

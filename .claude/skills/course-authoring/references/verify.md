@@ -15,7 +15,7 @@ python3 .claude/skills/course-authoring/scripts/check_pages.py <course-or-file>
 It checks registration, links, that no page links a local `.md` file, and that each course `outline.js` names exactly the lessons on disk.
 On a routed course it also checks the route manifest, every committed pager against its owning route, and the living-document metadata.
 
-`check_pages.py` checks the house standard: the design-system links, the Mermaid traps, widget shapes, the diagram and quiz counts, the answer-index distribution, and the rung and reading-time pills.
+`check_pages.py` checks the house standard: the design-system links, the Mermaid traps, widget shapes, the orientation figure, the word ceilings, the diagram and quiz counts, the answer-index distribution, and the rung and reading-time pills.
 Both green before you open the pull request.
 A warning from `check_pages.py` is a decision you must be able to defend in the pull request body, not a line to scroll past.
 
@@ -69,6 +69,8 @@ Then look anyway. A diagram that parses can still say the wrong thing.
 
 Read the page start to finish as the learner in `MISSION.md`, not as its author.
 
+- **Cover the page and look only at the h1 and the orientation figure.** Can you say what this page is about and why it exists? That is the whole test, and it is the one the machine cannot run. If the answer is no, the figure is decoration and the page has no big picture.
+- **Which paragraph does a figure already say?** Read every paragraph beside the figure nearest it. Where the two say the same thing, the paragraph goes. This is where a page comes down under the word ceiling, and cutting here costs the reader nothing.
 - **Is there one idea?** If the summary needs "and", it is two pages.
 - **Does anything arrive before its scaffold?** A symbol before its name, a formula before its picture, a mechanism before its model.
 - **Is any step missing?** Where you compressed arithmetic, expand it. The reader must never reconstruct what you skipped.

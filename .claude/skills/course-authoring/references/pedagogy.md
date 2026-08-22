@@ -5,6 +5,60 @@ Counts, not qualities.
 
 Everything here is checked by `.claude/skills/course-authoring/scripts/check_pages.py`, either as a failure or as a warning.
 
+The shape those counts add up to:
+
+```
+eyebrow -> h1 -> paper-meta -> one-minute version -> ORIENTATION FIGURE -> the sections -> quizzes
+                                                     where this sits        the detail
+                                                      in the whole
+```
+
+## The orientation figure
+
+**The big picture comes first.**
+Every content page opens with a figure that shows where this idea sits in the whole: what larger thing it is part of, what came before it, what it enables.
+
+| Bar | Value |
+|---|---|
+| position | the page's **first** `<figure>` |
+| body sections opened before it | **0**; it stands between the one-minute version and the first section |
+| prose words before it | **250 maximum** |
+| things it draws | **3 minimum**: what came before, this, what it enables |
+| content pages without one | **0** |
+
+The test it has to pass: a reader who reads the opening sentence, looks at this figure, and reads nothing else can say what the page is about and why it exists.
+
+It is not a decorative header and it is not the mechanism drawn early.
+The mechanism figure belongs beside the mechanism.
+This one is the map the reader keeps in the corner of their eye for the rest of the page.
+
+It counts towards the diagram floor below.
+
+## Fewer words
+
+The page carries its meaning in figures and short prose, not in paragraphs the reader must hold in their head.
+
+| Bar | Value |
+|---|---|
+| prose words per content page | **1,800 maximum**, 900 to 1,400 typical |
+| prose words per figure | **400 maximum** |
+
+**When a paragraph and a figure say the same thing, the paragraph goes.**
+Not both, and not the figure.
+
+Prose is what is left of the reading column once the figures, the code, the quizzes and the page chrome are taken out.
+It is the quantity the reader has to hold, which is why it is the quantity the bars are stated in.
+
+Both numbers are measured rather than chosen.
+Every one of the 54 pages in `llm-papers-course` and `llm-inference-course`, the two courses that read best, clears both: their longest page is 1,716 words and their densest is 394 words per figure.
+A ceiling that fails a good page is a wish, not a bar.
+
+A page over the ceiling is usually two pages, and splitting it beats cutting it.
+A page over the density ceiling is usually one figure short, and the missing one is the picture some paragraph is describing in words.
+
+The reading-time pill is prose words divided by 200, plus half a minute for each figure and each quiz, rounded.
+It is an estimate and it only has to be honest; the point is that a reader arriving from a search result knows whether they have time for the page.
+
 ## Diagrams
 
 | Bar | Value |
@@ -36,19 +90,13 @@ The learner should never have to hold more than one new thing at a time, and nev
 | new named concepts per paragraph | **1** |
 | `.math` blocks without a `.gloss` | **0** |
 | symbols used before being named in words *on this page* | **0** |
-| reading minutes per page | **8 to 12** |
 | formula appearing before its picture | **0** |
 
-The reading-time bar is a grain rule, not a length limit.
-A page at 25 minutes is two ideas wearing one title, and the fix is to split it rather than to cut it.
-
-The number on the pill is prose words divided by 200, rounded to the nearest minute, plus one minute for each figure and each quiz.
-It is an estimate and it only has to be honest; the point is that a reader arriving from a search result knows whether they have time for the page.
-
 **A bar the neighbouring pages miss is still a bar.**
-Most pages in this hub predate this file and carry no rung pill and no reading-time pill.
+Most pages in this hub predate this file and carry no rung pill, no reading-time pill, and no orientation figure.
 `new-lesson.md` tells you to match the neighbours for voice, depth and structure, and that is what it means: voice, depth and structure.
-It does not mean inheriting a missing widget. Add the pills to the page you are writing and say in the pull request that its neighbours still lack them.
+It does not mean inheriting a missing widget.
+Write the page to the bar and say in the pull request that its neighbours still miss it.
 
 ## Level progression
 
@@ -63,7 +111,7 @@ Three rungs, and the class names already exist in `assets/hub.css`:
 
 The ladder is a claim about *dependencies*, so it is checkable: read the map in order and confirm no page needs a page that comes later.
 
-Two rules keep the ladder honest:
+Two rules keep it honest:
 
 - **Every lesson card carries exactly one rung pill,** and the pill text is the rung word. The class is not a colour: `pill easy` reading "labs" tells the reader nothing about difficulty and burns the only signal the card has.
 - **Every page carries its rung and its reading time** in `.paper-meta`, so a reader who arrived from a search result knows what they walked into.

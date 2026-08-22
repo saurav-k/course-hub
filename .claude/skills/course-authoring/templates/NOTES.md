@@ -15,7 +15,8 @@ A useful distinction to write down where it applies: someone can be a beginner i
 
 ## Cadence
 
-What one page is: reading minutes, diagram count, quiz count.
+What one page is: prose words, diagram count, quiz count.
+What the orientation figure on a page of this course draws, since that is the part every page shares.
 Where a page ends and the next begins.
 Whether quizzes come after the idea is worked, which they should.
 

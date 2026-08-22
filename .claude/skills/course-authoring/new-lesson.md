@@ -25,9 +25,13 @@ Then settle three things before drafting:
 Copy `templates/lesson.html.tmpl` and work top to bottom.
 Order matters: the template's order is the teaching order.
 
+**The big picture first.** Before the first body section, draw the orientation figure: what larger thing this idea is part of, what came before it, what it enables. Cover the rest of the page with your hand; the opening sentence and that figure alone must say what the page is about and why it exists. The bar is in [`references/pedagogy.md`](references/pedagogy.md) and the markup is in [`references/widgets.md`](references/widgets.md).
+
 **Mental model, then mechanism, then trade-off.** The reader gets a picture they can hold before they get a thing they must follow, and they never get a technique without its cost. A section that introduces a technique and lists only benefits is unfinished.
 
 **Diagram before the paragraph it illustrates, not after.** A diagram that appears after the explanation is a summary; a diagram that appears before it is a scaffold, and scaffolds are what lower cognitive load.
+
+**When a paragraph and a figure say the same thing, the paragraph goes.** Not both. A paragraph that walks the reader through a diagram node by node is the diagram typed out, and it is the first thing to cut when the page is over the word ceiling. 1,800 prose words is the ceiling and 400 words per figure is the density bar; both are counted by `check_pages.py`.
 
 **One new named thing per paragraph.** Name it in plain words on first use on this page, not once per course. Repetition across pages is cheap; a reader stalling on an unexplained symbol is not.
 

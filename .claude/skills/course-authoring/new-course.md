@@ -31,7 +31,7 @@ Where an answer is genuinely derivable from the existing hub, derive it and say 
 6. How many pages, and what is a page? A lesson, a chapter that indexes many topics, or a lecture split into parts. The three shapes are described in [`references/page-contracts.md`](references/page-contracts.md); pick one and stay in it.
 6b. Is there genuinely more than one order in which this course should be read? If yes, and only if yes, it is a **routed** course: one pool of lessons declared once in a `routes.js` manifest and travelled several ways. `llm-evolution-course` is the only one, `llm-evolution-course/routes/README.md` is the reference, and the cost is real: `gen_outline.py` refuses to run against a routed course, every lesson owes a committed pager naming its owning route, and `validate_site.py` checks all of it. Answer no unless the several orders were the reason for the course.
 7. What is the level ladder, rung by rung? See the level ladder in [`references/pedagogy.md`](references/pedagogy.md). A course with no ladder is a reference, and a reference should say so rather than pretend to be a progression.
-8. How long is one page in reading minutes? This sets the grain: 8 to 12 minutes is one sitting, 25 is two pages pretending to be one.
+8. How long is one page in prose words? This sets the grain. 900 to 1,400 is one sitting and 1,800 is the ceiling; a page that wants 4,000 is three pages wearing one title. The count excludes the figures, the code and the quizzes, because prose is what the reader has to hold. See [`references/pedagogy.md`](references/pedagogy.md).
 
 **Boundaries.**
 

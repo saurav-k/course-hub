@@ -32,7 +32,7 @@ And the failure that would still be a failure even if every page were accurate.
 ## Structure
 
 The page shape: lesson, chapter, or lecture split into parts. One shape, held for the whole course.
-How many pages, how many modules, and what one page costs in reading minutes.
+How many pages, how many modules, and what one page costs in prose words.
 
 ## The ladder
 

@@ -128,6 +128,31 @@ Reserve it. A page with three warnings has no warning.
 
 ## Diagrams
 
+### The orientation figure, which opens every content page
+
+Ordinary `figure.diagram` markup in a load-bearing position: the page's first figure, directly after the one-minute version and before the first body section.
+Position is what makes it the orientation figure, so there is no class to remember and nothing to add to the stylesheet.
+
+```html
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;the reader already has this"] --> T["THIS PAGE&lt;br/&gt;the one idea"]
+  T --> N["What it enables&lt;br/&gt;named, not hinted"]
+  W["The larger thing&lt;br/&gt;this is a part of"] -.- T
+  </div>
+  <figcaption>Where this sits: it takes X from the previous page and is what makes Y possible.
+  <b>The one sentence a reader should leave with even if they read nothing else.</b></figcaption>
+</figure>
+```
+
+Three things it must draw, which is why the floor is three nodes: what came before, this, what it enables.
+On a routed course it names what the idea enables rather than the next file, because the neighbour changes with the route and the place in the whole does not.
+Any kind may carry it.
+A `timeline` suits a history, a `mindmap` suits a chapter that indexes topics, a `flowchart` suits everything else.
+
+The bar, and the test the figure has to pass, are in [`pedagogy.md`](pedagogy.md).
+
 ### Mermaid, for structure
 
 ```html
