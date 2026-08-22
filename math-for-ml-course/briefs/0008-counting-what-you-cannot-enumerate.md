@@ -12,11 +12,12 @@
 | Dataset | `datasets/tickets.csv` |
 | Named theorems | **`C(n,k) = n!/(k!(n-k)!)`, Pascal's rule, and `Sum_k C(n,k) = 2^n`.** All three proved (D4). |
 
-## Boundary and absorption
+## Boundary
 
 M07 owns the binomial **distribution**; this page owns the **coefficient** in front of it.
 M08 owns sampling with and without replacement as a probabilistic act.
-This page carries the counting half of the absorbed lecture on counting and sampling, at full depth. Survey design is not mathematics and is not here.
+
+**Nothing here is absorbed from anywhere.** Under captain update 3 the existing `statistical-foundations-ml-course` is frozen and stays a separate live course; this page covers counting at full depth because the union syllabus (D11) calls for it, written from primary sources. Survey design is not mathematics and is not here.
 
 ## The one idea
 
