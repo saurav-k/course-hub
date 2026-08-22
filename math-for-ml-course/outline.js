@@ -397,6 +397,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "09",
+      "title": "Estimation, testing, and inference",
+      "lessons": [
+        {
+          "title": "A fitted slope is one draw from a distribution you can name",
+          "href": "lessons/0172-inference-in-simple-linear-regression.html"
+        }
+      ]
+    },
+    {
       "n": "10",
       "title": "Information, similarity, and dimension",
       "lessons": [
