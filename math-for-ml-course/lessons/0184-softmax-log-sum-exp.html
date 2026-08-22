@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Softmax and log-sum-exp - Mathematics for Machine Learning and Data Science</title>
+<meta name="description" content="The exponential you write is never the exponential you compute, and the line that makes it computable also hands you the gradient p minus y.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">MATHS FOR ML</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Information, similarity, and dimension &middot; Lesson 184</div>
+  <h1>The exponential you write is never the one you compute</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">13 min</span>
+    Blanchard, D. J. Higham and N. J. Higham, <i>Accurately computing the log-sum-exp and softmax functions</i> (IMA J. Numer. Anal., 2021).
+    &middot; <a href="https://webhomes.maths.ed.ac.uk/~dhigham/Publications/P149.pdf">the paper</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Softmax exponentiates and normalises. It is a soft <b>argmax</b>, not a soft max, and the difference explains everything else about it.</li>
+      <li>It sees only the <b>differences</b> between its inputs. Add any constant to all of them and nothing changes.</li>
+      <li>Written as it stands it overflows: in float16 a logit above <b>11.0</b> is already infinity, and 28.7 per cent of a real batch is above it.</li>
+      <li>Subtract the largest logit first. The same identity that makes it safe also proves <b>the gradient of log-sum-exp is the softmax</b>.</li>
+      <li>Which hands you <b>p &minus; y</b>, the most reused derivative in machine learning, in one line.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["Module 03&lt;br/&gt;a dot product&lt;br/&gt;produces the logits"] --> T["THIS PAGE&lt;br/&gt;logits become a&lt;br/&gt;distribution, safely"]
+  B["Module 05&lt;br/&gt;the chain rule"] -.- T
+  T --> C["Lesson 181&lt;br/&gt;which scores it"]
+  T --> D["Module 06&lt;br/&gt;which descends on&lt;br/&gt;the gradient it gives"]
+    </div>
+    <figcaption>Where this sits: a matrix-vector product hands you unbounded scores, and something has to turn them into probabilities before the loss on lesson 181 can read them. <b>This page is that something, plus the reason no implementation writes it the way the textbook does.</b></figcaption>
+  </figure>
+
+  <h2>1. Two steps, no magic</h2>
+
+  <p>You have <i>k</i> real numbers, called logits, and you need a probability vector: everything positive, everything adding to one. Exponentiating makes them positive. Dividing by the total makes them sum to one. That is the whole construction.</p>
+
+  <div class="math">
+    softmax(z)<sub>i</sub> = e<sup>z<sub>i</sub></sup> / &sum;<sub>j</sub> e<sup>z<sub>j</sub></sup>
+    <span class="gloss">Read as: the <i>i</i>-th output is <i>e</i> raised to the <i>i</i>-th input,
+    divided by the sum of <i>e</i> raised to every input. The index <i>j</i> in the denominator runs
+    over all <i>k</i> classes, so every output depends on every input, not only on its own.</span>
+  </div>
+
+  <p>It is not the only function that could do this. Squaring and normalising would also work and is much cheaper. The exponential earns its place for a reason that only becomes visible in section 4: the logarithm in the loss undoes it exactly, and nothing else has that property.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Three raw logits on a signed scale, and the three probabilities they become after exponentiating and normalising">
+      <line class="axis" x1="60" y1="150" x2="300" y2="150"/>
+      <rect class="m-noise" x="80" y="70" width="46" height="80"/>
+      <rect class="m-noise" x="150" y="110" width="46" height="40"/>
+      <rect class="m-noise" x="220" y="146" width="46" height="4"/>
+      <text class="lbl-sm" x="103" y="62" text-anchor="middle">2.0</text>
+      <text class="lbl-sm" x="173" y="102" text-anchor="middle">1.0</text>
+      <text class="lbl-sm" x="243" y="138" text-anchor="middle">0.1</text>
+      <text class="lbl-b" x="180" y="188" text-anchor="middle">raw logits</text>
+      <text class="lbl-sm" x="180" y="206" text-anchor="middle">any real number, no total</text>
+      <text class="lbl-b t-gold" x="330" y="150" text-anchor="middle">&rarr;</text>
+      <line class="axis" x1="370" y1="250" x2="620" y2="250"/>
+      <rect class="m-prob" x="390" y="118" width="46" height="132"/>
+      <rect class="m-prob" x="460" y="202" width="46" height="48"/>
+      <rect class="m-prob" x="530" y="230" width="46" height="20"/>
+      <text class="lbl-sm" x="413" y="110" text-anchor="middle">0.6590</text>
+      <text class="lbl-sm" x="483" y="194" text-anchor="middle">0.2424</text>
+      <text class="lbl-sm" x="553" y="222" text-anchor="middle">0.0986</text>
+      <text class="lbl-b" x="495" y="188" text-anchor="middle">probabilities</text>
+      <text class="lbl-sm" x="495" y="272" text-anchor="middle">all positive, adding to exactly 1</text>
+    </svg>
+    <figcaption>The same three numbers before and after. The order is unchanged and the gaps are stretched, because exponentiating is convex. <b>The right-hand bars must add to one and the left-hand bars need not add to anything, and that constraint is the only thing softmax is for.</b></figcaption>
+  </figure>
+
+  <h2>2. It only sees differences</h2>
+
+  <p>Add the same constant <i>c</i> to every logit. In the numerator that multiplies by <i>e</i><sup><i>c</i></sup>. In the denominator every term also multiplies by <i>e</i><sup><i>c</i></sup>, so it factors out of the sum. The two cancel.</p>
+
+  <div class="math">
+    softmax(z + c<b>1</b>) = softmax(z) &nbsp;&nbsp;and&nbsp;&nbsp; LSE(z + c<b>1</b>) = LSE(z) + c
+    <span class="gloss">Read as: adding the same number <i>c</i> to every entry of the logit vector
+    leaves the softmax output completely unchanged, and shifts the log-sum-exp by exactly <i>c</i>.
+    The bold <b>1</b> is the vector of ones, so <i>c</i><b>1</b> is "add <i>c</i> to everything".
+    A shift applied to only some entries is not free and does change the answer.</span>
+  </div>
+
+  <p>Two consequences follow, and they pull in opposite directions.</p>
+
+  <p>The comfortable one: <b>you may subtract anything you like</b>, provided you subtract it everywhere. Section 3 uses that to make the computation safe.</p>
+
+  <p>The uncomfortable one: <b>a single logit means nothing on its own.</b> The vector has <i>k</i> entries and only <i>k</i> &minus; 1 degrees of freedom, so a logit of 12 is not "confident" and a logit of &minus;3 is not "doubtful". Only the gaps carry information. This is also why softmax saturates when the gaps grow large rather than when any one value does.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+    <i>Deep Learning</i>, section 6.2.2.3, on the name: "The function is more closely related to the
+    arg max function than the max function... It would perhaps be better to call the softmax function
+    'softargmax,' but the current name is an entrenched convention." <b>The soft version of max is
+    softmax(z) &middot; z, a scalar.</b> Once you hold that, temperature stops being a knob to memorise:
+    a smoothed argmax obviously becomes the hard argmax as the smoothing goes away.
+  </div>
+
+  <h2>3. Why it cannot be computed as written</h2>
+
+  <p>Exponentials get large very quickly, and floating point has a ceiling. Blanchard, Higham and Higham tabulate where each format gives up.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="The largest logit each floating point format can exponentiate: float16 at eleven, bfloat16 and float32 at eighty-eight point seven, float64 at seven hundred and ten">
+      <line class="axis" x1="120" y1="250" x2="620" y2="250"/>
+      <rect class="m-alarm" x="120" y="60" width="48" height="190"/>
+      <rect class="m-stat" x="240" y="60" width="48" height="190"/>
+      <rect class="m-stat" x="360" y="60" width="48" height="190"/>
+      <rect class="m-signal" x="480" y="60" width="48" height="190"/>
+      <text class="lbl-b t-alarm" x="144" y="52" text-anchor="middle">11.0</text>
+      <text class="lbl-b" x="264" y="52" text-anchor="middle">88.7</text>
+      <text class="lbl-b" x="384" y="52" text-anchor="middle">88.7</text>
+      <text class="lbl-b" x="504" y="52" text-anchor="middle">710</text>
+      <text class="lbl-sm" x="144" y="268" text-anchor="middle">float16</text>
+      <text class="lbl-sm" x="264" y="268" text-anchor="middle">bfloat16</text>
+      <text class="lbl-sm" x="384" y="268" text-anchor="middle">float32</text>
+      <text class="lbl-sm" x="504" y="268" text-anchor="middle">float64</text>
+      <text class="lbl-sm" x="370" y="290" text-anchor="middle">the largest logit each format can exponentiate</text>
+      <text class="lbl-sm t-alarm" x="180" y="120" text-anchor="start">the ordinary inference precision</text>
+    </svg>
+    <figcaption>The bars are not to scale with each other and that is the point: the numbers on them are what matter. <b>In float16, the precision most inference actually runs in, any logit above 11.0 exponentiates to infinity.</b> On the twenty thousand held-out rows this module ships, 28.7 per cent of them carry at least one logit above that line.</figcaption>
+  </figure>
+
+  <p>What happens next is worth following step by step, because the failure is silent until the very end.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Z as logits
+  participant E as exp
+  participant S as sum
+  participant D as divide
+  Z->>E: 12.0 - above the float16 ceiling
+  E->>S: inf
+  S->>D: inf
+  D-->>Z: nan - and no warning was raised
+  Note over Z,D: now with the shift, a equals max z
+  Z->>E: 12.0 minus 12.0 equals 0
+  E->>S: 1.0 - the largest term is exactly one
+  S->>D: 1.0499
+  D-->>Z: 0.9525 - finite, every time
+    </div>
+    <figcaption>Where the two routes part company. The naive route fails at the very first exponential, before any summation, and every later step faithfully propagates the damage. <b>Nothing raises an exception and nothing reaches the console: you get a loss of not-a-number several layers downstream and have to trace it back.</b></figcaption>
+  </figure>
+
+  <h2>4. The shift, and what it hands you for free</h2>
+
+  <p>Section 2 says you may subtract any constant from every logit. Choose the largest one.</p>
+
+  <div class="math">
+    LSE(z) = log &sum;<sub>j</sub> e<sup>z<sub>j</sub></sup> = a + log &sum;<sub>j</sub> e<sup>z<sub>j</sub> &minus; a</sup>, &nbsp; a = max<sub>j</sub> z<sub>j</sub>
+    <span class="gloss">Read as: the log-sum-exp of a vector equals the largest entry plus the
+    log-sum-exp of the vector with that largest entry subtracted from everything. After the
+    subtraction the biggest exponent is exactly zero, so <i>e</i> to it is exactly 1: nothing can
+    overflow, and at least one term in the sum is 1, so the sum cannot underflow to zero either.</span>
+  </div>
+
+  <p>Now the loss. Lesson 181 showed that with a one-hot label the cross-entropy is &minus;log of the true class's probability. Write that out with the definition of softmax and the logarithm splits.</p>
+
+  <div class="math">
+    &minus;log softmax(z)<sub>y</sub> = &minus;z<sub>y</sub> + LSE(z)
+    <span class="gloss">Read as: the loss for a single example is minus the logit of the true class,
+    plus the log-sum-exp of the whole logit vector. No probability is ever formed, so nothing can
+    underflow to zero and no logarithm is ever handed a zero. <i>y</i> is the index of the true class.</span>
+  </div>
+
+  <p>Now differentiate, and watch what happens.</p>
+
+  <ol class="worked">
+    <li><b>Differentiate the log-sum-exp.</b> The outer function is a logarithm, so the chain rule gives one over the sum, times the derivative of the sum.</li>
+    <li><b>Differentiate the sum.</b> Only the <i>j</i>-th term contains <i>z<sub>j</sub></i>, and its derivative is <i>e</i><sup><i>z<sub>j</sub></i></sup>.</li>
+    <li><b>Put them together.</b> &part;LSE/&part;z<sub>j</sub> = e<sup>z<sub>j</sub></sup> / &sum;<sub>m</sub> e<sup>z<sub>m</sub></sup>, which is softmax(z)<sub>j</sub>. <b>This is the step that does the real work, and it does nothing clever</b>: the denominator of the softmax is the very sum the logarithm was taken of, so the softmax falls out of "one over <i>u</i>, times d<i>u</i>" and nothing else happens.</li>
+    <li><b>Add the other term.</b> &minus;z<sub>y</sub> differentiates to &minus;1 when <i>j</i> = <i>y</i> and 0 otherwise.</li>
+  </ol>
+
+  <div class="math">
+    &part;L / &part;z<sub>j</sub> = softmax(z)<sub>j</sub> &minus; 1[j = y] &nbsp;&nbsp; which is &nbsp; <b>p &minus; y</b>
+    <span class="gloss">Read as: the derivative of the loss with respect to the <i>j</i>-th logit is
+    the predicted probability of class <i>j</i>, minus 1 if <i>j</i> is the true class and minus 0 if
+    it is not. Written as vectors that is the prediction minus the one-hot label. The bracket
+    1[<i>j</i> = <i>y</i>] is an indicator: it is 1 when the condition holds and 0 otherwise.</span>
+  </div>
+
+  <p>Two checks make this trustworthy rather than memorable. The gradient sums to zero over <i>j</i>, because the probabilities sum to one and so does the one-hot label. <b>It must:</b> section 2 says the loss cannot see a constant added to the whole vector, so it can have no slope in that direction. And the program checks both derivatives against central differences, with a largest disagreement of 1.6 &times; 10<sup>&minus;9</sup> over twelve rows.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  L["LSE(z)"] -->|"differentiate"| S["softmax(z)"]
+  S -->|"is the model output"| P["the loss&lt;br/&gt;minus z_y plus LSE(z)"]
+  L -->|"is inside"| P
+  P -->|"differentiate"| G["p minus y"]
+  G -->|"one term per class"| S
+    </div>
+    <figcaption>The same three objects, drawn as the cycle they form. Log-sum-exp differentiates into the softmax; the softmax is the model's output; the loss is built from both; and differentiating the loss returns the softmax with a single 1 subtracted. <b>The famous gradient is not a special case anybody had to derive separately: it is what falls out when the log in the loss meets the exp in the softmax.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    One rewrite that looks equivalent and is not. Computing softmax as
+    exp(z<sub>j</sub> &minus; LSE(z)), which removes the division, is used by SciPy 1.4.1 and by the
+    code accompanying a well-known textbook. Blanchard, Higham and Higham conclude that this
+    division-free variant "can suffer from loss of accuracy". The <b>shifted</b> forms are fine and
+    they measure them to be so. That one specific rearrangement is not.
+  </div>
+
+  <h2>5. Worked: the same loss twice, then the cliff</h2>
+
+  <ol class="worked">
+    <li><b>Take three logits.</b> z = 2.0, 1.0, 0.1, and the true class is the first.</li>
+    <li><b>The naive route.</b> exp gives 7.3891, 2.7183, 1.1052; the sum is 11.2126; the probabilities are 0.6590, 0.2424, 0.0986; the loss is &minus;ln 0.6590 = 0.4170 nats.</li>
+    <li><b>The stable route, shift.</b> a = 2.0, so the shifted logits are 0, &minus;1.0, &minus;1.9.</li>
+    <li><b>Exponentiate and sum.</b> 1 + 0.3679 + 0.1496 = 1.5175.</li>
+    <li><b>Finish.</b> LSE = 2.0 + ln 1.5175 = 2.4170, and the loss is &minus;z<sub>y</sub> + LSE = &minus;2.0 + 2.4170 = <b>0.4170 nats</b>. The same number, and no probability was formed.</li>
+    <li><b>Sanity check.</b> LSE always lies between the largest logit and the largest logit plus ln <i>k</i>. Here that is 2.0 to 2.0 + ln 3 = 3.0986, and 2.4170 sits inside. If your LSE came out below the largest logit you subtracted the shift and forgot to add it back, which is the single most common bug in a hand-written implementation.</li>
+    <li><b>What changes if</b> the logits are 800, 801, 802? The naive route overflows even in float64 and returns not-a-number. The stable route gives LSE = 802.4170 and, for the third class, a loss of 0.4170 again. <b>Identical, because only the gaps ever mattered.</b></li>
+    <li><b>And the gradient, from the same numbers.</b> p &minus; y = 0.6590 &minus; 1, 0.2424, 0.0986 = &minus;0.3410, 0.2424, 0.0986, which sums to zero as it must. Reading it: push the true class's logit up, push the other two down, each in proportion to how much probability it wrongly held.</li>
+  </ol>
+
+  <h2>6. Temperature, and what it cannot do</h2>
+
+  <p>Divide the logits by a positive number <i>T</i> before the softmax. Large <i>T</i> shrinks the gaps and flattens the distribution; small <i>T</i> stretches them and sharpens it. Hinton, Vinyals and Dean introduce it in exactly this form for distilling one model into another, and note that gradients scale as 1/<i>T</i><sup>2</sup>, so a mixed objective has to multiply by <i>T</i><sup>2</sup> to keep its two halves in balance.</p>
+
+  <p>Run on one real row of logits, 7.743, 10.645, 7.880, 5.881 and 8.957:</p>
+
+  <div class="code-cap">code/0184-softmax-log-sum-exp.py &middot; NumPy and Pandas only &middot; <a href="../code/0184-softmax-log-sum-exp.py">download</a></div>
+<pre><code>T = 0.25   [9.08e-06  9.9881e-01  1.58e-05  5.31e-09  1.1688e-03]   argmax 1
+T = 1.00   [0.0419    0.7625      0.0481    0.0065    0.1410    ]   argmax 1
+T = 5.00   [0.1730    0.3092      0.1779    0.1193    0.2206    ]   argmax 1
+</code></pre>
+
+  <p><b>The argmax never moves.</b> Dividing every logit by the same positive number preserves their order, so no temperature can change which class wins. Temperature changes how confident the model sounds and never what it decides, which is worth knowing before you reach for it to fix a calibration problem: it can only rescale a curve like the one on lesson 181, not bend it.</p>
+
+  <h2>Check yourself</h2>
+
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Softmax is best described as a smooth version of which function?</div>
+      <button class="q-opt">The maximum, which is what the name says it is a softening of</button>
+      <button class="q-opt">The logistic sigmoid, generalised from two classes up to k</button>
+      <button class="q-opt">The argmax, since it returns a vector and not a single number</button>
+      <button class="q-opt">Normalising by the sum, made positive by the exponential first</button>
+      <div class="q-fb">Argmax returns which entry wins, as a one-hot vector, and softmax is a
+        differentiable version of that. The first option is what the name suggests and it is wrong:
+        the soft version of max is softmax(z) dotted with z, a scalar. The second is a true statement
+        about the relationship between the two functions but it does not answer which function is
+        being softened. The fourth describes what the code does and skips what the function means.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does every implementation subtract max(z) before exponentiating?</div>
+      <button class="q-opt">So the largest exponent is zero, which no format can overflow</button>
+      <button class="q-opt">So that the resulting probabilities are guaranteed to sum to one</button>
+      <button class="q-opt">To centre the logits, which makes the gradient better behaved</button>
+      <button class="q-opt">Because the exponential is far cheaper on a negative argument</button>
+      <div class="q-fb">After the shift the biggest exponent is exactly 0, so its exponential is 1 and
+        nothing can overflow, while at least one term equals 1 so the sum cannot underflow to zero.
+        The second option describes something the division already guarantees with or without the
+        shift. The third borrows an idea from feature preprocessing that does not apply, because
+        section 2 shows the gradient is unchanged by any shift. The fourth is not true of any
+        implementation.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 12 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A model produces logits 12.0, 9.0 and 3.0, and the computation is running in float16, where the
+      exponential overflows above about 11.09. The true class is the first.</p>
+      <p><b>Find</b> what the naive route returns and at which step it first fails; then the loss computed
+      the stable way; then the gradient with respect to all three logits, checking that it sums to zero.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Work out <i>e</i><sup>12</sup> before you look at anything else, and compare it with float16's
+      largest finite value of 65,504.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The first exponential.</b> <i>e</i><sup>12</sup> = 162,754, above float16's largest finite value of 65,504, so it becomes infinity <b>at the very first step</b>, before any summation.</li>
+        <li><b>What follows.</b> The denominator becomes infinity, the division gives not-a-number, and the loss is not-a-number. Nothing raised an error along the way.</li>
+        <li><b>Now the shift.</b> a = 12.0, so the shifted logits are 0, &minus;3, &minus;9.</li>
+        <li><b>Exponentiate.</b> 1, then <i>e</i><sup>&minus;3</sup> = 0.049787, then <i>e</i><sup>&minus;9</sup> = 0.00012341.</li>
+        <li><b>Sum and take the log.</b> 1.049910, and ln 1.049910 = 0.048703.</li>
+        <li><b>The loss.</b> LSE = 12.0 + 0.048703 = 12.048703, so the loss is &minus;12.0 + 12.048703 = <b>0.048703 nats</b>.</li>
+        <li><b>The probabilities.</b> Divide each shifted exponential by 1.049910: p = 0.952465, 0.047420, 0.000118.</li>
+        <li><b>The gradient.</b> p &minus; y = &minus;0.047535, 0.047420, 0.000118. The sum is 0.000003, zero to rounding.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The loss must be small and positive, because the model put
+      95 per cent on the right class. If it came out above ln 3 = 1.0986 the model would be doing worse
+      than a uniform guess over three classes, which these logits cannot produce. And the gradient must
+      sum to zero: if yours does not, you have almost certainly forgotten to subtract the 1 from the
+      true class's entry.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If section 4 did not land, ask an agent to compute the
+    loss for the logits in section 5 by finite differences: nudge one logit by 0.000001, recompute the
+    loss, divide by the nudge, and compare against p minus y. Watching the two agree to nine decimal
+    places is worth more than reading the derivation twice.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Blanchard, D. J. Higham and N. J. Higham, <a href="https://webhomes.maths.ed.ac.uk/~dhigham/Publications/P149.pdf"><i>Accurately computing the log-sum-exp and softmax functions</i></a>. Twenty pages of rounding-error analysis on the one function every classifier calls, and the source of both the precision table in section 3 and the warning in section 4.</p>
+
+  <div class="pager">
+    <a href="0183-mutual-information.html"><span class="dir">&larr; Previous</span><span class="ttl">Mutual information sees dependence correlation cannot</span></a>
+    <a class="nxt" href="0185-distance-metrics.html"><span class="dir">Next &rarr;</span><span class="ttl">Distance and similarity metrics</span></a>
+  </div>
+
+  <footer><p>Mathematics for Machine Learning and Data Science &middot; Lesson 184 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
