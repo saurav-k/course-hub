@@ -12,7 +12,7 @@ every one against a finite-difference derivative rather than asserting it:
 
 Then the payoff: identity 5 set to zero gives the normal equations, which the
 linear algebra module reached by dropping a perpendicular. Two disjoint routes,
-one answer, checked against each other on eight thousand real rows.
+one answer, checked against each other on twelve thousand real rows.
 
 Layout convention, held everywhere in this course: a gradient has the shape of
 the thing you differentiate by. d(scalar)/dx for a column x is a column.
@@ -121,6 +121,7 @@ def main() -> None:
 
     print("\nthe payoff: identity 5, set to zero, is the normal equations")
     frame = load()
+    print(f"  loaded sensors.csv: {len(frame)} rows, {len(FEATURES) + 1} parameters")
     xd = np.hstack([np.ones((len(frame), 1)), frame[FEATURES].to_numpy(dtype=float)])
     yd = frame[TARGET].to_numpy(dtype=float)
 
