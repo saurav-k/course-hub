@@ -235,6 +235,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "A long chain of Jacobians: what backprop costs, and how the signal decays",
           "href": "lessons/0087-a-long-chain-of-jacobians.html"
+        },
+        {
+          "title": "Curvature is the second derivative, and the Hessian holds it for every direction at once",
+          "href": "lessons/0088-curvature-and-the-hessian.html"
         }
       ]
     },
