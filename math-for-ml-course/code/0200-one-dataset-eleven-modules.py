@@ -1,30 +1,29 @@
 """M11 Capstone, part 1: the summaries this course already computed for sessions.csv.
 
-Reproduces every number stated on lessons/1101-one-dataset-eleven-modules.html.
+Reproduces every number stated on lessons/0200-one-dataset-eleven-modules.html.
 Needs numpy and pandas only. Runs unchanged in a codebase, in Jupyter and in Colab.
 
-    python3 1101-one-dataset-eleven-modules.py
+    python3 0200-one-dataset-eleven-modules.py
 
 Each quantity is computed twice, once from the definition and once the library way,
 and the two are asserted equal. The point is to see the arithmetic, not to call an API.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 
-LOCAL = "../datasets/sessions.csv"
-REMOTE = (
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = (
     "https://raw.githubusercontent.com/saurav-k/course-hub/main/"
     "math-for-ml-course/datasets/sessions.csv"
 )
 
 
 def load() -> pd.DataFrame:
-    """Read the committed dataset from disk, falling back to the published copy."""
-    try:
-        return pd.read_csv(LOCAL)
-    except (FileNotFoundError, OSError):
-        return pd.read_csv(REMOTE)
+    """The committed dataset, with a URL fallback so pasting into Colab works."""
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 
 
 def mean_from_definition(values: np.ndarray) -> float:

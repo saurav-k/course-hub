@@ -1,27 +1,27 @@
 """M11 Capstone, part 2: the same fit by normal equations and by gradient descent.
 
-Reproduces every number on lessons/1102-three-routes-same-coefficients.html, including
+Reproduces every number on lessons/0201-three-routes-same-coefficients.html, including
 the divergence of descent on raw columns and the condition numbers that predict it.
 Needs numpy and pandas only.
 
-    python3 1102-three-routes-same-coefficients.py
+    python3 0201-three-routes-same-coefficients.py
 """
+
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-LOCAL = "../datasets/sessions.csv"
-REMOTE = (
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = (
     "https://raw.githubusercontent.com/saurav-k/course-hub/main/"
     "math-for-ml-course/datasets/sessions.csv"
 )
 
 
 def load() -> pd.DataFrame:
-    try:
-        return pd.read_csv(LOCAL)
-    except (FileNotFoundError, OSError):
-        return pd.read_csv(REMOTE)
+    """The committed dataset, with a URL fallback so pasting into Colab works."""
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
 
 
 def fit_by_normal_equations(x: np.ndarray, y: np.ndarray) -> tuple[float, float]:

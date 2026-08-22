@@ -1,9 +1,9 @@
-# 1103 - What a fitted coefficient is worth
+# 0202 - What a fitted coefficient is worth
 
 **Module** M11 Capstone: regression, end to end · Part 3 of 3 · the course's last page
 **Rung** frontier · **Owner** mlm-sfml-notes-r11 · **Issue** #54
 
-> Provisional number. See 1101.
+> Provisional number. See 0200.
 
 ## Prerequisites, by number
 
@@ -18,7 +18,7 @@ twenty thousand, and the number that tells them apart is the standard error.
 ## Boundary
 
 M09 owns the error model, the sampling distributions, `sigma-hat^2 = SSE/(n-2)`, the
-t-test and the intervals. This page applies them once, to the fit page 1102 produced,
+t-test and the intervals. This page applies them once, to the fit page 0201 produced,
 and reads the answer.
 
 ## Beats

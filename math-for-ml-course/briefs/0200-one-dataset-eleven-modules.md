@@ -1,10 +1,9 @@
-# 1101 - One dataset, eleven modules
+# 0200 - One dataset, eleven modules
 
 **Module** M11 Capstone: regression, end to end · Part 1 of 3
 **Rung** frontier · **Owner** mlm-sfml-notes-r11 · **Issue** #54
 
-> Page numbers 1101-1103 are PROVISIONAL, claimed from the M11 tail of the teaching
-> order. The scaffold (#41) owns final numbering; renumber all three together.
+> Page numbers 0200-0202, from the definitive block table on issue #42: M11 owns 0200-0219.
 
 ## Prerequisites, by number
 
