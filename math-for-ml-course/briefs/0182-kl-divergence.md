@@ -1,4 +1,4 @@
-# 0202 - KL divergence
+# 0182 - KL divergence
 
 **Module** M10 - lesson 03  **Rung** working  **Class** core
 
@@ -9,22 +9,22 @@ number is directional, so the direction you pick decides what your fitted model 
 
 ## Prerequisites
 
-0200 (entropy), 0201 (cross-entropy). M05 for convexity as a picture; this page uses Jensen's
+0180 (entropy), 0181 (cross-entropy). M05 for convexity as a picture; this page uses Jensen's
 inequality and states it rather than proving it, because M06 owns convexity.
 
 ## Beats, in order
 
 1. **One-minute version.** `KL(p||q) = H(p,q) - H(p)`. Zero only when `p = q`. Never negative.
    Not symmetric. Infinite when `q` rules out something `p` allows.
-2. **Orientation figure.** 0201's "what you pay" minus 0200's "what you must pay" into "this page:
-   the excess", into 0203 (mutual information) and the KL term in an RLHF objective.
+2. **Orientation figure.** 0181's "what you pay" minus 0180's "what you must pay" into "this page:
+   the excess", into 0183 (mutual information) and the KL term in an RLHF objective.
 3. **Mechanism by subtraction, not by definition.** Write `H(p,q)`, write `H(p)`, subtract, and the
    log ratio falls out. Deriving it this way means the reader never has to accept a new formula.
 4. **Non-negativity, picture first.** The chord-above-the-curve figure for `-log`, then the algebra.
    **Named theorem: Gibbs' inequality.** This is the module's central proof; see below.
 5. **Why "distance" is the wrong word**, as four separate failures, one line each: not symmetric;
    fails the triangle inequality; infinite on a single ruled-out outcome; and the units are bits,
-   not length. Page 0205 owns the metric axioms and this page hands it the four failures.
+   not length. Page 0185 owns the metric axioms and this page hands it the four failures.
 6. **The asymmetry with its consequence.** Forward `KL(p||q)` punishes `q` for being small where
    `p` is large, so it is mean-seeking and smears across modes. Reverse `KL(q||p)` punishes `q` for
    being large where `p` is small, so it is mode-seeking and picks one. Numbers below.
@@ -134,7 +134,7 @@ If you got a negative total, check that both vectors sum to exactly 1.
 
 ## Code and dataset plan
 
-`code/0202-kl-divergence.py` against `m10_classifier.csv` and `m10_signals.csv`. Computes KL from
+`code/0182-kl-divergence.py` against `m10_classifier.csv` and `m10_signals.csv`. Computes KL from
 the definition and again as `H(p,q) - H(p)`; **tests Gibbs' inequality over 10,000 random Dirichlet
 pairs** and reports the smallest value seen (0.006997 bits, never negative); measures the asymmetry
 (0.060771 against 0.071421 bits, ratio 1.1753); demonstrates the infinity; and **grid-searches the

@@ -1,4 +1,4 @@
-# 0203 - Mutual information
+# 0183 - Mutual information
 
 **Module** M10 - lesson 04  **Rung** working  **Class** core
 
@@ -10,15 +10,15 @@ correlation of zero can say.
 
 ## Prerequisites
 
-0202 (KL). M07 for independence and joint distributions. M08 for covariance and correlation, so
+0182 (KL). M07 for independence and joint distributions. M08 for covariance and correlation, so
 the contrast in beat 5 lands.
 
 ## Beats, in order
 
 1. **One-minute version.** `I(X;Y) = KL(p(x,y) || p(x)p(y))`. It equals `H(Y) - H(Y|X)`. It is zero
    if and only if the two are independent. Correlation zero does not say that.
-2. **Orientation figure.** 0202's "KL between any two distributions" into "this page: KL between
-   the joint and the product of the marginals" into 0209 (a decision tree split) and 0206 (the PMI
+2. **Orientation figure.** 0182's "KL between any two distributions" into "this page: KL between
+   the joint and the product of the marginals" into 0189 (a decision tree split) and 0186 (the PMI
    matrix behind word embeddings).
 3. **Mental model: the two-circle overlap.** `H(X)`, `H(Y)`, overlap `I(X;Y)`, union `H(X,Y)`.
    Draw it, then immediately say what the picture does not survive: the analogous three-variable
@@ -26,7 +26,7 @@ the contrast in beat 5 lands.
 4. **Mechanism, three forms.** `I = H(X) - H(X|Y) = H(Y) - H(Y|X) = H(X) + H(Y) - H(X,Y)`. Shannon
    writes the same three identities for his "rate of transmission" on page 21 of the 1948 paper, so
    these are his, not a modern repackaging. **Named theorem, see proof.**
-5. **Non-negativity comes free**, because it is a KL: 0202 already proved it. **One-way cross-link,
+5. **Non-negativity comes free**, because it is a KL: 0182 already proved it. **One-way cross-link,
    allowed by captain update 3 and genuinely useful here:**
    `../../statistical-foundations-ml-course/lessons/0007-leading-indicators-and-correlation.html`
    teaches correlation as a diagnostic and its traps; this page is where the reader learns what
@@ -35,7 +35,7 @@ the contrast in beat 5 lands.
    thing correlation cannot do.** `Y = X^2` with `X` symmetric about zero is the standing
    counterexample and the worked example below.
 6. **Pointwise mutual information**, `PMI(x,y) = log2 (p(x,y) / (p(x)p(y)))`, with the note that
-   PMI can be negative while its expectation under the joint cannot. Page 0206 needs this definition.
+   PMI can be negative while its expectation under the joint cannot. Page 0186 needs this definition.
 7. **Trade-off, same section, and it is severe.** Mutual information is hard to estimate.
    McAllester and Stratos prove that any distribution-free high-confidence lower bound from `N`
    samples cannot exceed `2 ln N + 5`. With `N = 128` that ceiling is about 14.7 nats however much
@@ -61,7 +61,7 @@ KL(p(x,y) || p(x)p(y)) = sum_{x,y} p(x,y) log2 ( p(x,y) / (p(x) p(y)) )
 
 The second and third sums collapse because summing `p(x,y)` over `y` gives `p(x)`, so
 `sum_{x,y} p(x,y) log2 p(x) = sum_x p(x) log2 p(x) = -H(X)`, and symmetrically for `y`. That gives
-the third form. For the second, substitute the chain rule `H(X,Y) = H(X) + H(Y|X)`, which page 0200
+the third form. For the second, substitute the chain rule `H(X,Y) = H(X) + H(Y|X)`, which page 0180
 established as Shannon's property 5:
 
 ```
@@ -73,7 +73,7 @@ depend on `y`, so summing the joint over `y` turns a double sum into a single on
 is what makes three apparently different quantities the same number.
 
 **Corollary.** `I(X;Y) >= 0`, with equality if and only if `X` and `Y` are independent. It is a KL,
-so Gibbs from 0202 applies directly, and the equality case of Gibbs says `p(x,y) = p(x)p(y)`
+so Gibbs from 0182 applies directly, and the equality case of Gibbs says `p(x,y) = p(x)p(y)`
 everywhere, which is exactly independence. **Consequence worth stating on the page:**
 `H(Y|X) <= H(Y)`. Conditioning never increases entropy on average. Shannon states it as
 "the uncertainty of `y` is never increased by knowledge of `x`".
@@ -133,14 +133,14 @@ computes to on this sample and what it is in the population, and why the two dif
 0.8464, **0.1245** bits. (c) Each value of `G` appears once, so knowing `G` determines the row and
 therefore `Y`: `H(Y|G) = 0` and `I(G;Y) = H(Y) = 0.9710` bits, the maximum possible. In the
 population it is exactly zero. The gap is plug-in estimation bias, it grows with the number of
-distinct values, and page 0209 shows the same effect wrecking a decision tree.
+distinct values, and page 0189 shows the same effect wrecking a decision tree.
 
 **`.p-check`.** `I(F;Y)` must be at most `min(H(F), H(Y))`. Here that is 0.9710, so anything above
 that is arithmetic gone wrong, not a discovery.
 
 ## Code and dataset plan
 
-`code/0203-mutual-information.py` against `m10_signals.csv`. Computes `I` all three ways and
+`code/0183-mutual-information.py` against `m10_signals.csv`. Computes `I` all three ways and
 asserts they agree to 1e-12 on every column; prints the PMI table; builds `Y = X^2` on 40,000
 samples and reports correlation `+0.000387` beside `I = 0.999993` bits; and sweeps the plug-in bias
 from 2 to 12,000 distinct values on a column independent by construction. Measured: `plan` 0.056819

@@ -1,4 +1,4 @@
-# 0205 - Distance and similarity metrics, and the metric axioms
+# 0185 - Distance and similarity metrics, and the metric axioms
 
 **Module** M10 - lesson 06  **Rung** working  **Class** core
 
@@ -13,7 +13,7 @@ M03 for norms and the unit ball of each, and for the dot product, the angle and 
 as geometry. **M03 owns the norm axioms** (a property of one vector); **this page owns the metric
 axioms** (a property of two points), which is an amendment to the spec's edge 5 that M03's brief
 and this one agree on. M04 for eigenvalues and the eigendecomposition of a symmetric matrix. M08
-for the covariance matrix and the multivariate Gaussian. 0202 for the four ways KL fails to be a
+for the covariance matrix and the multivariate Gaussian. 0182 for the four ways KL fails to be a
 distance, which this page's table finally files.
 
 ## Beats, in order
@@ -22,19 +22,19 @@ distance, which this page's table finally files.
    Mahalanobis answers "how far in units of the data's own spread". Scale decides between the first
    two; correlation decides whether you need the third.
 2. **Orientation figure.** M03's norms and angles into "this page: which one, and when each lies"
-   into 0206 (cosine in an embedding space), 0207 (kernels) and 0208 (what high dimension does to
+   into 0186 (cosine in an embedding space), 0187 (kernels) and 0188 (what high dimension does to
    all three).
 3. **The metric axioms**, which is what this page owns. A metric needs `d(x,y) = 0` if and only if
    `x = y`, symmetry, and the triangle inequality. Then immediately the table: Euclidean is a
    metric, standardised Euclidean is a metric, Mahalanobis is a metric, **cosine distance `1 - cos`
-   is not**, and **KL is not** in three separate ways. This is the page that files 0202's four
+   is not**, and **KL is not** in three separate ways. This is the page that files 0182's four
    failures under a heading.
 4. **Euclidean, and the units problem**, worked with real numbers below. One feature on a larger
    scale owns the distance. Standardisation is the answer and M02 owns the z-score.
 5. **Cosine, and what dropping the magnitude buys and costs.** The exact relation
    `|x_hat - y_hat|^2 = 2(1 - cos theta)` for length-one vectors, so **after normalisation cosine
    and Euclidean give the same ranking**, which is why vector databases normalise on ingest. Page
-   0206 develops the rest.
+   0186 develops the rest.
 6. **Mahalanobis, built rather than quoted.** `D^2 = (x - mu)' Sigma^-1 (x - mu)`, PRML eq 2.44,
    which reduces to Euclidean when `Sigma = I`. Then the geometric reading: **it is Euclidean
    distance after each principal direction has been divided by its standard deviation.**
@@ -47,7 +47,7 @@ distance, which this page's table finally files.
    link to M04 on conditioning.
 
 **Do not do here:** learned metrics, triplet loss, ANN index structures, the anisotropy material
-(0206 owns it).
+(0186 owns it).
 
 ## The stated proofs (D4)
 
@@ -164,7 +164,7 @@ eigenvalues instead of their square roots.
 
 ## Code and dataset plan
 
-`code/0205-distance-metrics.py` against `m10_signals.csv`. Computes all three distances for every
+`code/0185-distance-metrics.py` against `m10_signals.csv`. Computes all three distances for every
 row and shows the top-100 lists overlap by only 30 of 100 between raw and Mahalanobis; **verifies
 the whitening theorem to 5.2e-13 over 12,000 rows**; and **tests the three metric axioms on 20,000
 random triples**, finding a real triangle-inequality violation for cosine distance and none for
@@ -173,7 +173,7 @@ Euclidean or `sqrt(2-2cos)`.
 ## Sources, primary only
 
 - Bishop, *PRML* (2006) eq 2.44 and eq 2.50, for the definition and the eigen reading.
-- Aggarwal, Hinneburg and Keim, ICDT 2001, section 1, for the `L_k` family. Used mainly on 0208.
+- Aggarwal, Hinneburg and Keim, ICDT 2001, section 1, for the `L_k` family. Used mainly on 0188.
 - **Note for the writer.** Mahalanobis' own 1936 note in *PINSA* is a scan with no text layer at
   `insa.nic.in/writereaddata/UpLoadedFiles/PINSA/Vol02_1936_1_Art05.pdf`. Cite PRML for the
   definition and do not claim the original. Record it in `RESOURCES.md` under `## Gaps`.
