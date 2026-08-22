@@ -78,7 +78,7 @@ If `N` is a Poisson process with rate `lambda`, the time `T` to the first arriva
 
 ## Code and dataset
 
-`code/M07-13-poisson-and-exponential.py` against `datasets/requests.csv`.
+`code/0076-poisson-and-exponential.py` against `datasets/requests.csv`.
 
 Estimates the rate twice, from the mean gap and from the count per window, and asserts the two agree to two decimals. Computes the Poisson PMF from the definition with an explicit factorial and again by a stable recurrence, asserting agreement. Bins the arrivals into one-second windows and prints the empirical count distribution beside the theoretical one. Then tests memorylessness on the real gaps by conditioning and prints the pairs the page quotes. Finally it demonstrates the scale trap: samples with `rng.exponential(scale=1/lam)` and with `rng.exponential(scale=lam)` and prints both sample means so the factor of 5.3 is on screen.
 

@@ -46,7 +46,7 @@ No named theorem. The counting formula is a modelling assumption plus arithmetic
 
 ## Code and dataset
 
-`code/M07-03-equally-likely-outcomes.py` against `datasets/requests.csv`.
+`code/0066-equally-likely-outcomes.py` against `datasets/requests.csv`.
 
 Computes `P(route = rerank)` twice: once by counting matching rows and dividing, and once with `value_counts(normalize=True)`, asserting they agree. Then draws 200,000 random rows with `default_rng`, confirms the empirical draw frequency matches the row proportions, and prints the assumed-uniform answer beside the true one so the 3.3-times error is on screen. Also computes with-and-without-replacement pair probabilities and prints the difference.
 

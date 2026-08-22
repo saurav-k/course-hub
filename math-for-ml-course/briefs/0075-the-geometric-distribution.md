@@ -79,7 +79,7 @@ When you repeat a trial until it works, the number of trials is geometric, its m
 
 ## Code and dataset
 
-`code/M07-12-the-geometric-distribution.py` against `datasets/requests.csv`.
+`code/0075-the-geometric-distribution.py` against `datasets/requests.csv`.
 
 Computes the geometric PMF two ways: once from the definition as an explicit power times `p`, and once as the observed value counts of the `retries` column, printing them side by side. Asserts the fitted `1 / mean` recovers `p = 0.85` to two decimals. Then tests memorylessness directly on the column: computes `P(R > n + k | R > n)` for several `n` and `k` by filtering, and asserts each is within sampling tolerance of `P(R > k)`. Prints the tolerance it used and the count of rows behind each estimate, because the deep-tail estimates rest on very few rows and the program says so rather than pretending.
 

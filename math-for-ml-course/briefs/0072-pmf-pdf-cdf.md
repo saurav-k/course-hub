@@ -60,7 +60,7 @@ In words: the probability sitting exactly on a point is the size of the CDF's ju
 
 ## Code and dataset
 
-`code/M07-09-pmf-pdf-cdf.py` against `datasets/requests.csv`.
+`code/0072-pmf-pdf-cdf.py` against `datasets/requests.csv`.
 
 For `retries`, computes the PMF by counting and the CDF by cumulative sum, then recovers the PMF from the CDF by differencing and asserts it matches the original. For `latency_ms`, computes the empirical CDF two ways: once by sorting and taking rank over `n`, and once by counting rows at or below each of a grid of thresholds, asserting agreement. Prints `F(150)`, `F(180)`, `F(200)` and `F(300)` at 0.1360, 0.4807, 0.7414 and 0.9915, and the 0.99 quantile at 283.93, so the page can quote them.
 
