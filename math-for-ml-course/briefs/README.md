@@ -66,3 +66,62 @@ primary sources, and the `core` or `depth` label.
 Committed and verified. Three generators plus three datasets in `../datasets/`,
 twelve programs in `../code/`. Every number quoted in these briefs is that program's
 actual output, reproducible from the committed seed.
+
+---
+
+# M10 Information, similarity, and dimension briefs
+
+One brief per planned page, per issue #42. Briefs are markdown and live here rather than as stub
+pages, because `validate_site.py` requires every `lessons/*.html` to be a registered card and to
+appear in `outline.js`, and `widgets.md` requires a planned page to be plain text in a `.roadmap`
+and never a link. Together those mean a planned page can have **no file at all**. The deploy
+excludes `*.md` and the validator ignores it, and **no page ever links a brief**.
+
+## Page numbers here are PROVISIONAL
+
+The scaffold (#41) owns final numbering and had not landed when this module was written. Every
+number in this folder, in `../code/` and in `../lessons/` is a placeholder in the block
+**9001 to 9011**, chosen so that:
+
+- it cannot collide with any real four-digit number the register will assign, since the course plans
+  about 133 pages;
+- ascending file order still puts M10 last, which is where it belongs, so the tree is legal in the
+  meantime;
+- and the renumber is one scripted pass over file names, the eyebrow, the footer, the pager, the
+  code file names and the card hrefs.
+
+| Provisional | Slug | Class |
+|---|---|---|
+| 9001 | entropy | core |
+| 9002 | cross-entropy | core |
+| 9003 | kl-divergence | core |
+| 9004 | mutual-information | core |
+| 9005 | softmax-log-sum-exp | core |
+| 9006 | distance-metrics | core |
+| 9007 | cosine-similarity | depth |
+| 9008 | kernels | depth |
+| 9009 | curse-of-dimensionality | depth |
+| 9010 | information-gain | depth |
+| 9011 | perplexity | core |
+
+Teaching order is file order, and file order is a topological order of the prerequisite graph:
+9001 -> 9002 -> 9003 -> 9004 -> 9010, with 9005 needing 9002, 9011 needing 9001 and 9002, and the
+geometry arc 9006 -> 9007 -> 9008 -> 9009 needing only 9006 inside this module. No page needs a
+page that comes after it.
+
+## What every M10 page owes
+
+The house contract in `references/page-contracts.md`, plus this course's delta: an orientation
+figure that is this page's slice of the prerequisite graph; at least one hand-authored `svg.chart`;
+every symbol named in words; one worked example in eight parts with a sanity check and a
+"what changes if" line; **a stated proof for every named theorem (D4)**; a runnable NumPy/Pandas
+program against a committed dataset; two quizzes of which at least one tests a misconception; and
+at least one practice problem with a hint, a hidden solution and a `.p-check` line.
+
+## `statistical-foundations-ml-course` is frozen
+
+Per captain update 3. This module creates, modifies, renames and deletes **nothing** under that
+folder. One-way links out to its pages are allowed and one is planned, from 9004 to its
+`lessons/0007-leading-indicators-and-correlation.html`, because that page teaches correlation as a
+diagnostic and 9004 is where the reader learns what correlation cannot see. No reverse link, because
+that would edit a frozen file.
