@@ -21,7 +21,7 @@ numbers and the parameter is a fixed number. It either contains it or it does
 not. There is no 95 per cent left to attach to the one on your screen. Reading
 it that way is the fallacy this page exists to prevent.
 
-Datasets: nimbus-sessions.csv (converted) and nimbus-experiment.csv.
+Datasets: sessions.csv (converted) and experiment.csv.
 
 Needs numpy and pandas only.
 """
@@ -60,12 +60,12 @@ def wald_interval(k: int, n: int, z: float = Z95) -> tuple[float, float]:
 
 
 def main() -> None:
-    df = pd.read_csv(data("nimbus-sessions.csv"))
-    conv = df["converted"].to_numpy(int)
+    df = pd.read_csv(data("sessions.csv"))
+    conv = df["returning"].astype(int).to_numpy()
     p_true = float(conv.mean())
     rng = np.random.default_rng(SEED)
 
-    print(f"treat the column as the population: p = {p_true:.6f} over {conv.size:,} sessions\n")
+    print(f"treat the returning column as the population: p = {p_true:.6f} over {conv.size:,} sessions\n")
 
     print("1. THE GUARANTEE IS ABOUT THE RULE. 20 intervals from 20 fresh samples of 800:")
     misses = 0
@@ -91,13 +91,13 @@ def main() -> None:
     print("   The nominal level is 0.95 and the small-n rows fall short of it. That")
     print("   is the substitution of p_hat for p inside the standard error, and it")
     print("   bites hardest when n p is small, which is exactly the conversion-rate")
-    print("   case: at n = 50 and p near 0.055 most samples contain no conversions")
+    print("   case: at n = 50 and p near 0.055 a Wald interval on a small sample is unreliable")
     print("   at all, and an interval of zero width cannot cover anything.")
 
     print("\n3. WHERE THE WALD INTERVAL EMBARRASSES ITSELF")
     for k, n in ((0, 40), (1, 40), (3, 40)):
         lo, hi = wald_interval(k, n) if k else (0.0, 0.0)
-        print(f"   {k} conversions in {n}:  p_hat = {k / n:.4f}   interval [{lo:.5f}, {hi:.5f}]"
+        print(f"   {k} successes in {n}:  p_hat = {k / n:.4f}   interval [{lo:.5f}, {hi:.5f}]"
               f"   width {hi - lo:.5f}")
     print("   Zero successes gives the interval [0, 0]: perfect certainty from no")
     print("   evidence. Any honest procedure has to widen there, and this one cannot.")
@@ -114,7 +114,7 @@ def main() -> None:
     print("   is the n = 10 row, not the n = 200 row.")
 
     print("\n5. A REAL COMPARISON: two arms of the committed experiment")
-    exp = pd.read_csv(data("nimbus-experiment.csv"))
+    exp = pd.read_csv(data("experiment.csv"))
     table = exp.groupby("variant").converted.agg(["sum", "count"])
     for variant, row in table.iterrows():
         k, n = int(row["sum"]), int(row["count"])

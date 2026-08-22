@@ -29,7 +29,7 @@ also the posterior mean. For the Laplace prior they do not: the lasso is the
 mode and the posterior mean is not sparse at all. A page that says
 "regularization is Bayesian" without that sentence has overstated the result.
 
-Dataset: nimbus-features.csv - 4,000 rows, 30 predictors of which x01..x05
+Dataset: features.csv - 4,000 rows, 30 predictors of which x01..x05
 carry the true coefficients (4.0, -2.5, 1.5, -1.0, 0.6) and x06..x30 are noise
 with true coefficient 0. Noise standard deviation 3.0.
 
@@ -41,8 +41,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-features.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-features.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "features.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/features.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 TRUE_BETA = np.array([4.0, -2.5, 1.5, -1.0, 0.6])
 NOISE_SD = 3.0

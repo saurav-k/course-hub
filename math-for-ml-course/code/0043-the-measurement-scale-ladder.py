@@ -18,9 +18,11 @@ the rung allows and see whether your conclusion survives. If it does not, the
 statistic was not meaningful on that scale. The program applies exactly that
 test to each column, which is why it prints conclusions twice.
 
-Dataset: nimbus-sessions.csv, which carries one column of each rung:
-    region (nominal), plan and satisfaction (ordinal),
-    temp_c (interval), latency_ms and session_minutes (ratio).
+Dataset: population.csv, which carries one column of each rung on purpose:
+    `region` and `stratum` (nominal), `satisfaction` (ordinal),
+    `office_temp_c` (interval), `spend` (ratio).
+The interval column is the one the rest of the course does not have, and
+without it the rung cannot be demonstrated, only described.
 
 Needs numpy and pandas only.
 """
@@ -30,15 +32,15 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "population.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 PLAN_ORDER = ["free", "basic", "pro", "enterprise"]
 
 
 def main() -> None:
     df = pd.read_csv(DATA)
-    print(f"n = {len(df):,} sessions\n")
+    print(f"n = {len(df):,} population units\n")
     print(f"{'column':>18}  {'rung':>10}  {'what it licenses':>46}")
     for name, rung, note in (
         ("region", "nominal", "counts and the mode; no order, no arithmetic"),
@@ -52,7 +54,7 @@ def main() -> None:
 
     print("\n1. NOMINAL: region. The mode survives relabelling; a mean does not exist.")
     counts = df.region.value_counts()
-    print(f"   mode = {counts.index[0]} with {counts.iloc[0]:,} sessions")
+    print(f"   mode = {counts.index[0]} with {counts.iloc[0]:,} units")
     codes = {r: i for i, r in enumerate(sorted(df.region.unique()))}
     numeric = df.region.map(codes).to_numpy(float)
     relabel = {r: i for i, r in enumerate(sorted(df.region.unique(), reverse=True))}
@@ -73,8 +75,8 @@ def main() -> None:
     print("   ordinal scale promises that. Reporting a mean rating is a choice to")
     print("   assume interval spacing, and it should be a stated choice.")
 
-    print("\n3. INTERVAL: temp_c. Differences mean something, ratios do not.")
-    t = df.temp_c.to_numpy(float)
+    print("\n3. INTERVAL: office_temp_c. Differences mean something, ratios do not.")
+    t = df.office_temp_c.to_numpy(float)
     f = t * 9.0 / 5.0 + 32.0
     warm, cool = float(np.quantile(t, 0.99)), float(np.quantile(t, 0.01))
     print(f"   mean {t.mean():.3f} C = {t.mean() * 9 / 5 + 32:.3f} F   the mean converts correctly")
@@ -85,11 +87,11 @@ def main() -> None:
     print("   The two ratios disagree, and the conversion was legitimate, so the")
     print("   ratio was meaningless. 'Twice as warm' is not a fact about temperature.")
 
-    print("\n4. RATIO: latency_ms. The zero is real, so ratios survive.")
-    lat = df.latency_ms.to_numpy(float)
+    print("\n4. RATIO: spend. The zero is real, so ratios survive.")
+    lat = df.spend.to_numpy(float)
     p50, p99 = float(np.quantile(lat, 0.5)), float(np.quantile(lat, 0.99))
-    print(f"   p99 / p50 in milliseconds = {p99 / p50:.4f}")
-    print(f"   p99 / p50 in seconds      = {(p99 / 1000) / (p50 / 1000):.4f}")
+    print(f"   p99 / p50 in pounds = {p99 / p50:.4f}")
+    print(f"   p99 / p50 in pence  = {(p99 * 100) / (p50 * 100):.4f}")
     print("   Identical, because the only transformation a ratio scale allows is")
     print("   multiplication by a positive constant, and that cancels. 'The tail is")
     print(f"   {p99 / p50:.1f} times the median' is a sentence that means something.")

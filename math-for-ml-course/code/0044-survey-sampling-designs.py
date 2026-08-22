@@ -29,7 +29,7 @@ unit and usually less precise, because units inside a cluster resemble each
 other, so a cluster of size m carries less information than m independent
 units. The program measures that loss rather than describing it.
 
-Dataset: nimbus-population.csv. 30,000 units, four strata of deliberately
+Dataset: population.csv. 30,000 units, four strata of deliberately
 unequal size and spread, 600 clusters with within-cluster similarity built in.
 
 Needs numpy and pandas only.
@@ -40,8 +40,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-population.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-population.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "population.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/population.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SAMPLE_SIZE = 600
 TRIALS = 4000

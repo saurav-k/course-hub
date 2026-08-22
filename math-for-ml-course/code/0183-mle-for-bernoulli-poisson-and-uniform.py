@@ -34,7 +34,7 @@ independence, so M has density n t^(n-1)/theta^n. Then
 So the bias is -theta/(n+1), always negative: every observation is at most
 theta, so their maximum is too. Multiplying by (n+1)/n removes it exactly.  []
 
-Datasets: nimbus-sessions.csv (converted for Bernoulli, page_views for Poisson)
+Datasets: sessions.csv (converted for Bernoulli, page_views for Poisson)
 and simulated uniform draws, because no column in the course is uniform.
 
 Needs numpy and pandas only.
@@ -45,8 +45,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SEED = 20260822
 
@@ -63,32 +63,43 @@ def poisson_loglik_core(lam: float, total: int, n: int) -> float:
 def main() -> None:
     df = pd.read_csv(DATA)
 
-    print("1. BERNOULLI on the converted column")
-    conv = df["converted"].to_numpy(int)
+    print("1. BERNOULLI on the returning column")
+    conv = df["returning"].astype(int).to_numpy()
     k, n = int(conv.sum()), conv.size
-    print(f"   k = {k:,} conversions in n = {n:,} sessions")
+    print(f"   k = {k:,} returning visitors in n = {n:,} sessions")
     print(f"   p_hat = k/n = {k / n:.6f}")
     print(f"   {'candidate p':>14}  {'log-likelihood':>18}")
-    for p in (0.030, 0.045, k / n, 0.070, 0.090):
+    for p in (0.30, 0.38, k / n, 0.46, 0.52):
         mark = "   <- the MLE" if abs(p - k / n) < 1e-12 else ""
         print(f"   {p:>14.6f}  {bernoulli_loglik(p, k, n):>18.4f}{mark}")
     print("   The peak is at k/n, and the curve falls away either side of it.")
 
-    print("\n2. POISSON on the page_views column")
-    views = df["page_views"].to_numpy(int)
+    print("\n2. POISSON on the pages_viewed column, and the model is WRONG")
+    views = df["pages_viewed"].to_numpy(int)
     total, m = int(views.sum()), views.size
-    print(f"   sum = {total:,} over n = {m:,} sessions")
-    print(f"   lambda_hat = xbar = {total / m:.6f}   (the generator used 7.4)")
+    print(f"   sum = {total:,} page views over n = {m:,} sessions")
+    print(f"   lambda_hat = xbar = {total / m:.6f}")
+    var = float(views.var(ddof=1))
+    print(f"   BUT a Poisson has variance equal to its mean, and this column's")
+    print(f"   variance is {var:,.2f} against a mean of {total / m:.4f}, a ratio of {var / (total / m):.1f}.")
+    print("   The MLE returned a number, as it always will. The number is the best")
+    print("   Poisson fit to data that is not Poisson, and the overdispersion is the")
+    print("   bots. Maximum likelihood does not check your model for you.")
     print(f"   {'candidate lambda':>18}  {'log-likelihood (up to a constant)':>36}")
-    for lam in (6.8, 7.1, total / m, 7.7, 8.0):
+    for lam in (4.8, 5.4, total / m, 6.3, 7.0):
         mark = "   <- the MLE" if abs(lam - total / m) < 1e-12 else ""
         print(f"   {lam:>18.6f}  {poisson_loglik_core(lam, total, m):>36.4f}{mark}")
 
     print("\n3. UNIFORM on [0, theta], where the derivative method has nothing to do")
+    print("   screen_brightness IS Uniform(0, 100), so this is a real column.")
     rng = np.random.default_rng(SEED)
-    theta = 10.0
+    theta = 100.0
+    brightness = df["screen_brightness"].to_numpy(float)
+    print(f"   whole column, n = {brightness.size:,}: max = {brightness.max():.4f}")
+    print("   At this n the bias theta/(n+1) is smaller than the column's rounding,")
+    print("   so the estimator looks exact. Subsample to see the theorem work.")
     for n_draw in (6, 50, 500):
-        sample = rng.uniform(0.0, theta, size=n_draw)
+        sample = rng.choice(brightness, size=n_draw, replace=False)
         mle = float(sample.max())
         debiased = (n_draw + 1) / n_draw * mle
         print(f"   n = {n_draw:>4}:  max = {mle:.6f}   debiased (n+1)/n * max = {debiased:.6f}"
@@ -97,17 +108,17 @@ def main() -> None:
     print("\n   the bias, measured against the theorem")
     print(f"   {'n':>6}  {'E[max]':>12}  {'predicted n.theta/(n+1)':>25}  {'E[debiased]':>13}")
     for n_draw in (2, 6, 20, 100):
-        draws = rng.uniform(0.0, theta, size=(200_000, n_draw))
+        draws = rng.choice(brightness, size=(200_000, n_draw), replace=True)
         maxes = draws.max(axis=1)
         predicted = n_draw * theta / (n_draw + 1)
         print(f"   {n_draw:>6}  {maxes.mean():>12.6f}  {predicted:>25.6f}"
               f"  {((n_draw + 1) / n_draw * maxes).mean():>13.6f}")
-    print("   The MLE column sits on the prediction and is below 10 at every n.")
-    print("   The debiased column sits on 10. A maximum likelihood estimator is")
+    print("   The MLE column sits close to the prediction and is below 100 at every n.")
+    print("   The debiased column sits on 100. A maximum likelihood estimator is")
     print("   consistent, not unbiased, and this is the cleanest case of that.")
 
     print("\n   why calculus never appeared: the likelihood has a wall, not a peak")
-    sample = rng.uniform(0.0, theta, size=8)
+    sample = rng.choice(brightness, size=8, replace=False)
     biggest = float(sample.max())
     print(f"   a sample of 8 with max = {biggest:.4f}")
     print(f"   {'theta':>10}  {'L(theta) = theta^-8':>22}")

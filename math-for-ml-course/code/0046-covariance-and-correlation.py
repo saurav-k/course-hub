@@ -23,10 +23,11 @@ up a factor a.c and each square root in the denominator picks up |a| and |c|.
 With a, c > 0 the factors cancel exactly. Covariance keeps its factor a.c,
 which is why its magnitude has no interpretation on its own.  []
 
-Dataset: nimbus-sessions.csv, bytes_sent_kb against session_minutes, a pair
-built to correlate at about r = 0.79. The same pair is then recomputed in
-different units so the two theorems can be watched rather than believed, and
-page_views, which was built independent of both, is the contrast.
+Dataset: sessions.csv. `spend` is driven by `session_seconds` plus independent
+noise, so the pair correlates. `screen_brightness` was drawn independently of
+everything, so its correlation with the same column is near zero. Having a real
+correlation and a null one in the same table is what stops a reader learning
+that "r is always big".
 
 Needs numpy and pandas only.
 """
@@ -36,8 +37,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 def covariance_from_definition(x: np.ndarray, y: np.ndarray, ddof: int = 1) -> float:
     u, v = x - x.mean(), y - y.mean()
@@ -51,28 +52,29 @@ def correlation_from_definition(x: np.ndarray, y: np.ndarray) -> float:
 
 def main() -> None:
     df = pd.read_csv(DATA)
-    minutes = df["session_minutes"].to_numpy(float)
-    payload = df["bytes_sent_kb"].to_numpy(float)
-    views = df["page_views"].to_numpy(float)
+    minutes = df["session_seconds"].to_numpy(float)
+    payload = df["spend"].to_numpy(float)
+    views = df["screen_brightness"].to_numpy(float)
 
     print(f"n = {minutes.size:,} sessions")
-    print("session_minutes against bytes_sent_kb")
+    print("session_seconds against spend")
     print(f"  cov from definition {covariance_from_definition(minutes, payload):14.6f}"
-          f"   pandas {df.session_minutes.cov(df.bytes_sent_kb):14.6f}")
+          f"   pandas {df.session_seconds.cov(df.spend):14.6f}")
     print(f"  r   from definition {correlation_from_definition(minutes, payload):14.6f}"
-          f"   pandas {df.session_minutes.corr(df.bytes_sent_kb):14.6f}")
-    print("session_minutes against page_views, built independent")
+          f"   pandas {df.session_seconds.corr(df.spend):14.6f}")
+    print("session_seconds against screen_brightness, built independent")
     print(f"  cov from definition {covariance_from_definition(minutes, views):14.6f}")
     print(f"  r   from definition {correlation_from_definition(minutes, views):14.6f}")
     print("  note that the two covariances cannot be ranked against each other at all:")
-    print("  they are in minute-kilobytes and minute-views. Only the r column compares.")
+    print("  one is in second-pounds and the other in second-brightness-units.")
+    print("  Only the r column compares, and it says one pair is related and one is not.")
 
-    print("\nrescale: minutes -> seconds (a = 60), kilobytes -> megabytes (c = 1/1024), both shifted")
+    print("\nrescale: seconds -> minutes (a = 1/60), pounds -> pence (c = 100), both shifted")
     rows = [
-        ("minutes, kilobytes", 1.0, 0.0, 1.0, 0.0),
-        ("seconds, kilobytes", 60.0, 0.0, 1.0, 0.0),
-        ("seconds, megabytes", 60.0, 0.0, 1.0 / 1024.0, 0.0),
-        ("seconds + 30, MB + 5", 60.0, 30.0, 1.0 / 1024.0, 5.0),
+        ("seconds, pounds", 1.0, 0.0, 1.0, 0.0),
+        ("minutes, pounds", 1.0 / 60.0, 0.0, 1.0, 0.0),
+        ("minutes, pence", 1.0 / 60.0, 0.0, 100.0, 0.0),
+        ("minutes + 30, pence + 5", 1.0 / 60.0, 30.0, 100.0, 5.0),
     ]
     print(f"  {'units':>28}  {'covariance':>16}  {'correlation':>14}")
     for label, a, b, c, d in rows:
@@ -92,7 +94,7 @@ def main() -> None:
     print(f"  (sum u^2)(sum v^2)  = {rhs:.6e}")
     print(f"  ratio               = {lhs / rhs:.8f}   which is r^2 = {correlation_from_definition(minutes, payload) ** 2:.8f}")
     exact = 2.5 * minutes - 7.0
-    print(f"  r(minutes, 2.5*minutes - 7) = {correlation_from_definition(minutes, exact):.8f}"
+    print(f"  r(seconds, 2.5*seconds - 7) = {correlation_from_definition(minutes, exact):.8f}"
           "   collinear, so the bound is attained")
 
     print("\nand the warning the number cannot carry")

@@ -38,7 +38,7 @@ THE HONEST LIMITS, both ways.
     and model revision sit outside the updating formalism and are essential
     to it.
 
-Dataset: nimbus-experiment.csv and nimbus-sessions.csv.
+Dataset: experiment.csv and sessions.csv.
 
 Needs numpy and pandas only.
 """
@@ -80,11 +80,11 @@ def credible(rng: np.random.Generator, a: float, b: float) -> tuple[float, float
 
 def main() -> None:
     rng = np.random.default_rng(SEED)
-    exp = pd.read_csv(data("nimbus-experiment.csv"))
+    exp = pd.read_csv(data("experiment.csv"))
     t = exp.groupby("variant").converted.agg(["sum", "count"])
     k, n = int(t.loc["control", "sum"]), int(t.loc["control", "count"])
 
-    print(f"the control arm: {k} conversions in {n:,} sessions\n")
+    print(f"the control arm: {k} conversions in {n:,} assigned users\n")
 
     print("1. THE SAME DATA, BOTH WAYS")
     lo_f, hi_f = wald(k, n)

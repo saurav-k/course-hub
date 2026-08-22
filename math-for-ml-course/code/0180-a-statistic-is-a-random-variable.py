@@ -21,7 +21,7 @@ THE DISTINCTION THIS PAGE EXISTS FOR. The standard deviation describes the
 data. The standard error describes the estimate. They differ by sqrt(n), and
 putting the first on an error bar overstates uncertainty by that factor.
 
-Dataset: nimbus-sessions.csv. The column is treated as the population and
+Dataset: sessions.csv. The column is treated as the population and
 resampled, so the estimand is the column's own mean and variance.
 
 Needs numpy and pandas only.
@@ -32,8 +32,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SEED = 20260822
 TRIALS = 40_000
@@ -41,7 +41,7 @@ TRIALS = 40_000
 
 def main() -> None:
     df = pd.read_csv(DATA)
-    x = df["session_minutes"].to_numpy(float)
+    x = df["session_seconds"].to_numpy(float)
     mu, sigma = float(x.mean()), float(x.std(ddof=0))
     rng = np.random.default_rng(SEED)
 
@@ -80,8 +80,8 @@ def main() -> None:
           f"   'this estimate would move by about this much'")
     print(f"    the two differ by sqrt(n) = {np.sqrt(sample.size):.1f}")
 
-    print("\nthe same theorem for a proportion, on the converted column")
-    conv = df["converted"].to_numpy(float)
+    print("\nthe same theorem for a proportion, on the returning column")
+    conv = df["returning"].to_numpy(float)
     p = float(conv.mean())
     print(f"  population rate p = {p:.6f},  so p(1-p) = {p * (1 - p):.6f}")
     print(f"  {'n':>6}  {'E[p_hat]':>12}  {'sd of p_hat':>13}  {'predicted':>12}")

@@ -29,7 +29,7 @@ THE WORDING THAT MATTERS. When the test does not reject, the conclusion is
 null. That distinction is the difference between "we did not detect an effect"
 and "we showed there is none", and only the first is ever earned.
 
-Datasets: nimbus-experiment.csv, plus one worked pair of counts
+Datasets: experiment.csv, plus one worked pair of counts
 (A 300/1000, B 340/1000) taken from the sibling course
 statistical-foundations-ml-course, lesson 0005, which is a separate live
 course in this hub and is not modified by anything here.
@@ -43,8 +43,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-experiment.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-experiment.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "experiment.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/experiment.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SEED = 20260822
 

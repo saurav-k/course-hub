@@ -21,7 +21,7 @@ have a strictly smaller MSE, and shrinkage is exactly that trade. The program
 demonstrates it with a shrinkage estimator, which is ridge regression's idea
 stripped down to one number.
 
-Dataset: nimbus-sessions.csv, column session_minutes, treated as the
+Dataset: sessions.csv, column session_seconds, treated as the
 population so the truth is known.
 
 Needs numpy and pandas only.
@@ -32,8 +32,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SEED = 20260822
 TRIALS = 60_000
@@ -50,7 +50,7 @@ def report(name: str, estimates: np.ndarray, truth: float) -> tuple[float, float
 
 
 def main() -> None:
-    x = pd.read_csv(DATA)["session_minutes"].to_numpy(float)
+    x = pd.read_csv(DATA)["session_seconds"].to_numpy(float)
     mu = float(x.mean())
     rng = np.random.default_rng(SEED)
     draws = rng.choice(x, size=(TRIALS, SAMPLE_N), replace=True)

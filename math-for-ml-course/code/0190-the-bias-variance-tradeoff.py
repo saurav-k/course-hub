@@ -27,7 +27,7 @@ fit the training data exactly, test error can fall again. That is double
 descent, it is an active area, and a course should name it rather than resolve
 it.
 
-Dataset: nimbus-features.csv, whose true coefficients and noise level are
+Dataset: features.csv, whose true coefficients and noise level are
 known, so bias and variance can be measured against the truth rather than
 estimated.
 
@@ -39,8 +39,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-features.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-features.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "features.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/features.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 TRUE_BETA = np.array([4.0, -2.5, 1.5, -1.0, 0.6])
 NOISE_SD = 3.0

@@ -36,9 +36,13 @@ is much wider than a confidence band and does not shrink towards zero as n
 grows. Both are widest far from xbar, which is the mathematics telling you not
 to extrapolate.
 
-Dataset: nimbus-adspend.csv, generated as
-revenue_k = 12.5 + 3.20 * ad_spend_k + Normal(0, 8.0), so every estimate can be
-checked against the truth.
+Dataset: features.csv. We regress `y` on `x01` alone. The predictors are
+mutually independent, so the simple slope still estimates x01's true
+coefficient of 4.0 and the true intercept is 0. The residual variance is not
+the generator's 9.0: it is 9.0 plus what the other four real predictors
+contribute, which is 2.5^2 + 1.5^2 + 1.0^2 + 0.6^2 = 9.86, so about 18.86.
+That is worth noticing rather than hiding. In a simple regression, sigma^2 is
+"everything the model does not see", and here we know exactly what that is.
 
 Needs numpy and pandas only.
 """
@@ -49,13 +53,14 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-adspend.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-adspend.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "features.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/features.csv"
 DATA = LOCAL if LOCAL.exists() else URL
-TRUE_INTERCEPT, TRUE_SLOPE, TRUE_SIGMA = 12.5, 3.20, 8.0
+TRUE_INTERCEPT, TRUE_SLOPE = 0.0, 4.0
+TRUE_SIGMA = float(np.sqrt(3.0 ** 2 + 2.5 ** 2 + 1.5 ** 2 + 1.0 ** 2 + 0.6 ** 2))
 SEED = 20260822
 # Two-sided 0.975 t quantiles.
-T975 = {8: 2.306004, 18: 2.100922, 48: 2.010635, 198: 1.972017, 1998: 1.961151}
+T975 = {8: 2.306004, 18: 2.100922, 48: 2.010635, 198: 1.972017, 3998: 1.960637}
 
 
 def fit(x: np.ndarray, y: np.ndarray) -> dict[str, float]:
@@ -72,15 +77,15 @@ def fit(x: np.ndarray, y: np.ndarray) -> dict[str, float]:
 
 
 def main() -> None:
-    ads = pd.read_csv(DATA)
-    x = ads["ad_spend_k"].to_numpy(float)
-    y = ads["revenue_k"].to_numpy(float)
+    feats = pd.read_csv(DATA)
+    x = feats["x01"].to_numpy(float)
+    y = feats["y"].to_numpy(float)
     f = fit(x, y)
     n = int(f["n"])
-    tcrit = T975[1998]
+    tcrit = T975[3998]
 
-    print(f"n = {n:,} weeks.  truth: revenue = {TRUE_INTERCEPT} + {TRUE_SLOPE} * spend,"
-          f" sigma = {TRUE_SIGMA}\n")
+    print(f"n = {n:,} rows.  truth: y = {TRUE_INTERCEPT} + {TRUE_SLOPE} * x01 + everything else,")
+    print(f"  so the effective sigma for this simple regression is {TRUE_SIGMA:.4f}\n")
     print("1. THE FIT, AND THE THREE NUMBERS THAT MAKE IT AN ESTIMATE")
     print(f"   slope     B = {f['b']:.6f}     true beta  = {TRUE_SLOPE}")
     print(f"   intercept A = {f['a']:.6f}     true alpha = {TRUE_INTERCEPT}")
@@ -131,7 +136,7 @@ def main() -> None:
         ses.append(se_d)
         print(f"   [{lo_x:>5.1f}, {hi_x:>5.1f}]  {sxx_d:>12.4f}  {se_d:>10.6f}"
               f"  {ses[0] / se_d:>12.1f}x")
-    print(f"   Same number of weeks and the same noise, and the widest design is")
+    print(f"   Same number of rows and the same noise, and the widest design is")
     print(f"   {ses[0] / ses[-1]:.1f} times as precise on the slope as the narrowest, purely from")
     print("   choosing where to spend. S_xx is under your control in a way that")
     print("   sigma is not, and se(B) = sigma/sqrt(S_xx) is where that control acts.")

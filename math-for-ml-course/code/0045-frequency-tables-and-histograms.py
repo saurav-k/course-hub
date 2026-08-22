@@ -18,7 +18,7 @@ A frequency table is the same object as a histogram: class intervals, counts,
 relative frequencies, and the cumulative column that answers "what share is
 below this?" and is the empirical CDF evaluated at the bin edges.
 
-Dataset: nimbus-sessions.csv, column latency_ms.
+Dataset: sessions.csv, column session_seconds.
 
 Needs numpy and pandas only.
 """
@@ -28,8 +28,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 def sturges_bins(n: int) -> int:
     return int(np.ceil(np.log2(n)) + 1)
@@ -54,20 +54,20 @@ def frequency_table(x: np.ndarray, edges: np.ndarray) -> pd.DataFrame:
 
 def main() -> None:
     df = pd.read_csv(DATA)
-    x = df["latency_ms"].to_numpy(float)
+    x = df["session_seconds"].to_numpy(float)
     n = x.size
-    print(f"n = {n:,} sessions, column latency_ms")
+    print(f"n = {n:,} sessions, column session_seconds")
     print(f"  min {x.min():.1f}   max {x.max():.1f}   IQR {np.quantile(x, .75) - np.quantile(x, .25):.1f}\n")
 
     k_sturges = sturges_bins(n)
     h_fd = freedman_diaconis_width(x)
     print("what the two rules ask for")
     print(f"  Sturges           {k_sturges} bins over the full range"
-          f"  ->  width {(x.max() - x.min()) / k_sturges:9.1f} ms")
-    print(f"  Freedman-Diaconis width {h_fd:.2f} ms over the full range"
+          f"  ->  width {(x.max() - x.min()) / k_sturges:9.1f} s")
+    print(f"  Freedman-Diaconis width {h_fd:.2f} s over the full range"
           f"  ->  {int(np.ceil((x.max() - x.min()) / h_fd)):,} bins")
     print("  The gap is enormous, and it is the heavy tail that causes it: Sturges")
-    print("  spreads its 16 bins across a range set by one 10,839 ms outlier, so")
+    print("  spreads its 16 bins across a range set by one 10,839 s outlier, so")
     print("  almost every session lands in the first bin.")
 
     edges = np.linspace(x.min(), x.max(), k_sturges + 1)
@@ -81,7 +81,7 @@ def main() -> None:
     body = x[x <= cut]
     edges = np.arange(0.0, cut + h_fd, h_fd)
     table = frequency_table(body, edges)
-    print(f"\nFreedman-Diaconis width {h_fd:.2f} ms, over the body (to p99 = {cut:.1f} ms)")
+    print(f"\nFreedman-Diaconis width {h_fd:.2f} s, over the body (to p99 = {cut:.1f} s)")
     print(f"  {len(table)} class intervals covering {len(body):,} of {n:,} sessions")
     print(table.head(10).to_string(index=False))
     shown = table.head(10)
@@ -89,7 +89,7 @@ def main() -> None:
     print("  count column is still climbing, so the mode is further down the table.")
     reach = table.index[table["cumulative"] >= 0.5][0]
     print(f"  The cumulative column passes one half at interval {reach + 1} of {len(table)},"
-          f" [{table['from'].iloc[reach]:.0f}, {table['to'].iloc[reach]:.0f}) ms,")
+          f" [{table['from'].iloc[reach]:.0f}, {table['to'].iloc[reach]:.0f}) s,")
     print("  which is the median arriving as a row number. The shape is a single")
     print("  mode with a long right tail, and it was invisible under Sturges.")
 
@@ -98,10 +98,10 @@ def main() -> None:
         e = np.arange(0.0, cut + width, width)
         counts, _ = np.histogram(body, bins=e)
         peak = int(np.argmax(counts))
-        print(f"  width {width:>7.2f} ms -> {len(counts):>4} bins,"
-              f" modal interval [{e[peak]:.0f}, {e[peak + 1]:.0f}) ms,"
+        print(f"  width {width:>7.2f} s -> {len(counts):>4} bins,"
+              f" modal interval [{e[peak]:.0f}, {e[peak + 1]:.0f}) s,"
               f" holding {counts[peak] / counts.sum():.2%}")
-    print("  The modal interval moves with the width, so 'the most common latency'")
+    print("  The modal interval moves with the width, so 'the most common session length'")
     print("  is not a property of the data alone. Report the width, or report a")
     print("  quantile, which does not need one.")
 

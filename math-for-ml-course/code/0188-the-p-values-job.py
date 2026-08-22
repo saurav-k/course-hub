@@ -35,8 +35,9 @@ to chance. Not a measure of effect size. Not a measure of importance. A large
 p-value is not evidence for H0. These are the readings the program is built to
 make impossible to keep.
 
-Dataset: nimbus-sessions.csv, sliced into many meaningless subgroups so the
-multiplicity problem happens rather than being described.
+Dataset: population.csv, sliced into many meaningless subgroups so the
+multiplicity problem happens rather than being described. The label being
+tested is a coin flip, so every null in the family is true by construction.
 
 Needs numpy and pandas only.
 """
@@ -47,8 +48,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "population.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SEED = 20260822
 
@@ -108,18 +109,19 @@ def main() -> None:
 
     print("\n3. IT HAPPENS ON REAL DATA TOO: slice the sessions until something 'works'")
     df = pd.read_csv(DATA)
-    # Assign a meaningless coin-flip label. By construction it affects nothing.
-    df = df.assign(fake_arm=rng.integers(0, 2, size=len(df)))
+    # A meaningless coin-flip label, and a binary outcome it cannot possibly affect.
+    df = df.assign(fake_arm=rng.integers(0, 2, size=len(df)),
+                   high_spend=(df.spend > df.spend.median()).astype(int))
     slices = []
     for region in sorted(df.region.unique()):
-        for plan in sorted(df.plan.unique()):
-            sub = df[(df.region == region) & (df.plan == plan)]
+        for stratum in sorted(df.stratum.unique()):
+            sub = df[(df.region == region) & (df.stratum == stratum)]
             arm0, arm1 = sub[sub.fake_arm == 0], sub[sub.fake_arm == 1]
-            p = two_proportion_p(int(arm0.converted.sum()), len(arm0),
-                                 int(arm1.converted.sum()), len(arm1))
-            slices.append((f"{region}/{plan}", len(sub), p))
+            p = two_proportion_p(int(arm0.high_spend.sum()), len(arm0),
+                                 int(arm1.high_spend.sum()), len(arm1))
+            slices.append((f"{region}/{stratum}", len(sub), p))
     slices.sort(key=lambda r: r[2])
-    print(f"   {len(slices)} region-by-plan slices, split by a coin flip that changes nothing")
+    print(f"   {len(slices)} region-by-stratum slices, split by a coin flip that changes nothing")
     print(f"   {'slice':>22}  {'n':>7}  {'p-value':>9}")
     for name, size, p in slices[:5]:
         print(f"   {name:>22}  {size:>7,}  {p:>9.4f}")

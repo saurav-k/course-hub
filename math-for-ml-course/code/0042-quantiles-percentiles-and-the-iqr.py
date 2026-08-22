@@ -18,7 +18,7 @@ is linear interpolation between order statistics, which is what pandas uses
 too. The program prints two conventions so the reader sees that the choice is
 real and small, rather than discovering it later as a mystery.
 
-Dataset: nimbus-sessions.csv, column latency_ms.
+Dataset: sessions.csv, column session_seconds.
 
 Needs numpy and pandas only.
 """
@@ -28,8 +28,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-sessions.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-sessions.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "sessions.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/sessions.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 def quantile_lower(x: np.ndarray, q: float) -> float:
     """The 'lower' convention: the smallest order statistic at or past the cut."""
@@ -40,9 +40,9 @@ def quantile_lower(x: np.ndarray, q: float) -> float:
 
 def main() -> None:
     df = pd.read_csv(DATA)
-    x = df["latency_ms"].to_numpy(float)
+    x = df["session_seconds"].to_numpy(float)
     n = x.size
-    print(f"n = {n:,} sessions, column latency_ms\n")
+    print(f"n = {n:,} sessions, column session_seconds\n")
 
     print(f"{'q':>7}  {'linear (numpy default)':>23}  {'lower order statistic':>23}  {'gap':>8}")
     for q in (0.01, 0.25, 0.50, 0.75, 0.90, 0.95, 0.99, 0.999):
@@ -57,7 +57,7 @@ def main() -> None:
     lo_fence, hi_fence = q1 - 1.5 * iqr, q3 + 1.5 * iqr
     print("\nthe five-number summary and the box plot it draws")
     print(f"  min {x.min():.2f}   Q1 {q1:.2f}   median {q2:.2f}   Q3 {q3:.2f}   max {x.max():.2f}")
-    print(f"  IQR = Q3 - Q1 = {iqr:.2f} ms, the width of the middle half of the data")
+    print(f"  IQR = Q3 - Q1 = {iqr:.2f} s, the width of the middle half of the data")
     print(f"  fences at Q1 - 1.5*IQR = {lo_fence:.2f} and Q3 + 1.5*IQR = {hi_fence:.2f}")
     beyond = int((x > hi_fence).sum())
     print(f"  {beyond:,} sessions ({beyond / n:.2%}) sit beyond the upper fence")
@@ -70,17 +70,20 @@ def main() -> None:
     for factor in (1, 10, 100, 1000):
         bumped = x.copy()
         bumped[worst] = x[worst] * factor
-        print(f"  slowest session x{factor:<5}  mean {bumped.mean():>12.2f}"
+        print(f"  longest session x{factor:<5}  mean {bumped.mean():>12.2f}"
               f"   median {float(np.median(bumped)):>8.2f}"
               f"   p95 {float(np.quantile(bumped, 0.95)):>9.2f}")
     print("  The mean tracks the single value it was given. The median and the p95")
     print("  do not move at all, because no order relation at their cut changed.")
 
-    print("\nwhat a service-level objective is actually written in")
+    print("\nwhy a product report should quote a quantile, not the mean")
     for q in (0.50, 0.95, 0.99):
-        print(f"  p{int(q * 100):<3} = {float(np.quantile(x, q)):>9.2f} ms")
-    print(f"  mean = {x.mean():.2f} ms, which is above p{int((x < x.mean()).mean() * 100)}"
-          f" of sessions: {(x < x.mean()).mean():.2%} of requests are faster than 'the average'.")
+        print(f"  p{int(q * 100):<3} = {float(np.quantile(x, q)):>9.2f} s")
+    share = float((x < x.mean()).mean())
+    print(f"  mean = {x.mean():.2f} s, which sits at about the {int(share * 100)}th percentile:")
+    print(f"  {share:.2%} of sessions are SHORTER than 'the average session'. A number that")
+    print("  most of the data falls below is a poor description of a typical case, and")
+    print("  that is the everyday cost of a right-skewed column.")
 
 
 if __name__ == "__main__":

@@ -31,8 +31,13 @@ with it: the same argument on a Bernoulli likelihood gives log loss, which the
 program also shows. That is why a heavy-tailed target gets a different loss:
 the Gaussian assumption was doing work that the data does not support.
 
-Datasets: nimbus-adspend.csv (a known line and known noise) and
-nimbus-sessions.csv (the converted column, for the Bernoulli half).
+Dataset: features.csv, whose true coefficients and noise level are stated in
+its generator, so both halves can be checked against a known truth. The
+residuals against the TRUE coefficients are exactly the generated
+Normal(0, 3.0) noise, which is what makes section 1 checkable. Section 2
+regresses y on x01 alone: because the predictors are independent, the simple
+slope still estimates x01's true coefficient of 4.0, and the residual variance
+is then the noise plus everything the other four real predictors contribute.
 
 Needs numpy and pandas only.
 """
@@ -53,9 +58,11 @@ def data(name: str) -> str:
     """
     local = HERE / name
     return str(local) if local.exists() else f"{URL_BASE}/{name}"
-ADSPEND = data("nimbus-adspend.csv")
-SESSIONS = data("nimbus-sessions.csv")
-TRUE_INTERCEPT, TRUE_SLOPE, TRUE_SIGMA = 12.5, 3.20, 8.0
+FEATURES = data("features.csv")
+SESSIONS = data("sessions.csv")
+TRUE_BETA = (4.0, -2.5, 1.5, -1.0, 0.6)   # x01..x05 in features.csv
+TRUE_SIGMA = 3.0                          # the generated noise
+TRUE_SLOPE = TRUE_BETA[0]
 SEED = 20260822
 
 
@@ -65,14 +72,17 @@ def gaussian_loglik(residuals: np.ndarray, sigma2: float) -> float:
 
 
 def main() -> None:
-    ads = pd.read_csv(ADSPEND)
-    x = ads["ad_spend_k"].to_numpy(float)
-    y = ads["revenue_k"].to_numpy(float)
+    feats = pd.read_csv(FEATURES)
+    cols = [c for c in feats.columns if c.startswith("x")]
+    x_all = feats[cols].to_numpy(float)
+    y = feats["y"].to_numpy(float)
+    x = feats["x01"].to_numpy(float)
     n = x.size
 
     print("1. THE GAUSSIAN MLE FOR A MEAN, on the residuals of a known model")
-    truth = TRUE_INTERCEPT + TRUE_SLOPE * x
-    noise = y - truth
+    beta = np.zeros(len(cols))
+    beta[:len(TRUE_BETA)] = TRUE_BETA
+    noise = y - x_all @ beta
     print(f"   the true noise column, n = {n:,}, generated Normal(0, {TRUE_SIGMA}^2)")
     print(f"   mu_hat = mean            {noise.mean():>12.6f}   true mu    = 0")
     print(f"   sigma_hat^2 (divide n)   {float((noise ** 2).mean()):>12.6f}   true sigma^2 = {TRUE_SIGMA ** 2}")
@@ -92,8 +102,9 @@ def main() -> None:
     sxy = float(((x - x.mean()) * (y - y.mean())).sum())
     b_ls = sxy / sxx
     a_ls = float(y.mean() - b_ls * x.mean())
+    print(f"   regressing y on x01 alone")
     print(f"   least squares    a = {a_ls:.6f}   b = {b_ls:.6f}")
-    print(f"   the truth        a = {TRUE_INTERCEPT}         b = {TRUE_SLOPE}")
+    print(f"   the truth        a = 0.0              b = {TRUE_SLOPE}")
     print(f"\n   {'candidate b':>14}  {'sum of squared errors':>23}  {'log-likelihood':>18}")
     sigma2 = float(((y - a_ls - b_ls * x) ** 2).mean())
     for b in (b_ls - 0.05, b_ls - 0.01, b_ls, b_ls + 0.01, b_ls + 0.05):
@@ -106,10 +117,10 @@ def main() -> None:
     print("   largest at the same b, and they are the same computation with a sign.")
 
     print("\n3. THE SAME MOVE ON A BERNOULLI LIKELIHOOD GIVES LOG LOSS")
-    conv = pd.read_csv(SESSIONS)["converted"].to_numpy(float)
+    conv = pd.read_csv(SESSIONS)["returning"].astype(float).to_numpy()
     k, m = float(conv.sum()), conv.size
     print(f"   {'candidate p':>14}  {'mean negative log-likelihood':>30}  {'sklearn-style log loss':>24}")
-    for p in (0.030, 0.050, k / m, 0.070):
+    for p in (0.30, 0.38, k / m, 0.46):
         nll = -float(np.mean(conv * np.log(p) + (1 - conv) * np.log1p(-p)))
         # The same number, written the way a training loop writes it.
         logloss = -float(np.mean(conv * np.log(p) + (1 - conv) * np.log(1 - p)))

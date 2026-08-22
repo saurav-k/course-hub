@@ -27,7 +27,7 @@ spending it all at each one. O'Brien-Fleming makes early stopping demanding
 and late stopping close to the fixed-horizon threshold, which matches the
 intuition that stopping early should need stronger evidence.
 
-Dataset: nimbus-experiment.csv, which is under-powered on purpose (0.546).
+Dataset: experiment.csv, which is under-powered on purpose (0.546).
 
 Needs numpy and pandas only.
 """
@@ -38,8 +38,8 @@ import pathlib
 import numpy as np
 import pandas as pd
 
-LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "nimbus-experiment.csv"
-URL = "https://<hub>/math-for-ml-course/datasets/nimbus-experiment.csv"
+LOCAL = pathlib.Path(__file__).resolve().parent.parent / "datasets" / "experiment.csv"
+URL = "https://<hub>/math-for-ml-course/datasets/experiment.csv"
 DATA = LOCAL if LOCAL.exists() else URL
 SEED = 20260822
 Z_ALPHA2 = 1.959963985
