@@ -197,6 +197,72 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "07",
+      "title": "Probability",
+      "lessons": [
+        {
+          "title": "A probability means two different things, and the mathematics does not care",
+          "href": "lessons/0120-what-a-probability-is.html"
+        },
+        {
+          "title": "Three rules generate the whole subject, and the hard part is the set they talk about",
+          "href": "lessons/0121-the-axioms.html"
+        },
+        {
+          "title": "Counting outcomes and dividing is a model, and it is often the wrong one",
+          "href": "lessons/0122-equally-likely-outcomes.html"
+        },
+        {
+          "title": "Conditioning does not change the world, it changes what counts as everything",
+          "href": "lessons/0123-conditional-probability.html"
+        },
+        {
+          "title": "Independence is an equation, not a story about the world",
+          "href": "lessons/0124-independence.html"
+        },
+        {
+          "title": "Bayes' theorem is two lines of algebra, and it reverses the only bar that matters",
+          "href": "lessons/0125-bayes-theorem.html"
+        },
+        {
+          "title": "A detector that catches 92 percent of abuse can still be wrong three times in four",
+          "href": "lessons/0126-the-base-rate-trap.html"
+        },
+        {
+          "title": "A random variable is neither random nor a variable",
+          "href": "lessons/0127-random-variables.html"
+        },
+        {
+          "title": "One object, three descriptions, and a density is not a probability",
+          "href": "lessons/0128-pmf-pdf-cdf.html"
+        },
+        {
+          "title": "Three distributions that are one idea at three widths",
+          "href": "lessons/0129-bernoulli-binomial-categorical.html"
+        },
+        {
+          "title": "The flattest distribution there is, and the one that proves a density is not a probability",
+          "href": "lessons/0130-the-uniform-distribution.html"
+        },
+        {
+          "title": "The wait so far tells you nothing about the wait remaining",
+          "href": "lessons/0131-the-geometric-distribution.html"
+        },
+        {
+          "title": "Two distributions that are one process read two ways",
+          "href": "lessons/0132-poisson-and-exponential.html"
+        },
+        {
+          "title": "The default distribution, and the tail where it stops being true",
+          "href": "lessons/0133-the-normal-distribution.html"
+        },
+        {
+          "title": "You choose a distribution by asking three questions, not by looking at a histogram",
+          "href": "lessons/0134-choosing-a-distribution.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Calculus for machine learning",
       "lessons": [
