@@ -139,6 +139,26 @@ window.COURSE_OUTLINE = {
         {
           "title": "The matrix version of a positive number",
           "href": "lessons/0064-positive-definiteness-and-its-eigenvalue-test.html"
+        },
+        {
+          "title": "A matrix written in its own coordinates",
+          "href": "lessons/0065-diagonalisation-and-matrix-powers.html"
+        },
+        {
+          "title": "Every matrix factors, whatever its shape",
+          "href": "lessons/0066-the-svd-every-matrix-is-rotate-stretch-rotate.html"
+        },
+        {
+          "title": "Rotate, stretch, rotate, and nothing else",
+          "href": "lessons/0067-the-geometry-of-the-svd.html"
+        },
+        {
+          "title": "The truncation that is provably best",
+          "href": "lessons/0068-low-rank-approximation-and-eckart-young.html"
+        },
+        {
+          "title": "PCA is the SVD of the centred data",
+          "href": "lessons/0069-pca-through-the-svd-of-the-centred-data-matrix.html"
         }
       ]
     },
