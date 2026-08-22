@@ -1,24 +1,34 @@
-"""M03 L06 - What a matrix multiply costs.
+"""Lesson 65 - what a matrix multiply costs.
 
-    python3 m03-l06-cost.py
+The result this checks twice is the 2mnp flop count: once as arithmetic from the
+shapes, and once as measured wall-clock time, which scales the same way even
+though the constant belongs entirely to the machine.
 
-The result this checks twice: the 2mnp flop count. Once as arithmetic from the
-shapes, and once as measured wall-clock time, which should scale the same way even
-though the constant depends entirely on the machine.
-
-It also settles the ordering question: (AB)C and A(BC) return the same matrix and
+It also settles the ordering question. (AB)C and A(BC) return the same matrix and
 cost wildly different amounts.
+
+Needs only numpy and pandas. Runs in a codebase, in Jupyter, or in Colab.
 """
 
-from __future__ import annotations
-
-import time
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-DATA = Path(__file__).resolve().parent.parent / "datasets" / "housing.csv"
+LOCAL = Path(__file__).resolve().parent.parent / "datasets" / "sensors.csv"
+URL = "https://raw.githubusercontent.com/saurav-k/course-hub/main/math-for-ml-course/datasets/sensors.csv"
+
+SENSORS = [
+    "vibration_x", "vibration_y", "acoustic_db", "current_amp",
+    "humidity_pct", "dust_index", "temp_c", "pressure_kpa",
+]
+
+
+def load() -> pd.DataFrame:
+    return pd.read_csv(LOCAL) if LOCAL.exists() else pd.read_csv(URL)
+
+
+import time
 
 
 def flops_matmul(m: int, p: int, n: int) -> int:
@@ -36,8 +46,7 @@ def timed(fn, repeats: int = 3) -> float:
 
 
 def main() -> None:
-    frame = pd.read_csv(DATA)
-    X = frame[["area_k_sqft", "bedrooms", "bathrooms", "age_years", "lot_sqft"]].to_numpy(float)
+    X = load()[SENSORS].to_numpy(dtype=float)
     print(f"the data matrix is {X.shape[0]:,} by {X.shape[1]}")
 
     print("\n-- predicted flops against measured time --")
@@ -49,26 +58,26 @@ def main() -> None:
         B = rng.normal(size=(n, n))
         f = flops_matmul(n, n, n)
         seconds = timed(lambda: A @ B)
-        print(f"{f'{n}x{n} @ {n}x{n}':>22} {f:>16,} {seconds:>10.5f} {f / seconds / 1e9:>9.1f}")
+        line = f"{f'{n}x{n} @ {n}x{n}':>22} {f:>16,} {seconds:>10.5f} {f / seconds / 1e9:>9.1f}"
         if previous is not None:
-            print(f"{'':>22} flops x{f / previous[0]:.1f}, time x{seconds / previous[1]:.1f}")
+            line += f"   flops x{f / previous[0]:.0f}, time x{seconds / previous[1]:.1f}"
+        print(line)
         previous = (f, seconds)
-    print("doubling n multiplies the flop count by 8, and the measured time follows")
+    print("doubling n multiplies the flop count by 8. The measured time follows once")
+    print("the matrices are big enough for the arithmetic to dominate the overheads.")
 
     print("\n-- the ordering result: same answer, different bill --")
     d, r = 4096, 4
     x = rng.normal(size=(1, d))
     B_lora = rng.normal(size=(d, r))
     A_lora = rng.normal(size=(r, d))
-
     first = flops_matmul(d, r, d) + flops_matmul(1, d, d)
     second = flops_matmul(1, d, r) + flops_matmul(1, r, d)
     print(f"  form (B A) then x @ it : {first:>15,} flops")
     print(f"  (x @ B) then @ A       : {second:>15,} flops")
     print(f"  ratio                  : {first / second:>15,.0f}x")
-
-    slow = timed(lambda: x @ (B_lora @ A_lora), repeats=3)
-    fast = timed(lambda: (x @ B_lora) @ A_lora, repeats=3)
+    slow = timed(lambda: x @ (B_lora @ A_lora))
+    fast = timed(lambda: (x @ B_lora) @ A_lora)
     print(f"  measured: {slow:.5f}s against {fast:.5f}s, a factor of {slow / fast:.0f}")
     assert np.allclose(x @ (B_lora @ A_lora), (x @ B_lora) @ A_lora, atol=1e-8)
     print("checked twice: associativity gives the identical answer both ways")
@@ -92,13 +101,12 @@ def main() -> None:
     print(f"  the two halves are equal when n = 6d = {6 * d_model:,} tokens")
 
     print("\n-- the Gram matrix is symmetric, so it costs about half --")
-    full = flops_matmul(X.shape[1], X.shape[0], X.shape[1])
-    print(f"  X^T X as a general product: about {full:,} flops")
-    print(f"  exploiting symmetry       : about {full // 2:,} flops")
-    G1 = X.T @ X
-    G2 = np.triu(G1) + np.triu(G1, 1).T
-    assert np.allclose(G1, G2)
-    print("checked twice: the upper half plus its mirror reconstructs the whole Gram matrix")
+    n, k = X.shape
+    print(f"  X^T X as a general product: about {flops_matmul(k, n, k):,} flops")
+    print(f"  exploiting symmetry       : about {flops_matmul(k, n, k) // 2:,} flops")
+    G = X.T @ X
+    assert np.allclose(G, np.triu(G) + np.triu(G, 1).T)
+    print("  checked twice: the upper half plus its mirror rebuilds the whole Gram matrix")
 
 
 if __name__ == "__main__":
