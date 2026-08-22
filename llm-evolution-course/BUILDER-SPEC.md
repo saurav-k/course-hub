@@ -160,7 +160,7 @@ Three zones and one date do that work.
 | `moving` | Roughly the last eighteen months. | Rewritten freely. Explicitly provisional. Carries a review date. |
 | `open` | Named questions with no answer. | A question is retired with its answer and the date. Never silently deleted. |
 
-The settled horizon is **1 March 2025** and it lives in exactly one place, `reference/chronicle.html`.
+The settled horizon is **30 June 2025** and it lives in exactly one place, `reference/chronicle.html`.
 Moving it forward promotes a batch of moving lessons into settled, and that is a deliberate reviewed act on a schedule rather than a drift.
 
 Rules:
