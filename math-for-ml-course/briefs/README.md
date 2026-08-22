@@ -66,3 +66,64 @@ primary sources, and the `core` or `depth` label.
 Committed and verified. Three generators plus three datasets in `../datasets/`,
 twelve programs in `../code/`. Every number quoted in these briefs is that program's
 actual output, reproducible from the committed seed.
+
+---
+
+# M10 Information, similarity, and dimension briefs
+
+One brief per planned page, per issue #42. Briefs are markdown and live here rather than as stub
+pages, because `validate_site.py` requires every `lessons/*.html` to be a registered card and to
+appear in `outline.js`, and `widgets.md` requires a planned page to be plain text in a `.roadmap`
+and never a link. Together those mean a planned page can have **no file at all**. The deploy
+excludes `*.md` and the validator ignores it, and **no page ever links a brief**.
+
+## The numbers
+
+M10's block is **0180 to 0199**, read off the block **table** on issue #42. The prose above that
+table says "module N starts at `N x 20`" and that phrase is one module out: the table's own first
+row gives M01 the block `0001-0019`, so a module occupies `(N-1) x 20 + 1` upward and M11, not M10,
+is the one that starts at 0200. **The rows are the authority.** This module briefly used 0105-0115
+and then 0200-0210 before that was settled; both are gone.
+
+Eleven of the twenty slots are used, 0180 to 0190, leaving nine spare. That headroom also settles a
+question this module had raised: the course map's roadmap lists M10 as ten pages because it merged
+"Information gain" and "Perplexity" onto one line, while issue #53, the spec for this module's
+scope, lists them as two of eleven lessons. They are two ideas with two theorems, two worked
+examples and two datasets' worth of results, so this module ships eleven, inside its own block,
+costing no other crew a number.
+
+| Real | Slug | Class |
+|---|---|---|
+| 0180 | entropy | core |
+| 0181 | cross-entropy | core |
+| 0182 | kl-divergence | core |
+| 0183 | mutual-information | core |
+| 0184 | softmax-log-sum-exp | core |
+| 0185 | distance-metrics | core |
+| 0186 | cosine-similarity | depth |
+| 0187 | kernels | depth |
+| 0188 | curse-of-dimensionality | depth |
+| 0189 | information-gain | depth |
+| 0190 | perplexity | core |
+
+Teaching order is file order, and file order is a topological order of the prerequisite graph:
+0180 -> 0181 -> 0182 -> 0183 -> 0189, with 0184 needing 0181, 0190 needing 0180 and 0181, and the
+geometry arc 0185 -> 0186 -> 0187 -> 0188 needing only 0185 from inside this module. No page needs
+a page that comes after it.
+
+## What every M10 page owes
+
+The house contract in `references/page-contracts.md`, plus this course's delta: an orientation
+figure that is this page's slice of the prerequisite graph; at least one hand-authored `svg.chart`;
+every symbol named in words; one worked example in eight parts with a sanity check and a
+"what changes if" line; **a stated proof for every named theorem (D4)**; a runnable NumPy/Pandas
+program against a committed dataset; two quizzes of which at least one tests a misconception; and
+at least one practice problem with a hint, a hidden solution and a `.p-check` line.
+
+## `statistical-foundations-ml-course` is frozen
+
+Per captain update 3. This module creates, modifies, renames and deletes **nothing** under that
+folder. One-way links out to its pages are allowed and one is planned, from 0183 to its
+`lessons/0007-leading-indicators-and-correlation.html`, because that page teaches correlation as a
+diagnostic and 0183 is where the reader learns what correlation cannot see. No reverse link, because
+that would edit a frozen file.
