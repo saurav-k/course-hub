@@ -73,3 +73,10 @@ No new theorem is proved here. The legality argument **is** `0004`'s monotone-ar
 - Goodfellow, Bengio and Courville, *Deep Learning*, section 4.1, on underflow, overflow and the log-softmax trap.
 - A named library's naive Bayes log-likelihood implementation, linked.
 - A named framework's fused cross-entropy documentation, for the raw-logits requirement.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The brief's "indistinguishability is the bug" is the page's centre, and it is now **measured rather than asserted**: on 721 held-out tickets, 8 have both class scores underflow and cannot be decided, and 26 have exactly one underflow, so the decision is forced by a floating-point artefact and looks confident. The silent failure is more than three times the loud one, and the same model loses 1.11 points of accuracy to arithmetic alone.
+The two failure modes are drawn as a `sequenceDiagram` using two real rows, tickets 731 and 359, rather than as a float64 number line.

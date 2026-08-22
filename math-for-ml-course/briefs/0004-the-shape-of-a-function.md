@@ -74,3 +74,11 @@ Four scores whose ordering is obvious. Apply `log`, then a linear rescale, then 
 ## Sources
 
 - A source for the ranking-against-threshold contrast, fetched and linked on the page.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The proof on the page runs **both directions** and names the converse as the only place strictness is used, with a constant `g` as the counterexample. The brief's forward-only version is correct but does not show where the hypothesis earns its keep.
+The centrepiece `svg.chart` is **six scored items before and after squaring**, with connecting ribbons and a fixed cutoff line, rather than two curves sharing an argmax: it shows the ordering surviving *and* the thresholded metric breaking in one picture. A `quadrantChart` sorts metrics by whether they read order or value.
+Squaring is applied on `[0,1]`, where it **is** strictly increasing; the brief's note that it is not monotone on the reals is right and is why the domain is stated.

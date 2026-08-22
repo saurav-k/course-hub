@@ -68,3 +68,10 @@ Two costs of the form `a n^2 d` and `b n d^2`. Set them equal, solve for the cro
 
 - Knuth on the one-way meaning of the equals sign in an asymptotic statement, quoted.
 - A named source for the two costs compared in the worked example.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The p-series test is proved by grouping, with an explicit honest boundary: that is the engineering proof for the two cases the course needs, and the general statement needs the integral test from M05.
+`O`, `Omega` and `Theta` are drawn as **nested sets of functions** so that Knuth's one-way equality reads as set inclusion, which pays `0002` back. The attention-against-recurrence crossover is drawn at `n = d = 512` and the page states plainly that a complexity class alone is never a verdict.

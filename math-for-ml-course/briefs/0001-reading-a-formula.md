@@ -67,3 +67,11 @@ Ten daily spend values from `sessions.csv`, taken as the first ten rows so the r
 
 - Goodfellow, Bengio and Courville, *Deep Learning*, the notation table, for `x^(i)` against `x_j`.
 - Any source used for the real formula in beat 7 must be fetched and linked on the page.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+The worked example uses **`tickets.csv`**, not `sessions.csv`: M01 has its own dataset, and the reason it exists is recorded in `datasets/README.md`.
+The required `svg.chart` became **two**: the data matrix drawn as a grid with one row and one column shaded, which is what kills the superscript-against-subscript error, and a second showing a double sum's every cell against a single sum's diagonal. The accumulation is unrolled as a `sequenceDiagram` instead of a step plot, because the confusion it kills is about *order*, not magnitude.
+Five figures rather than three. The page names no theorem and says so in the teacher note.

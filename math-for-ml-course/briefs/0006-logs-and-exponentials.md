@@ -72,3 +72,10 @@ Convert a decay rate to a half-life and back. Show every rule used, named as it 
 ## Sources
 
 - NIST DLMF chapter 4 for the exponential series and the logarithm rules.
+
+## As built
+
+Written by `mlm-foundations-r2` alongside this brief; where the shipped page departs from the plan above, this is what it does and why.
+
+All four identities are proved, each in two lines from `e^u e^v = e^(u+v)`, and the page says outright that this is one sentence used four times.
+The four rules and **the rule that does not exist** are drawn as a `mindmap`, with the non-rule as a fifth clearly-marked branch. The exponential fit is worked on `tickets.csv`'s response times, and the page carries a one-way link to the Statistical Foundations course's version of the same `ln 2` relationship on different data.
