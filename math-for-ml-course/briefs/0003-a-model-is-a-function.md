@@ -37,6 +37,7 @@ M05 owns the derivative and the chain rule; this page is what makes "the chain r
 7. Shape algebra: why one chain of widths composes and a mismatched one does not. This is where a first shape error stops being mysterious.
 8. Inverses exist only for one-to-one functions. ReLU has none, which is one honest reason a network is hard to run backwards.
 9. The inverse pair the reader meets constantly: sigmoid and logit.
+10. **Where the mathematics and the arithmetic part company.** Measured while writing this page's program, and not in the original scout report: a sigmoid's image is the open interval, so it never returns exactly 1, and yet in float64 it rounds to exactly `1.0` from an input of about **36.74** upward, and in float32 from about **16.64**. State both facts and say which is which. This is where `log(1 - yhat)` becomes `-inf` in a real training run, and telling the two apart is the whole skill.
 
 ## Figures
 
