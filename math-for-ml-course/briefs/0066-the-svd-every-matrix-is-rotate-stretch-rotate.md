@@ -1,4 +1,4 @@
-# 0407 - The SVD: every matrix is a rotation, a stretch and a rotation
+# 0066 - The SVD: every matrix is a rotation, a stretch and a rotation
 
 **Placeholder number.** Module M04, position 7. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,21 +8,21 @@ Every matrix whatsoever, of any shape, factors as `A = U Sigma V^T` with two ort
 
 ## Prerequisites, by page number
 
-- `0403` the spectral theorem
-- `0405` positive semidefiniteness and the `X^T X` fact
-- `0406` diagonalisation and where it fails
+- `0062` the spectral theorem
+- `0064` positive semidefiniteness and the `X^T X` fact
+- `0065` diagonalisation and where it fails
 - `03xx` rank, and the column and null spaces (M03)
 
 ## Beats, in order
 
-1. Collect the four ways the eigendecomposition has already disappointed, all met on earlier pages: complex eigenvalues (`0402`), non-perpendicular eigenvectors (`0403`), too few eigenvectors (`0406`), and the one that has not been said yet.
+1. Collect the four ways the eigendecomposition has already disappointed, all met on earlier pages: complex eigenvalues (`0061`), non-perpendicular eigenvectors (`0062`), too few eigenvectors (`0065`), and the one that has not been said yet.
 2. Say it: a non-square matrix has no eigenvectors at all, because `Av` lives in a different space from `v` and `Av = lambda v` cannot even be written down. A data matrix is almost never square, so this is the common case and not the exotic one.
 3. State the SVD, with every shape spelled out: `A` is `m x n`, `U` is `m x m` orthogonal, `Sigma` is `m x n` diagonal with non-negative entries in decreasing order, `V` is `n x n` orthogonal.
 4. Name the parts in words: the columns of `V` are the right singular vectors and live in the input space; the columns of `U` are the left singular vectors and live in the output space; the `sigma_i` are the singular values and say how much each paired direction is stretched.
-5. **Where the singular values come from** and the existence proof (below). The whole factorisation is the spectral theorem applied to `A^T A`, which `0405` already proved is symmetric positive semidefinite. Nothing new is assumed.
+5. **Where the singular values come from** and the existence proof (below). The whole factorisation is the spectral theorem applied to `A^T A`, which `0064` already proved is symmetric positive semidefinite. Nothing new is assumed.
 6. Two things that differ from eigenvalues and must be said explicitly: singular values are never negative, and they come in a conventional decreasing order. Eigenvalues have neither property.
-7. The rank-one sum `A = sigma_1 u_1 v_1^T + ... + sigma_r u_r v_r^T`, the same shape as `0403`'s spectral sum but with two different vectors in each term instead of one repeated. Page `0409` truncates exactly this sum.
-8. Rank becomes countable: the rank of `A` is the number of non-zero singular values. This makes rank a measured quantity rather than a symbolic one, and page `0409` shows why the distinction matters when the small values are not exactly zero.
+7. The rank-one sum `A = sigma_1 u_1 v_1^T + ... + sigma_r u_r v_r^T`, the same shape as `0062`'s spectral sum but with two different vectors in each term instead of one repeated. Page `0068` truncates exactly this sum.
+8. Rank becomes countable: the rank of `A` is the number of non-zero singular values. This makes rank a measured quantity rather than a symbolic one, and page `0068` shows why the distinction matters when the small values are not exactly zero.
 9. The comparison table, one row each: what the spectral theorem covers against what the SVD covers, one basis against two, symmetric-only against everything.
 
 ## Named theorem and its stated proof (D4)
@@ -31,7 +31,7 @@ Every matrix whatsoever, of any shape, factors as `A = U Sigma V^T` with two ort
 
 **Proof, constructive, in four steps.**
 
-*Step 1, build `V` and the singular values.* The matrix `A^T A` is `n x n`, symmetric (because `(A^T A)^T = A^T A`), and positive semidefinite by `0405`'s one-line fact. By the spectral theorem `0403` it has an orthonormal basis of eigenvectors `v_1, ..., v_n` with real eigenvalues `lambda_1 >= ... >= lambda_n >= 0`, the non-negativity coming from `0405`. Define `sigma_i = sqrt(lambda_i)`, which is real because `lambda_i >= 0`. Let `r` be the number of strictly positive `sigma_i`.
+*Step 1, build `V` and the singular values.* The matrix `A^T A` is `n x n`, symmetric (because `(A^T A)^T = A^T A`), and positive semidefinite by `0064`'s one-line fact. By the spectral theorem `0062` it has an orthonormal basis of eigenvectors `v_1, ..., v_n` with real eigenvalues `lambda_1 >= ... >= lambda_n >= 0`, the non-negativity coming from `0064`. Define `sigma_i = sqrt(lambda_i)`, which is real because `lambda_i >= 0`. Let `r` be the number of strictly positive `sigma_i`.
 
 *Step 2, build the first `r` columns of `U`.* For `i <= r` define `u_i = A v_i / sigma_i`, which is legal because `sigma_i > 0`.
 
@@ -43,12 +43,12 @@ If `i != j` then `v_i^T v_j = 0` and the whole thing is zero. If `i = j` then `v
 
 **The step that does the real work.** Step 3's middle equality, `(A v_i)^T (A v_j) = v_i^T (A^T A) v_j`. It is what lets the orthonormality of the `v`'s, which the spectral theorem handed us in the *input* space, transfer to the `u`'s in the *output* space. Everything else is bookkeeping. Notice also step 4's second half: the directions with zero singular value are exactly the null space, which is beat 8 arriving as a by-product rather than a separate claim.
 
-**The honest boundary.** The proof assumed `A` is real; the complex case is identical with conjugate transposes throughout. It also quietly used that any orthonormal set extends to an orthonormal basis, which is Gram-Schmidt and is M03's. And the factorisation is not unique when singular values repeat or when `r < m`: the extension in step 3 involved a free choice. Page `0409` says exactly when that freedom matters.
+**The honest boundary.** The proof assumed `A` is real; the complex case is identical with conjugate transposes throughout. It also quietly used that any orthonormal set extends to an orthonormal basis, which is Gram-Schmidt and is M03's. And the factorisation is not unique when singular values repeat or when `r < m`: the extension in step 3 involved a free choice. Page `0068` says exactly when that freedom matters.
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `Spectral theorem (0403)` and `Positive semidefiniteness (0405)` feed `THIS PAGE - every matrix factors, any shape`, which feeds `SVD geometry (0408)`, `Low-rank approximation (0409)` and `PCA (0410)`.
-2. **`svg.chart`, required floor.** The measured singular value spectrum of the centred `spectra.csv` matrix: four tall bars at 49.17, 27.25, 13.59 and 6.80, then twenty short bars sitting flat near 1.85. The cliff is annotated with the ratio 3.65. Kills: treating rank as symbolic when here it is a visible cliff, and previews `0409`.
+1. **Orientation figure**, `flowchart LR`: `Spectral theorem (0062)` and `Positive semidefiniteness (0064)` feed `THIS PAGE - every matrix factors, any shape`, which feeds `SVD geometry (0067)`, `Low-rank approximation (0068)` and `PCA (0069)`.
+2. **`svg.chart`, required floor.** The measured singular value spectrum of the centred `spectra.csv` matrix: four tall bars at 49.17, 27.25, 13.59 and 6.80, then twenty short bars sitting flat near 1.85. The cliff is annotated with the ratio 3.65. Kills: treating rank as symbolic when here it is a visible cliff, and previews `0068`.
 3. **`flowchart LR`.** Two lanes side by side: `eigendecomposition` requiring square and rewarding symmetry, returning one basis; `SVD` requiring nothing, returning two. Each lane annotated with what it cannot do. Kills: believing singular values are eigenvalues.
 4. **`svg.chart`.** For the small worked matrix, the two chains `A v_1 = sigma_1 u_1` and `A v_2 = sigma_2 u_2` drawn as arrows from the input plane to the output plane, with lengths 5 and 3 marked. Kills: not seeing that the SVD pairs up two different sets of directions.
 
@@ -85,14 +85,14 @@ If `i != j` then `v_i^T v_j = 0` and the whole thing is zero. If `i = j` then `v
 
 ## Code and dataset plan
 
-`code/0407-the-svd.py`. Dataset `datasets/spectra.csv`.
+`code/0066-the-svd.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition, following the existence proof exactly.** Form `A^T A`, run `numpy.linalg.eigh` on it, take square roots of the eigenvalues for the singular values, build `u_i = A v_i / sigma_i` for the non-zero ones, and verify orthonormality of the constructed `U` by checking `U^T U` against the identity.
 2. **The library way.** `numpy.linalg.svd` on the same matrix.
 3. **Assert they agree** on the singular values to tolerance, and on the singular *vectors* **up to sign**, with a comment saying that the sign freedom is exactly the non-uniqueness the proof's boundary paragraph named. It also asserts `A = U Sigma V^T` reproduces the original to tolerance.
 
-The program then prints the rank as a **threshold sweep** rather than as one number: `numpy.linalg.matrix_rank` says 24, and counting singular values above 0.5, 1.0, 5.0 and 10.0 gives 24, 24, 4 and 3. Every singular value is non-zero because noise is present, so the numerical rank is genuinely full; only a threshold placed inside the cliff recovers the four components the data was built from. Rank here is a choice about where signal stops, and that is the hook page `0409` picks up.
+The program then prints the rank as a **threshold sweep** rather than as one number: `numpy.linalg.matrix_rank` says 24, and counting singular values above 0.5, 1.0, 5.0 and 10.0 gives 24, 24, 4 and 3. Every singular value is non-zero because noise is present, so the numerical rank is genuinely full; only a threshold placed inside the cliff recovers the four components the data was built from. Rank here is a choice about where signal stops, and that is the hook page `0068` picks up.
 
 ## Sources
 

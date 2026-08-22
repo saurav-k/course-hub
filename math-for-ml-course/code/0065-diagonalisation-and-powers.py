@@ -1,4 +1,4 @@
-"""0406 - Diagonalisation and matrix powers.
+"""0065 - Diagonalisation and matrix powers.
 
 Computes A^k two ways: by the sandwich P D^k P^-1, and by repeated
 multiplication. Asserts they agree, then times both as k grows, where the point
@@ -7,7 +7,7 @@ lands: the sandwich pays for one eigendecomposition and then k scalar powers.
 Also runs the routine on a defective matrix and reports the condition number of
 P rather than crashing, showing how defectiveness announces itself numerically.
 
-Needs numpy and pandas only:  python3 0406-diagonalisation-and-powers.py
+Needs numpy and pandas only:  python3 0065-diagonalisation-and-powers.py
 """
 
 from __future__ import annotations

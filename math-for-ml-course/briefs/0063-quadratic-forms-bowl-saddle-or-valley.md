@@ -1,4 +1,4 @@
-# 0404 - Quadratic forms: reading a matrix as a bowl, a saddle or a valley
+# 0063 - Quadratic forms: reading a matrix as a bowl, a saddle or a valley
 
 **Placeholder number.** Module M04, position 4. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,7 +8,7 @@ Feeding a vector into `x^T A x` turns a symmetric matrix into a surface over the
 
 ## Prerequisites, by page number
 
-- `0403` the spectral theorem
+- `0062` the spectral theorem
 - `03xx` the dot product and matrix-vector products (M03)
 
 Calculus-free by design. M05 owns the Hessian as a matrix of second partial derivatives, and M06 owns "a positive definite Hessian means a local minimum". This page owns the surface and nothing about derivatives.
@@ -17,8 +17,8 @@ Calculus-free by design. M05 owns the Hessian as a matrix of second partial deri
 
 1. From a matrix to a number: `q(x) = x^T A x` takes a vector in and returns one scalar. Evaluate it at three points by hand before any theory, so the reader sees it is just arithmetic.
 2. Expand it for a 2x2 and get `a x_1^2 + 2b x_1 x_2 + d x_2^2`. Name the cross term. The cross term is the whole difficulty and everything after this removes it.
-3. Only the symmetric part matters: for any `A`, `x^T A x = x^T ((A + A^T)/2) x`, because a number equals its own transpose. So assuming symmetry costs nothing, and page `0403` therefore applies to every quadratic form.
-4. Rotate into the eigenbasis. Substituting `x = Q y` gives `q = y^T Lambda y = lambda_1 y_1^2 + ... + lambda_n y_n^2`. **No cross terms.** This is the payoff of `0403` and the reason anyone diagonalises anything.
+3. Only the symmetric part matters: for any `A`, `x^T A x = x^T ((A + A^T)/2) x`, because a number equals its own transpose. So assuming symmetry costs nothing, and page `0062` therefore applies to every quadratic form.
+4. Rotate into the eigenbasis. Substituting `x = Q y` gives `q = y^T Lambda y = lambda_1 y_1^2 + ... + lambda_n y_n^2`. **No cross terms.** This is the payoff of `0062` and the reason anyone diagonalises anything.
 5. The three shapes, read straight off the signs: all eigenvalues positive is a bowl, mixed signs is a saddle, a zero eigenvalue is a flat direction along the floor of a valley.
 6. The level set `x^T A x = 1`. In the eigenbasis it is `sum lambda_i y_i^2 = 1`, so along eigenvector `i` it reaches `y_i = 1 / sqrt(lambda_i)`. **A large eigenvalue gives a short axis.**
 7. **The trap, stated in the same breath, because separating them is what causes the error.** The data cloud whose covariance is `A` spreads by `sqrt(lambda_i)` along eigenvector `i`, so there a large eigenvalue gives a **long** axis. Two ellipses, from one matrix, behaving oppositely. Both are correct about different objects and the page draws them side by side.
@@ -28,17 +28,17 @@ Calculus-free by design. M05 owns the Hessian as a matrix of second partial deri
 
 **Result (principal axes).** For symmetric `A`, the substitution `x = Q y` with `Q` the orthonormal eigenvector matrix turns `x^T A x` into `lambda_1 y_1^2 + ... + lambda_n y_n^2`, a sum with no cross terms.
 
-**Proof.** By `0403`, `A = Q Lambda Q^T` with `Q^T Q = I`. Substitute `x = Q y`:
+**Proof.** By `0062`, `A = Q Lambda Q^T` with `Q^T Q = I`. Substitute `x = Q y`:
 `x^T A x = (Q y)^T (Q Lambda Q^T) (Q y) = y^T Q^T Q Lambda Q^T Q y = y^T Lambda y`,
 using `Q^T Q = I` twice. Because `Lambda` is diagonal, `y^T Lambda y = sum_i lambda_i y_i^2`.
 
-**The step that does the real work:** `Q^T Q = I` collapsing in the middle. It is available only because the eigenvectors are *orthonormal*, which is precisely what symmetry bought on `0403`. For a non-symmetric matrix the change of basis would leave a `P^-1` that does not cancel and the cross terms would survive.
+**The step that does the real work:** `Q^T Q = I` collapsing in the middle. It is available only because the eigenvectors are *orthonormal*, which is precisely what symmetry bought on `0062`. For a non-symmetric matrix the change of basis would leave a `P^-1` that does not cancel and the cross terms would survive.
 
 **A note on what the substitution is.** `x = Q y` is a rotation of the coordinate system, not a change to the surface. The bowl does not move; the reader's axes turn to line up with it. The page says this, because "diagonalising changed my data" is a real misreading.
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `Spectral theorem (0403)` feeds `THIS PAGE - x^T A x as a surface`, which feeds `Positive definiteness (0405)`, and out of module to `Loss surfaces (M05)` and `Convexity (M06)`.
+1. **Orientation figure**, `flowchart LR`: `Spectral theorem (0062)` feeds `THIS PAGE - x^T A x as a surface`, which feeds `Positive definiteness (0064)`, and out of module to `Loss surfaces (M05)` and `Convexity (M06)`.
 2. **`svg.chart`, required floor.** Three level-set panels on shared axes: `[[5,2],[2,2]]` (concentric ellipses, a bowl), `[[1,2],[2,1]]` (hyperbolas, a saddle), `[[1,2],[2,4]]` (parallel lines, a flat valley). Each annotated with its eigenvalue signs. Kills: "indefinite" as jargon rather than a picture.
 3. **`svg.chart`.** The same quadratic before and after the rotation: tilted ellipse with the cross term written beside it, then axis-aligned with the cross term gone and the two parabolas `6 y_1^2` and `1 y_2^2` drawn underneath. Kills: not seeing why anyone bothers to diagonalise.
 4. **`svg.chart`, the trap.** Two ellipses side by side from the same `S = [[5,2],[2,2]]`. Left, the level set `x^T S x = 1`, semi-axes `1/sqrt(6) = 0.408` and `1/sqrt(1) = 1`, so the big eigenvalue gives the **short** axis. Right, a scatter of points with covariance `S`, spreading `sqrt(6) = 2.449` and `sqrt(1) = 1`, so the big eigenvalue gives the **long** axis. Kills: the single most reversed fact in the module.
@@ -46,12 +46,12 @@ using `Q^T Q = I` twice. Because `Lambda` is diagonal, `y^T Lambda y = sum_i lam
 
 ## The worked example, in eight parts
 
-`S = [[5, 2], [2, 2]]`, continued from `0403` so the eigen-work is already trusted.
+`S = [[5, 2], [2, 2]]`, continued from `0062` so the eigen-work is already trusted.
 
 1. **Goal.** Say what shape `q(x) = x^T S x` is, and where its level set reaches furthest.
 2. **Write it out.** `q(x) = 5 x_1^2 + 4 x_1 x_2 + 2 x_2^2`. The `4` is `2b` with `b = 2`.
 3. **Evaluate three points.** `q(1,0) = 5`. `q(1,1) = 5 + 4 + 2 = 11`. `q(1,-2) = 5 - 8 + 8 = 5`. All positive so far, which is a hint and not a proof.
-4. **Bring in the eigenvalues from `0403`:** `6` and `1`, with `q_1 = (2,1)/sqrt(5)` and `q_2 = (1,-2)/sqrt(5)`.
+4. **Bring in the eigenvalues from `0062`:** `6` and `1`, with `q_1 = (2,1)/sqrt(5)` and `q_2 = (1,-2)/sqrt(5)`.
 5. **Rotate.** In the eigenbasis, `q = 6 y_1^2 + 1 y_2^2`. Both coefficients positive, so it is a bowl and `q(x) > 0` for every non-zero `x`. The hint from step 3 is now a proof.
 6. **Level set.** `6 y_1^2 + y_2^2 = 1` reaches `y_1 = 1/sqrt(6) = 0.408` along `q_1` and `y_2 = 1` along `q_2`. The ellipse is **short** along the direction with eigenvalue 6.
 7. **Sanity check (`.p-check`).** Evaluate `q` at the two ellipse points. Along `q_1` at distance `0.408`: `6 (0.408)^2 = 0.999`, which is 1 to rounding. Along `q_2` at distance 1: `1 (1)^2 = 1`. Both land on the level set, so the semi-axis formula is right way up. Getting `2.449` and `1` instead means `sqrt(lambda)` was used where `1/sqrt(lambda)` belongs, which is beat 7's trap.
@@ -77,7 +77,7 @@ using `Q^T Q = I` twice. Because `Lambda` is diagonal, `y^T Lambda y = sum_i lam
 
 ## Code and dataset plan
 
-`code/0404-quadratic-forms.py`. Dataset `datasets/spectra.csv`.
+`code/0063-quadratic-forms.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition.** Take the 24x24 channel covariance `S`. Evaluate `x^T S x` directly for a batch of 10,000 random unit vectors, and report the minimum and maximum values found.

@@ -1,11 +1,11 @@
-"""0402 - The characteristic equation, the trace and the determinant.
+"""0061 - The characteristic equation, the trace and the determinant.
 
 Solves a 2x2 eigenproblem from the characteristic polynomial and checks it
 against the library, then scales the two invariant identities up to 24x24 where
 one of them needs a relative tolerance and the other does not. That contrast is
 the page's numerical honesty made executable.
 
-Needs numpy and pandas only:  python3 0402-characteristic-and-invariants.py
+Needs numpy and pandas only:  python3 0061-characteristic-and-invariants.py
 """
 
 from __future__ import annotations

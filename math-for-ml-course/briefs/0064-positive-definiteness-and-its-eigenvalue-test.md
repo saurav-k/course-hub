@@ -1,4 +1,4 @@
-# 0405 - Positive definiteness and its eigenvalue test
+# 0064 - Positive definiteness and its eigenvalue test
 
 **Placeholder number.** Module M04, position 5. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,14 +8,14 @@ A symmetric matrix is positive definite exactly when all its eigenvalues are pos
 
 ## Prerequisites, by page number
 
-- `0403` the spectral theorem
-- `0404` quadratic forms and the three shapes
+- `0062` the spectral theorem
+- `0063` quadratic forms and the three shapes
 
 M06 owns "a positive definite Hessian implies a local minimum". M08 owns "a covariance matrix is positive semidefinite" as a statistical statement. This page owns the linear algebra: the definition, the eigenvalue test, and the `R^T R` characterisation.
 
 ## Beats, in order
 
-1. Definition, from `0404`'s bowl: `A` is positive definite when `x^T A x > 0` for every non-zero `x`. Positive semidefinite replaces `>` with `>=`.
+1. Definition, from `0063`'s bowl: `A` is positive definite when `x^T A x > 0` for every non-zero `x`. Positive semidefinite replaces `>` with `>=`.
 2. Name the terminology clash once and move on: parts of the mathematics literature call the semidefinite case simply "positive". This course always writes definite or semidefinite and never bare "positive" for a matrix.
 3. **The eigenvalue test** and its proof (below). This is the workable criterion and everything else on the page is a consequence or a shortcut.
 4. Why the definition alone is unusable: it quantifies over infinitely many `x`. The eigenvalue test replaces "check every vector" with "check `n` numbers".
@@ -30,9 +30,9 @@ M06 owns "a positive definite Hessian implies a local minimum". M08 owns "a cova
 
 **Proof.**
 
-*If all eigenvalues are positive, then `A` is positive definite.* By `0403`, write `A = Q Lambda Q^T` with `Q` orthogonal. Take any `x != 0` and set `y = Q^T x`. Because `Q` is orthogonal it is invertible, so `y != 0` too. By `0404`'s principal-axes result, `x^T A x = sum_i lambda_i y_i^2`. At least one `y_i` is non-zero, its square is strictly positive, every `lambda_i` is strictly positive, and no term is negative. So the sum is strictly positive.
+*If all eigenvalues are positive, then `A` is positive definite.* By `0062`, write `A = Q Lambda Q^T` with `Q` orthogonal. Take any `x != 0` and set `y = Q^T x`. Because `Q` is orthogonal it is invertible, so `y != 0` too. By `0063`'s principal-axes result, `x^T A x = sum_i lambda_i y_i^2`. At least one `y_i` is non-zero, its square is strictly positive, every `lambda_i` is strictly positive, and no term is negative. So the sum is strictly positive.
 
-*If `A` is positive definite, then all eigenvalues are positive.* Let `lambda` be an eigenvalue with unit eigenvector `q`, which `0403` guarantees is real. Then `0 < q^T A q = q^T (lambda q) = lambda (q^T q) = lambda`, since `q^T q = 1`. So `lambda > 0`.
+*If `A` is positive definite, then all eigenvalues are positive.* Let `lambda` be an eigenvalue with unit eigenvector `q`, which `0062` guarantees is real. Then `0 < q^T A q = q^T (lambda q) = lambda (q^T q) = lambda`, since `q^T q = 1`. So `lambda > 0`.
 
 **The step that does the real work.** In the forward direction, the fact that `y != 0` whenever `x != 0`. It holds because `Q` is invertible, and it is what stops the argument from silently allowing the all-zero `y` that would make the sum zero. In the reverse direction, the real work is that the definition applies to *every* non-zero vector, so it may be applied to an eigenvector in particular. That is the whole trick.
 
@@ -40,7 +40,7 @@ M06 owns "a positive definite Hessian implies a local minimum". M08 owns "a cova
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `Spectral theorem (0403)` and `Quadratic forms (0404)` feed `THIS PAGE - when the bowl always points up`, which feeds `Low-rank approximation (0409)` and `PCA (0410)`, and out of module to `Convexity (M06)` and `Kernels (M10)`.
+1. **Orientation figure**, `flowchart LR`: `Spectral theorem (0062)` and `Quadratic forms (0063)` feed `THIS PAGE - when the bowl always points up`, which feeds `Low-rank approximation (0068)` and `PCA (0069)`, and out of module to `Convexity (M06)` and `Kernels (M10)`.
 2. **`svg.chart`, required floor.** Eigenvalue spectra as bar charts for three real matrices side by side: `[[5,2],[2,2]]` (bars at 6 and 1, both above the axis, definite); `[[1,2],[2,4]]` (bars at 5 and 0, one touching the axis, semidefinite); `[[1,2],[2,1]]` (bars at 3 and -1, one below the axis, indefinite). Kills: thinking definite and semidefinite differ by a technicality. One bar touching zero is the entire difference and it is visible.
 3. **`svg.chart`.** The 24 eigenvalues of the `spectra.csv` channel covariance on a log axis, all strictly above zero, next to the same covariance computed after duplicating a channel, where the smallest eigenvalue drops to the floor of the plot. Kills: not connecting "collinear features" to "zero eigenvalue".
 4. **`flowchart TD`.** The four tests as branches from one root, each leaf annotated with its cost and its failure mode, including the explicit dead end `det > 0` with `[[-1,0],[0,-1]]` attached to it. Kills: the determinant trap.
@@ -72,13 +72,13 @@ Two matrices side by side, `A_1 = [[9, 6], [6, 5]]` and `A_2 = [[9, 6], [6, 3]]`
 *`.p-check`:* `5.5616 + 1.4384 = 7.0000 = trace` and `5.5616 x 1.4384 = 8.0000 = det`. Both routes must agree that it is definite, and they do.
 
 **P2, `depth`.** Show that if `A` is positive definite then `A` is invertible, and that `A^-1` is positive definite too.
-*Hint:* Use the eigenvalue test in both directions, and page `0402`'s result about the eigenvalues of an inverse.
-*Solution:* All eigenvalues are positive, so none is zero, so `det(A) = product of eigenvalues != 0` and `A` is invertible. By `0402`, the eigenvalues of `A^-1` are the reciprocals `1/lambda_i`, and the reciprocal of a positive number is positive. `A^-1` is symmetric because `(A^-1)^T = (A^T)^-1 = A^-1`. Symmetric with all eigenvalues positive is positive definite.
+*Hint:* Use the eigenvalue test in both directions, and page `0061`'s result about the eigenvalues of an inverse.
+*Solution:* All eigenvalues are positive, so none is zero, so `det(A) = product of eigenvalues != 0` and `A` is invertible. By `0061`, the eigenvalues of `A^-1` are the reciprocals `1/lambda_i`, and the reciprocal of a positive number is positive. `A^-1` is symmetric because `(A^-1)^T = (A^T)^-1 = A^-1`. Symmetric with all eigenvalues positive is positive definite.
 *`.p-check`:* For `A = [[9,6],[6,5]]`, `A^-1 = (1/9)[[5,-6],[-6,9]]`, whose trace is `14/9 = 1.5556` and this must equal `1/13.3246 + 1/0.6754 = 0.0751 + 1.4806 = 1.5556`. It does.
 
 ## Code and dataset plan
 
-`code/0405-positive-definiteness.py`. Dataset `datasets/spectra.csv`.
+`code/0064-positive-definiteness.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition, by sampling.** Draw 200,000 random non-zero vectors and evaluate `x^T S x` on the 24x24 channel covariance, recording the minimum. Sampling can only ever *fail* to find a negative value, and the program says so in a comment: this is evidence, not proof.

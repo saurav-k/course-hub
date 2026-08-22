@@ -1,4 +1,4 @@
-# 0406 - Diagonalisation, and matrix powers
+# 0065 - Diagonalisation, and matrix powers
 
 **Placeholder number.** Module M04, position 6. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,8 +8,8 @@ When a matrix has a full set of independent eigenvectors it can be written as "c
 
 ## Prerequisites, by page number
 
-- `0401` eigenvalues and eigenvectors
-- `0403` the spectral theorem, which is the case where this always works and works orthogonally
+- `0060` eigenvalues and eigenvectors
+- `0062` the spectral theorem, which is the case where this always works and works orthogonally
 - `03xx` change of basis, and the matrix inverse (M03)
 
 ## Beats, in order
@@ -18,9 +18,9 @@ When a matrix has a full set of independent eigenvectors it can be written as "c
 2. If `P` is invertible, `A = P D P^-1`. State the condition plainly: `P` is invertible exactly when the `n` eigenvectors are linearly independent.
 3. Read the sandwich right to left as three physical steps: `P^-1` rewrites the vector in eigenvector coordinates, `D` scales each coordinate, `P` writes the answer back in the original coordinates. Nothing is being approximated.
 4. **The powers result** and its proof (below). This is why anyone cares.
-5. Consequence, drawn rather than asserted: repeatedly applying `A` to almost any starting vector makes the largest `|lambda|` dominate, so the result swings onto the dominant eigendirection. That is power iteration, which is how `code/0401` already computed an eigenvector.
-6. Two conditions that guarantee diagonalisability, in increasing usefulness: `n` distinct eigenvalues is sufficient but not necessary; symmetry (page `0403`) is the case that matters here and it gives the stronger orthogonal form `A = Q Lambda Q^T`.
-7. **When it fails.** A shear such as `[[1,1],[0,1]]` has `lambda = 1` twice and only a one-dimensional eigenspace, so `P` cannot be invertible. Such a matrix is called defective. Say plainly that this is not a curiosity to wave away: it is why pages `0407` to `0410` use a different factorisation entirely.
+5. Consequence, drawn rather than asserted: repeatedly applying `A` to almost any starting vector makes the largest `|lambda|` dominate, so the result swings onto the dominant eigendirection. That is power iteration, which is how `code/0060` already computed an eigenvector.
+6. Two conditions that guarantee diagonalisability, in increasing usefulness: `n` distinct eigenvalues is sufficient but not necessary; symmetry (page `0062`) is the case that matters here and it gives the stronger orthogonal form `A = Q Lambda Q^T`.
+7. **When it fails.** A shear such as `[[1,1],[0,1]]` has `lambda = 1` twice and only a one-dimensional eigenspace, so `P` cannot be invertible. Such a matrix is called defective. Say plainly that this is not a curiosity to wave away: it is why pages `0066` to `0069` use a different factorisation entirely.
 8. Name the sibling without teaching it: the long-run behaviour of a Markov chain is this same computation, and M08 owns it.
 
 ## Named theorems and their stated proofs (D4)
@@ -38,11 +38,11 @@ Formally this is an induction: it holds for `k = 1`; and if `A^k = P D^k P^-1` t
 
 **The step that does the real work.** The interior cancellation `P^-1 P = I`. It is the whole content of the theorem, and it is available only because `P` is invertible, which is exactly the condition of Theorem 1. A defective matrix has no such `P` and no such shortcut.
 
-**The honest boundary.** Every defective matrix still has a Jordan form, which is nearly diagonal and recovers a version of the powers result. The course names it here and does not build it, because the SVD on page `0407` solves the practical problem better and needs no extra theory.
+**The honest boundary.** Every defective matrix still has a Jordan form, which is nearly diagonal and recovers a version of the powers result. The course names it here and does not build it, because the SVD on page `0066` solves the practical problem better and needs no extra theory.
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `Eigenvectors (0401)` and `Change of basis (03xx)` feed `THIS PAGE - A = P D P^-1 and A^k = P D^k P^-1`, which feeds `The SVD (0407)` as the repair for the case where it fails.
+1. **Orientation figure**, `flowchart LR`: `Eigenvectors (0060)` and `Change of basis (03xx)` feed `THIS PAGE - A = P D P^-1 and A^k = P D^k P^-1`, which feeds `The SVD (0066)` as the repair for the case where it fails.
 2. **`flowchart LR`.** The sandwich as four boxes with the vector annotated at each stage: `x`, then `P^-1 x` labelled "now in eigenvector coordinates", then `D P^-1 x` labelled "each coordinate scaled", then `A x`. Kills: reading `P D P^-1` as an algebraic identity rather than three motions.
 3. **`svg.chart`, required floor.** A fan of eight starting vectors, then the same fan after `A`, `A^2`, `A^4` and `A^8` for `A = [[4,1],[2,3]]`, visibly collapsing onto the `(1,1)` direction. The angle of each fan-mean is annotated so the convergence is a number and not an impression. Kills: not seeing why the dominant eigenvalue dominates.
 4. **`stateDiagram-v2`.** Three states a square matrix can be in: `diagonalisable`, `orthogonally diagonalisable` as a substate reached by symmetry, and `defective`, with the transitions labelled by the property that puts it there. Kills: treating "defective" as a footnote instead of the reason the next four pages exist.
@@ -52,7 +52,7 @@ Formally this is an induction: it holds for `k = 1`; and if `A^k = P D^k P^-1` t
 `A = [[4, 1], [2, 3]]`, third appearance, so the eigen-work is trusted and only the new step is new.
 
 1. **Goal.** Compute `A^5` without multiplying five matrices.
-2. **Collect.** From `0401`, eigenvalues `5` and `2` with eigenvectors `(1,1)` and `(1,-2)`. So `P = [[1, 1], [1, -2]]` and `D = diag(5, 2)`.
+2. **Collect.** From `0060`, eigenvalues `5` and `2` with eigenvectors `(1,1)` and `(1,-2)`. So `P = [[1, 1], [1, -2]]` and `D = diag(5, 2)`.
 3. **Check `P` is invertible.** `det(P) = (1)(-2) - (1)(1) = -3`, non-zero, so the two eigenvectors are independent and Theorem 1 applies.
 4. **Invert.** `P^-1 = (1/-3) [[-2, -1], [-1, 1]] = [[2/3, 1/3], [1/3, -1/3]]`.
 5. **Power the diagonal.** `D^5 = diag(5^5, 2^5) = diag(3125, 32)`. Two scalar powers, not five matrix products.
@@ -64,7 +64,7 @@ Formally this is an induction: it holds for `k = 1`; and if `A^k = P D^k P^-1` t
 
 **Q1, tests a misconception.** Why can a quarter-turn rotation matrix not be diagonalised over the real numbers? Answer: because it turns every real vector, so no real eigenvector exists. Distractors: because its determinant is 1 (a true fact about rotations with no bearing); because it is symmetric and symmetric matrices resist diagonal form (doubly wrong, and the feedback says so); because its trace is zero (a true number, irrelevant).
 
-**Q2.** A 3x3 matrix has three distinct eigenvalues. Which follows? Answer: it is diagonalisable, because eigenvectors for distinct eigenvalues are independent. Distractors: its eigenvectors are perpendicular (needs symmetry, page `0403`); it is invertible (needs all eigenvalues non-zero, and distinct does not mean non-zero); it is symmetric (the implication runs the other way, and not even then).
+**Q2.** A 3x3 matrix has three distinct eigenvalues. Which follows? Answer: it is diagonalisable, because eigenvectors for distinct eigenvalues are independent. Distractors: its eigenvectors are perpendicular (needs symmetry, page `0062`); it is invertible (needs all eigenvalues non-zero, and distinct does not mean non-zero); it is symmetric (the implication runs the other way, and not even then).
 
 ## Practice seeds
 
@@ -80,7 +80,7 @@ Formally this is an induction: it holds for `k = 1`; and if `A^k = P D^k P^-1` t
 
 ## Code and dataset plan
 
-`code/0406-diagonalisation-and-powers.py`. Dataset `datasets/spectra.csv`.
+`code/0065-diagonalisation-and-powers.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition.** Build `P` and `D` from the eigendecomposition of the 24x24 channel covariance, then form `P D^k P^-1` for `k = 8`.

@@ -1,4 +1,4 @@
-"""0410 - PCA through the SVD of the centred data matrix.
+"""0069 - PCA through the SVD of the centred data matrix.
 
 The module's centrepiece. Runs PCA two ways and checks they are the same thing:
 
@@ -9,7 +9,7 @@ The module's centrepiece. Runs PCA two ways and checks they are the same thing:
 Then verifies the reconstruction identity directly: the average squared error
 from keeping M directions equals the sum of the eigenvalues that were dropped.
 
-Needs numpy and pandas only:  python3 0410-pca-through-the-svd.py
+Needs numpy and pandas only:  python3 0069-pca-through-the-svd.py
 """
 
 from __future__ import annotations

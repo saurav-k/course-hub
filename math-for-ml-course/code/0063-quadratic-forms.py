@@ -1,11 +1,11 @@
-"""0404 - Quadratic forms: reading a matrix as a bowl, a saddle or a valley.
+"""0063 - Quadratic forms: reading a matrix as a bowl, a saddle or a valley.
 
 Brackets x^T S x over unit vectors two ways: by sampling many random directions,
 and by reading the extreme eigenvalues. Sampling can only ever find values
 inside the bracket, which is the point. Then confirms that rotating into the
 eigenbasis removes the cross terms.
 
-Needs numpy and pandas only:  python3 0404-quadratic-forms.py
+Needs numpy and pandas only:  python3 0063-quadratic-forms.py
 """
 
 from __future__ import annotations

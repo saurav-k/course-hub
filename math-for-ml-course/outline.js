@@ -22,11 +22,11 @@ window.COURSE_OUTLINE = {
       "lessons": [
         {
           "title": "Some directions a matrix only stretches",
-          "href": "lessons/0401-eigenvectors-the-directions-a-matrix-does-not-turn.html"
+          "href": "lessons/0060-eigenvectors-the-directions-a-matrix-does-not-turn.html"
         },
         {
           "title": "One polynomial holds every eigenvalue",
-          "href": "lessons/0402-the-characteristic-equation-trace-and-determinant.html"
+          "href": "lessons/0061-the-characteristic-equation-trace-and-determinant.html"
         }
       ]
     }

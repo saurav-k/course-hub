@@ -1,4 +1,4 @@
-"""0405 - Positive definiteness and its eigenvalue test.
+"""0064 - Positive definiteness and its eigenvalue test.
 
 Tests definiteness two ways: by sampling the quadratic form, and by the smallest
 eigenvalue. Then duplicates a channel and watches the smallest eigenvalue
@@ -6,7 +6,7 @@ collapse to zero while sampling stays stubbornly positive, because a random
 vector almost never lands exactly on the null direction. That gap is why
 "I sampled a lot and it was fine" is not a proof.
 
-Needs numpy and pandas only:  python3 0405-positive-definiteness.py
+Needs numpy and pandas only:  python3 0064-positive-definiteness.py
 """
 
 from __future__ import annotations

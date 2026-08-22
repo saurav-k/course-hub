@@ -1,4 +1,4 @@
-# 0409 - Low-rank approximation, and Eckart-Young
+# 0068 - Low-rank approximation, and Eckart-Young
 
 **Placeholder number.** Module M04, position 9. **Label:** `core`. **Rung:** frontier (`pill hard`).
 
@@ -8,20 +8,20 @@ Cutting the SVD's rank-one sum off after `k` terms is not merely a reasonable ap
 
 ## Prerequisites, by page number
 
-- `0407` the SVD and its rank-one sum
-- `0408` the geometry, and `sigma_1` as the largest stretch
+- `0066` the SVD and its rank-one sum
+- `0067` the geometry, and `sigma_1` as the largest stretch
 - `03xx` rank (M03)
 
 ## Beats, in order
 
 1. The question, asked concretely on the real dataset before any theory: this matrix has 192,000 numbers in it, how few can I keep and still have it?
-2. Truncate. Define `A_k` as the first `k` terms of the rank-one sum from `0407`. It is a rank-`k` matrix by construction, since it is a sum of `k` rank-one pieces.
+2. Truncate. Define `A_k` as the first `k` terms of the rank-one sum from `0066`. It is a rank-`k` matrix by construction, since it is a sum of `k` rank-one pieces.
 3. Ask the sceptical question the page exists to answer: of all the rank-`k` matrices in the world, is this particular one the closest to `A`? There is no reason yet to think so.
-4. Define what "closest" means, because the answer depends on it. Two norms: the spectral norm `||M||_2 = sigma_1(M)`, the worst stretch, from `0408`; and the Frobenius norm, the square root of the sum of every squared entry.
+4. Define what "closest" means, because the answer depends on it. Two norms: the spectral norm `||M||_2 = sigma_1(M)`, the worst stretch, from `0067`; and the Frobenius norm, the square root of the sum of every squared entry.
 5. **State Eckart-Young-Mirsky and prove it** (below), for the spectral norm in full.
 6. The two error identities, and they are worth memorising: `||A - A_k||_2 = sigma_{k+1}` and `||A - A_k||_F = sqrt(sigma_{k+1}^2 + ... + sigma_r^2)`. Both say the same thing in different words: the error *is* the discarded spectrum.
 7. Choosing `k` honestly. Show the energy curve, define "energy kept" as `sum of kept sigma^2 / sum of all sigma^2`, and immediately say what it is not: a share of squared error in the original units, not an accuracy on any downstream task. Where a real cliff exists, as it does in this dataset by construction, the cliff is a better guide than any percentage.
-8. Uniqueness: the best rank-`k` approximation is unique exactly when `sigma_k > sigma_{k+1}`. A tie means the choice is genuinely arbitrary, and that is the practical meaning of the free choice named in `0407`'s boundary.
+8. Uniqueness: the best rank-`k` approximation is unique exactly when `sigma_k > sigma_{k+1}`. A tie means the choice is genuinely arbitrary, and that is the practical meaning of the free choice named in `0066`'s boundary.
 9. When storage actually wins: rank-`k` costs `k(m + n + 1)` numbers against `mn`, so the saving exists only when `k` is well below `mn/(m+n)`. Do the arithmetic for the dataset rather than asserting it.
 10. Where this is the whole technique, three named places with a cross-link each: image and signal compression; latent semantic analysis; and the low-rank weight update in `../../llm-papers-course/lessons/0028-lora.html`, where freezing a large weight matrix and training only a rank-`r` correction is exactly this idea used deliberately rather than as a compromise.
 11. **The honest limit, and it is a warning callout.** "Best" here means best over a **fully observed** matrix in **these norms**. Change either and the theorem does not apply. A ratings matrix where most entries are missing is the standard case where it does not, and no amount of filling the blanks in recovers the guarantee.
@@ -34,7 +34,7 @@ So `A_k` is a closest rank-`k` matrix to `A` in the spectral norm.
 
 **Proof, in three moves.**
 
-*Move 1, the value `A_k` achieves.* `A - A_k = sum_{i > k} sigma_i u_i v_i^T`. That is itself an SVD, already in the right form with orthonormal `u`'s and `v`'s, and its largest singular value is `sigma_{k+1}`. By `0408` beat 4, the spectral norm is the largest singular value, so `||A - A_k||_2 = sigma_{k+1}`.
+*Move 1, the value `A_k` achieves.* `A - A_k = sum_{i > k} sigma_i u_i v_i^T`. That is itself an SVD, already in the right form with orthonormal `u`'s and `v`'s, and its largest singular value is `sigma_{k+1}`. By `0067` beat 4, the spectral norm is the largest singular value, so `||A - A_k||_2 = sigma_{k+1}`.
 
 *Move 2, set up a contradiction.* Suppose some `B` of rank at most `k` did better, so `||A - B||_2 < sigma_{k+1}`.
 
@@ -52,14 +52,14 @@ That `A_k` is also *optimal* in the Frobenius norm is true, and the course state
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `The SVD (0407)` and `SVD geometry (0408)` feed `THIS PAGE - truncating is provably optimal`, which feeds `PCA (0410)` and, out of module, `Dimension and compression (M10)`.
+1. **Orientation figure**, `flowchart LR`: `The SVD (0066)` and `SVD geometry (0067)` feed `THIS PAGE - truncating is provably optimal`, which feeds `PCA (0069)` and, out of module, `Dimension and compression (M10)`.
 2. **`svg.chart`, required floor.** The measured singular value decay of the centred `spectra.csv` matrix on a log axis, the cut at `k = 4` marked, and the discarded tail shaded. The shaded region is annotated as *being* the error rather than representing it. Kills: treating `k` as a hyperparameter to search when the error is readable off the tail.
 3. **`svg.chart`, the credibility figure.** Measured `||A - A_k||_F` and `||A - A_k||_2` against `k` from 1 to 6, with the theoretical `sqrt(sum of tail squares)` and `sigma_{k+1}` overplotted as hollow dots landing exactly on the measured curves. Kills: doubting that the theorem is tight, by letting the reader watch theory and measurement coincide to six decimals.
 4. **`quadrantChart`.** Compression ratio against energy kept, with `k = 1, 2, 3, 4, 5, 6` placed from the measured numbers so the elbow at four is a position on a chart rather than a claim.
 
 ## The worked example, in eight parts
 
-`A = [[3, 2, 2], [2, 3, -2]]`, continued from `0407` where its SVD was found by hand, so the only new work is the truncation.
+`A = [[3, 2, 2], [2, 3, -2]]`, continued from `0066` where its SVD was found by hand, so the only new work is the truncation.
 
 1. **Goal.** Find the best rank-one approximation to `A` and know exactly how wrong it is before computing it.
 2. **Recall the SVD.** `sigma_1 = 5` with `u_1 = (1,1)/sqrt(2)` and `v_1 = (1,1,0)/sqrt(2)`; `sigma_2 = 3` with `u_2 = (1,-1)/sqrt(2)` and `v_2 = (1,-1,4)/(3 sqrt(2))`.
@@ -84,13 +84,13 @@ That `A_k` is also *optimal* in the Frobenius norm is true, and the course state
 *`.p-check`:* Kept energy plus discarded energy must be exactly 1: `0.86 + 70/500 = 0.86 + 0.14 = 1.00`. If they do not sum to one, a squared value was used where a value belonged.
 
 **P2, `depth`.** Show that `||A||_F^2 = sigma_1^2 + ... + sigma_r^2`, and use it to prove the energy-kept and error identities are the same statement.
-*Hint:* The Frobenius norm squared is `trace(A^T A)`, and `0402` says the trace is the sum of the eigenvalues.
-*Solution:* `||A||_F^2 = trace(A^T A)`, since the `i`-th diagonal entry of `A^T A` is the squared length of column `i` and summing them sums every squared entry. By `0402`, the trace equals the sum of the eigenvalues of `A^T A`, which by `0407` are exactly the `sigma_i^2`. So `||A||_F^2 = sum sigma_i^2`. Now split the sum at `k`: the first `k` terms are `||A_k||_F^2` by the same argument applied to `A_k`, and the rest are `||A - A_k||_F^2` by the error formula. So kept plus discarded equals the total, and dividing through by the total turns the error identity into the energy identity.
-*`.p-check`:* On the worked `A`, `||A||_F^2 = 34` and `sigma_1^2 + sigma_2^2 = 25 + 9 = 34`. On the dataset, `trace` of the covariance times `(n-1)` must equal the sum of the squared singular values, which `code/0409` asserts.
+*Hint:* The Frobenius norm squared is `trace(A^T A)`, and `0061` says the trace is the sum of the eigenvalues.
+*Solution:* `||A||_F^2 = trace(A^T A)`, since the `i`-th diagonal entry of `A^T A` is the squared length of column `i` and summing them sums every squared entry. By `0061`, the trace equals the sum of the eigenvalues of `A^T A`, which by `0066` are exactly the `sigma_i^2`. So `||A||_F^2 = sum sigma_i^2`. Now split the sum at `k`: the first `k` terms are `||A_k||_F^2` by the same argument applied to `A_k`, and the rest are `||A - A_k||_F^2` by the error formula. So kept plus discarded equals the total, and dividing through by the total turns the error identity into the energy identity.
+*`.p-check`:* On the worked `A`, `||A||_F^2 = 34` and `sigma_1^2 + sigma_2^2 = 25 + 9 = 34`. On the dataset, `trace` of the covariance times `(n-1)` must equal the sum of the squared singular values, which `code/0068` asserts.
 
 ## Code and dataset plan
 
-`code/0409-low-rank-approximation.py`. Dataset `datasets/spectra.csv`, whose four-component construction is the point of this page.
+`code/0068-low-rank-approximation.py`. Dataset `datasets/spectra.csv`, whose four-component construction is the point of this page.
 
 Computes twice:
 1. **From the definition.** Build `A_k` explicitly as a sum of `k` outer products `sigma_i u_i v_i^T`, then measure `||A - A_k||_F` and `||A - A_k||_2` directly from the residual matrix.

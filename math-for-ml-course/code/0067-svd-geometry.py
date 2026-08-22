@@ -1,11 +1,11 @@
-"""0408 - The geometry of the SVD.
+"""0067 - The geometry of the SVD.
 
 Checks that sigma_1 and sigma_min really do bracket how much a matrix can
 stretch a unit vector, by sampling against the spectrum. Then applies V^T,
 Sigma and U as three separate steps and shows the length changes only in the
 middle one, which is the whole "rotate, stretch, rotate" reading.
 
-Needs numpy and pandas only:  python3 0408-svd-geometry.py
+Needs numpy and pandas only:  python3 0067-svd-geometry.py
 """
 
 from __future__ import annotations

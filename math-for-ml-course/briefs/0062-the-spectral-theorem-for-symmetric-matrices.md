@@ -1,4 +1,4 @@
-# 0403 - The spectral theorem for symmetric matrices
+# 0062 - The spectral theorem for symmetric matrices
 
 **Placeholder number.** Module M04, position 3. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,21 +8,21 @@ A real symmetric matrix always has a full set of eigenvectors that are mutually 
 
 ## Prerequisites, by page number
 
-- `0401` eigenvalues and eigenvectors
-- `0402` the characteristic equation
+- `0060` eigenvalues and eigenvectors
+- `0061` the characteristic equation
 - `03xx` the dot product, orthogonality, and orthonormal bases (M03)
 - `03xx` orthogonal matrices and `Q^-1 = Q^T` (M03)
 
 ## Beats, in order
 
-1. Recap the three ways a general matrix disappoints, all met already: complex eigenvalues (`0402`), eigenvectors that are not perpendicular, and possibly too few of them.
+1. Recap the three ways a general matrix disappoints, all met already: complex eigenvalues (`0061`), eigenvectors that are not perpendicular, and possibly too few of them.
 2. Symmetry, defined in one line: `A = A^T`, the entries mirror across the diagonal.
 3. State the theorem, as an equivalence rather than a one-way convenience. The "only if" direction is what makes it a characterisation, and it is what forbids the very common wrong claim that eigenvectors are perpendicular in general.
 4. **The proof** (below), in three parts, with the load-bearing step called out.
-5. The algebraic payoff: with `Q` holding orthonormal eigenvectors as columns, `Q^-1 = Q^T`, so `A = Q Lambda Q^T`. The sandwich from `0406` costs a transpose instead of an inversion, and it is a rotation rather than a general change of basis.
+5. The algebraic payoff: with `Q` holding orthonormal eigenvectors as columns, `Q^-1 = Q^T`, so `A = Q Lambda Q^T`. The sandwich from `0065` costs a transpose instead of an inversion, and it is a rotation rather than a general change of basis.
 6. **The census, and this is the page's real payload.** Show that the covariance matrix, any Gram matrix `X^T X`, a kernel matrix, and a graph Laplacian are all symmetric by construction. The restriction to symmetric matrices is not a restriction in practice. One line each, no derivations, each pointing at the page that owns it.
-7. The spectral sum `A = lambda_1 q_1 q_1^T + ... + lambda_n q_n q_n^T`. Each term is a rank-one piece, weighted by its eigenvalue. This shape returns on `0407` with two sets of vectors and on `0409` as the thing that gets truncated.
-8. What is still free, and must be said here because `0410` depends on it: eigenvalue **signs** and eigenvector **signs** are not pinned down, and when two eigenvalues are equal the whole plane they span is an eigenspace, so any orthonormal pair in it will do. Perpendicular does not mean unique.
+7. The spectral sum `A = lambda_1 q_1 q_1^T + ... + lambda_n q_n q_n^T`. Each term is a rank-one piece, weighted by its eigenvalue. This shape returns on `0066` with two sets of vectors and on `0068` as the thing that gets truncated.
+8. What is still free, and must be said here because `0069` depends on it: eigenvalue **signs** and eigenvector **signs** are not pinned down, and when two eigenvalues are equal the whole plane they span is an eigenspace, so any orthonormal pair in it will do. Perpendicular does not mean unique.
 
 ## Named theorem and its stated proof (D4)
 
@@ -38,13 +38,13 @@ A real symmetric matrix always has a full set of eigenvectors that are mutually 
 
 *Converse.* If `A = Q Lambda Q^T` then `A^T = (Q Lambda Q^T)^T = Q Lambda^T Q^T = Q Lambda Q^T = A`, since a diagonal matrix is its own transpose.
 
-**The step that does the real work.** Part 3's invariance argument: that the perpendicular complement of an eigenvector is carried into itself. That single line is what turns "there is at least one eigenvector" into "there are `n` of them, perpendicular". It uses symmetry, and it is exactly the step that fails for a non-symmetric matrix. The page says this explicitly and immediately shows the failure with `A = [[4,1],[2,3]]` from `0401`, whose eigendirections `(1,1)` and `(1,-2)` have dot product `1 - 2 = -1`, not zero.
+**The step that does the real work.** Part 3's invariance argument: that the perpendicular complement of an eigenvector is carried into itself. That single line is what turns "there is at least one eigenvector" into "there are `n` of them, perpendicular". It uses symmetry, and it is exactly the step that fails for a non-symmetric matrix. The page says this explicitly and immediately shows the failure with `A = [[4,1],[2,3]]` from `0060`, whose eigendirections `(1,1)` and `(1,-2)` have dot product `1 - 2 = -1`, not zero.
 
-**The honest boundary.** Part 1 quietly used complex vectors to prove an entirely real statement, which is the standard route and not an accident. The complex analogue, where `A = A*` and the same conclusion holds, is called the Hermitian case; it is true, the proof is the same with conjugate transposes throughout, and the course does not need it. Part 3's induction also assumes an eigenvalue exists at all, which over the complex numbers is the fundamental theorem of algebra, named on `0402` and not proved here.
+**The honest boundary.** Part 1 quietly used complex vectors to prove an entirely real statement, which is the standard route and not an accident. The complex analogue, where `A = A*` and the same conclusion holds, is called the Hermitian case; it is true, the proof is the same with conjugate transposes throughout, and the course does not need it. Part 3's induction also assumes an eigenvalue exists at all, which over the complex numbers is the fundamental theorem of algebra, named on `0061` and not proved here.
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `Eigenvectors (0401)` and `Orthonormal bases (03xx)` feed `THIS PAGE - symmetric means perpendicular eigenvectors, always`, which feeds `Quadratic forms (0404)`, `Positive definiteness (0405)`, `The SVD (0407)` and `PCA (0410)`.
+1. **Orientation figure**, `flowchart LR`: `Eigenvectors (0060)` and `Orthonormal bases (03xx)` feed `THIS PAGE - symmetric means perpendicular eigenvectors, always`, which feeds `Quadratic forms (0063)`, `Positive definiteness (0064)`, `The SVD (0066)` and `PCA (0069)`.
 2. **`svg.chart`, required floor.** Two panels on identical axes. Left: `S = [[5,2],[2,2]]`, its two eigendirections drawn as rays at exactly 90 degrees, aligned with the axes of the ellipse `S` maps the unit circle to. Right: `A = [[4,1],[2,3]]`, eigendirection rays at an acute angle and *not* aligned with the ellipse axes, with the angle annotated. Kills: "eigenvectors are perpendicular", the module's most common wrong belief.
 3. **`mindmap`.** Root `Symmetric matrices in machine learning`, four branches: `From data` (covariance, Gram `X^T X`), `From the model` (Hessian, Fisher information), `From a graph` (adjacency, Laplacian), `From a kernel` (any kernel matrix). Kills: reading the theorem as a special case, when the special case is nearly everything.
 4. **`svg.chart`.** The spectral sum as layers: `S` drawn as a 2x2 heat grid, then `6 q_1 q_1^T` and `1 q_2 q_2^T` as two fainter grids, then the two added back to `S` exactly. Kills: `A = sum lambda_i q_i q_i^T` read as notation rather than as a decomposition into weighted layers.
@@ -78,11 +78,11 @@ A real symmetric matrix always has a full set of eigenvectors that are mutually 
 **P2, `depth`.** Prove that if `S` is symmetric then `S^2` has the same eigenvectors as `S`, with eigenvalues squared, and use this to show `S^2` never has a negative eigenvalue.
 *Hint:* Apply `S` twice to an eigenvector.
 *Solution:* If `S q = lambda q` then `S^2 q = S(lambda q) = lambda (S q) = lambda^2 q`. So each eigenvector of `S` is an eigenvector of `S^2` with eigenvalue `lambda^2`. Because the spectral theorem gives `n` orthonormal eigenvectors of `S`, these are all of `S^2`'s eigenvalues. Every `lambda^2` is at least zero, so `S^2` has no negative eigenvalue.
-*`.p-check`:* On `S = [[5,2],[2,2]]`, `S^2 = [[29,14],[14,8]]`, whose trace is `37 = 36 + 1 = 6^2 + 1^2` and determinant `232 - 196 = 36 = (6 x 1)^2`. Page `0405` will call `S^2` positive semidefinite for exactly this reason.
+*`.p-check`:* On `S = [[5,2],[2,2]]`, `S^2 = [[29,14],[14,8]]`, whose trace is `37 = 36 + 1 = 6^2 + 1^2` and determinant `232 - 196 = 36 = (6 x 1)^2`. Page `0064` will call `S^2` positive semidefinite for exactly this reason.
 
 ## Code and dataset plan
 
-`code/0403-spectral-theorem.py`. Dataset `datasets/spectra.csv`.
+`code/0062-spectral-theorem.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition.** Form the 24x24 channel covariance. Get its eigenvalues and eigenvectors, then verify the theorem's three claims directly rather than trusting them: every eigenvalue has zero imaginary part; the matrix of eigenvectors satisfies `Q^T Q = I` to tolerance; and `Q Lambda Q^T` reproduces the covariance.

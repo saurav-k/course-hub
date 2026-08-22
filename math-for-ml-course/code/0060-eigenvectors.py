@@ -1,4 +1,4 @@
-"""0401 - Eigenvectors: the directions a matrix does not turn.
+"""0060 - Eigenvectors: the directions a matrix does not turn.
 
 Computes the dominant eigenvector of a real covariance matrix two ways and
 checks they agree: once from the definition by power iteration, once with
@@ -7,7 +7,7 @@ mathematics does not pin down and which the page says so on.
 
 Needs numpy and pandas only. Run it anywhere:
 
-    python3 0401-eigenvectors.py
+    python3 0060-eigenvectors.py
 
 Each program in this course is self-contained on purpose, including a copy of
 the loader below, so that a single file pasted into Colab or a notebook runs

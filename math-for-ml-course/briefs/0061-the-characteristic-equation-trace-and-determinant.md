@@ -1,4 +1,4 @@
-# 0402 - The characteristic equation, and what the trace and determinant tell you
+# 0061 - The characteristic equation, and what the trace and determinant tell you
 
 **Placeholder number.** Module M04, position 2. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,19 +8,19 @@ The eigenvalues are the roots of one polynomial built from the matrix, and two c
 
 ## Prerequisites, by page number
 
-- `0401` eigenvalues and eigenvectors
+- `0060` eigenvalues and eigenvectors
 - `03xx` the determinant, and what a zero determinant means (M03)
 
 ## Beats, in order
 
-1. Recover the question from `0401`: `Av = lambda v` with `v != 0` means `(A - lambda I)v = 0` has a non-zero solution, which means `A - lambda I` is **singular**.
+1. Recover the question from `0060`: `Av = lambda v` with `v != 0` means `(A - lambda I)v = 0` has a non-zero solution, which means `A - lambda I` is **singular**.
 2. Singular means zero determinant. So `det(A - lambda I) = 0`. Name it the characteristic equation and the left side the characteristic polynomial.
 3. Work it for a general 2x2 and get `lambda^2 - (a + d) lambda + (ad - bc)`, that is `lambda^2 - trace(A) lambda + det(A)`. The two coefficients are already the two numbers the reader knows.
 4. State and prove the two identities (below).
 5. Use them as a check, and be explicit that a check that costs one addition and one multiplication is worth doing every single time.
-6. What the roots can do: two distinct real roots, one repeated root, or a complex conjugate pair. The discriminant decides, and this is the promised payoff of `0401` beat 7.
+6. What the roots can do: two distinct real roots, one repeated root, or a complex conjugate pair. The discriminant decides, and this is the promised payoff of `0060` beat 7.
 7. **The honest warning, and it is a warning callout.** The characteristic polynomial is the cleanest *definition* of an eigenvalue and among the worst *algorithms* for computing one. Root-finding on a polynomial of degree `n` is badly behaved for `n` past a handful, and no numerical library computes eigenvalues this way. This page shows it once, uses it on 2x2 matrices, and never uses it again.
-8. What the determinant tells you on its own: `det(A) = 0` exactly when zero is an eigenvalue, exactly when some non-zero direction is collapsed to the origin, exactly when `A` is not invertible. Four statements, one fact. Page `0405` needs this and page `0409` measures it.
+8. What the determinant tells you on its own: `det(A) = 0` exactly when zero is an eigenvalue, exactly when some non-zero direction is collapsed to the origin, exactly when `A` is not invertible. Four statements, one fact. Page `0064` needs this and page `0068` measures it.
 
 ## Named theorems and their stated proofs (D4)
 
@@ -37,14 +37,14 @@ Two polynomials equal for every `lambda` have equal coefficients. Matching the `
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `Eigenvectors (0401)` and `Determinant (03xx)` feed `THIS PAGE - the polynomial whose roots are the eigenvalues`, which feeds `Spectral theorem (0403)` and `Positive definiteness (0405)`.
+1. **Orientation figure**, `flowchart LR`: `Eigenvectors (0060)` and `Determinant (03xx)` feed `THIS PAGE - the polynomial whose roots are the eigenvalues`, which feeds `Spectral theorem (0062)` and `Positive definiteness (0064)`.
 2. **`svg.chart`, required floor.** The characteristic polynomial of `A = [[4,1],[2,3]]` plotted over `lambda` from 0 to 7, crossing the axis at exactly 5 and 2, with the two roots marked and the trace and determinant annotated as the coefficients they are. Kills: "the characteristic equation" as an incantation rather than a curve with visible roots.
 3. **`svg.chart`.** Three polynomials on one axis for three matrices: two real roots, a repeated root (tangent to the axis), and no real root (the parabola clears the axis). Kills: expecting two eigenvalues always.
 4. **`flowchart TD`.** The four equivalent readings of `det(A) = 0`: zero is an eigenvalue, some direction collapses, columns are dependent, `A` has no inverse. One box each, joined to one root. Kills: treating these as four separate facts to memorise.
 
 ## The worked example, in eight parts
 
-`A = [[4, 1], [2, 3]]`, deliberately the same matrix as `0401` so the reader sees a second route to an answer they already trust.
+`A = [[4, 1], [2, 3]]`, deliberately the same matrix as `0060` so the reader sees a second route to an answer they already trust.
 
 1. **Goal.** Get the eigenvalues without hunting for directions.
 2. **Set up.** `A - lambda I = [[4 - lambda, 1], [2, 3 - lambda]]`.
@@ -52,7 +52,7 @@ Two polynomials equal for every `lambda` have equal coefficients. Matching the `
 4. **Expand.** `12 - 7 lambda + lambda^2 - 2 = lambda^2 - 7 lambda + 10`.
 5. **Read the coefficients.** `7` is `trace(A) = 4 + 3`; `10` is `det(A) = 12 - 2`. The polynomial was already known before it was expanded.
 6. **Solve.** `lambda = (7 +/- sqrt(49 - 40)) / 2 = (7 +/- 3) / 2`, so `5` and `2`.
-7. **Sanity check (`.p-check`).** `5 + 2 = 7` and `5 x 2 = 10`. Both coefficients reproduced, so the arithmetic is sound. And these match `0401`, reached by a different route.
+7. **Sanity check (`.p-check`).** `5 + 2 = 7` and `5 x 2 = 10`. Both coefficients reproduced, so the arithmetic is sound. And these match `0060`, reached by a different route.
 8. **What changes if.** Replace the lower-left `2` with `-2`. Then `det = 12 + 2 = 14`, the polynomial is `lambda^2 - 7 lambda + 14`, the discriminant is `49 - 56 = -7`, and there is no real root. The trace and determinant identities still hold, over the complex numbers.
 
 ## Quiz seeds
@@ -66,7 +66,7 @@ Two polynomials equal for every `lambda` have equal coefficients. Matching the `
 **P1.** Find the eigenvalues of `A = [[6, -2], [-2, 9]]` and check both coefficients.
 *Hint:* Write down the trace and the determinant first. You already have the polynomial.
 *Solution:* `trace = 15`, `det = 54 - 4 = 50`, so `lambda^2 - 15 lambda + 50 = 0`, discriminant `225 - 200 = 25`, roots `(15 +/- 5)/2 = 10` and `5`.
-*`.p-check`:* `10 + 5 = 15` and `10 x 5 = 50`. Both match, and both roots are positive, which page `0405` will call positive definite.
+*`.p-check`:* `10 + 5 = 15` and `10 x 5 = 50`. Both match, and both roots are positive, which page `0064` will call positive definite.
 
 **P2, `depth`.** Show that if `lambda` is an eigenvalue of an invertible `A`, then `1/lambda` is an eigenvalue of `A^-1`, and say why `lambda` cannot be zero.
 *Hint:* Start from `Av = lambda v` and hit both sides with `A^-1`.
@@ -75,7 +75,7 @@ Two polynomials equal for every `lambda` have equal coefficients. Matching the `
 
 ## Code and dataset plan
 
-`code/0402-characteristic-and-invariants.py`. Dataset `datasets/spectra.csv`.
+`code/0061-characteristic-and-invariants.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition,** on a 2x2 block of the channel covariance: build the characteristic polynomial's coefficients from `trace` and `det` and solve the quadratic with the formula.

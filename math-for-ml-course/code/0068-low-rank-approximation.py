@@ -1,10 +1,10 @@
-"""0409 - Low-rank approximation and Eckart-Young.
+"""0068 - Low-rank approximation and Eckart-Young.
 
 Measures the truncation error two ways at every k: by building A_k explicitly
 and measuring the residual, and by reading it off the discarded spectrum alone.
 The theorem says these must be equal. They are, to twelve decimals.
 
-Needs numpy and pandas only:  python3 0409-low-rank-approximation.py
+Needs numpy and pandas only:  python3 0068-low-rank-approximation.py
 """
 
 from __future__ import annotations

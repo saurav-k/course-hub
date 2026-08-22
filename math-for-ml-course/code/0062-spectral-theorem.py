@@ -1,4 +1,4 @@
-"""0403 - The spectral theorem for symmetric matrices.
+"""0062 - The spectral theorem for symmetric matrices.
 
 Checks the theorem's three promises on a real symmetric matrix rather than
 trusting them: real eigenvalues, orthonormal eigenvectors, and Q Lambda Q^T
@@ -6,7 +6,7 @@ reproducing the original. Then runs the same checks on a deliberately
 non-symmetric matrix and watches the orthogonality promise fail, which is the
 executable form of the page's misconception quiz.
 
-Needs numpy and pandas only:  python3 0403-spectral-theorem.py
+Needs numpy and pandas only:  python3 0062-spectral-theorem.py
 """
 
 from __future__ import annotations

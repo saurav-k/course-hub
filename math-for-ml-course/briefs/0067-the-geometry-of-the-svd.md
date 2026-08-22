@@ -1,4 +1,4 @@
-# 0408 - The geometry of the SVD
+# 0067 - The geometry of the SVD
 
 **Placeholder number.** Module M04, position 8. **Label:** `core`. **Rung:** working (`pill med`).
 
@@ -8,17 +8,17 @@ Every matrix does exactly three things to space in exactly this order: it rotate
 
 ## Prerequisites, by page number
 
-- `0407` the SVD and its existence proof
+- `0066` the SVD and its existence proof
 - `03xx` orthogonal matrices as rotations and reflections (M03)
 
 ## Beats, in order
 
 1. Read `A = U Sigma V^T` right to left as three motions rather than three matrices: `V^T` turns the input frame, `Sigma` stretches along the turned axes and changes dimension, `U` turns the result into the output frame.
-2. Insist on the order and on which space each rotation happens in. `V^T` acts in the input space, `U` in the output space, and when the matrix is not square those are not the same space at all. This is the concrete meaning of "two bases" from `0407`.
+2. Insist on the order and on which space each rotation happens in. `V^T` acts in the input space, `U` in the output space, and when the matrix is not square those are not the same space at all. This is the concrete meaning of "two bases" from `0066`.
 3. **The ellipsoid result** and its proof (below). This is the page's payload: the picture is a theorem, not an analogy.
 4. `sigma_1` is the largest stretch any unit vector receives, and `sigma_n` the smallest. So the singular values bracket what the matrix can do to a vector's length. Name `sigma_1` as the spectral norm and say what it measures.
-5. The ratio `sigma_1 / sigma_n` says how differently the matrix treats its best and worst directions. A ratio near one means the ellipsoid is nearly a sphere; a large ratio means a long thin sliver. Name it the condition number, and state in one sentence where it bites: a matrix with a large ratio turns a small change in the input into a large change in the answer. M06 owns what that does to gradient descent; the SVD route on page `0410` avoids the problem rather than solving it.
-6. What `Sigma` does when the matrix is not square: with more rows than columns it embeds a lower-dimensional ellipsoid in a bigger space; with more columns than rows it flattens, and the directions with `sigma = 0` are crushed to the origin. Those crushed directions are the null space, already met on `0407` beat 8.
+5. The ratio `sigma_1 / sigma_n` says how differently the matrix treats its best and worst directions. A ratio near one means the ellipsoid is nearly a sphere; a large ratio means a long thin sliver. Name it the condition number, and state in one sentence where it bites: a matrix with a large ratio turns a small change in the input into a large change in the answer. M06 owns what that does to gradient descent; the SVD route on page `0069` avoids the problem rather than solving it.
+6. What `Sigma` does when the matrix is not square: with more rows than columns it embeds a lower-dimensional ellipsoid in a bigger space; with more columns than rows it flattens, and the directions with `sigma = 0` are crushed to the origin. Those crushed directions are the null space, already met on `0066` beat 8.
 7. Contrast with the eigendecomposition, geometrically rather than algebraically: `P D P^-1` changes basis, scales, then changes *back*, so it is one coordinate system used twice. The SVD uses two different ones and never undoes the first. That is why the SVD can describe a map between spaces of different dimension and the eigendecomposition cannot.
 8. Determinant as a by-product: for a square matrix, `|det(A)| = sigma_1 sigma_2 ... sigma_n`, because rotations preserve volume and only `Sigma` changes it. The sign the determinant carries is orientation, which `Sigma` cannot express, which is why the absolute value is there.
 
@@ -39,14 +39,14 @@ which is exactly the equation of an ellipsoid with semi-axis `sigma_i` along coo
 
 ## Planned figures
 
-1. **Orientation figure**, `flowchart LR`: `The SVD (0407)` feeds `THIS PAGE - what the three factors do to space`, which feeds `Low-rank approximation (0409)` and, out of module, `Conditioning and convergence (M06)`.
+1. **Orientation figure**, `flowchart LR`: `The SVD (0066)` feeds `THIS PAGE - what the three factors do to space`, which feeds `Low-rank approximation (0068)` and, out of module, `Conditioning and convergence (M06)`.
 2. **`svg.chart`, required floor, four panels.** The unit circle with two marked vectors; after `V^T` (rotated, marks moved to the axes); after `Sigma` (stretched into an axis-aligned ellipse with semi-axes labelled `sigma_1` and `sigma_2`); after `U` (rotated into final position). The two marked vectors are traceable through all four panels. Kills: the SVD as "three matrices" instead of three motions.
 3. **`svg.chart`.** Two ellipses from two matrices with the same `sigma_1` but very different `sigma_2`: one nearly circular, one a thin sliver, with the ratio annotated on each. Kills: not feeling what a condition number is.
 4. **`flowchart LR`.** Eigendecomposition drawn as `basis change, scale, basis change BACK` in one space, beside SVD drawn as `basis change in the input space, scale, different basis change in the output space`. Kills: thinking the SVD is the eigendecomposition with extra steps.
 
 ## The worked example, in eight parts
 
-`A = [[1, 0.8], [0, 1]]`, a shear. Chosen because it is the matrix `0406` showed cannot be diagonalised usefully, so the reader watches the SVD succeed exactly where the eigendecomposition failed.
+`A = [[1, 0.8], [0, 1]]`, a shear. Chosen because it is the matrix `0065` showed cannot be diagonalised usefully, so the reader watches the SVD succeed exactly where the eigendecomposition failed.
 
 1. **Goal.** Describe what this shear does to the unit circle, given that its eigen-story is degenerate.
 2. **Recall the failure.** Its only eigenvalue is `1`, twice, with a single eigendirection `(1,0)`. The eigendecomposition says almost nothing about it.
@@ -73,11 +73,11 @@ which is exactly the equation of an ellipsoid with semi-axis `sigma_i` along coo
 **P2, `depth`.** Show that `sigma_1` is the largest value `||Ax||` takes over all unit vectors `x`.
 *Hint:* Use the substitution from the theorem's proof and ask which unit `y` makes `||Sigma y||` biggest.
 *Solution:* With `x = V y` and `||y|| = 1`, the proof gave `||Ax|| = ||Sigma y||` because `U` preserves length. Now `||Sigma y||^2 = sum_i sigma_i^2 y_i^2`. Since `sum_i y_i^2 = 1`, this is a weighted average of the numbers `sigma_i^2` with weights summing to one, so it is at most the largest of them, `sigma_1^2`, and it attains that value by putting all the weight on the first coordinate, `y = e_1`. Undoing the substitution, the maximiser is `x = V e_1 = v_1`, and the value is `sigma_1`.
-*`.p-check`:* On the worked shear, `A v_1` should have length `1.4770`. And no unit vector should beat it: sampling a few thousand random unit vectors must never exceed `sigma_1`, which is what `code/0408` asserts.
+*`.p-check`:* On the worked shear, `A v_1` should have length `1.4770`. And no unit vector should beat it: sampling a few thousand random unit vectors must never exceed `sigma_1`, which is what `code/0067` asserts.
 
 ## Code and dataset plan
 
-`code/0408-svd-geometry.py`. Dataset `datasets/spectra.csv`.
+`code/0067-svd-geometry.py`. Dataset `datasets/spectra.csv`.
 
 Computes twice:
 1. **From the definition, by sampling.** Draw 100,000 random unit vectors in 24 dimensions, apply the centred data matrix's first two rows as a 2x24 map, and record the maximum and minimum of `||Ax||`.

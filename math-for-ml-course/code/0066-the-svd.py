@@ -1,13 +1,13 @@
-"""0407 - The SVD: every matrix is a rotation, a stretch and a rotation.
+"""0066 - The SVD: every matrix is a rotation, a stretch and a rotation.
 
 Builds the SVD by following the existence proof literally: diagonalise A^T A,
 take square roots for the singular values, then construct u_i = A v_i / sigma_i
 and check they came out orthonormal. Compares against numpy.linalg.svd.
 
 Also prints the rank two ways and shows they can disagree, which is the hook
-page 0409 picks up.
+page 0068 picks up.
 
-Needs numpy and pandas only:  python3 0407-the-svd.py
+Needs numpy and pandas only:  python3 0066-the-svd.py
 """
 
 from __future__ import annotations
@@ -96,7 +96,7 @@ def main() -> None:
     print("\nEvery singular value is non-zero, so the numerical rank is full at 24.")
     print("But this matrix was built from four components plus noise, and only a")
     print("threshold placed INSIDE the cliff recovers that. Rank is not one number")
-    print("here, it is a choice about where signal stops. Page 0409 makes the choice.")
+    print("here, it is a choice about where signal stops. Page 0068 makes the choice.")
 
 
 if __name__ == "__main__":
