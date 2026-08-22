@@ -1,4 +1,4 @@
-# 9008 - Kernels, and why a kernel matrix must be positive semi-definite
+# 0112 - Kernels, and why a kernel matrix must be positive semi-definite
 
 **Module** M10 - lesson 08  **Rung** frontier  **Class** depth
 
@@ -9,9 +9,9 @@ product and get a non-linear method for free, without ever visiting the bigger s
 
 ## Prerequisites
 
-9006 (distances, and the RBF kernel is a function of one). M03 for the dot product. **M04 owns
+0110 (distances, and the RBF kernel is a function of one). M03 for the dot product. **M04 owns
 positive semi-definiteness and the eigenvalue test**; this page uses it and does not re-derive it.
-9009 is *not* a prerequisite, but the page should note it comes next and that adding dimensions on
+0113 is *not* a prerequisite, but the page should note it comes next and that adding dimensions on
 purpose is about to look strange.
 
 ## Beats, in order
@@ -39,7 +39,7 @@ purpose is about to look strange.
    `(x.x' + 1)^d`, Cortes and Vapnik eq 37. RBF `exp(-gamma |x - x'|^2)`, whose feature space is
    infinite-dimensional and whose ancestor is the potential function `exp(-|u - v|)` of Aizerman,
    Braverman and Rozonoer 1964 (Cortes and Vapnik eq 36). Note that the RBF is a function of
-   `|x - x'|`, so **it is 9006's Euclidean distance wearing a different hat** and everything 9009
+   `|x - x'|`, so **it is 0110's Euclidean distance wearing a different hat** and everything 0113
    is about to say applies to it.
 8. **Trade-off, in the same section.** The Gram matrix is `n` by `n`. At a million training points
    that is `10^12` entries. Kernel methods trade a dimension problem for a sample-size problem,
@@ -160,7 +160,7 @@ factor of two.
 
 ## Code and dataset plan
 
-`code/9008-kernels.py` against `m10_signals.csv` plus a ring problem generated in the file. Verifies
+`code/0112-kernels.py` against `m10_signals.csv` plus a ring problem generated in the file. Verifies
 the identity on ten random pairs to 8.9e-16; prints the multiplication-count table; **checks
 Mercer's condition as an eigenvalue test** on linear, polynomial and RBF Gram matrices and on the
 `tanh` counterexample; and solves the ring problem twice, linear ridge at 0.6650 accuracy against

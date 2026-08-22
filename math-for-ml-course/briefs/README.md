@@ -77,36 +77,46 @@ appear in `outline.js`, and `widgets.md` requires a planned page to be plain tex
 and never a link. Together those mean a planned page can have **no file at all**. The deploy
 excludes `*.md` and the validator ignores it, and **no page ever links a brief**.
 
-## Page numbers here are PROVISIONAL
+## The numbers, and where they came from
 
-The scaffold (#41) owns final numbering and had not landed when this module was written. Every
-number in this folder, in `../code/` and in `../lessons/` is a placeholder in the block
-**9001 to 9011**, chosen so that:
+M10's block is **0105 to 0115**, and it is derived rather than chosen. Adding up the planned page
+counts the course map declares for the modules before this one, starting from lesson zero at 0000:
 
-- it cannot collide with any real four-digit number the register will assign, since the course plans
-  about 133 pages;
-- ascending file order still puts M10 last, which is where it belongs, so the tree is legal in the
-  meantime;
-- and the renumber is one scripted pass over file names, the eyebrow, the footer, the pager, the
-  code file names and the card hrefs.
+```
+0000  lesson zero
+0001-0009  M01   9 pages      0052-0063  M06  12 pages
+0010-0017  M02   8 pages      0064-0077  M07  14 pages
+0018-0030  M03  13 pages      0078-0092  M08  15 pages
+0031-0040  M04  10 pages      0093-0104  M09  12 pages
+0041-0051  M05  11 pages      0105-0115  M10  11 pages   <- this module
+                              0116-0117  M11   2 pages
+```
+
+**One thing this changes for another crew, and it needs to be seen rather than discovered.** The
+course map's roadmap lists M10 as ten pages because it merged "Information gain" and "Perplexity"
+onto one line. Issue #53, which is the spec for this module's scope, lists them as two of eleven
+lessons, and they are two ideas with two theorems, two worked examples and two datasets' worth of
+results. This module ships **eleven**, so **M11 moves from 0115-0116 to 0116-0117**. M11 has no
+files yet, so the cost is this sentence. If the captain prefers ten, the merge to make is
+`0114` and `0115` into one page, and this module owner recommends against it.
 
 | Provisional | Slug | Class |
 |---|---|---|
-| 9001 | entropy | core |
-| 9002 | cross-entropy | core |
-| 9003 | kl-divergence | core |
-| 9004 | mutual-information | core |
-| 9005 | softmax-log-sum-exp | core |
-| 9006 | distance-metrics | core |
-| 9007 | cosine-similarity | depth |
-| 9008 | kernels | depth |
-| 9009 | curse-of-dimensionality | depth |
-| 9010 | information-gain | depth |
-| 9011 | perplexity | core |
+| 0105 | entropy | core |
+| 0106 | cross-entropy | core |
+| 0107 | kl-divergence | core |
+| 0108 | mutual-information | core |
+| 0109 | softmax-log-sum-exp | core |
+| 0110 | distance-metrics | core |
+| 0111 | cosine-similarity | depth |
+| 0112 | kernels | depth |
+| 0113 | curse-of-dimensionality | depth |
+| 0114 | information-gain | depth |
+| 0115 | perplexity | core |
 
 Teaching order is file order, and file order is a topological order of the prerequisite graph:
-9001 -> 9002 -> 9003 -> 9004 -> 9010, with 9005 needing 9002, 9011 needing 9001 and 9002, and the
-geometry arc 9006 -> 9007 -> 9008 -> 9009 needing only 9006 inside this module. No page needs a
+0105 -> 0106 -> 0107 -> 0108 -> 0114, with 0109 needing 0106, 0115 needing 0105 and 0106, and the
+geometry arc 0110 -> 0111 -> 0112 -> 0113 needing only 0110 inside this module. No page needs a
 page that comes after it.
 
 ## What every M10 page owes
@@ -121,7 +131,7 @@ at least one practice problem with a hint, a hidden solution and a `.p-check` li
 ## `statistical-foundations-ml-course` is frozen
 
 Per captain update 3. This module creates, modifies, renames and deletes **nothing** under that
-folder. One-way links out to its pages are allowed and one is planned, from 9004 to its
+folder. One-way links out to its pages are allowed and one is planned, from 0108 to its
 `lessons/0007-leading-indicators-and-correlation.html`, because that page teaches correlation as a
-diagnostic and 9004 is where the reader learns what correlation cannot see. No reverse link, because
+diagnostic and 0108 is where the reader learns what correlation cannot see. No reverse link, because
 that would edit a frozen file.

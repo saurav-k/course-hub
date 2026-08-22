@@ -1,4 +1,4 @@
-# 9011 - Perplexity
+# 0115 - Perplexity
 
 **Module** M10 - lesson 11, the last page of the module  **Rung** working  **Class** core
 
@@ -9,7 +9,7 @@ makes it readable across models and meaningless across tokenizers.
 
 ## Prerequisites
 
-9001 (entropy), 9002 (cross-entropy). Nothing else; this page is deliberately the easy landing
+0105 (entropy), 0106 (cross-entropy). Nothing else; this page is deliberately the easy landing
 after four hard ones.
 
 ## Beats, in order
@@ -17,8 +17,8 @@ after four hard ones.
 1. **One-minute version.** `PPL = exp(mean NLL)`. It is one over the geometric mean of the
    probabilities the model gave the things that actually happened. A uniform model over `V` symbols
    scores exactly `V`. And comparing two models with different tokenizers is not a comparison.
-2. **Orientation figure.** 9002's cross-entropy in bits into "this page: exponentiate to get a
-   count of options" into reading a scaling-law plot, with 9001 dotted in as the floor.
+2. **Orientation figure.** 0106's cross-entropy in bits into "this page: exponentiate to get a
+   count of options" into reading a scaling-law plot, with 0105 dotted in as the floor.
 3. **Mental model: a fair die.** A model with perplexity 7 is on average as uncertain as someone
    rolling a fair seven-sided die. Draw the ladder: 1 is certainty, `V` is total ignorance.
 4. **Mechanism, both readings, shown to be the same number.** `PPL = exp(-(1/N) sum log q(x_i))`
@@ -161,7 +161,7 @@ outside that range you averaged the probabilities instead of their logs.
 
 ## Code and dataset plan
 
-`code/9011-perplexity.py` against `m10_classifier.csv` read as a next-symbol predictor. Computes
+`code/0115-perplexity.py` against `m10_classifier.csv` read as a next-symbol predictor. Computes
 perplexity three ways and asserts they agree to 1e-9; checks both anchors; reports the loss
 concentration; and **performs the retokenisation experiment**, pairing adjacent symbols so the
 model's beliefs are unchanged and only the unit moves, then prints The Pile's conversion.

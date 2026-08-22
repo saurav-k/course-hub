@@ -1,4 +1,4 @@
-# 9002 - Cross-entropy, and why it is the loss
+# 0106 - Cross-entropy, and why it is the loss
 
 **Module** M10 - lesson 02  **Rung** working  **Class** core
 
@@ -9,7 +9,7 @@ reality with your model's beliefs.
 
 ## Prerequisites
 
-- 9001 (entropy, and the code reading of it).
+- 0105 (entropy, and the code reading of it).
 - **M09 owns the equivalence** "minimising cross-entropy is maximising likelihood" and derives it
   for the Gaussian and the Bernoulli. This page restates the one-line result with a link and
   **does not re-derive it**. That boundary is the spec's ownership table, edge 23.
@@ -19,7 +19,7 @@ reality with your model's beliefs.
 1. **One-minute version.** `H(p,q) = -sum p log q`. It is what you pay; `H(p)` is what you must
    pay; the gap is the model's fault. The binary case is the log loss M09 already derived.
 2. **Orientation figure.** M09's negative log-likelihood into "this page: the same number read as
-   bits per symbol" into 9003 (the gap), 9011 (perplexity) and 9005 (the machinery), with 9001
+   bits per symbol" into 0107 (the gap), 0115 (perplexity) and 0109 (the machinery), with 0105
    attached by a dotted edge as the floor.
 3. **Mental model: two codebooks.** Reality emits symbols with frequencies `p`. You built your
    code table from `q`. Every symbol costs `-log q` bits instead of the `-log p` it could have.
@@ -42,7 +42,7 @@ reality with your model's beliefs.
    `q = 1e-9` contributes 29.9 bits and can dominate a batch. Name label smoothing and gradient
    clipping as the two answers, one line, link to M06.
 
-**Do not do here:** softmax mechanics (9005), KL as a named quantity (9003), perplexity (9011),
+**Do not do here:** softmax mechanics (0109), KL as a named quantity (0107), perplexity (0115),
 the MLE derivation (M09 owns it).
 
 ## The stated proofs (D4)
@@ -63,7 +63,7 @@ That is the point worth making to the reader. The decomposition is not a discove
 it is bookkeeping, and everything interesting is in what the two pieces *mean*.
 
 **Corollary (Gibbs, applied).** `H(p, q) >= H(p)`, with equality only when `q = p`. Immediate from
-the decomposition plus `KL >= 0`, which page 9003 proves. So a model can never beat the floor, and
+the decomposition plus `KL >= 0`, which page 0107 proves. So a model can never beat the floor, and
 the amount by which it misses is exactly the KL. That corollary is what licenses Brown et al.'s
 1.75 bits as an **upper bound** on the entropy of English rather than an estimate of it.
 
@@ -136,7 +136,7 @@ that guesses uniformly over four options. If either is above that, you summed in
 
 ## Code and dataset plan
 
-`code/9002-cross-entropy.py` against `datasets/m10_classifier.csv`. Computes the loss the long way
+`code/0106-cross-entropy.py` against `datasets/m10_classifier.csv`. Computes the loss the long way
 (`-sum p log q` over all five classes) and the framework way (`-z_true + logsumexp(z)`) and asserts
 they agree to 3.6e-15 over 20,000 rows; verifies `H(p,q) = H(p) + KL` on the label marginal; then
 reports accuracy 0.7924 against mean loss 0.7558 nats, mean loss 0.2874 on correct rows and 2.5435
