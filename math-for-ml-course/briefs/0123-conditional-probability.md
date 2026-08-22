@@ -57,7 +57,7 @@ Conditioning does not change the world; it shrinks the sample space to the part 
 
 ## Code and dataset
 
-`code/0067-conditional-probability.py` against `datasets/requests.csv`.
+`code/0123-conditional-probability.py` against `datasets/requests.csv`.
 
 Computes `P(flagged | not verified)` twice: once from the definition as a ratio of two proportions over the full frame, and once by filtering to the unverified rows and taking the mean, asserting they agree to 12 places. Then verifies the law of total probability numerically by recovering `P(flagged)` from the two conditionals and their weights. Then demonstrates the chain rule on three columns, computing the three-way joint directly and as a product of conditionals and asserting equality.
 

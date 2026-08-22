@@ -46,7 +46,7 @@ No named theorem. The page defines an object; there is nothing here to prove, an
 
 ## Code and dataset
 
-`code/0071-random-variables.py` against `datasets/requests.csv`.
+`code/0127-random-variables.py` against `datasets/requests.csv`.
 
 Builds `X` twice: once with an explicit loop over the 97 batches that counts flags one row at a time, so the reader sees the function being applied, and once vectorised by reshaping the flag column and summing along an axis. Asserts the two arrays are identical. Then demonstrates the pullback by printing, for `X = 3`, the batch indices in the preimage and confirming each really contains three flagged rows.
 

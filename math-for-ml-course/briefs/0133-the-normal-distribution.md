@@ -69,7 +69,7 @@ The normal distribution is two parameters that mean exactly what you want them t
 
 ## Code and dataset
 
-`code/0077-the-normal-distribution.py` against `datasets/requests.csv`.
+`code/0133-the-normal-distribution.py` against `datasets/requests.csv`.
 
 Computes the standard normal CDF twice: once from the definition by numerically integrating the density on a fine grid with the trapezoid rule, and once with `math.erf` in closed form, asserting they agree to six decimals. That is the assertion that teaches, because the reader sees the area being added up. Then fits `mu` and `sigma` to `latency_ms` and to its sub-300 ms bulk, and prints the empirical against theoretical band occupancies for both, so the table in the warning callout is generated rather than typed. Prints the observed and predicted counts beyond three sigma, 227 against 34.
 

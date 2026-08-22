@@ -16,7 +16,7 @@ the routes, and the file says it is wrong by up to 79 percent.
 
 It closes with the with-and-without-replacement pair probabilities, which is the
 difference between a binomial and a hypergeometric and is worth seeing as a
-number before Lesson 10 names it.
+number before Lesson 129 names it.
 
 Needs only numpy and pandas. Runs in a codebase, in Jupyter, or in Colab.
 """

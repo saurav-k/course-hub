@@ -55,7 +55,7 @@ Everything in probability is derived from three rules about a set of outcomes, s
 
 ## Code and dataset
 
-`code/0065-the-axioms.py` against `datasets/requests.csv`.
+`code/0121-the-axioms.py` against `datasets/requests.csv`.
 
 Computes `P(A union B)` for `A = verified_user` and `B = cache_hit` twice: once by inclusion-exclusion from the three separate probabilities, and once by directly counting rows where either holds. Asserts they agree to 12 decimal places. Then checks the three axioms on the `route` distribution and prints each check. Then demonstrates the failure: sums three independent sigmoid-style columns and shows the total exceeding 1.
 

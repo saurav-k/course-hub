@@ -58,7 +58,7 @@ The uniform distribution is the one where every value in a range is equally like
 
 ## Code and dataset
 
-`code/0074-the-uniform-distribution.py`, self-contained with no dataset load, because the object of study is an initialiser rather than a data column. It documents that exception in its docstring, as the BUILDER-SPEC requires when a program does not read `datasets/`.
+`code/0130-the-uniform-distribution.py`, self-contained with no dataset load, because the object of study is an initialiser rather than a data column. It documents that exception in its docstring, as the BUILDER-SPEC requires when a program does not read `datasets/`.
 
 Computes the Glorot bound from the formula, draws 200,000 weights with `default_rng`, then computes `P(|W| < 0.01)` twice: once from the definition as width-over-width, and once as the empirical fraction of draws, asserting they agree to three decimals. Prints the empirical density estimate from a histogram beside the exact 6.532. Also verifies the mean and variance against `(a+b)/2` and `(b-a)^2/12`.
 

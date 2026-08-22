@@ -55,7 +55,7 @@ For an exponential, `P(X > t) = e^(-lambda t)`. The median `m` is by definition 
 
 ## Code and dataset
 
-`code/0078-choosing-a-distribution.py` against `datasets/requests.csv`.
+`code/0134-choosing-a-distribution.py` against `datasets/requests.csv`.
 
 Rather than a single result, this program is the module's diagnostic kit, and its docstring says so. For each of five columns it prints the three questions answered: the observed support, a mechanism guess, and what is known. Then it runs the checks that distinguish the families: mean against variance for the count column, which is the Poisson diagnostic; the ratio of mean to standard deviation for `retries`, which distinguishes geometric from Poisson; the band occupancies for `latency_ms`, which is the normal check that fails; and the memorylessness ratio for the gaps, which is the exponential check that passes. Each check is computed from the definition and printed with the value the family predicts beside it, and the program asserts nothing, because the point is that the reader reads the comparison and decides.
 

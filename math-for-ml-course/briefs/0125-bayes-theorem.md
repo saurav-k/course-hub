@@ -68,7 +68,7 @@ If `E1 ... Ek` partition `Omega` and each has positive probability, then `P(A) =
 
 ## Code and dataset
 
-`code/0069-bayes-theorem.py` against `datasets/requests.csv`.
+`code/0125-bayes-theorem.py` against `datasets/requests.csv`.
 
 Computes the posterior three ways and asserts all three agree: from the expanded Bayes formula; from the odds form as prior odds times likelihood ratio converted back; and by direct counting of the confusion table. Then computes the detector's precision at thresholds 0.5 and 0.6 from Bayes and from the counted confusion matrix, asserting agreement, and prints the pair so the page can quote 0.2395 and 0.6033.
 

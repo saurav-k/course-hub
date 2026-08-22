@@ -1,4 +1,4 @@
-"""Lesson 0067 - conditional probability, the law of total probability, the chain rule.
+"""Lesson 123 - conditional probability, the law of total probability, the chain rule.
 
 Conditioning shrinks the sample space and renormalises. This program computes the
 same conditional probability two ways to show that literally:

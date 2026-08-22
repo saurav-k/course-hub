@@ -58,7 +58,7 @@ Flip two fair coins, so `Omega = {HH, HT, TH, TT}` with each outcome at 0.25. Le
 
 ## Code and dataset
 
-`code/0068-independence.py` against `datasets/requests.csv`.
+`code/0124-independence.py` against `datasets/requests.csv`.
 
 For each of the two pairs, computes the joint twice: once as `P(A) * P(B)` from the two marginals, and once by counting rows where both hold. Prints both with their absolute and relative gap, and asserts the independent pair agrees to within 0.001 while the dependent pair does not. Then builds the two-coin counterexample as an explicit four-row frame and checks all four independence equations, printing which three pass and which one fails.
 

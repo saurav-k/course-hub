@@ -48,7 +48,7 @@ No named theorem on this page. Nothing to prove.
 
 ## Code and dataset
 
-`code/0064-what-a-probability-is.py` against `datasets/requests.csv`.
+`code/0120-what-a-probability-is.py` against `datasets/requests.csv`.
 
 Computes the running proportion of `cache_hit` two ways: once from the definition as a cumulative count divided by a cumulative trial number, in a loop over the first 200 rows so the reader sees the arithmetic; and once vectorised with `np.cumsum` over all 25,000. Asserts the two agree on the overlap. Prints the estimate at n = 10, 100, 1000, 25000 and the largest step between consecutive estimates in each decade, which is the convergence the page claims.
 

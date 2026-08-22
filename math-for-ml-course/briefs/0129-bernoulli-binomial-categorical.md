@@ -59,7 +59,7 @@ One trial, `n` trials, one of `k` outcomes: three distributions that are the sam
 
 ## Code and dataset
 
-`code/0073-bernoulli-binomial-categorical.py` against `datasets/requests.csv`.
+`code/0129-bernoulli-binomial-categorical.py` against `datasets/requests.csv`.
 
 Computes the binomial PMF twice: once from the definition with an explicit factorial-based `C(n,k)` written out, and once with a vectorised recurrence that avoids overflow, asserting agreement. Then chops the flag column into 97 real batches of 256 and prints the observed proportions beside the theoretical ones, so the reader sees theory and sample side by side rather than only theory. Also fits and prints the three-state categorical over `route` and asserts the three probabilities sum to 1.
 

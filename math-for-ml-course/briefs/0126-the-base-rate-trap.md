@@ -51,7 +51,7 @@ An observation worth stating and justifying in one line, because it is the page'
 
 ## Code and dataset
 
-`code/0070-the-base-rate-trap.py` against `datasets/requests.csv`.
+`code/0126-the-base-rate-trap.py` against `datasets/requests.csv`.
 
 Sweeps the threshold from 0.3 to 0.75 and, at each step, computes precision twice: once by counting the confusion matrix and once from Bayes using the measured recall, FPR and prior, asserting agreement. Prints the table the page quotes. Then holds recall and FPR fixed at the 0.5-threshold values and sweeps the prior by resampling the clean rows, showing precision moving from 7 percent to 99 percent with the detector unchanged.
 
