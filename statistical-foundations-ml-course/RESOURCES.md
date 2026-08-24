@@ -64,6 +64,14 @@ Prefer a textbook or a primary paper over a blog summarising one.
   The American Statistical Association's own statement. Open access.
   Use for: why a threshold like 5 percent is a convention chosen by people, not a fact about the world.
 
+- **[Bertsekas and Tsitsiklis, "Introduction to Probability", 2nd edition, full text as a PDF](https://web.jfet.org/6.041-text/Probability.pdf)**.
+  The textbook behind the MIT OCW RES.6-012 course already listed in the canon. Freely available from the authors' course materials.
+  Use for: the set-theory chapter and the probability-axioms section of Lecture 2 (parts 0010 to 0015), and in particular the Section 1.2 footnote on why uncountable sample spaces cannot put a probability on every subset.
+
+- **[MIT 6.436J Lecture 1, "Probabilistic Models and Probability Measures", Fall 2018](https://ocw.mit.edu/courses/6-436j-fundamentals-of-probability-fall-2018/c37dc8b61cdf6bde689a627bfa5b4942_MIT6_436JF18_lec01.pdf)** - Yury Polyanskiy, MIT OpenCourseWare.
+  Graduate-level lecture notes, linked from Lecture 2 only to show the precise three-axiom sigma-field definition the course paraphrases.
+  Use for: Definition 2, the sigma-field axioms with countable unions stated outright, on part 0013. Not a reading recommendation for this course's audience.
+
 ## Not used, and why
 
 - **The GeeksforGeeks probability-and-statistics illustration** that slide 4 adapts.
