@@ -18,7 +18,7 @@ Status marks used below:
 |---|---|---|---|
 | 1 | **Lecture 1: Introduction** | written | Lessons `0000` to `0008`: a hub plus eight parts, plus the Lecture 1 formula sheet in `reference/`. Dated Aug 11, 2026 in the source deck. |
 | 2 | **Lecture 2: probability axioms, conditional probability and independence** | in progress | Starts at lesson `0009`, per `BUILDER-SPEC.md`. Being written now; its exact page count is set when it lands. |
-| 3 | **Lecture 3: counting and sampling** | in progress | Numbering continues after whatever Lecture 2 ends on. Being written now alongside the problem sets that attach to it. |
+| 3 | **Lecture 3: from the axioms to Bayes** | written | Lessons `0016` to `0024`: a hub plus eight parts, plus the Lecture 3 formula sheet in `reference/`. Faculty Session 3, dated Aug 22, 2026. Part 8, independence, runs ahead of the deck because the tutorial needs it, and says so on its own page. |
 | 4 | **TA Session 1** (tutorial) | in progress | Twelve tutorial problems. It follows Lecture 3 and sits there in the map, not in a list at the bottom. Its twelve problems are its own; they are not duplicated by the problem sets below. Being written now. |
 | 5 | **Second tutorial session** | reserved | No source deck exists yet, so nothing is named or anchored. The position after the current material is held, and the exact anchor is pinned in this file and in `index.html` on the day its deck arrives. |
 | 6 | **Third tutorial session** | reserved | As above. |
@@ -31,7 +31,7 @@ Each takes its true place in this table when its deck arrives; a tutorial deck t
 - **Problem sets**, tracked in hub issues #102 and #103: nine concept sets for Lectures 1 and 2, then six sets for Lecture 3 plus three of extra tutorial practice, landing in a `problems/` folder with its own index.
   Problem sets attach to lectures concept by concept rather than holding a position in the read, so they are recorded here but not as sequence rows.
 - **A closing pass** that wires lessons to their problem sets and back, reconciles the glossary, and reads the whole map against this file.
-- **One formula sheet per lecture.** The policy in `NOTES.md` is to keep one per lecture rather than grow a single sheet nobody prints. Only Lecture 1's exists.
+- **One formula sheet per lecture.** The policy in `NOTES.md` is to keep one per lecture rather than grow a single sheet nobody prints. Lecture 1's and Lecture 3's exist.
 
 ## Adding a session to this course
 
