@@ -123,6 +123,48 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0024-independence.html"
         }
       ]
+    },
+    {
+      "n": "TA1",
+      "title": "TA Session 1: twelve problems, worked in full",
+      "lessons": [
+        {
+          "title": "TA Session 1: start here",
+          "href": "lessons/0025-ta-session-1-start-here.html"
+        },
+        {
+          "title": "Checking sigma-fields",
+          "href": "lessons/0026-checking-sigma-fields.html"
+        },
+        {
+          "title": "Is it a probability measure?",
+          "href": "lessons/0027-is-it-a-probability-measure.html"
+        },
+        {
+          "title": "Probability properties, with numbers",
+          "href": "lessons/0028-probability-properties-with-numbers.html"
+        },
+        {
+          "title": "Geometry and counting",
+          "href": "lessons/0029-geometry-and-counting.html"
+        },
+        {
+          "title": "Building the conditional space",
+          "href": "lessons/0030-building-the-conditional-space.html"
+        },
+        {
+          "title": "Conditioning in practice",
+          "href": "lessons/0031-conditioning-in-practice.html"
+        },
+        {
+          "title": "Pairwise versus mutual independence",
+          "href": "lessons/0032-pairwise-versus-mutual.html"
+        },
+        {
+          "title": "The fast track: recap",
+          "href": "lessons/0033-the-fast-track-recap.html"
+        }
+      ]
     }
   ],
   "extras": [
