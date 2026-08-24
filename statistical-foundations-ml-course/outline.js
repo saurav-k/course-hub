@@ -49,6 +49,40 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "L2",
+      "title": "Lecture 2: The probability space",
+      "lessons": [
+        {
+          "title": "Start here",
+          "href": "lessons/0009-lecture-2-start-here.html"
+        },
+        {
+          "title": "The language of sets",
+          "href": "lessons/0010-the-language-of-sets.html"
+        },
+        {
+          "title": "The sample space",
+          "href": "lessons/0011-the-sample-space.html"
+        },
+        {
+          "title": "Events are subsets",
+          "href": "lessons/0012-events-are-subsets.html"
+        },
+        {
+          "title": "The sigma-field",
+          "href": "lessons/0013-the-sigma-field.html"
+        },
+        {
+          "title": "The probability measure",
+          "href": "lessons/0014-the-probability-measure.html"
+        },
+        {
+          "title": "A discrete space worked",
+          "href": "lessons/0015-a-discrete-space-worked.html"
+        }
+      ]
+    },
+    {
       "n": "L3",
       "title": "Lecture 3: From the axioms to Bayes",
       "lessons": [
