@@ -17,9 +17,9 @@ Status marks used below:
 | # | Position | Status | Notes |
 |---|---|---|---|
 | 1 | **Lecture 1: Introduction** | written | Lessons `0000` to `0008`: a hub plus eight parts, plus the Lecture 1 formula sheet in `reference/`. Dated Aug 11, 2026 in the source deck. |
-| 2 | **Lecture 2: probability axioms, conditional probability and independence** | in progress | Starts at lesson `0009`, per `BUILDER-SPEC.md`. Being written now; its exact page count is set when it lands. |
-| 3 | **Lecture 3: counting and sampling** | in progress | Numbering continues after whatever Lecture 2 ends on. Being written now alongside the problem sets that attach to it. |
-| 4 | **TA Session 1** (tutorial) | in progress | Twelve tutorial problems. It follows Lecture 3 and sits there in the map, not in a list at the bottom. Its twelve problems are its own; they are not duplicated by the problem sets below. Being written now. |
+| 2 | **Lecture 2: probability axioms, conditional probability and independence** | written | Lessons `0009` to `0015`: a hub plus six parts, plus the Lecture 2 formula sheet in `reference/`. |
+| 3 | **Lecture 3: counting and sampling** | written | Lessons `0016` to `0024`: a hub plus eight parts, plus the Lecture 3 formula sheet in `reference/`. |
+| 4 | **TA Session 1** (tutorial) | written | Lessons `0025` to `0033`: a hub plus eight parts, the twelve tutorial problems worked in full from the Week 1 question sheet and tutorial notes, dated August 22, 2026. It follows Lecture 3 and sits there in the map, not in a list at the bottom. Its twelve problems are its own; they are not duplicated by the problem sets below. |
 | 5 | **Second tutorial session** | reserved | No source deck exists yet, so nothing is named or anchored. The position after the current material is held, and the exact anchor is pinned in this file and in `index.html` on the day its deck arrives. |
 | 6 | **Third tutorial session** | reserved | As above. |
 
