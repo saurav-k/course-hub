@@ -55,9 +55,11 @@ Read, in this order:
 
 1. The target course's `MISSION.md` - why the course exists and what is out of scope. This is canonical.
 2. Its `NOTES.md` - teaching style, cadence, and known gotchas.
-3. Its `BUILDER-SPEC.md` - the authoring spec, including exact widget markup.
-4. Its `RESOURCES.md` - the sources the course already trusts.
-5. Two or three neighbouring lessons - match their voice, depth, and structure.
+3. Its `PLOT.md` - the true reading order: where every lecture and session sits, and what is planned but unwritten.
+   Place any new material by it; never append to the bottom because it arrived last.
+4. Its `BUILDER-SPEC.md` - the authoring spec, including exact widget markup.
+5. Its `RESOURCES.md` - the sources the course already trusts.
+6. Two or three neighbouring lessons - match their voice, depth, and structure.
 
 Do not infer the house style from this file. Infer it from the lessons.
 
@@ -85,7 +87,21 @@ Generate its `outline.js` before opening the pull request, give it a hue in the 
 block of `assets/hub.css`, write its `MISSION.md` before any lesson, and add a card for it in
 the hub `index.html`. Nothing else is needed: the pipeline syncs the whole hub, so merging the pull request publishes the new course on its own.
 
-A course may instead ship a `routes.js` manifest, which lets one pool of lessons be read along several named routes. `llm-evolution-course` is the one that does; `llm-evolution-course/routes/README.md` is the reference for the mechanism, and `scripts/gen_outline.py` refuses to run against such a course.
+Give it the five instruction files before the first lesson is written:
+`AGENTS.md`, the course contract for agents, which points at the others rather than repeating them;
+`CLAUDE.md`, a symlink to `AGENTS.md`;
+`MISSION.md`;
+`PLOT.md`, the sequence map - the true reading order, where every lecture and session sits, and everything planned but unwritten; and
+`NOTES.md`.
+`.claude/skills/course-authoring/templates/` carries starters for all five, and
+`.claude/skills/course-authoring/new-course.md` carries the interview question that fills `PLOT.md`.
+Fill each from what the course actually is. Eight near-identical generated files would satisfy the letter of this rule and be worthless: a short honest file beats a long generic one.
+
+The order rule that goes into every `PLOT.md`: a course's reading order is its true order,
+and a tutorial or lab session that follows a lecture sits after that lecture in the course map,
+never in a separate list at the bottom.
+
+A course may instead ship a `routes.js` manifest, which lets one pool of lessons be read along several named routes. `llm-evolution-course` is the one that does; `llm-evolution-course/routes/README.md` is the reference for the mechanism, and `scripts/gen_outline.py` refuses to run against such a course. Its `PLOT.md` names the default route as canonical and points at the manifest rather than duplicating every row.
 
 ## Accuracy
 

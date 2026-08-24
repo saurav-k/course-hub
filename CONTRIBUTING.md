@@ -90,6 +90,7 @@ Every rule it mentions is written somewhere else, and that other file is the aut
 | What a page must contain to be one of these courses | [`.claude/skills/course-authoring/SKILL.md`](.claude/skills/course-authoring/SKILL.md) and the `references/` beside it |
 | How the shared design system behaves, and the traps in it | The "Editing the shared assets" section of [`AGENTS.md`](AGENTS.md) |
 | This course's voice, scope, cadence, and trusted sources | That course's `MISSION.md`, `NOTES.md`, `RESOURCES.md`, and `BUILDER-SPEC.md` |
+| Where a session sits in that course's reading order | That course's `PLOT.md` |
 | The one course that presents its lessons along several routes | [`llm-evolution-course/routes/README.md`](llm-evolution-course/routes/README.md) |
 
 The course-authoring skill lives under `.claude/` because Claude Code loads it from there on its own.
@@ -138,10 +139,13 @@ These keep the courses consistent, so read the course's own `MISSION.md`, `NOTES
 
 1. Create `<course-name>/` with its own `index.html` and `lessons/`. It needs no `assets/` folder unless it has rules of its own; it links the hub design system like every other course. Give it a hue in the course-accent block of `assets/hub.css` so it does not wear the same accent as its neighbours.
 2. Write its `MISSION.md` first: why it exists, what "done" looks like, and what is out of scope.
-3. Add a card for it in the hub `index.html`.
-4. Generate its `outline.js` with `python3 scripts/gen_outline.py <course-name>`.
-5. Run the validator. It checks that the hub links your course and that your course links every one of its lessons.
-6. Open a pull request. No deploy configuration change is needed - the workflow syncs the whole hub.
+3. Give it the five instruction files before any lesson: `AGENTS.md`, `CLAUDE.md` as a symlink to `AGENTS.md`, `MISSION.md`, `PLOT.md`, and `NOTES.md`. `PLOT.md` records the reading order - where every lecture and session sits, and everything planned but unwritten - and a tutorial or lab that follows a lecture sits after it in the course map, never in a separate list at the bottom. `.claude/skills/course-authoring/templates/` carries starters for all five, and writing each from what the course actually is matters more than filling them fast: a short honest file beats a long generic one.
+4. Add a card for it in the hub `index.html`.
+5. Generate its `outline.js` with `python3 scripts/gen_outline.py <course-name>`.
+6. Run the validator. It checks that the hub links your course and that your course links every one of its lessons.
+7. Open a pull request. No deploy configuration change is needed - the workflow syncs the whole hub.
+
+The full procedure, including the interview questions that fill these files, is in [`.claude/skills/course-authoring/new-course.md`](.claude/skills/course-authoring/new-course.md).
 
 ## What not to commit
 
