@@ -47,6 +47,48 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0008-synthesis-and-the-road-ahead.html"
         }
       ]
+    },
+    {
+      "n": "L3",
+      "title": "Lecture 3: From the axioms to Bayes",
+      "lessons": [
+        {
+          "title": "Start here",
+          "href": "lessons/0016-lecture-3-start-here.html"
+        },
+        {
+          "title": "What the axioms force",
+          "href": "lessons/0017-what-the-axioms-force.html"
+        },
+        {
+          "title": "Inclusion-exclusion",
+          "href": "lessons/0018-inclusion-exclusion.html"
+        },
+        {
+          "title": "The union bound and Bonferroni",
+          "href": "lessons/0019-union-bound-and-bonferroni.html"
+        },
+        {
+          "title": "Conditional probability",
+          "href": "lessons/0020-conditional-probability.html"
+        },
+        {
+          "title": "The multiplication rule",
+          "href": "lessons/0021-the-multiplication-rule.html"
+        },
+        {
+          "title": "The law of total probability",
+          "href": "lessons/0022-law-of-total-probability.html"
+        },
+        {
+          "title": "Bayes rule",
+          "href": "lessons/0023-bayes-rule.html"
+        },
+        {
+          "title": "Independence",
+          "href": "lessons/0024-independence.html"
+        }
+      ]
     }
   ],
   "extras": [
@@ -57,6 +99,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Glossary",
       "href": "reference/glossary.html"
+    },
+    {
+      "title": "Lecture 3 Formula Sheet",
+      "href": "reference/lecture-3-formula-sheet.html"
     }
   ]
 };
