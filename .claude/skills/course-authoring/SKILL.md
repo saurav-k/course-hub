@@ -1,13 +1,14 @@
 ---
 name: course-authoring
-description: Authoring in this course hub. Use when creating a course, writing or rewriting a lesson or chapter, or checking a page against the house standard before a pull request.
+description: The course-hub house standard for teaching pages, and the procedure that produces one. Use when creating a course, writing or rewriting a lesson or chapter, or checking a page against the standard before a pull request. Also use when installed in any other project to author self-contained local HTML learning pages, study notes or an explainer pack, with no hub clone and nothing published.
 ---
 
 # Course authoring
 
 The house standard for every page published from this repository, and the procedure that produces one.
+The same standard travels: installed into another project, this skill authors self-contained local pages that are held to it, and [`standalone.md`](standalone.md) is that branch.
 
-`AGENTS.md` is the contract and it still binds: it says who may push, what may not be renamed, what the shared design system will do to a page that gets its markup slightly wrong, and what "done" looks like for a pull request.
+Inside this repository, `AGENTS.md` is the contract and it still binds: it says who may push, what may not be renamed, what the shared design system will do to a page that gets its markup slightly wrong, and what "done" looks like for a pull request.
 Read it first.
 This skill says what a page must contain to be one of these courses rather than a page that merely lives beside them.
 
@@ -23,9 +24,11 @@ A course's `BUILDER-SPEC.md` is now only the **course delta**: what is true of t
 | build a whole new course from a topic and an audience | [`new-course.md`](new-course.md) |
 | add or rewrite one lesson in a course that already exists | [`new-lesson.md`](new-lesson.md) |
 | retrofit an existing course to this standard | [`new-lesson.md`](new-lesson.md), one page at a time, plus [`retrofit.md`](retrofit.md) |
+| author learning pages with this skill installed outside this repository | [`standalone.md`](standalone.md) |
 
 Read the branch file before you open an editor.
 Every branch ends at the same gate: [`references/verify.md`](references/verify.md).
+The last row is the branch for a foreign project: no `assets/hub.css` beside you and no `AGENTS.md` above you means the skill was installed rather than cloned, and [`standalone.md`](standalone.md) says what changes and what does not.
 
 ## The closed vocabulary
 

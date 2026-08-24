@@ -27,6 +27,26 @@ xdg-open index.html                   # Linux
 
 Or just use the live site above.
 
+## Authoring with the course-authoring skill
+
+The house standard these courses are written to is packaged as an agent skill at [`.claude/skills/course-authoring/`](.claude/skills/course-authoring/SKILL.md). It carries the page contracts, the widget markup, the teaching bar as numbers rather than adjectives, and the five ways a page renders wrong while shipping green. Coding agents working inside this repository load it on their own; it is also installable into any other project, because none of that standard is specific to this bucket.
+
+Install it with the [vercel-labs/skills](https://github.com/vercel-labs/skills) CLI, which needs no clone and no checkout:
+
+```bash
+npx skills add saurav-k/course-hub                       # prompts for the skills and the agents
+npx skills add saurav-k/course-hub --list                # just show what the repository ships
+npx skills add saurav-k/course-hub --skill course-authoring \
+  -a claude-code -a codex -a opencode -y                 # non-interactive, three agents
+npx skills add saurav-k/course-hub --skill course-authoring -g   # install globally, not per project
+```
+
+The files land once in `.agents/skills/course-authoring/`, which Codex and OpenCode read directly, and `.claude/skills/course-authoring` is symlinked to it for Claude Code. One copy, three agents.
+
+**Authoring into the hub.** Clone the repository, open an agent in it, and ask for a lesson or a course. The agent reads [`AGENTS.md`](AGENTS.md) and the skill together, writes the page against the shared design system in `assets/`, runs `scripts/validate_site.py`, and stops at an open pull request. This is the mode the seven courses here were built in.
+
+**Generating local learning pages.** Install the skill into any other project and ask it to teach you something. It writes self-contained HTML pages into a folder you choose, inlining this hub's stylesheet and runtime so each file opens in a browser from disk and keeps its styling, quizzes and theme controls with the network off. The same teaching bar applies, orientation figure and retrieval practice included. Nothing is cloned, nothing is published, and no pull request is opened. The procedure is in [`.claude/skills/course-authoring/standalone.md`](.claude/skills/course-authoring/standalone.md).
+
 ## Repository layout
 
 ```
