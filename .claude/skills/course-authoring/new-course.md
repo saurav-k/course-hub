@@ -33,19 +33,27 @@ Where an answer is genuinely derivable from the existing hub, derive it and say 
 7. What is the level ladder, rung by rung? See the level ladder in [`references/pedagogy.md`](references/pedagogy.md). A course with no ladder is a reference, and a reference should say so rather than pretend to be a progression.
 8. How long is one page in prose words? This sets the grain. 900 to 1,400 is one sitting and 1,800 is the ceiling; a page that wants 4,000 is three pages wearing one title. The count excludes the figures, the code and the quizzes, because prose is what the reader has to hold. See [`references/pedagogy.md`](references/pedagogy.md).
 
+**Order.**
+
+9. Walk the course in reading order: what comes first, what follows what, and why that order and no other?
+   Which sessions sit directly after which lectures, so a tutorial or lab lands beside the material it supports rather than in a list at the bottom of the map?
+   Name everything planned but unwritten and reserve its position now.
+   A position reserved costs nothing; a position taken by accident is a renumbering.
+
 **Boundaries.**
 
-9. What is out of scope, and for each, which neighbour owns it? "Out of scope" with nowhere to send the reader is an abandonment.
-10. Which existing courses in this hub does it touch, and at which pages? Read their `MISSION.md` files before answering.
-11. Does anything here overlap an existing course enough that the honest answer is a chapter there rather than a course here?
+10. What is out of scope, and for each, which neighbour owns it? "Out of scope" with nowhere to send the reader is an abandonment.
+11. Which existing courses in this hub does it touch, and at which pages? Read their `MISSION.md` files before answering.
+12. Does anything here overlap an existing course enough that the honest answer is a chapter there rather than a course here?
 
 **Sources.**
 
-12. What is the canon: the small set of primary sources this course will keep returning to? A course with no canon cites whatever a search returns.
-13. Is there a spine document, deck, or syllabus this course follows? If yes, its numbers are the ceiling and its ordering is the default.
+13. What is the canon: the small set of primary sources this course will keep returning to? A course with no canon cites whatever a search returns.
+14. Is there a spine document, deck, or syllabus this course follows? If yes, its numbers are the ceiling and its ordering is the default.
 
 Write the answers into `MISSION.md` before anything else.
 That file is the record of this interview, and every later authoring decision is settled by re-reading it.
+The answer to question 9 becomes `PLOT.md` in step 3; it is the one answer that gets a file of its own.
 
 ## 2. Architecture
 
@@ -58,6 +66,9 @@ The map states, for every page: its number, its slug, its title, its module, its
 Pages that are planned but unwritten sit in a `.roadmap` list as plain text.
 **A roadmap entry must never be a link**, because a link to a file that does not exist fails the validator.
 
+Record the same map as reading order in `PLOT.md`: one row per position, with the unwritten ones marked reserved rather than left out.
+The course map and the plot are two views of one order, and they have to agree; when they disagree, one of them is wrong and it gets fixed before anything new is added.
+
 Check the map against the ladder before you accept it: read the titles in order and confirm each one only needs what came before it.
 A page that needs a later page is a map bug, and it is far cheaper to fix here than after eight pages are written.
 
@@ -67,7 +78,10 @@ Copy from [`templates/`](templates/), then fill:
 
 | File | Template | What it is |
 |---|---|---|
+| `<course>/AGENTS.md` | `AGENTS.md` | the course contract for agents: what the course is, what to read in which order, and the rules an agent violates first here |
+| `<course>/CLAUDE.md` | `CLAUDE.md` | a symlink to `AGENTS.md`, exactly as at the repository root, so either filename resolves to the same contract |
 | `<course>/MISSION.md` | `MISSION.md` | the interview answers; canonical, settles every later argument |
+| `<course>/PLOT.md` | `PLOT.md` | the reading order: every position, written or reserved, and everything planned but unwritten |
 | `<course>/NOTES.md` | `NOTES.md` | how this course teaches, and the gotchas found while authoring it |
 | `<course>/RESOURCES.md` | `RESOURCES.md` | the canon, plus a `## Gaps` list of claims with no citable source |
 | `<course>/BUILDER-SPEC.md` | `BUILDER-SPEC.md` | the course delta only: what differs from this skill |
@@ -75,6 +89,10 @@ Copy from [`templates/`](templates/), then fill:
 | `<course>/lessons/` | | empty until step 4 |
 | `<course>/reference/glossary.html` | `glossary.html.tmpl` | grows as terms are introduced |
 | `<course>/learning-records/` | | notes on the authoring itself; never published |
+
+Five of these are instruction files and a new course is never born without them: `AGENTS.md`, `CLAUDE.md`, `MISSION.md`, `PLOT.md`, `NOTES.md`.
+Fill each one from this interview and from what the course actually is; a template with only the name swapped produces files nobody reads.
+If your tooling flattened the `CLAUDE.md` symlink into a text file while copying, recreate it with `ln -s AGENTS.md CLAUDE.md`.
 
 A course needs **no `assets/` folder at all**.
 It links `assets/hub.css` and `assets/hub.js` like every other page in the hub, and there is nothing else to link.
