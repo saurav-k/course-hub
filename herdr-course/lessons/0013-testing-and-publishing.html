@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Debug locally, publish globally - Herdr from Zero</title>
+<meta name="description" content="Iterate on a plugin with link and log list, survive the first errors, then get listed on the marketplace by tagging a GitHub repo.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HERDR FROM ZERO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+<div class="eyebrow">Module 05 &middot; Plugin development &middot; Lesson 13</div>
+<h1>Debug locally, then ship to the marketplace</h1>
+<p class="paper-meta">
+  <span class="pill med">working</span>
+  <span class="pill">10 min</span>
+  The local loop, the first errors you will hit, and the five steps that get a plugin listed.
+  &middot; <a href="https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/marketplace.mdx">marketplace docs</a>
+</p>
+
+<div class="card tldr">
+  <h2 class="h-label">The one-minute version</h2>
+  <ul>
+    <li>Develop with <b>link</b>, not install - your working folder stays the live source.</li>
+    <li>Debug through two logs: per-command records, and herdr's own rotating log files.</li>
+    <li>Publishing is five steps and no review: repo, manifest, topic tag, push, wait.</li>
+    <li>The index rescans GitHub every <b>30 minutes</b>; listing is automatic or nothing.</li>
+  </ul>
+</div>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  D["LINK your folder&lt;br/&gt;invoke and read logs"] --> P["POLISH&lt;br/&gt;manifest honest and complete"]
+  P --> G["PUSH to github&lt;br/&gt;add topic herdr-plugin"]
+  G --> I["AUTO-INDEX&lt;br/&gt;rescanned every 30 min"]
+  I --> U["USERS install&lt;br/&gt;herdr plugin install owner/repo"]
+  </div>
+  <figcaption>Where this sits: lessons 11 and 12 built and explained a plugin; this page gets it into other people's hands.
+  <b>There is no review queue between your repository and the marketplace listing.</b></figcaption>
+</figure>
+
+<h2>1. The local loop</h2>
+<p><code>herdr plugin link "$PWD"</code> registers your working tree in place. Because the server re-reads manifests before every plugin call (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/mod.rs#L39-L46">refresh</a>) and spawns scripts fresh each run, edit-and-rerun needs no reinstall at all. Two logs tell you what happened:</p>
+<ul>
+  <li><b>Per-command records</b>: <code>herdr plugin log list --plugin &lt;id&gt;</code> shows status, exit code and capped output for recent runs.</li>
+  <li><b>Server logs</b>: <code>herdr.log</code>, <code>herdr-client.log</code> and <code>herdr-server.log</code> under the session data directory; verbosity follows the <code>HERDR_LOG</code> env var, defaulting to info (<a href="https://github.com/herdrdev/herdr/blob/master/src/logging.rs#L11-L40">logging</a>).</li>
+</ul>
+
+<table>
+  <thead>
+    <tr><th>Error you will see first</th><th>Cause</th><th>Fix</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>plugin_requires_newer_herdr</code></td><td>min_herdr_version above your binary</td><td>declare your true oldest supported version</td></tr>
+    <tr><td><code>invalid_plugin_id</code></td><td>bad characters or over 120 chars in an id</td><td>stick to letters/digits and <code>: . _ -</code></td></tr>
+    <tr><td><code>platform_unsupported</code></td><td>item's platforms exclude this OS</td><td>broaden platforms or test on a matching OS</td></tr>
+    <tr><td><code>ambiguous_plugin_action</code></td><td>two plugins declare the same action id</td><td>use the qualified id or pass --plugin</td></tr>
+    <tr><td><code>ui_busy</code></td><td>opening a popup while a modal is up</td><td>close settings or copy mode first</td></tr>
+    <tr><td><code>unknown event 'x'</code> warning</td><td>typo in [[events]] on</td><td>copy names from lesson 12's list exactly</td></tr>
+    <tr><td>output ends mid-sentence</td><td>64 KiB per-stream capture cap</td><td>print summaries; write detail to state dir</td></tr>
+  </tbody>
+</table>
+<p class="note-sm">Codes come straight from the loader and spawn paths (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/manifest.rs#L144-L256">loader errors</a>, <a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/runtime.rs#L82-L102">spawn limit</a>).</p>
+
+<h2>2. A real plugin, dissected</h2>
+<p><a href="https://github.com/ogulcancelik/herdr-plugin-examples/tree/main/github-link-preview">github-link-preview</a> from the community examples repo makes ctrl-clicked GitHub issue links open as a side pane instead of a browser tab. Three files:</p>
+
+<div class="code-cap">herdr-plugin.toml &middot; the link handler is the whole trick</div>
+<pre><code>id = "examples.github-link-preview"
+name = "GitHub Link Preview"
+version = "0.1.0"
+min_herdr_version = "0.7.0"
+description = "Open clicked GitHub issue and PR links in a Herdr side pane."
+platforms = ["linux", "macos"]
+
+[[actions]]
+id = "open"
+title = "Open GitHub link preview"
+command = ["bash", "open.sh"]
+
+[[panes]]
+id = "preview"
+title = "GitHub preview"
+placement = "split"
+command = ["bash", "preview.sh"]
+
+[[link_handlers]]
+id = "github-issue-or-pr"
+title = "Preview GitHub issue or PR"
+pattern = "^https://github\\.com/[^/]+/[^/]+/(issues|pull)/[0-9]+/?$"
+action = "open"</code></pre>
+
+<div class="code-cap">open.sh &middot; the handler action hands off to the pane</div>
+<pre><code>#!/usr/bin/env bash
+set -euo pipefail
+
+herdr_bin="${HERDR_BIN_PATH:-herdr}"
+url="${HERDR_PLUGIN_CLICKED_URL:-}"
+
+if [[ -z "$url" ]]; then
+  echo "missing HERDR_PLUGIN_CLICKED_URL" >&2
+  exit 0
+fi
+
+exec "$herdr_bin" plugin pane open \
+  --plugin examples.github-link-preview \
+  --entrypoint preview \
+  --placement split \
+  --direction right \
+  --env "GITHUB_URL=$url" \
+  --focus</code></pre>
+<p>The third file, <code>preview.sh</code>, parses the URL out of <code>GITHUB_URL</code> and runs <code>gh issue view</code> or <code>gh pr view</code> inside the pane. Note the soft-failure habit: a missing variable exits zero with a message on stderr rather than failing the log record.</p>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  C["ctrl-click a github url"] --> M["handler regex matches&lt;br/&gt;first enabled plugin wins"]
+  M --> O["open.sh reads clicked url&lt;br/&gt;from its environment"]
+  O --> P["plugin.pane.open&lt;br/&gt;split right with focus"]
+  P --> V["preview.sh renders gh output&lt;br/&gt;in a real split pane"]
+  </div>
+  <figcaption>The journey of one ctrl-click, from terminal text to rendered preview.
+  <b>A link handler is just a regex plus an action - the action does the rest with ordinary commands.</b></figcaption>
+</figure>
+
+<h2>3. Publish in five steps</h2>
+<ol class="worked">
+  <li><b>Make the repo installable.</b> Public, not a fork or archived; valid manifest at the root or any subdirectory of the default branch (<a href="https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/marketplace.mdx#L37-L44">docs</a>).</li>
+  <li><b>Pass the metadata bar.</b> Required fields must parse: id within 120 chars, description within 500, min_herdr_version strictly three-part semver (<a href="https://github.com/herdrdev/herdr/blob/master/workers/plugin-marketplace/src/index.ts#L713-L763">worker validator</a>).</li>
+  <li><b>Add the topic</b> <code>herdr-plugin</code>. That is the entire submission.</li>
+  <li><b>Wait one cycle.</b> The worker rescans every 30 minutes; pushes trigger a rescan of your repo alone.</li>
+  <li><b>Verify.</b> Search herdr.dev/plugins, then dogfood <code>herdr plugin install you/repo[/subdir]</code>.</li>
+</ol>
+
+<figure class="diagram">
+  <div class="mermaid">
+sequenceDiagram
+  participant A as Author
+  participant GH as GitHub
+  participant W as Index worker
+  participant R as Reader
+  A->>GH: push repo with manifest
+  A->>GH: add topic herdr-plugin
+  W->>GH: search repos then scan default branches
+  Note over W: every 30 minutes via cron
+  W->>W: validate required metadata per manifest
+  R->>W: browse herdr.dev slash plugins snapshot
+  R->>A: herdr plugin install owner/repo/subdir
+  </div>
+  <figcaption>Publishing end to end. No account, form or approval exists anywhere in the path.
+  <b>Your listing lives exactly as long as your topic tag and a parseable manifest do.</b></figcaption>
+</figure>
+
+<figure class="diagram">
+  <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of the five most starred repositories in the plugin index on 24 August 2026">
+    <line class="axis" x1="170" y1="270" x2="620" y2="270"/>
+    <text class="ttl" x="170" y="24">most-starred repos in the index - 2026-08-24</text>
+    <rect class="m-stat" x="170" y="50"  width="417" height="26"/>
+    <rect class="m-stat" x="170" y="98"  width="99"  height="26"/>
+    <rect class="m-stat" x="170" y="146" width="66"  height="26"/>
+    <rect class="m-stat" x="170" y="194" width="66"  height="26"/>
+    <rect class="m-stat" x="170" y="242" width="25"  height="18"/>
+    <text class="lbl-b" x="300" y="68">8341</text>
+    <text class="lbl-b" x="277" y="116">1984</text>
+    <text class="lbl-b" x="244" y="164">1328</text>
+    <text class="lbl-b" x="244" y="212">1326</text>
+    <text class="lbl-sm" x="203" y="255">496</text>
+    <text class="lbl-sm" x="162" y="66"  text-anchor="end">oh-my-opencode-slim</text>
+    <text class="lbl-sm" x="162" y="114" text-anchor="end">terminal-browser</text>
+    <text class="lbl-sm" x="162" y="162" text-anchor="end">terminal-code</text>
+    <text class="lbl-sm" x="162" y="210" text-anchor="end">crabbox</text>
+    <text class="lbl-sm" x="162" y="255" text-anchor="end">herdr-reviewr</text>
+  </svg>
+  <div class="chart-legend"><span><i class="sw-stat"></i>stars when indexed</span></div>
+  <figcaption>The top of the marketplace by stars, read from the live page on 2026-08-24 (bar length proportional; counts quoted).
+  <b>The biggest listings are general terminal tools that happen to be plugins - popularity comes from usefulness, not herdr specificity.</b></figcaption>
+</figure>
+
+<div class="callout warn">
+Listings are not reviewed by anyone. Herdr shows users an install preview and requires confirmation, but the code itself arrives unvetted from its author's repository - keep your own manifest honest and your sources skimmable (<a href="https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/plugins.mdx#L35-L52">trust guidance</a>).
+</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <h3 class="h-label">Retrieval practice</h3>
+  <p class="note-sm">Answer from memory before revealing.</p>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Mid-development you tweak a script. Fastest way to see the change?</div>
+    <button class="q-opt">Reinstall from github</button>
+    <button class="q-opt">Just rerun the action</button>
+    <button class="q-opt">Wait for the 30-minute rescan</button>
+    <button class="q-opt">Restart the herdr server</button>
+    <div class="q-fb">Linked folders are re-read before every call, so the next invocation already uses your edits. Reinstalling is for refreshing managed github checkouts, the rescan only affects the marketplace index, and restarting discards your command log.</div>
+  </div>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">What actually gets a plugin listed on the marketplace?</div>
+    <button class="q-opt">Filing a listing request issue</button>
+    <button class="q-opt">A maintainer approving the code</button>
+    <button class="q-opt">Paying the publisher a fee</button>
+    <button class="q-opt">A topic tag and a valid manifest</button>
+    <div class="q-fb">Discovery is automatic: public repos tagged herdr-plugin whose default branch contains at least one parseable herdr-plugin.toml are indexed, unreviewed (<a href="https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/marketplace.mdx#L19-L22">docs</a>). No submission channel exists - which is also why broken manifests silently drop out instead of being rejected.</div>
+  </div>
+</div>
+
+<h2>How this connects</h2>
+<ul>
+  <li><b>You finished the chapter.</b> The course map points back to the pages on sessions and agents, which are the surfaces most plugins automate.</li>
+</ul>
+
+<div class="teacher-note"><b>Your teacher.</b> If publishing still feels heavy, ask the agent to checklist your repository against the three failure causes: missing topic tag, manifest outside the default branch, or metadata that fails the worker's parser.</div>
+
+<h2 class="h-label">Primary source to go deeper</h2>
+<p><a href="https://herdr.dev/plugins/">The marketplace itself</a>, alongside its <a href="https://github.com/herdrdev/herdr/blob/master/workers/plugin-marketplace/src/index.ts">indexer source</a>, read this session on 2026-08-24.</p>
+
+<div class="pager">
+  <a href="0012-plugin-lifecycle-and-api.html"><span class="dir">&larr; Previous</span><span class="ttl">Plugin lifecycle and API</span></a>
+  <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+</div>
+
+<footer><p>Herdr from Zero &middot; Lesson 13</p></footer>
+
+</main>
+</body>
+</html>
