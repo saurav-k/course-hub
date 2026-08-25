@@ -165,6 +165,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0033-the-fast-track-recap.html"
         }
       ]
+    },
+    {
+      "n": "HW1",
+      "title": "Homework 1: Practice Set 1, explained",
+      "lessons": [
+        {
+          "title": "Processes and modelling",
+          "href": "lessons/0044-practice-processes-and-modelling.html"
+        },
+        {
+          "title": "Bounds and inequalities",
+          "href": "lessons/0042-practice-bounds-and-inequalities.html"
+        },
+        {
+          "title": "Bayes and total probability",
+          "href": "lessons/0043-practice-bayes-and-total-probability.html"
+        }
+      ]
     }
   ],
   "extras": [
