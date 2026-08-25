@@ -165,6 +165,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0033-the-fast-track-recap.html"
         }
       ]
+    },
+    {
+      "n": "HW1",
+      "title": "Homework 1: the graded four, explained not solved",
+      "lessons": [
+        {
+          "title": "Homework 1: start here",
+          "href": "lessons/0034-homework-1-start-here.html"
+        },
+        {
+          "title": "Graded 1: counting and sampling",
+          "href": "lessons/0035-graded-1-counting-and-sampling.html"
+        },
+        {
+          "title": "Graded 2: independence",
+          "href": "lessons/0036-graded-2-independence.html"
+        },
+        {
+          "title": "Graded 3: Bonferroni bounds",
+          "href": "lessons/0037-graded-3-bonferroni-bounds.html"
+        },
+        {
+          "title": "Graded 4: the alternating dice game",
+          "href": "lessons/0038-graded-4-the-alternating-dice-game.html"
+        }
+      ]
     }
   ],
   "extras": [
