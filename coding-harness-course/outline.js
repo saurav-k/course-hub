@@ -151,6 +151,16 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0270-build-a-harness.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Deep Dives - the cast of fifteen",
+      "lessons": [
+        {
+          "title": "Google Antigravity - artifacts as the review surface",
+          "href": "lessons/0190-antigravity.html"
+        }
+      ]
     }
   ],
   "extras": [
