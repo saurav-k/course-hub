@@ -165,6 +165,56 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0033-the-fast-track-recap.html"
         }
       ]
+    },
+    {
+      "n": "HW1",
+      "title": "Homework 1: Practice Set 1, explained not solved",
+      "lessons": [
+        {
+          "title": "Homework 1: start here",
+          "href": "lessons/0034-homework-1-start-here.html"
+        },
+        {
+          "title": "Graded 1: counting and sampling",
+          "href": "lessons/0035-graded-1-counting-and-sampling.html"
+        },
+        {
+          "title": "Graded 2: independence",
+          "href": "lessons/0036-graded-2-independence.html"
+        },
+        {
+          "title": "Graded 3: Bonferroni bounds",
+          "href": "lessons/0037-graded-3-bonferroni-bounds.html"
+        },
+        {
+          "title": "Graded 4: the alternating dice game",
+          "href": "lessons/0038-graded-4-the-alternating-dice-game.html"
+        },
+        {
+          "title": "Every independence verdict is one product test, once the events are straight",
+          "href": "lessons/0039-practice-independence-and-conditioning.html"
+        },
+        {
+          "title": "Counting problems are won or lost on what counts as one outcome",
+          "href": "lessons/0040-practice-counting-and-arrangements.html"
+        },
+        {
+          "title": "\"At least one\" questions are union questions, and the overlaps carry the answer",
+          "href": "lessons/0041-practice-inclusion-exclusion-and-derangements.html"
+        },
+        {
+          "title": "Five problems where the win is a proven inequality, not a number",
+          "href": "lessons/0042-practice-bounds-and-inequalities.html"
+        },
+        {
+          "title": "Six problems, one machine - and half of them run it backwards",
+          "href": "lessons/0043-practice-bayes-and-total-probability.html"
+        },
+        {
+          "title": "Eight problems where the modelling choice is the whole problem",
+          "href": "lessons/0044-practice-processes-and-modelling.html"
+        }
+      ]
     }
   ],
   "extras": [
