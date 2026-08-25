@@ -147,6 +147,16 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0270-build-a-harness.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Deep Dives - the cast of fifteen",
+      "lessons": [
+        {
+          "title": "Cline - plan and act as two programs",
+          "href": "lessons/0200-cline.html"
+        }
+      ]
     }
   ],
   "extras": [
