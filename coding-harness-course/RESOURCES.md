@@ -43,6 +43,25 @@ Cited once or twice, by page.
 - [The agent SDK agent loop](https://code.claude.com/docs/en/agent-sdk/agent-loop) - turn/message vocabulary (AssistantMessage, tool_use, ResultMessage); cited by lessons 0000 and 0020.
 - [Explore the context window](https://code.claude.com/docs/en/context-window) - documented startup token breakdown used as an illustrative measurement in lesson 0000's chart.
 
+### Models module
+
+- [Anthropic: define tools](https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools) - `tool_use`/`tool_result` encoding, `tool_choice` semantics, and the constructed tool system prompt; lesson 0100.
+- [Anthropic: prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) - prefix order tools/system/messages, breakpoint pricing (1.25x/2x write, 0.1x read), thinking-block retention rules; lesson 0100.
+- [OpenAI: function calling](https://platform.openai.com/docs/guides/function-calling) - `function_call` items, strict-mode schema requirements, functions injected into the system message; lesson 0100.
+- [OpenAI: prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching) - implicit default breakpoints, GPT-5.6+ explicit mode, effort changes and prefix reuse; lesson 0100.
+- [Gemini: thought signatures](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures) - validation rules, 400-error behavior, ordering rule, `skip_thought_signature_validator`; lesson 0100.
+- [Aider model-settings.yml](https://github.com/Aider-AI/aider/blob/main/aider/resources/model-settings.yml) - per-model edit formats and capability flags; lesson 0100.
+- [opencode registry.ts](https://github.com/anomalyco/opencode/blob/main/packages/opencode/src/tool/registry.ts) - the GPT apply_patch/edit-write tool swap; lesson 0100.
+- [Cline model-tool-routing.ts](https://github.com/ClineBot/cline/blob/main/sdk/packages/core/src/extensions/tools/model-tool-routing.ts) - declarative per-family tool routing rules; lesson 0100.
+- [Codex model-provider-info lib.rs](https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs) - the single-variant `WireApi` enum; lesson 0100.
+- [Claude Code: model configuration](https://code.claude.com/docs/en/model-config) - alias slot table per provider, `ANTHROPIC_DEFAULT_*_MODEL`, fallback chains, classifier fallback; cited by lessons 0100 and 0110.
+- [Z.ai: Claude Code with GLM Coding Plan](https://docs.z.ai/devpack/tool/claude) - compat base URL, slot remapping, compaction-window patch; lesson 0110.
+- [Moonshot: Use Kimi in Claude Code](https://platform.kimi.ai/docs/guide/claude-code-kimi) - all four slots plus subagent, silent-failure table, thinking requirements, `/status` verification; lesson 0110.
+- [OpenRouter: Anthropic Messages endpoint](https://openrouter.ai/docs/api/api-reference/anthropic-messages/create-messages) and the [Claude Code integration cookbook](https://openrouter.ai/docs/cookbook/coding-agents/claude-code-integration) - the "Anthropic Skin" and its first-party-only guarantee; lesson 0110.
+- [xAI: Grok Build 0.1](https://docs.x.ai/developers/models/grok-code-fast-1) - OpenAI-shapes-only serving, cached-input pricing; lesson 0110.
+- [sst/models.dev provider TOMLs](https://github.com/sst/models.dev/tree/main/providers) - `kimi-for-coding` registered under the Anthropic adapter for thinking-block replay; Z.ai coding-plan effort mapping; lesson 0110.
+- [MoonshotAI/Kimi-K2 issue #129](https://github.com/MoonshotAI/Kimi-K2/issues/129) - community probe of the unpublished `/anthropic` contract, temperature rescaling; lesson 0110.
+
 ## Wisdom
 
 Where practitioners argue, for a reader who wants to test their understanding against people who do this.

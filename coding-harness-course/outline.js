@@ -107,6 +107,20 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0240-pi.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Models",
+      "lessons": [
+        {
+          "title": "Model affinity - tool-call encoding per family",
+          "href": "lessons/0100-model-affinity.html"
+        },
+        {
+          "title": "Compatibility endpoints and model substitution",
+          "href": "lessons/0110-compatibility-endpoints.html"
+        }
+      ]
     }
   ],
   "extras": [

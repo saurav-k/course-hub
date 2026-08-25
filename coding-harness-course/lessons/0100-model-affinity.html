@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Model affinity - tool-call encoding per family - Coding Harness Engineering</title>
+<meta name="description" content="Why a harness works materially better on one model family: tool-call encoding, reasoning-token replay rules, and cache economics decided at the adapter layer.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Models &middot; Lesson 10</div>
+  <h1>Affinity is decided at the adapter, not in the benchmark</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Framed against the three wire dialects' own documentation.
+    &middot; <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools">Anthropic tools</a>
+    &middot; <a href="https://platform.openai.com/docs/guides/function-calling">OpenAI function calling</a>
+    &middot; <a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures">Gemini thought signatures</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>"Works better with Claude" is not folklore - it is three encoding contracts where families genuinely disagree: <b>tool-call shape</b>, <b>reasoning replay</b>, and <b>cache control</b>.</li>
+      <li>The deepest fork is reasoning tokens: each family has different rules for what the model's thinking becomes on the wire and what the harness must do with it next turn.</li>
+      <li>Every harness keeps a translation shelf for these differences - Aider stores per-model edit formats in a config file, opencode swaps its editor tools out entirely for GPT models.</li>
+      <li>Vendors who own both sides stop translating and start training - which is why co-designed pairings keep a quality ceiling adapters cannot reach.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;a loop that treats every model alike"] --> T["THIS PAGE&lt;br/&gt;the three contracts families disagree about"]
+  T --> N["What it enables&lt;br/&gt;predicting which pairing works and why"]
+  M["The models layer&lt;br/&gt;of the seven-layer map"] -.- T
+    </div>
+    <figcaption>Where this sits: lesson 0000 named the model adapter as the layer "where per-family favoritism lives"; this page opens it up and names the three contracts doing the favoring.
+    <b>After this page, "this agent works better with that model" should resolve into a specific encoding you can go read.</b></figcaption>
+  </figure>
+
+  <h2 id="three-dialects">1. The same tool call, three ways</h2>
+  <p>When your harness asks any model to edit a file, the request travels one of three wire dialects.
+  The idea is identical - declare a function, receive a call, answer with a result - but every field name and container differs, and so does the strictness each dialect offers.</p>
+
+  <table>
+    <thead><tr><th>Dimension</th><th>Anthropic Messages</th><th>OpenAI Chat + Responses</th><th>Gemini</th></tr></thead>
+    <tbody>
+      <tr><td>Declaration</td><td><code>tools[]</code>: <code>name</code>, <code>input_schema</code></td><td><code>tools[]</code>: <code>parameters</code>, optional <code>strict</code></td><td><code>function_declarations</code></td></tr>
+      <tr><td>Call arrives as</td><td><code>tool_use</code> block: <code>id</code>, <code>name</code>, JSON object <code>input</code></td><td><code>function_call</code> item: <code>call_id</code>, <code>arguments</code> as a JSON string</td><td><code>functionCall</code> part: <code>name</code>, <code>args</code></td></tr>
+      <tr><td>You answer with</td><td><code>tool_result</code> block keyed by <code>id</code></td><td><code>function_call_output</code> keyed by <code>call_id</code></td><td><code>functionResponse</code> part</td></tr>
+      <tr><td>Schema guarantee</td><td>JSON Schema; optional <code>strict</code> tools</td><td>strict mode needs <code>additionalProperties: false</code> and all fields required</td><td>subset of OpenAPI schema, not full JSON Schema</td></tr>
+      <tr><td>Forcing</td><td><code>tool_choice</code>: auto / any / tool / none</td><td>auto / required / named / <code>allowed_tools</code></td><td>AUTO / ANY / NONE</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph A["Anthropic Messages"]
+    A1["assistant message carries&lt;br/&gt;a tool_use block"] --> A2["next user message carries&lt;br/&gt;the matching tool_result block"]
+  end
+  subgraph B["OpenAI Responses"]
+    B1["output array carries a&lt;br/&gt;function_call item"] --> B2["input appends a&lt;br/&gt;function_call_output item"]
+  end
+  subgraph C["Gemini"]
+    C1["model role part carries&lt;br/&gt;a functionCall"] --> C2["user role part must follow&lt;br/&gt;with functionResponse"]
+  end
+    </div>
+    <figcaption>The round trip all three dialects implement, side by side.
+    <b>An edit is just another function declaration in every family - what differs is the container it travels in and how strictly arguments are checked.</b></figcaption>
+  </figure>
+
+  <p>Two of these details are affinity-bearing rather than cosmetic.
+  Anthropic documents that its API constructs a system prompt from your tool definitions before the model sees them, and OpenAI states functions are "injected into the system message in a syntax the model has been trained on" - so tool lists cost input tokens and sit inside the cached prefix on both.
+  And forcing behaves differently under thinking modes: with manual extended thinking, <code>tool_choice: any</code> or <code>tool</code> is an error on Anthropic, while adaptive thinking allows forced calls.
+  A harness that plans by forcing a tool call must know which regime the selected model is in.</p>
+
+  <h2 id="reasoning-replay">2. Reasoning tokens are the real fork</h2>
+  <p>The hardest adapter problem is not tools - it is what happens to the model's thinking between turns.
+  Agentic coding interleaves reasoning with tool calls, so every multi-step task replays this decision over and over, and each family wrote different rules.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q["the model reasoned&lt;br/&gt;last turn - now what?"] --> CL["Claude&lt;br/&gt;thinking blocks ride in history"]
+  Q --> CO["OpenAI&lt;br/&gt;encrypted reasoning items echoed back"]
+  Q --> GE["Gemini&lt;br/&gt;thought signatures validated"]
+  Q --> GL["GLM Kimi&lt;br/&gt;reasoning_content field on the assistant message"]
+  CL --> CL2["kept by default on Opus 4.5+&lt;br/&gt;stripped on older models - cache goes too"]
+  GE --> GE2["missing signature on Gemini 3&lt;br/&gt;is a 400 error"]
+    </div>
+    <figcaption>One question, four family answers: what becomes of reasoning at the turn boundary.
+    <b>The replay rule is the contract most likely to break silently when you swap model families.</b></figcaption>
+  </figure>
+
+  <p>Gemini is the strictest: its thought signatures are encrypted reasoning state attached to content parts, and Google documents that Gemini 3 models return a 400 error when a required signature is missing from replayed history - even ordering matters, since interleaving a function response between two parallel calls is itself a 400.
+  Gemini CLI lives inside these rules and shows the scar: <code>geminiChat.ts</code> defines <code>SYNTHETIC_THOUGHT_SIGNATURE = 'skip_thought_signature_validator'</code>, injecting Google's own documented escape hatch when a call arrives unsigned, because the alternative is a failed turn.
+  OpenAI took the opposite path - reasoning items are encrypted server-side and simply echoed back verbatim, which is why Codex CLI sends <code>include: ["reasoning.encrypted_content"]</code> and <code>store: false</code> to carry state client-side.
+  Anthropic's thinking blocks are ordinary content blocks whose survival depends on generation: Opus 4.5 and Sonnet 4.6 onward preserve them across new user turns by default, while earlier models strip them - taking the cached prefix behind them along.</p>
+
+  <div class="callout warn">
+    The open coding models inherit whichever host dialect they serve through, plus their own quirks: Moonshot's <code>kimi-k2.7-code</code> rejects any request where thinking is not explicitly enabled (<code>invalid thinking: only type=enabled is allowed for this model</code>), per Moonshot's own <a href="https://platform.kimi.ai/docs/guide/claude-code-kimi">Claude Code guide</a>. A generic adapter cannot know this; someone had to encode it.
+  </div>
+
+  <h2 id="cache-economics">3. Cache economics differ per family</h2>
+  <p>Prompt caching is where affinity gets billed.
+  All three labs discount reads of a cached prefix to about a tenth of fresh input, but they differ on who controls placement and what a write costs.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing the relative cost per token of fresh input, cache write, and cache read across Anthropic Claude, OpenAI GPT-5.6 and later, and pre-GPT-5.6 models, using each vendor's published multipliers.">
+      <line class="axis" x1="150" y1="20" x2="150" y2="250"/>
+      <line class="grid" x1="150" y1="70"  x2="610" y2="70"/>
+      <line class="grid" x1="150" y1="120" x2="610" y2="120"/>
+      <line class="grid" x1="150" y1="170" x2="610" y2="170"/>
+      <line class="grid" x1="150" y1="220" x2="610" y2="220"/>
+      <rect class="m-stat"  x="152" y="32"  width="400" height="26"/>
+      <rect class="m-gold"  x="152" y="66"  width="500" height="26"/>
+      <rect class="m-signal" x="152" y="100" width="40"  height="26"/>
+      <rect class="m-stat"  x="152" y="142" width="400" height="26"/>
+      <rect class="m-gold"  x="152" y="176" width="500" height="26"/>
+      <rect class="m-signal" x="152" y="210" width="40"  height="26"/>
+      <text class="lbl-sm" x="143" y="49"   text-anchor="end">Claude - fresh</text>
+      <text class="lbl-b"  x="560" y="49"   text-anchor="start">write 1.25x</text>
+      <text class="lbl-sm" x="200" y="83"   text-anchor="start">1-hour write costs 2x base</text>
+      <text class="lbl-sm" x="200" y="117"  text-anchor="start">read 0.1x</text>
+      <text class="lbl-sm" x="143" y="159"  text-anchor="end">GPT-5.6+ fresh</text>
+      <text class="lbl-sm" x="200" y="193"  text-anchor="start">explicit breakpoints new in 5.6</text>
+      <text class="lbl-sm" x="200" y="227"  text-anchor="start">read 0.1x</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>fresh input = 1x</span><span><i class="sw-gold"></i>cache write</span><span><i class="sw-signal"></i>cache read</span></div>
+    <figcaption>Relative input-token cost per vendor-published multiplier: Anthropic charges 1.25x to write a 5-minute cache entry and 0.1x to read one; GPT-5.6 and later match those numbers, while earlier GPT models charged no write premium and placed breakpoints implicitly every 2,048 tokens.
+    <b>Cached reads are an order of magnitude cheaper than fresh input - which is why editing one tool description re-prices every later request.</b></figcaption>
+  </figure>
+
+  <p>Placement control differs too.
+  Anthropic creates prefixes in the fixed order <code>tools</code>, then <code>system</code>, then <code>messages</code>, allows up to four explicit <code>cache_control</code> breakpoints, and invalidates a level and everything after it when that level changes.
+  OpenAI caches implicitly by default and only added explicit breakpoints with GPT-5.6.
+  Both labs warn that changing reasoning effort changes model-side instructions and therefore breaks prefix reuse - so effort is part of the cache key whether you like it or not.
+  This is why Goose places <code>cache_control</code> markers on its last two messages for Claude-shaped models while skipping the mechanism entirely on providers that cache automatically, and why Kimi CLI pins <code>prompt_cache_key</code> to the session ID.</p>
+
+  <h2 id="what-harnesses-change">4. What harnesses actually change per family</h2>
+  <p>Read enough harnesses and a pattern emerges: nobody translates only shapes.
+  Every serious adapter encodes judgments about what each family does reliably.</p>
+
+  <table>
+    <thead><tr><th>Harness</th><th>What changes per family</th><th>Where it lives</th></tr></thead>
+    <tbody>
+      <tr><td>Aider</td><td>edit format per model - <code>diff</code>, <code>udiff</code>, <code>diff-fenced</code>; DeepSeek gets automatic caching flagged, Claude gets <code>cache_control</code></td><td>a 357-entry <a href="https://github.com/Aider-AI/aider/blob/main/aider/resources/model-settings.yml"><code>model-settings.yml</code></a></td></tr>
+      <tr><td>opencode</td><td>GPT models get <code>apply_patch</code> and lose <code>edit</code>/<code>write</code>; per-family sampling constants and schema sanitization</td><td><a href="https://github.com/anomalyco/opencode/blob/main/packages/opencode/src/tool/registry.ts"><code>registry.ts</code></a>, <code>transform.ts</code></td></tr>
+      <tr><td>Cline</td><td>routing rules enable <code>apply_patch</code> and disable <code>editor</code> for model IDs containing codex or gpt</td><td><a href="https://github.com/ClineBot/cline/blob/main/sdk/packages/core/src/extensions/tools/model-tool-routing.ts"><code>model-tool-routing.ts</code></a></td></tr>
+      <tr><td>Codex CLI</td><td>nothing to configure - the <code>WireApi</code> enum has exactly one variant, <code>Responses</code>; Chat Completions was deleted</td><td><a href="https://github.com/openai/codex/blob/main/codex-rs/model-provider-info/src/lib.rs"><code>model-provider-info/src/lib.rs:64</code></a></td></tr>
+      <tr><td>Gemini CLI</td><td>two prompt dialects and a per-model tool manifest - <code>getFunctionDeclarations(modelId)</code> returns different declarations per model</td><td><a href="https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/core/geminiChat.ts"><code>geminiChat.ts</code></a>, <code>coreTools.ts</code></td></tr>
+      <tr><td>Claude Code</td><td>auto mode requires recent generations; safety-classifier fallback chains are keyed to exact model versions; aliases resolve differently per cloud</td><td><a href="https://code.claude.com/docs/en/model-config">model configuration docs</a></td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["one declared&lt;br/&gt;tool surface"] --> D{"which family&lt;br/&gt;answered?"}
+  D -->|claude| E1["edit + write&lt;br/&gt;search-replace blocks"]
+  D -->|gpt codex| E2["apply_patch&lt;br/&gt;patch grammar"]
+  D -->|gemini| E3["same tools&lt;br/&gt;rewritten descriptions"]
+    </div>
+    <figcaption>The same declared surface, resolved three ways at dispatch time - the pattern opencode and Cline both encode explicitly and Aider predates with edit formats.
+    <b>This is the design principle of absorbing differences in the adapter: the protocol stays stable so everything above it can stay naive.</b></figcaption>
+  </figure>
+
+  <p>Notice what this table does to the wrapper belief.
+  If capability lived entirely in the model, the adapter would be a URL rewrite.
+  Instead, Aider's maintainers learned that Gemini breaks unified-diff filename headers and gave it a fenced variant; opencode's learned that OpenAI models emit patch dialects more reliably than search-and-replace blocks and swapped the tools; Gemini CLI's rewrite tool descriptions per generation.
+  Each entry is a recorded behavioral difference, paid for in maintenance.</p>
+
+  <h2 id="co-design">5. Co-design beats adaptation</h2>
+  <p>The translation shelf has a ceiling, and the vendors above it stopped translating.
+  Cursor trains Composer on trajectories containing its real tool lists; Windsurf's <code>swe-grep</code> retrieval models are trained to issue parallel search calls its own harness schedules well; Anthropic and Claude Code gate features like auto mode on model recency and route classifier-flagged requests down per-version fallback chains.
+  When one team owns the weights, the training loop, and the tool schemas, the model converges on the harness - a loop a third-party adapter cannot join by writing more translation code.
+  That is the honest shape of affinity: the further a pairing sits from co-design, the more of it lives in tables like section 4's, and the more silently it degrades when you substitute the other half.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A harness replays history against a Gemini 3 model and starts receiving 400 errors mid-task. The tool calls themselves are well-formed. What did the loop most likely drop?</div>
+      <button class="q-opt">The tool_choice forcing directive, which Gemini validates strictly</button>
+      <button class="q-opt">The system instruction block from before the first turn</button>
+      <button class="q-opt">The parallel_tool_calls toggle from the original request</button>
+      <button class="q-opt">The thought signatures attached to the replayed function calls</button>
+      <div class="q-fb">Gemini 3 enforces thought-signature validation and returns 400 when required signatures are missing from replayed history. Option one is backwards - manual extended thinking blocks forced calls on Anthropic, not Gemini. Options two and three affect caching or parallelism, not validation errors.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">opencode hides its Edit and Write tools and exposes apply_patch instead. For which models?</div>
+      <button class="q-opt">Anthropic models, because search-and-replace blocks confuse them</button>
+      <button class="q-opt">GPT-family models whose IDs match gpt-, excluding gpt-4 and oss variants</button>
+      <button class="q-opt">Every model behind an openai-compatible endpoint without exception</button>
+      <button class="q-opt">Gemini models, since they reject JSON Schema in edit tool inputs</button>
+      <div class="q-fb">The registry's rule matches model IDs containing gpt- but excludes gpt-4 and oss variants - patch dialect works better for those generations. Option one inverts the finding: Claude keeps search-and-replace. Option three is wrong because openai-compatible endpoints keep the normal tools, and option four confuses schema-subset handling with the tool swap.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Find the translation shelf in a harness you have installed.
+      If it is open source, search its repository for per-family branching - strings like <code>claude</code>, <code>gpt-</code>, <code>gemini</code>, or fields named after effort, thinking, or cache control.
+      Closed-source harnesses expose the same seams behaviorally: switch the model with the picker, then watch what the permission prompts, output style, or error messages do.</p>
+      <p><b>Find</b>: three per-family code paths or behaviors, and for each, name which of the three contracts from this page it serves - tool-call encoding, reasoning replay, or cache economics.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Adapter files cluster near the words provider, transform, or model.
+      Aider's <code>model-settings.yml</code> is the largest single example in the cast if you want to see the whole shelf in one file.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Tool-call encoding.</b> opencode's registry swaps editor tools for gpt- models; Roo Code converts schemas to OpenAI strict form for some providers and leaves them alone for others.</li>
+        <li><b>Reasoning replay.</b> Copilot's Messages path round-trips signed thinking blocks; Kimi CLI guards its proprietary reasoning envelope behind a check for its own provider.</li>
+        <li><b>Cache economics.</b> Goose attaches cache_control markers only for Claude-shaped models; aider flags DeepSeek as caching by default and Claude via explicit headers.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Three findings mapping onto three different contracts means you found real affinity machinery; three findings all about prompts usually mean you found one family's system prompt and labeled it thrice.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the three contracts blur together, ask it to trace one tool call from declaration to result in two dialects and name every field that changed spelling. If the reasoning section felt abstract, ask why swapping a model family mid-session can invalidate the prompt cache even when nothing else changed.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Google's thought-signatures reference is the sharpest public statement of a replay contract - validation rules, error conditions, and the documented escape hatch Gemini CLI injects: <a href="https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/thinking/thought-signatures">Thought signatures</a>. Read it after this page and count how many of its rules a harness must implement to survive one multi-tool turn.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0110-compatibility-endpoints.html"><span class="dir">Next &rarr;</span><span class="ttl">Compatibility endpoints</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 10 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
