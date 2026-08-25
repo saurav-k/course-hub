@@ -91,6 +91,26 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0240-pi.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Extending",
+      "lessons": [
+        {
+          "title": "Code mode - tool calls as generated programs",
+          "href": "lessons/0090-code-mode.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "Deep Dives - the cast of fifteen",
+      "lessons": [
+        {
+          "title": "GitHub Copilot Chat - prompts as a component tree",
+          "href": "lessons/0160-copilot-chat.html"
+        }
+      ]
     }
   ],
   "extras": [

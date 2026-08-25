@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Code mode - tool calls as generated programs - Coding Harness Engineering</title>
+<meta name="description" content="Codex, Goose and opencode let the model write a program that calls tools, instead of emitting one tool call per round trip. What it saves, what it costs, and why it looks like where the field is heading.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Extending &middot; Lesson 90</div>
+  <h1>Code mode turns a tool fan-out into one generated program</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Read from each harness's public source at the commits pinned in this page's links.
+    &middot; <a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/code-mode-protocol/src/lib.rs">example: Codex's exec tool name</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every tool call normally costs a full <b>model round trip</b>: the request goes out, the result comes back, the model thinks again before the next call.</li>
+      <li><b>Code mode</b> collapses that fan-out: the model writes one TypeScript program whose statements call tools, and the harness executes the whole thing locally.</li>
+      <li>Three members of our cast built it independently. Codex CLI made it the <b>default path for its newest models</b>, Goose ships it opt-in and off, opencode keeps it behind an experimental flag.</li>
+      <li>The savings are real - fewer round trips, compact results, stable caching - but a failed program is one opaque failure, and debugging shifts from reading a transcript to reading generated code.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Before&lt;br/&gt;lesson 0020's loop&lt;br/&gt;one tool call per turn"] --> T["THIS PAGE&lt;br/&gt;code mode&lt;br/&gt;the model writes the orchestration"]
+  T --> N["Enables&lt;br/&gt;judging when one big call&lt;br/&gt;beats many small ones"]
+  W["Module 04 Extending&lt;br/&gt;after MCP and skills"] -.- T
+    </div>
+    <figcaption>Where this sits: lessons 0070 and 0080 grew the set of tools a model may call; this page questions the calling convention itself.
+    <b>If the model can write code, the loop, the branching, and the retrying can move out of the model and into a program it wrote.</b></figcaption>
+  </figure>
+
+  <h2 id="tax">The round-trip tax</h2>
+  <p>Watch a coding agent work through its transcript and count the turns. A task like "run the test suite in each of these twelve directories and retry the failures once" becomes a procession: call bash for directory one, wait, read the result, decide, call again for directory two. Each hop is one sampling request - the full history travels to the model and back just so something can decide whether to run the next command. The harness pays latency on every hop, the provider bills tokens for re-reading the history, and any prompt cache in front of the model must survive the growing tail.</p>
+  <p>A shell tool already offers an escape hatch - nothing stops the model from writing one big script that loops over all twelve directories. Code mode formalizes that escape hatch with structure: typed bindings back into the harness's real tools, not raw text scraping of shell output.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing model round trips for a twelve-directory test task: fourteen sampling requests carrying tool traffic for direct tool calling against one for code mode.">
+      <line class="axis" x1="150" y1="20" x2="150" y2="250"/>
+      <rect class="m-noise" x="151" y="60"  width="400" height="30"/>
+      <rect class="m-stat"  x="151" y="150" width="29"  height="30"/>
+      <text class="lbl-sm" x="143" y="80"  text-anchor="end">direct tools</text>
+      <text class="lbl-sm" x="143" y="170" text-anchor="end">code mode</text>
+      <text class="lbl-sm" x="559" y="80"  text-anchor="start">14 requests</text>
+      <text class="lbl-sm" x="188" y="170" text-anchor="start">1 request</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>per-directory calls plus retries</span><span><i class="sw-stat"></i>one exec call</span></div>
+    <figcaption>Illustrative arithmetic, not a measurement: twelve checks plus two retries is fourteen sampling requests carrying tool results, against a single request whose argument is the program. Both paths still need one final text-only completion, so it cancels out.
+    <b>The saving scales with fan-out width, because retries and conditionals stop being things the model must think about between requests.</b></figcaption>
+  </figure>
+
+  <h2 id="three">Three implementations of one idea</h2>
+  <p>The cast contains three first-hand implementations, and they disagree about execution venue and default status. Codex CLI defines a freeform custom tool literally named <code>exec</code> (with a companion <code>wait</code>), whose argument is TypeScript source (<a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/code-mode-protocol/src/lib.rs">code-mode-protocol/src/lib.rs</a>, the constants naming both tools). The source runs in a dedicated out-of-process host crate family (<a href="https://github.com/openai/codex/tree/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/code-mode-host">code-mode-host</a>), and the descriptions of ordinary tools get rewritten to show how each would be reached from inside a program (<a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/tools/src/code_mode.rs">tools/src/code_mode.rs</a>). Most striking is who gets it: six model entries in the bundled catalog ship <code>"tool_mode": "code_mode_only"</code>, including the default <code>gpt-5.6-sol</code>, which hides every direct tool (<a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/models-manager/models.json">models-manager/models.json</a>). For those models there is no choice to make - generating a program is the only way to act.</p>
+  <p>Goose reaches the same design from the extensions side: four tools named <code>execute_typescript</code>, <code>execute_bash</code>, <code>list_functions</code> and <code>get_function_details</code> let a script enumerate the available extension calls and batch them, each callback dispatching into the same <code>dispatch_tool_call</code> path a normal tool call would take (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/platform_extensions/code_execution.rs">code_execution.rs</a>, handlers near lines 216 and 251, callback dispatch at line 383). It ships off by default. opencode's version lives in a separate <code>packages/codemode</code> interpreter package with its own standard library, mounted as a single <code>execute</code> tool only when the experimental flag is set (<a href="https://github.com/anomalyco/opencode/blob/69aaa22793bcbe0b016ad9cfad22616906766df0/packages/opencode/src/tool/registry.ts">registry.ts</a>, flag gate at line 118).</p>
+
+  <table>
+    <thead><tr><th>Subject</th><th>Generated programs?</th><th>Evidence or status</th></tr></thead>
+    <tbody>
+      <tr><td>Codex CLI</td><td>Yes - default for flagged families</td><td><code>exec</code>/<code>wait</code> freeform tools, gRPC host, six catalog entries <code>code_mode_only</code></td></tr>
+      <tr><td>Goose</td><td>Yes - opt-in, off by default</td><td>four code-execution tools dispatching into <code>dispatch_tool_call</code></td></tr>
+      <tr><td>opencode</td><td>Experimental</td><td>flag-gated <code>execute</code> tool over a dedicated interpreter package</td></tr>
+      <tr><td>Copilot Chat</td><td>No</td><td>compresses differently - tools execute during prompt rendering (lesson 160)</td></tr>
+      <tr><td>Claude Code, Gemini CLI, Cline, Roo Code, Kimi CLI, Pi</td><td>No</td><td>standard function-calling loops in their public sources and documentation</td></tr>
+      <tr><td>Aider</td><td>Inverted</td><td>pre-agentic: no tool calls at all - the reply text itself is the action (lesson 120)</td></tr>
+      <tr><td>Cursor, Windsurf, Antigravity core</td><td>Not publicly documented</td><td>closed products; no official page describes such a mechanism</td></tr>
+      <tr><td>pi-launcher</td><td>n/a</td><td>a launcher, not a loop</td></tr>
+      <tr><td>Model layer (models.dev)</td><td>Upstream</td><td>the catalogs whose declarations code mode compiles into bindings</td></tr>
+    </tbody>
+  </table>
+  <p class="note-sm">Rows carry the pinned-commit evidence where the subject is open source; closed subjects state their documented absence rather than a guess.</p>
+
+  <h2 id="mechanism">How a generated program reaches real tools</h2>
+  <p>The execution shape is common to all three, drawn here Goose-style because its dispatch path is the most visible: the script never touches files or networks directly. Each tool call inside the program becomes a callback into the dispatcher the interactive loop already uses, so permissions, telemetry, and result formatting stay identical to a plain tool call.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant M as Model
+    participant L as Loop
+    participant X as TS host
+    participant D as Tool dispatcher
+    M->>L: one call whose argument is a program
+    L->>X: hand source to the host process
+    Note over X: the program runs - loops and branches are local
+    X->>D: binding call - read file
+    D-->>X: result value
+    X->>D: binding call - run tests
+    D-->>X: failure value
+    X->>D: binding call - retry the failure
+    D-->>X: pass
+    X-->>L: final value of the program
+    L-->>M: one tool result message
+    </div>
+    <figcaption>A dozen would-be round trips happen inside the host while the model waits once.
+    <b>The dispatcher boundary is what keeps this legitimate tool use: every statement still crosses the same permission gate as an ordinary call.</b></figcaption>
+  </figure>
+
+  <h2 id="ledger">What it saves and what it costs</h2>
+  <p>The savings column is why OpenAI flagged its newest models this way. Round trips collapse, as the chart above showed. Intermediate values stay compact: a loop over forty files returns the three failures that matter, not forty full results re-read by the model. And the wire stays cache-friendly - one stable <code>exec</code> call replaces a long tail of growing history.</p>
+  <p>The cost column is equally structural. A program that throws on line fifty has really done the work of lines one through forty-nine - those tool calls executed - but what comes back is one failed result describing a program, not a clean checkpoint the model can continue from. Wrong-tool-call errors used to be small and local; wrong-program errors are large and opaque. Debugging moves from reading a transcript of decisions to reading generated code, and the host becomes part of the security surface, since it runs model-written TypeScript and must sandbox it exactly as seriously as a shell command.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+    Tool schemas have been the interface between model and harness. Code mode demotes them to a compilation target: the model no longer addresses tools one declaration at a time, it addresses an API surface, and lesson 0010's principle that the loop is a product of the model's limits explains why independent teams converged here at the moment models became good enough to write the glue.</div>
+
+  <p>Is it where the field is heading? The adoption spectrum says "probably, slowly": one cast member made it the only path for its newest models, one ships it off by default, one keeps it behind a flag, and the rest have not started. The mechanism pages ahead keep meeting the same pressure - lesson 160 shows a harness compressing the loop from the other side - but no other member currently lets the model author the orchestration itself.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">You pick the newest default model in Codex CLI and ask it to refactor six files. What tool surface does it actually receive?</div>
+      <button class="q-opt">The full function list, because code mode adds exec alongside the existing tools</button>
+      <button class="q-opt">One freeform exec tool - direct tools are hidden for models flagged code_mode_only</button>
+      <button class="q-opt">Only read-only tools, until you approve the patch dialect for write access in settings</button>
+      <button class="q-opt">Whatever an MCP server contributes, since built-in tools retire on the newest families</button>
+      <div class="q-fb">Six bundled catalog entries ship "tool_mode": "code_mode_only", including the default, which hides direct tools entirely - writing a program is the only way to act. This is not a settings gate you flip, MCP contributions do not change it, and exec replaces rather than joins the direct surface.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A generated program reads ten files successfully, then its final write call fails. What does the model see?</div>
+      <button class="q-opt">Ten separate successful results followed by the failure, as a normal loop delivers</button>
+      <button class="q-opt">Nothing - the harness rewinds the completed reads before handing control back</button>
+      <button class="q-opt">One failed result for the whole program - earlier effects happened, unsummarized</button>
+      <button class="q-opt">A permission prompt asking whether to rerun the entire program from its first line</button>
+      <div class="q-fb">The program is one tool call from the loop's perspective, so its outcome arrives as one result - but the bindings genuinely dispatched, so the ten reads stand and nothing rewinds. Reruns are the model's decision, not an automatic prompt.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A task fans out over twelve directories: run each directory's tests, retry a failure once if it occurs, and suppose exactly two directories fail on the first attempt. Count <b>sampling requests that carry tool traffic</b> - the final text-only summary cancels out either way.</p>
+      <p><b>Find</b>: the count for direct tool calling (one call per check, one per retry) and for code mode (one exec call), and the ratio between them.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Direct: twelve checks plus one extra call per failing directory. Code mode: everything - checks, branches, retries - happens between statements of one program.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Count the direct path.</b> 12 checks + 2 retries = <b>14</b> sampling requests carrying tool results.</li>
+        <li><b>Count the code-mode path.</b> All twelve checks, the two branch decisions, and both retries execute inside the host: <b>1</b> request.</li>
+        <li><b>Take the ratio.</b> 14 &divide; 1 = <b>14&times;</b> fewer tool-carrying round trips.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> With zero failures the counts become 12 and 1 - the saving tracks fan-out width, not luck, because branching and retrying moved in-process.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask it to take your last multi-step agent session and split each action into "must be decided by the model" versus "could be a line of generated code". Then ask which single error in that session would have been harder to debug as one failed program instead of fifteen visible steps.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Codex's own tool-description rewriter shows the idea at its most concrete - every ordinary tool taught to describe how a program would call it: <a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/tools/src/code_mode.rs">codex-rs/tools/src/code_mode.rs</a>. Read the augmentation function and notice it changes no behavior at all, only what the model knows about addressing tools from code.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 90 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
