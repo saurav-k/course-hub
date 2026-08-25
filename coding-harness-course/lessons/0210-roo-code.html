@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roo Code turns one YAML object into a whole dev team - Coding Harness Engineering</title>
+<meta name="description" content="Deep dive into Roo Code at pinned commit b867ec91: the mode system binding role, tool permissions, rules, and a sticky model profile into one authorable persona.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 10 of 15</div>
+  <h1>Roo Code turns one YAML object into a whole dev team</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Read from source at pinned commit <code>b867ec91</code> (v3.54.0).
+    &middot; <a href="https://github.com/RooCodeInc/Roo-Code">RooCodeInc/Roo-Code</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    Repository: <a href="https://github.com/RooCodeInc/Roo-Code">github.com/RooCodeInc/Roo-Code</a> - TypeScript VS Code extension, Apache-2.0, forked from Cline, archived read-only on May 15 2026 with community maintenance announced in its changelog.
+    Analysis pinned to commit <code>b867ec9145750d0ae1ff7f02d35406e9bf2a0b16</code>.
+    Five files to read first, in this order:
+    <ol class="worked">
+      <li><code>src/core/task/Task.ts</code> - the whole agent loop, four thousand six hundred lines</li>
+      <li><code>packages/types/src/mode.ts</code> - the mode schema and the five built-in personas</li>
+      <li><code>src/core/config/CustomModesManager.ts</code> - how <code>.roomodes</code> is watched, parsed, merged</li>
+      <li><code>src/core/config/ProviderSettingsManager.ts</code> - sticky per-mode model profiles in secrets storage</li>
+      <li><code>src/core/diff/strategies/multi-search-replace.ts</code> - the fuzzy ladder behind every edit</li>
+    </ol>
+    Community: the repository's <a href="https://github.com/RooCodeInc/Roo-Code/issues">issue tracker</a> (read-only but searchable), and official docs at <a href="https://docs.roocode.com">docs.roocode.com</a>.
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Skills and subagents&lt;br/&gt;the primitives page"] --> T["THIS PAGE&lt;br/&gt;the mode system as persona"]
+  T --> N["What it enables&lt;br/&gt;reading any persona system&lt;br/&gt;as bindings plus enforcement"]
+  W["Deep dive ten of fifteen&lt;br/&gt;same skeleton every time"] -.- T
+    </div>
+    <figcaption>Where this sits: the Extending module introduced customization primitives; Roo Code binds four of them into one object.
+    <b>The claim to test against your own skepticism: a "dev team" is a schema, not marketing.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <p>Roo Code began in late 2024 as Roo Cline, a fork of Cline, and rebranded once custom modes arrived - its own changelog credits the rename to outgrowing fifty thousand installations. It is a TypeScript monorepo whose extension host runs one agent core behind two shells: the VS Code webview UI, and a CLI that runs the same code headlessly through a fake VS Code API (<code>@roo-code/vscode-shim</code>). At the pinned commit it counted roughly twenty-four thousand GitHub stars and three million installs, and its self-description - a whole dev team in your editor - is more literal than most slogans: the product's central artifact is the ability to define teammates.</p>
+
+  <h2 id="loop">The loop</h2>
+  <p>The loop lives almost entirely in <code>Task.ts</code>. An outer <code>while (!this.abort)</code> drives an inner iteration stack; each iteration expands mentions, appends fresh environment details, rebuilds the system prompt, and streams from the provider. Tool calls arrive through native function calling only - the XML-in-text-stream parser inherited from Cline was deleted outright, so a malformed call without an id is refused with an error telling the model that XML calls are no longer supported. The inherited trick survives: tools execute while later blocks are still streaming, and each result is pushed straight into the next user message. The turn ends only when the model calls <code>attempt_completion</code>, which blocks awaiting your verdict - approval idles the task, feedback text becomes the next tool result. A task never completes autonomously; the user or a request cap closes it, a fact the source states in a comment beside the loop itself.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as You
+    participant T as Task loop
+    participant P as Provider stream
+    participant E as presentAssistantMessage
+    U->>T: prompt
+    T->>T: mentions expanded plus fresh environment details
+    T->>P: createMessage with system prompt and tools array
+    P-->>E: tool_call chunks parsed as arguments arrive
+    E->>U: approval ask unless auto-approved
+    U-->>E: approve
+    E->>T: result pushed into next user content
+    T->>P: next iteration with results appended
+    Note over T,E: until attempt_completion asks you for a verdict
+    </div>
+    <figcaption>The streaming-execution pattern: dispatch overlaps generation, saving one round trip per tool call.
+    <b>Denial travels the same channel as any result - information, not exception.</b></figcaption>
+  </figure>
+
+  <h2 id="context">Context assembly</h2>
+  <p>Every request rebuilds the prompt from scratch: the active mode's role definition opens it, followed by tool-use guidance, capabilities, the list of available modes with their <code>whenToUse</code> hints, skills, rules, system facts, and finally the user's instruction block - global settings, then mode-specific instructions, then rules files in strict precedence (<code>.roo/rules-{mode}/</code> directories before legacy <code>.roorules</code>, AGENTS.md honored when enabled). Notably absent: CLAUDE.md and .cursorrules are never loaded natively. A fresh <code>&lt;environment_details&gt;</code> block rides onto the last user message every turn - visible editors, running terminals, recently modified files, git status, current mode - replacing any stale copy first.</p>
+  <p>Budgeting is explicit arithmetic: usable window equals context window minus a ten percent buffer minus reserved output tokens. Crossing the condense threshold triggers one summarizer call whose output replaces prior history non-destructively - old messages stay tagged on disk so checkpoints can rewind past them - with a half sliding-window truncation as fallback and a forced seventy-five percent reduction if the window is exceeded outright.</p>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>Roo Code sits in the ask-first family with granular automation. Seven auto-approval categories - read-only, write, protected writes, MCP, mode switches, subtasks, commands - each toggle independently; command gating splits chained commands and matches allowlists by longest prefix. Two guardrails are worth stealing mentally: a spend limiter caps consecutive requests and cumulative cost even when everything is approved, and a protected-file controller requires separate consent before anything may write <code>.roomodes</code>, <code>.roorules</code>, <code>AGENTS.md</code>, or <code>.roo/**</code> - the configuration surface itself is defended, because a harness that edits its own permissions has lost them. There is no OS sandbox and no network policy; rollback instead comes from a shadow git repository per task that commits before every mutating tool. And the hook count from the previous page shows here as a zero: policy is approvals, categories, and mode restrictions, not user-written event handlers.</p>
+
+  <h2 id="extensions">Extension surface</h2>
+  <p>MCP speaks all three transports with project config overriding global; skills follow the Agent Skills standard from four locations with mode-scoped directories; slash commands are markdown files with frontmatter; subtasks run through <code>new_task</code>. What the cast shares here matters less than what binds it: every extension mechanism reads the current mode before deciding what exists - skill directories gain a mode suffix, MCP tools filter by group membership, and the tools themselves are withheld per mode rather than merely discouraged.</p>
+
+  <h2 id="models">Model behavior</h2>
+  <p>A factory switch covers about twenty-seven providers over two wire dialects, with typed catalogs carrying context windows, prices, and capability flags per model. Family handling differs where the families differ: Claude thinking budgets clamp against max tokens with temperature pinned while thinking, GPT-5 models drop temperature support and ride the Responses API, Gemini receives every tool definition plus an allowlist enforcing mode restrictions at the API level, Bedrock places token-aware cache points by strategy rather than markers. The default profile points at Anthropic's Sonnet via OpenRouter. None of that is unusual by cast standards - the distinctive part is who selects the model, which is the next section.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p>The mode system binds four dimensions into one authorable object. A single YAML entry in <code>.roomodes</code> sets the role definition that opens the system prompt, the tool groups - optionally restricted by file regex - the mode-specific rules directory, and a sticky API profile remembered per mode in secrets storage, restored automatically whenever you switch. Enforcement is real: validation checks every completed tool call against the mode's groups and regex, including paths parsed out of patch bodies, and rejects violations as error results the model must handle.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  M["one mode slug in .roomodes"] --> R["roleDefinition opens system prompt"]
+  M --> G["tool groups with optional fileRegex"]
+  M --> RU["rules-{slug} directory joins prompt"]
+  M --> S["sticky API profile per mode"]
+  G --> V["validateToolUse enforces at call time"]
+  O["orchestrator - groups empty"] -->|"new_task delegates"| C["child task - own context and model"]
+  C -->|"attempt_completion"| B["summary returns as parent tool result"]
+    </div>
+    <figcaption>One slug, four bindings, enforced at the call boundary rather than requested politely.
+    <b>Orchestrator proves the design: zero tool groups still coordinates work, because delegation itself is always available.</b></figcaption>
+  </figure>
+
+  <p>The arithmetic makes the design legible. Counting static built-ins - four read tools, three edit tools, two command tools, two MCP wrappers, plus seven always-available companions including delegation - the code mode carries eighteen tools, ask thirteen, and orchestrator exactly seven. Five built-in modes ship with the product, each a different answer to "who is working now", and any number of yours can sit beside them in version control.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Horizontal bar chart of built-in tool counts per Roo Code mode derived from source: code 18, debug 18, architect 16, ask 13, orchestrator 7.">
+      <line class="axis" x1="150" y1="25" x2="150" y2="265"/>
+      <rect class="m-stat" x="151" y="35"  width="412" height="30"/>
+      <rect class="m-stat" x="151" y="80"  width="412" height="30"/>
+      <rect class="m-stat" x="151" y="125" width="366" height="30"/>
+      <rect class="m-stat" x="151" y="170" width="298" height="30"/>
+      <rect class="m-alarm" x="151" y="215" width="160" height="30"/>
+      <text class="lbl-sm" x="143" y="55"  text-anchor="end">code</text>
+      <text class="lbl-sm" x="143" y="100" text-anchor="end">debug</text>
+      <text class="lbl-sm" x="143" y="145" text-anchor="end">architect</text>
+      <text class="lbl-sm" x="143" y="190" text-anchor="end">ask</text>
+      <text class="lbl-sm" x="143" y="235" text-anchor="end">orchestrator</text>
+      <text class="lbl-b" x="571" y="55"  text-anchor="start">18</text>
+      <text class="lbl-b" x="571" y="100" text-anchor="start">18</text>
+      <text class="lbl-b" x="525" y="145" text-anchor="start">16</text>
+      <text class="lbl-b" x="457" y="190" text-anchor="start">13</text>
+      <text class="lbl-b" x="319" y="235" text-anchor="start">7</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>static tools granted</span><span><i class="sw-alarm"></i>always-available set only</span></div>
+    <figcaption>Built-in tool counts per mode, derived by summing group members plus the seven always-available tools from <code>src/shared/tools.ts</code> at the pinned commit (dynamic MCP tools excluded; architect's edit group is regex-restricted to markdown).
+    <b>The seven-tool floor is not a limitation but the point: orchestrator owns delegation, specialists own everything else.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    The repository was archived read-only in May 2026 after the original team moved to a successor product, with community maintenance announced in the final changelog. Every mechanism described here is verifiable at the pinned commit forever, but the project will not evolve - treat this page as a snapshot of the fullest persona-binding design shipped to date, not a living roadmap.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An architect mode restricts its edit group to markdown files. Where does that restriction actually bite?</div>
+      <button class="q-opt">The model self-restrains after reading its role prompt</button>
+      <button class="q-opt">The webview greys out non-markdown files silently</button>
+      <button class="q-opt">Call-time validation rejects violating edits as errors</button>
+      <button class="q-opt">The provider filters tool schemas before sending them</button>
+      <div class="q-fb">Validation runs on every completed tool call against the mode's groups and regex - paths inside patch bodies included - and returns an error result. The prompt informs but does not enforce. The UI hides nothing here, and while tool filtering does happen per group, the regex check happens at execution time on arguments.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">You switch from code mode to docs-writer mode. What happens to the model selection?</div>
+      <button class="q-opt">Both modes keep whichever model is currently active</button>
+      <button class="q-opt">Each mode restores its own saved API profile</button>
+      <button class="q-opt">A fresh default profile applies until you choose again</button>
+      <button class="q-opt">The child task inherits the parent's model binding</button>
+      <div class="q-fb">Sticky profiles map every mode slug to an API config in secrets storage, restored on switch - that is the mechanism the docs call Sticky Models. Option one describes the opt-out lock setting, not the default. There is no fresh-default reset, and parent-child inheritance belongs to subtasks, not mode switching.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Clone the repository at the pinned commit and verify three load-bearing claims from this page with your own eyes: that orchestrator ships empty tool groups, that the diff strategy is hardcoded to one implementation, and that per-mode profiles live outside plain settings storage.</p>
+      <p><b>Find</b>: the line number in <code>packages/types/src/mode.ts</code> where the orchestrator's groups array is declared, the constructor call in <code>Task.ts</code> that fixes the diff strategy, and the storage key constant in <code>ProviderSettingsManager.ts</code>.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Read the DEFAULT_MODES array bottom-up for the orchestrator entry, search Task.ts for the constructor assignment near setup, and look for where the settings manager persists profiles - the key name contains a fossil of the project's original name.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Orchestrator's groups.</b> The last entry of DEFAULT_MODES declares <code>groups: []</code> - an empty array, so only always-available tools remain.</li>
+        <li><b>Diff strategy.</b> Task setup assigns <code>this.diffStrategy = new MultiSearchReplaceDiffStrategy()</code> with no alternative branch anywhere - one editor for everyone.</li>
+        <li><b>Profile storage.</b> The manager persists under the secrets-storage key <code>roo_cline_config_api_config</code> - the hyphenated fossil of roo-cline, the fork's original name.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> All three finds should sit within roughly the first five hundred lines of their files except the modes array, which starts around line one-sixty-eight - if your grep lands deep in test files, you searched the spec copies rather than the source.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the four-bindings picture did not land, ask it to redesign Roo Code without sticky profiles and enumerate what breaks for a user who plans on one model and codes on another. Then have it compare Cline's plan-act session rebuild against this mode switch - same goal, different mechanism, different cost.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The vendor documentation on customizing modes - the property table, the fileRegex grammar, and the precedence rules this page summarized: <a href="https://docs.roocode.com/features/custom-modes">Customizing Modes at docs.roocode.com</a>. Read it beside <code>packages/types/src/mode.ts</code> and note how closely the schema and the docs track each other.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 21 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
