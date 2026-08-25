@@ -129,6 +129,26 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0250-pi-launcher.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Deep Dives - the cast of fifteen",
+      "lessons": [
+        {
+          "title": "opencode - model behavior as data",
+          "href": "lessons/0220-opencode.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Capstone",
+      "lessons": [
+        {
+          "title": "Capstone - build a minimal harness",
+          "href": "lessons/0270-build-a-harness.html"
+        }
+      ]
     }
   ],
   "extras": [

@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>opencode - model behavior as data - Coding Harness Engineering</title>
+<meta name="description" content="opencode runs one Bun process that serves every client, drives an explicit while(true) loop, and compiles a hosted models.dev catalog into per-model behavior at runtime. A source-level deep dive at a pinned commit.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 22</div>
+  <h1>opencode compiles one shared model catalog into everything its agent does</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Read from source at <a href="https://github.com/anomalyco/opencode/blob/69aaa22793bcbe0b016ad9cfad22616906766df0/packages/opencode/src/session/prompt.ts">commit <code>69aaa227</code></a> (v1.18.23).
+    &middot; <a href="https://models.dev">models.dev</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <b>Repository:</b> <a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a> (older <code>sst/opencode</code> links redirect) &middot; MIT &middot; TypeScript on Bun &middot;
+    analysis pinned to commit <code>69aaa22793bcbe0b016ad9cfad22616906766df0</code>, v1.18.23.<br>
+    <b>Read these five files, in this order:</b>
+    <ol>
+      <li><code>packages/opencode/src/session/prompt.ts</code> - <code>runLoop</code>, the whole turn cycle in one explicit <code>while&nbsp;(true)</code></li>
+      <li><code>packages/opencode/src/provider/transform.ts</code> - roughly 1,850 lines of per-family middleware: effort ladders, sampling, caching, schema surgery</li>
+      <li><code>packages/opencode/src/session/system.ts</code> - the per-family persona prompts</li>
+      <li><code>packages/opencode/src/tool/registry.ts</code> - the built-in tools, and the GPT-only <code>apply_patch</code> swap</li>
+      <li><code>packages/core/src/models-dev.ts</code> - fetching and caching the catalog that drives all of the above</li>
+    </ol>
+    <b>Community:</b> GitHub issues on the repository, the project's
+    <a href="https://opencode.ai/discord">Discord</a> (linked from the README badge), and user documentation versioned in-repo under
+    <code>packages/web/src/content/docs/</code>.
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>One Bun process</b> serves every client - TUI, editor extensions, desktop, ACP hosts - through one generated HTTP and SSE SDK.</li>
+      <li>The loop is an <b>explicit <code>while&nbsp;(true)</code></b> in <code>SessionPrompt.runLoop</code>: iterate while the reply ends in tool calls, compact instead of overflowing, and cap steps only where an agent declares a budget.</li>
+      <li>Behavior follows the model: the <b>persona prompt, reasoning-effort menu, sampling constants, cache breakpoints</b>, even which edit tools exist, are all derived per model family at request time.</li>
+      <li>The distinctive move is the <b>model-behavior compiler</b>: a hosted models.dev catalog treated as declarative truth, plus a doom-loop breaker that converts a third identical call into a human question.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  G["The generic turn&lt;br/&gt;eight steps from lesson 0020"] --> T["THIS PAGE&lt;br/&gt;opencode: one server process,&lt;br/&gt;model behavior compiled from a catalog"]
+  T --> N["What it enables&lt;br/&gt;predict exactly what changes&lt;br/&gt;when you switch model families"]
+  W["The deep-dive skeleton&lt;br/&gt;sixteen subjects same seven headings"] -.- T
+    </div>
+    <figcaption>Where this sits: the same turn cycle as every other harness, but opencode pushes as much per-model behavior as it can out of code and into data - so switching families changes prompts, tools, and wire format together.
+    <b>If you remember one thing: here, what the model gets is computed from what the catalog says about the model.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Vendor</td><td>opencode, begun inside SST; repository now lives under <a href="https://github.com/anomalyco/opencode">anomalyco</a></td></tr>
+      <tr><td>License / language</td><td>MIT / TypeScript throughout, on the Bun runtime - despite its reputation, there is no Go left in the tree</td></tr>
+      <tr><td>Repository</td><td><a href="https://github.com/anomalyco/opencode">anomalyco/opencode</a>, a monorepo of roughly thirty workspace packages</td></tr>
+      <tr><td>Versions</td><td>v1.18.23; commit read <code>69aaa227</code>; first public release April 2025</td></tr>
+      <tr><td>Scale</td><td>about 201,000 stars, 26,000 forks (GitHub API, August 2026)</td></tr>
+      <tr><td>Self-claim</td><td>"The open source AI coding agent" - the README's one-liner</td></tr>
+    </tbody>
+  </table>
+  <p>The process shape surprises people who remember the old Go TUI: everything runs in <b>one Bun process</b>.
+  A yargs CLI (<code>src/index.ts</code>) starts the UI, the UI boots the real HTTP server inside a Bun Worker
+  (<code>cli/cmd/tui.ts</code>, <code>cli/tui/worker.ts</code>), and the TUI frontend talks to that server like any other client -
+  over TCP, or through an in-memory bridge that shuttles <code>fetch</code> calls into the server under the fake origin
+  <code>http://opencode.internal</code>. The router is an Effect <code>HttpApi</code> (<code>server/server.ts</code>) with typed route groups,
+  and every consumer - TUI, VS Code extension, desktop app, <code>opencode run</code>, ACP hosts such as Zed -
+  uses the same generated SDK over HTTP plus SSE events.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph CL["Clients - equal citizens"]
+    TUI["TUI frontend&lt;br/&gt;OpenTUI plus Solid"]
+    IDE["editor extensions"]
+    RUN["opencode run and ACP"]
+  end
+  subgraph PROC["One Bun process"]
+    HTTP["Effect HttpApi router&lt;br/&gt;server/server.ts"]
+    LOOP["SessionPrompt.runLoop&lt;br/&gt;session/prompt.ts"]
+    PRC["SessionProcessor&lt;br/&gt;stream event handling"]
+    LLM["llm.stream into AI SDK streamText"]
+    TOOLS["tool registry plus MCP"]
+    PROV["Provider service&lt;br/&gt;catalog plus adapters"]
+    DB[("SQLite session store")]
+  end
+  CAT["models.opencode.ai&lt;br/&gt;api.json - a models.dev snapshot"]
+  API["provider APIs - Anthropic OpenAI Google"]
+  TUI -->|"in-memory fetch bridge"| HTTP
+  IDE --> HTTP
+  RUN --> HTTP
+  HTTP --> LOOP --> PRC --> LLM
+  PRC --> TOOLS
+  LLM --> PROV --> API
+  PROV -->|"cache TTL 5 min"| CAT
+  LOOP --> DB
+    </div>
+    <figcaption>The component map. No client is privileged: the terminal UI reaches its own backend through the same protocol an extension would.
+    <b>One process, one protocol, many frontends - which is what makes the headless <code>opencode run</code> mode a rounding error to maintain.</b></figcaption>
+  </figure>
+
+  <h2 id="loop">The loop</h2>
+  <p><code>runLoop</code> in <code>session/prompt.ts</code> is a plain <code>while&nbsp;(true)</code>, and reading it top to bottom is reading the whole turn cycle.
+  Each iteration reloads projected history, checks the stop condition, drains queued subtasks, guards the context budget,
+  resolves the agent's toolset, rebuilds the system prompt, streams one model step, and consumes normalized events.
+  Three details carry real engineering weight:</p>
+  <ul>
+    <li><b>The stop condition is precise.</strong> The loop breaks only when the last assistant message finished with something other than <code>tool-calls</code>, has no pending non-provider-executed tool parts, and belongs to the latest user message - interrupted orphans cannot keep it alive.</li>
+    <li><b>Overflow becomes compaction, not a crash.</b> When the finished message exceeds usable context, the loop enqueues auto-compaction instead of calling the model.</li>
+    <li><b>A doom-loop breaker watches dispatch.</b> After three identical consecutive tool calls, <code>SessionProcessor</code> forces a <code>doom_loop</code> permission prompt - a human question as a circuit breaker.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant C as Client
+    participant L as runLoop
+    participant P as SessionProcessor
+    participant M as streamText
+    participant T as Tool execute
+    C->>L: POST session prompt
+    loop until finish reason is not tool-calls
+        L->>L: history - stop check - overflow guard
+        L->>P: process system plus messages plus tools
+        P->>M: llm.stream with ProviderTransform middleware
+        M-->>P: text - reasoning - tool-call events
+        P->>T: execute via registry - hooks and gate wrap execute
+        T-->>P: output - attachments
+        M-->>P: step-finish usage plus snapshot diff
+        P-->>L: compact - stop - continue
+    end
+    L-->>C: result parts - SSE deltas throughout
+    </div>
+    <figcaption>The turn cycle with real names. Malformed tool calls are repaired upstream or rerouted to an <code>invalid</code> sink tool rather than crashing the step, and each step-finish diffs a filesystem snapshot into a <code>patch</code> part.
+    <b>The loop owns three policies at once: when to stop, when to compact, and when to wake a human.</b></figcaption>
+  </figure>
+
+  <p>Step budgets exist but are opt-in per agent: <code>agent.steps ?? Infinity</code>. On the final allowed step the loop appends
+  a <code>MAX_STEPS_PROMPT</code> assistant prefill telling the model to wrap up - the leash announces itself.
+  Title generation and session summaries ride along as forked side jobs on the hidden <code>title</code> agent,
+  so they never pollute the main transcript.</p>
+
+  <h2 id="context">Context assembly</h2>
+  <p>The system context is rebuilt fresh every iteration, in a fixed order, and its second slot is already model-specific:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  SP["1 environment block - model id - cwd - git state - date"]
+  FAM["2 family persona prompt - anthropic txt or gpt txt or gemini txt"]
+  INS["3 instruction files - global AGENTS md then nearest project match"]
+  MCP["4 MCP server instructions"]
+  SK["5 skills index - names and descriptions"]
+  HI["6 history replay from SQLite - text reasoning tool parts"]
+  PT["7 patch parts - snapshot diffs from past steps"]
+  TR["8 tool results - truncated outputs"]
+  RM["9 plan-mode reminders reapplied - MAX_STEPS prefill if final step"]
+  SP --> FAM --> INS --> MCP --> SK --> HI --> PT --> TR --> RM
+    </div>
+    <figcaption>What one request carries, in order. There is no embedding index anywhere in the repository - retrieval is the grep and glob tools like everyone else.
+    <b>The family persona sits above your instructions: the model hears who it is before it hears what you want.</b></figcaption>
+  </figure>
+
+  <p>Instruction files follow a strict precedence: one global file (<code>~/.config/opencode/AGENTS.md</code>, falling back to
+  <code>~/.claude/CLAUDE.md</code>), then the <em>first</em> match of <code>AGENTS.md</code>, then <code>CLAUDE.md</code>, then the deprecated
+  <code>CONTEXT.md</code>, scanning upward from the working directory. Two lazy mechanisms extend this without spending startup tokens:
+  <code>@file</code> mentions in your prompt expand into eager reads, and when a Read touches a file deep in the tree, any unattached
+  <code>AGENTS.md</code> between it and the root is injected once. Budgeting is arithmetic in <code>session/overflow.ts</code> -
+  usable context equals the catalog's <code>limit.context</code> minus reserved output tokens - and compaction works in two layers:
+  <b>prune</b> erases old tool outputs outside a protected recent window (2,000 to 15,000 tokens, active only past 20,000 total),
+  then <b>summarize</b> runs a hidden compaction agent over the serialized transcript and restarts the loop with a synthetic
+  continue message. Skill outputs are exempt from pruning - the model asked for them.</p>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>Permissions are ordered wildcard rules - <code>{permission, pattern, action}</code> with actions <code>allow</code>, <code>ask</code>, <code>deny</code>,
+  matched last-rule-wins, defaulting to <code>ask</code> when nothing matches. The shipped agents lean permissive-but-guarded:
+  everything allowed by default, with <code>doom_loop</code> set to ask, reads outside the worktree set to ask, and reads of
+  <code>*.env</code> files requiring approval. Asking is asynchronous and event-driven: the pending request parks the tool call on a
+  deferred while the client answers <code>once</code>, <code>always</code>, or <code>reject</code>; <code>always</code> appends a session-lifetime allow rule.
+  A CLI flag approves everything not explicitly denied - the flag's hidden aliases are <code>--yolo</code> and
+  <code>--dangerously-skip-permissions</code>.</p>
+
+  <div class="callout warn">
+    There is no OS-level sandbox. Bash runs as a plain child process of the server, network egress is unfiltered,
+    and the entire trust story is rule matching plus the external-directory read gate. On a compromised or confused
+    model, nothing contains the blast radius except a wildcard pattern list - the exact opposite trade-off to Codex CLI's
+    fail-closed Seatbelt sandbox, and one step short of Pi, which ships no gate at all.
+  </div>
+
+  <h2 id="extensions">Extension surface</h2>
+  <table>
+    <thead><tr><th>Mechanism</th><th>Shape</th><th>Lives in</th></tr></thead>
+    <tbody>
+      <tr><td>MCP servers</td><td>config entries; stdio, StreamableHTTP, SSE fallback, OAuth</td><td>config schema</td></tr>
+      <tr><td>Plugins</td><td><code>.opencode/plugin/*.ts</code> or npm names; about twenty lifecycle hooks from <code>chat.message</code> to <code>tool.execute.after</code></td><td>file convention plus runtime API</td></tr>
+      <tr><td>Custom tools</td><td><code>.opencode/tool/*.{js,ts}</code> exporting zod-typed definitions, auto-registered</td><td>file convention</td></tr>
+      <tr><td>Agents</td><td><code>.opencode/agent/*.md</code> frontmatter or config objects; primary versus subagent modes</td><td>file convention plus config schema</td></tr>
+      <tr><td>Slash commands</td><td><code>.opencode/command/*.md</code> templates with <code>$ARGUMENTS</code> and shell interpolation</td><td>file convention</td></tr>
+      <tr><td>Skills</td><td>SKILL.md directories, indexed in the system prompt, loaded via the <code>skill</code> tool</td><td>file convention</td></tr>
+      <tr><td>Subagents</td><td>the <code>task</code> tool forks child sessions with derived permissions, background-capable</td><td>runtime</td></tr>
+    </tbody>
+  </table>
+  <p>Everything hot-loads from the project directory, so a plugin arrives as a file edit rather than an install - and because
+  plugins wrap each tool's <code>execute</code> at resolution time, they compose with the permission gate rather than sitting beside it.</p>
+
+  <h2 id="models">Model behavior</h2>
+  <p>Support is catalog-driven end to end. At startup the provider service fetches <code>https://models.opencode.ai/api.json</code> -
+  a models.dev snapshot operated by the project - caches it with a five-minute TTL behind a cross-process file lock, and reads
+  three things off each entry: context limits, costs, and an <code>npm</code> field naming the Vercel AI SDK package to load.
+  About twenty provider packages ship bundled; anything else is npm-installed at runtime and dynamically imported, which is how
+  the project claims seventy-five-plus providers with a small team. The default model falls through config, then recent use,
+  then a hardcoded preference order led by <code>gpt-5</code> and <code>claude-sonnet-4</code>.</p>
+  <p>All per-family differences concentrate in one middleware pipeline, <code>ProviderTransform</code>, applied to every request:
+  different base persona files per family; reasoning-effort menus derived from model ID <em>and release date</em> - newer
+  GPT-5.x builds unlock lower and higher effort tiers that older ones never see; hardcoded sampling constants per family
+  (Claude gets temperature omitted entirely, Gemini 2.5 and 3 get <code>1.0 / 0.95 / 64</code>); explicit Anthropic cache breakpoints
+  on the last two system and last two conversation messages; and JSON-schema surgery per backend, because Gemini and Moonshot
+  validators reject schemas OpenAI accepts.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p>The loop itself is conventional - a ReAct-style <code>while&nbsp;(true)</code> over AI SDK <code>streamText</code>, structurally close to peers in this cast.
+  What sets opencode apart is what decides its behavior. Most harnesses special-case models with scattered conditionals;
+  opencode treats one externally-hosted catalog as declarative truth and <b>compiles it at runtime into every layer</b>:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  E["One catalog entry&lt;br/&gt;id - limits - cost - npm - release date"] --> A["adapter&lt;br/&gt;npm package downloaded&lt;br/&gt;and imported at runtime"]
+  E --> P["persona&lt;br/&gt;family prompt file chosen"]
+  E --> V["effort ladder&lt;br/&gt;tiers gated by release date"]
+  E --> S["sampling constants&lt;br/&gt;forced per family"]
+  E --> CB["cache breakpoints&lt;br/&gt;placed or skipped"]
+  E --> SC["schema rewrite&lt;br/&gt;per backend validator"]
+  E --> TS["tool swap&lt;br/&gt;GPT loses edit and write gains apply_patch"]
+    </div>
+    <figcaption>Seven behaviors derived from one record. The clearest single example is the tool swap: GPT-family models lose the <code>edit</code> and <code>write</code> tools entirely and receive <code>apply_patch</code>, because OpenAI models are trained to speak patch dialect - the registry consults the catalog, not a settings flag.
+    <b>Affinity here is not tuning; it is a compilation step whose input is metadata.</b></figcaption>
+  </figure>
+
+  <p>This is the answer to "why does the same model behave differently under different harnesses": under opencode, changing the
+  model ID silently rewires the persona, the reasoning-effort menu, the sampling envelope, the cache layout, the wire-format
+  fixes, and the tool surface - deterministically, from data. Two runner-up mechanisms deserve mention. The
+  <b>doom-loop circuit breaker</b> turns repetition into a human decision, converting a failure mode other harnesses handle with
+  silent retries into an ask. And the <b>Context Epoch</b> design documented in the repository's <code>CONTEXT.md</code> - admitting
+  mid-conversation system-message changes only at safe provider-turn boundaries so cached prefixes stay valid within an epoch -
+  is already visible in the database schema, though not yet the executing path. Treat it as a roadmap item, not a feature.</p>
+
+  <p>Two of the design principles lesson 0010 distills show up here in their purest form. First, <b>the model adapter is where
+  affinity lives</b>: nothing about the loop changed across families, yet the effective agent differs sharply. Second,
+  <b>defaults are the product</b>: the catalog's numbers - context limits, output reserves, cost weights - quietly decide what
+  compacts, what fits, and what a session costs, before any user preference is consulted.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">The model makes the exact same tool call three times in a row. What does opencode do on the third?</div>
+      <button class="q-opt">Restarts the loop from the last user message to clear the repetition</button>
+      <button class="q-opt">Triggers auto-compaction, assuming full history caused the loop</button>
+      <button class="q-opt">Forces a permission prompt, turning the repetition into a human decision</button>
+      <button class="q-opt">Silently drops the duplicate call and asks the model to continue</button>
+      <div class="q-fb"><code>SessionProcessor</code> counts identical consecutive calls and forces a <code>doom_loop</code> ask at three. Restarting and dropping calls do not exist as mechanisms, and compaction fires on token budgets rather than repetition - the breaker's whole point is that a stuck loop needs a person, not a smaller window.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">You switch a session's default model from a Claude model to a GPT-5 model. What changes?</div>
+      <button class="q-opt">Nothing visible - tools and prompts are model-independent by design</button>
+      <button class="q-opt">Edit and write vanish, replaced by apply_patch, plus new persona and efforts</button>
+      <button class="q-opt">Only the pricing display changes, limits come from the same catalog</button>
+      <button class="q-opt">History is summarized once, OpenAI cannot replay Anthropic thinking</button>
+      <div class="q-fb">The catalog-driven swap removes <code>edit</code>/<code>write</code> and exposes <code>apply_patch</code> for GPT models, while the persona file, effort ladder, sampling constants, and cache placement all re-derive from the new record too. Pricing and limits indeed come from the same catalog, but they are far from the only change.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with a browser and a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Open <a href="https://models.dev">models.dev</a>'s raw catalog at <code>https://models.dev/api.json</code> and pick any model you use.
+      From its record alone - id string, release date, provider - predict four things opencode would derive:
+      which persona prompt file it loads, which reasoning-effort tiers it exposes, whether it keeps <code>edit</code>/<code>write</code>
+      or gets <code>apply_patch</code>, and where cache breakpoints go.</p>
+      <p><b>Find</b>: each prediction checked against the pinned source - <code>session/system.ts</code> for the persona map,
+      <code>provider/transform.ts</code> for the effort ladder and caching rules, and <code>tool/registry.ts</code> for the swap condition.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The persona files are chosen by matching substrings of the model ID; the effort ladder gates tiers on the release date field;
+      the swap keys on model IDs starting <code>gpt-</code> excluding some open-weight and legacy variants.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Read the record.</b> Note the <code>id</code>, the provider, the <code>release_date</code>, and the <code>npm</code> field naming the AI SDK package.</li>
+        <li><b>Predict from data.</b> An ID containing <code>claude</code> maps to the Anthropic persona file; a <code>gpt-5</code>-prefixed ID predicts the patch-dialect tool swap and a release-date-gated effort menu.</li>
+        <li><b>Verify in source.</b> <code>system.provider()</code> picks the prompt file; <code>variants()</code> builds the effort tiers; the registry's provider check performs the swap; Anthropic-shaped IDs get explicit cache breakpoints.</li>
+        <li><b>Score yourself.</b> Four-for-four means you can now predict harness behavior from catalog data alone - the compiler's promise.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If any prediction required reading the loop in <code>prompt.ts</code>, it was not a catalog-derived behavior - the whole claim is that these decisions live downstream of the loop, in the transform pipeline.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the compiler idea has not landed, ask it to enumerate what would break if the catalog served a wrong <code>release_date</code> for one model. If the trust posture felt thin, ask it to compare the blast radius of opencode's allow-by-default rules against Codex CLI's fail-closed sandbox for the same runaway command.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The catalog itself, with every record the compiler consumes: <a href="https://models.dev">models.dev</a>. Then read
+  <a href="https://github.com/anomalyco/opencode/blob/69aaa22793bcbe0b016ad9cfad22616906766df0/packages/opencode/src/provider/transform.ts">transform.ts at the pinned commit</a>
+  and find one behavior this page did not mention - it is 1,800 lines, there are several.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 22 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
