@@ -31,6 +31,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Context engineering - what actually fills the window",
           "href": "lessons/0030-context-engineering.html"
+        },
+        {
+          "title": "The edit problem - applying a change that does not apply",
+          "href": "lessons/0040-edit-problem.html"
         }
       ]
     },
@@ -69,6 +73,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Cursor - the harness that trains its own models",
           "href": "lessons/0150-cursor-trains-own-models.html"
+        },
+        {
+          "title": "Gemini CLI - the self-healing edit pipeline",
+          "href": "lessons/0170-gemini-cli-self-healing.html"
         },
         {
           "title": "Windsurf - the human trajectory as context",
