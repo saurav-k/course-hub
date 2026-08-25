@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pi - the agent loop as a library - Coding Harness Engineering</title>
+<meta name="description" content="Pi ships its agent engine as three independently consumable libraries - unified LLM API, bare agent loop, coding agent - and treats absent features as architecture. A source-level deep dive at a pinned commit.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 24</div>
+  <h1>Pi is the only harness here whose engine you can npm install</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Read from source at <a href="https://github.com/earendil-works/pi/blob/fe37e9f9b5fb2e7bd9ff504e678f08d115375230/packages/agent/src/agent-loop.ts">commit <code>fe37e9f9</code></a> (v0.84.3).
+    &middot; <a href="https://mariozechner.at/posts/2025-11-30-pi-coding-agent/">the author's design post</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <b>Repository:</b> <a href="https://github.com/earendil-works/pi">earendil-works/pi</a> &middot; MIT &middot; TypeScript (Node&nbsp;&ge;&nbsp;22) &middot;
+    analysis pinned to commit <code>fe37e9f9b5fb2e7bd9ff504e678f08d115375230</code>, v0.84.3.<br>
+    <b>Read these five files, in this order:</b>
+    <ol>
+      <li><code>packages/agent/src/agent-loop.ts</code> - the whole loop, 800 lines</li>
+      <li><code>packages/ai/src/types.ts</code> - the four-line <code>StreamFn</code> contract everything hangs on</li>
+      <li><code>packages/coding-agent/src/core/agent-session.ts</code> - the product wiring, and <code>agent_settled</code></li>
+      <li><code>packages/coding-agent/src/core/system-prompt.ts</code> - context assembly, start to finish</li>
+      <li><code>packages/coding-agent/src/core/extensions/loader.ts</code> - how extensions become part of the process</li>
+    </ol>
+    <b>Community:</b> GitHub issues and discussions on the repository, plus the author's
+    <a href="https://mariozechner.at/posts/2025-11-30-pi-coding-agent/">"What I learned building a minimal coding agent"</a>.
+    A signed macOS launcher (<a href="https://github.com/kunchenguid/pi-launcher">pi-launcher</a>) is a separate project with its own deep dive.
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The engine ships as <b>three libraries</b>: pi-ai for providers, pi-agent-core for the loop, pi-coding-agent as their consumer.</li>
+      <li>The loop accepts any <b>StreamFn</b>, so it drives real providers or your test double identically.</li>
+      <li><b>Absence is architecture</b>: no MCP, no subagents, no permission popups - each becomes an extension exercise.</li>
+      <li>The cost: shell executes <b>unasked by default</b>; containerization is your job.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  G["The generic turn&lt;br/&gt;eight steps from lesson 0020"] --> T["THIS PAGE&lt;br/&gt;pi runs it as a library:&lt;br/&gt;runAgentLoop plus injected config"]
+  T --> N["What it enables&lt;br/&gt;embed the engine,&lt;br/&gt;skip building one"]
+  W["Absence as architecture&lt;br/&gt;no gate no MCP no subagents"] -.- T
+    </div>
+    <figcaption>Where this sits: same eight steps as every harness, but the loop ships as <code>@earendil-works/pi-agent-core</code> and the provider layer as <code>@earendil-works/pi-ai</code> - separately installable, with the coding agent as just one consumer.
+    <b>Pi's claim to fame is not what it adds; it is that you can take the engine home without the product.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Vendor</td><td>earendil-works; authored by Mario Zechner (<code>badlogic</code>)</td></tr>
+      <tr><td>License / language</td><td>MIT / TypeScript throughout, standalone Bun binaries per release</td></tr>
+      <tr><td>Repository</td><td><a href="https://github.com/earendil-works/pi">earendil-works/pi</a> (mirror: <code>badlogic/pi-mono</code>)</td></tr>
+      <tr><td>Versions</td><td>v0.84.3 lockstep across packages (2026-08-24); commit read <code>fe37e9f9</code></td></tr>
+      <tr><td>Scale</td><td>~97,000 stars, 274 contributors, roughly 256 releases since late 2025</td></tr>
+      <tr><td>Self-claim</td><td>"AI agent toolkit: unified LLM API, agent loop, TUI, coding agent CLI"</td></tr>
+    </tbody>
+  </table>
+  <p>One process does everything: <code>main()</code> dispatches to interactive TUI, print mode (<code>-p</code>), or RPC mode (JSONL over stdio), and optional server/client packages add socket transport. The publish boundaries are the real module lines - five npm packages, imported strictly downward: coding-agent &rarr; agent-core &rarr; ai.</p>
+
+  <h2 id="loop">The loop</h2>
+  <p>The loop lives in one file of the library package and knows nothing about files, terminals, or permissions.
+  It works on internal message types, converts once per request at the model boundary, and takes its behavior entirely from a config object.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as Queues
+    participant L as runAgentLoop
+    participant S as streamAssistantResponse
+    participant P as pi-ai streamSimple
+    participant X as tool execute
+    U->>L: prompts then getSteeringMessages poll
+    L->>S: context and config
+    S->>S: transformContext then convertToLlm
+    S->>P: streamFn model Context tools
+    P-->>S: start text thinking toolcall done
+    S-->>L: AssistantMessage stopReason
+    alt toolUse and not length
+        L->>L: prepareToolCall validate plus beforeToolCall
+        L->>X: execute parallel unless sequential declared
+        X-->>L: results become toolResult messages
+        L->>L: turn_end then next iteration
+    else length stop
+        L->>L: failToolCallsFromTruncatedMessage
+    else stop error aborted
+        L->>U: followUp queue empty means agent_end
+    end
+    </div>
+    <figcaption>The turn cycle with real names. Three rules stand out: steering messages are drained into the context <em>before every model call</em>; a reply cut off by <code>length</code> fails all its tool calls unexecuted, because streamed arguments may have been silently truncated; and there is no max-steps knob anywhere in the file.
+    <b>The library stops when the model stops calling tools and both queues run dry - nothing else can end it.</b></figcaption>
+  </figure>
+
+  <p>Above the library sits the product's <code>AgentSession</code>, which subscribes to every loop event, persists each finished message, drives auto-compaction and retries, and only then emits <code>agent_settled</code> - a deliberately distinct event meaning no retry, compaction, or follow-up work remains. Extensions that want "the agent is truly done" listen for that, not for <code>agent_end</code>.</p>
+
+  <h2 id="context">Context assembly</h2>
+  <p>Pi's stated philosophy is minimal, fully visible context: the default system prompt is about one thousand tokens including tool definitions, and nothing enters the window behind your back. The assembly order, rebuilt fresh each turn by <code>buildSystemPrompt</code>:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  SP["1 system prompt - default or replaced by .pi/SYSTEM.md&lt;br/&gt;amended by APPEND_SYSTEM.md"]
+  PC["2 project_context - memory files wrapped in tags&lt;br/&gt;AGENTS.override.md then AGENTS.md then CLAUDE.md&lt;br/&gt;global dir first then ancestors root down to cwd"]
+  SK["3 available_skills XML index - name description path only&lt;br/&gt;body read on demand via the read tool"]
+  CW["4 cwd line"]
+  CO["5 optional CompactionEntry replayed as user text"]
+  HI["6 full transcript oldest first - non-LLM roles flattened&lt;br/&gt;by convertToLlm - cross-model history cleaned by transformMessages"]
+  SP --> PC --> SK --> CW --> CO --> HI
+    </div>
+    <figcaption>What one model request carries, in order. There is no indexing, embedding, or retrieval anywhere in the repo - finding things is grep, find, and ls like a human does.
+    <b>Compaction keeps it fitting: above a reserve of 16,384 tokens it summarizes the prefix, keeping the most recent 20,000 tokens raw.</b></figcaption>
+  </figure>
+
+  <p>Cross-model handoff is handled at the boundary by <code>transformMessages</code>: switch models mid-session and unsigned thinking blocks degrade to plain text, orphaned tool calls get synthetic error results, and OpenAI-style 450-character tool-call IDs are renormalized to Anthropic's charset so old history stays replayable.</p>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>The security documentation says it flatly: Pi runs with the permissions of the account that starts it and ships no sandbox. Every tool, including arbitrary shell, executes without prompting - the author calls this YOLO by default, arguing partial sandboxes are security theater once the model can write and run code. What exists instead:</p>
+  <ul>
+    <li><b>Project trust</b> - an input-loading guard, not a sandbox: before loading anything under a project's <code>.pi/</code> directory, Pi asks; decisions persist in <code>~/.pi/agent/trust.json</code>.</li>
+    <li><b>Read-only mode</b> - <code>--tools read,grep,find,ls</code> shrinks the toolset; <code>-ne</code> disables extensions.</li>
+    <li><b>Containerize the whole thing</b> - three documented patterns, including the Gondolin extension that routes every tool call into a local Linux micro-VM with the project mounted at <code>/workspace</code>.</li>
+    <li><b>Build your own gate</b> - the extension event <code>tool_call</code> can return <code>{block: true}</code>, which is exactly how the docs suggest confirming risky commands.</li>
+  </ul>
+
+  <div class="callout warn">
+    Running Pi as shipped means shell commands execute with your full user permissions, unasked. That is a designed posture, not a gap - but it moves the entire safety burden onto the environment you run it in. The failure mode is silent by construction: nothing will ever stop to ask.
+  </div>
+
+  <h2 id="extensions">Extension surface</h2>
+  <p>Extensions are TypeScript modules auto-discovered from <code>.pi/extensions/</code> (trust-gated) and <code>~/.pi/agent/extensions/</code>, hot-reloaded with <code>/reload</code>. The loader runs them through jiti with virtual modules, so an extension imports <code>@earendil-works/pi-ai</code> and gets the <em>same instance</em> the binary uses - even inside the compiled executable. The runtime API exposes roughly thirty lifecycle events (<code>before_agent_start</code>, <code>turn_start</code>, <code>tool_call</code>, <code>before_provider_request</code>...) plus registration points for tools, commands, shortcuts, flags, providers, and custom UI components.</p>
+  <p>Skills are <code>SKILL.md</code> directories whose index lands in the system prompt while bodies load on demand. Slash commands come from Markdown templates in <code>.pi/prompts</code> or <code>registerCommand</code>. Packages bundle any of the above for npm/git distribution via <code>pi install</code>. Two absences are deliberate: <a href="https://github.com/earendil-works/pi/blob/fe37e9f9b5fb2e7bd9ff504e678f08d115375230/packages/coding-agent/docs/usage.md">the usage docs</a> state Pi "intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash" - the sanctioned alternative to MCP is ordinary CLI tools with READMEs the model reads progressively.</p>
+
+  <h2 id="models">Model behavior</h2>
+  <p>Dispatch is two-stage: <code>Models.streamSimple</code> resolves auth (API key, env var, or OAuth) and routes to a wire-API adapter. Ten adapters ship - Anthropic Messages, three OpenAI dialects, two Google dialects, Bedrock, Mistral, and Pi's own gateway protocol - covering around forty known providers from a generated catalog.</p>
+  <p>Per-family differences live inside the adapters behind one neutral vocabulary, a <code>reasoning</code> level mapped through each model's <code>thinkingLevelMap</code>: adaptive-thinking Claude models take an effort level, older ones a token budget carved out of <code>max_tokens</code>; OpenAI-compatible models get <code>reasoning_effort</code> clamped per provider; Google models get <code>thinkingConfig</code>. Prompt caching is marked where Anthropic rewards it, on tools and the last user message. Nothing in the code favors one family - the deepest single-family code is Claude-specific simply because Anthropic exposes the most surface to integrate.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p>Every other harness in this cast bakes its engine into its product, or exposes plugins that run inside someone else's loop. Pi publishes the engine itself as two libraries and ships the product as their consumer:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  YOU["Your code -&lt;br/&gt;one import away"] --> CORE["@earendil-works/pi-agent-core&lt;br/&gt;runAgentLoop - injectable StreamFn&lt;br/&gt;convertToLlm and tool set"]
+  CORE -->|"streamFn"| AI["@earendil-works/pi-ai&lt;br/&gt;streamSimple - ten wire adapters&lt;br/&gt;auth catalog cost accounting"]
+  AI --> PROV["Anthropic OpenAI Google&lt;br/&gt;Bedrock Mistral your own"]
+  CA["@earendil-works/pi-coding-agent&lt;br/&gt;sessions tools extensions TUI"] --> CORE
+  CA --> AI
+    </div>
+    <figcaption>The split, drawn as dependency arrows. The loop takes <em>any</em> function satisfying the four-line StreamFn contract - must not throw, failures encoded in the stream - so the engine cannot tell a real provider from your test double.
+    <b>The CLI is demoted from vessel to example: swap the top box out and the lower two still run.</b></figcaption>
+  </figure>
+
+  <p>Evidence that this is structural, not cosmetic: the RPC mode, the server/client packages, and the author's own Slack integration all consume <code>AgentSession</code> programmatically rather than shelling out to the CLI; the example extensions include one registering a complete custom Anthropic-compatible provider through the public API; and an experimental <code>packages/agent/src/harness/</code> skeleton shows durable-session machinery being generalized back down into the library layer. Even the extension loader enforces the architecture - virtual modules exist precisely so third-party code shares one set of package instances with the host.</p>
+  <p>The companion trait is <b>absence as architecture</b>: no MCP, no subagents, no permission popups, no plan mode. Each missing feature is an invitation to build it on the event hooks - which is why Pi's capability list lives in its extension ecosystem rather than in its changelog. The cost is symmetrical: the minimal thousand-token prompt trusts the model to do more with less scaffolding, and the empty trust layer hands you a loaded tool with no safety on it. Whether that reads as freedom or as unpaid work is exactly the trade-off the course's next pages ask you to price.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What makes Pi's loop a library rather than a hardcoded pipeline?</div>
+      <button class="q-opt">Its tools arrive from MCP servers negotiated at startup, core stays generic</button>
+      <button class="q-opt">A plugin registry rewrites the loop bytecode when extensions load</button>
+      <button class="q-opt">StreamFn, convertToLlm, and the tools all arrive via one config object</button>
+      <button class="q-opt">An RPC daemon owns the loop, the CLI being merely its richest client</button>
+      <div class="q-fb">The AgentLoopConfig injection points are the mechanism - the loop never names a provider, a file system, or a UI. MCP is deliberately absent, nothing rewrites bytecode, and RPC is one consumer of the session layer, not the owner of the loop.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A response hits the output-token limit mid-way through streaming a batch of tool-call arguments. What does the loop do?</div>
+      <button class="q-opt">Fails every call in that batch without executing any of them</button>
+      <button class="q-opt">Executes the calls that streamed fully and drops truncated ones</button>
+      <button class="q-opt">Retries the whole turn automatically at a higher token ceiling</button>
+      <button class="q-opt">Queues partial arguments until the next model response arrives</button>
+      <div class="q-fb"><code>failToolCallsFromTruncatedMessage</code> fails them all: streamed arguments may be silently cut, and executing half a JSON payload is worse than executing none. Partial-batch execution would run unverifiable inputs, and neither retry nor deferral exists at that point in the loop.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>In a scratch directory, run <code>npm i @earendil-works/pi-agent-core @earendil-works/pi-ai</code> and write a twenty-line script that calls <code>agentLoop</code> with a <b>fake</b> <code>StreamFn</code> - an async function that yields one text delta reading "hello from a test double" and a done event, never touching the network.</p>
+      <p><b>Find</b>: proof in your terminal that the loop emitted <code>agent_start</code>, <code>message_update</code>, and <code>agent_end</code> driven entirely by your fake - the engine ran with zero providers configured.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Your fake must satisfy the StreamFn contract from <code>packages/ai/src/types.ts</code>: yield protocol events, never throw. Start from <code>start</code>, emit one <code>text_delta</code>, then <code>done</code> with an empty usage record.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Write the fake.</b> An async generator yielding <code>{type: "start"}</code>, one <code>{type: "text_delta", delta: "..."}</code>, then <code>{type: "done", ...}</code> - six lines.</li>
+        <li><b>Wire the loop.</b> Call <code>agentLoop([yourPrompt], {systemPrompt: "", messages: []}, {...config, tools: []}, undefined, fakeStreamFn)</code> and iterate the returned EventStream, logging each event type.</li>
+        <li><b>Observe.</b> The console shows <code>agent_start</code>, <code>turn_start</code>, <code>message_start/update/end</code>, <code>turn_end</code>, <code>agent_end</code> - the full cycle with no API key anywhere.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If events flowed without a provider, you proved the decoupling claim; if you needed a key, you accidentally called the product CLI instead of the library.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the three-library split has not landed, ask for the thought experiment: what would porting this loop to a different provider require, line-for-line? If the trust posture unsettled you, ask it to sketch the Gondolin containerization pattern as a sequence of boundaries.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The author's own design retrospective explains every choice this page cites - the minimal prompt, the missing features, the toolkit framing: <a href="https://mariozechner.at/posts/2025-11-30-pi-coding-agent/">What I learned building an opinionated and minimal coding agent</a>.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 24 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

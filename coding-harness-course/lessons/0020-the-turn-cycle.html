@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The turn cycle - the loop every harness runs - Coding Harness Engineering</title>
+<meta name="description" content="Every coding harness runs the same eight-step turn cycle. The teaching is at the edges: what may stop the loop, and where mid-turn input lands, across all fifteen harnesses.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; The Loop &middot; Lesson 02</div>
+  <h1>Every agent runs the same eight steps - the design lives at the exits</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The cycle traced in the source of ten open harnesses and the docs of five closed ones.
+    &middot; <a href="https://code.claude.com/docs/en/agent-sdk/agent-loop">How the agent loop works</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>One turn is <b>eight steps</b>: input, context assembly, model request, response parse, tool dispatch, result, next iteration, stop condition.</li>
+      <li>All sixteen subjects of this course run some shape of it - the cycle is <b>boring on purpose</b>, which is why you can learn it once and read any codebase.</li>
+      <li>The design lives at the edges: what may <b>stop the loop</b> ranges from a five-follow-up cap (Cursor) to nothing shipped at all (Pi).</li>
+      <li>Where <b>mid-turn input lands</b> differs just as much: Pi drains a steering queue before every model call; Windsurf makes your message wait for task end.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0000&lt;br/&gt;the seven-layer map"] --> T["THIS PAGE&lt;br/&gt;the loop layer dissected&lt;br/&gt;into its eight steps"]
+  T --> N["What it enables&lt;br/&gt;find any harness loop&lt;br/&gt;and predict its stops"]
+  W["Deep dives 0120 to 0260&lt;br/&gt;one loop shape each"] -.- T
+    </div>
+    <figcaption>Where this sits: lesson 0000 named seven layers and pointed at this one; here the loop layer comes apart into steps you can name in any harness.
+    <b>If you can trace input to context to model call to dispatch to result and say where each step lives, this page did its job.</b></figcaption>
+  </figure>
+
+  <h2 id="cycle">1. The cycle, end to end</h2>
+  <p>Strip away the themes, the diff cards, and the permission dialogs, and every harness in this course runs the same cycle.
+  A prompt arrives; the harness assembles the full context window around it; the model streams back text plus structured tool calls; the harness executes those calls and appends the results; and the whole thing repeats until a reply arrives with nothing left to execute.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant Y as You
+    participant H as Loop layer
+    participant M as Model API
+    participant T as Tools
+    Y->>H: prompt typed or streamed
+    H->>H: assemble context - pi convertToLlm - aider format_chat_chunks
+    H->>M: request - codex run_turn - gemini Turn.run
+    M-->>H: assistant reply carrying tool_use blocks
+    H->>T: dispatch - pi executeToolCalls
+    T-->>H: output and exit status
+    H->>M: results appended - history resent
+    M-->>H: final text with no tool calls
+    H-->>Y: ResultMessage - cost usage session id
+    </div>
+    <figcaption>The generic turn, with one real implementation named per step. Anthropic's Agent SDK documents the same cycle as receive prompt, evaluate, execute tools, repeat, return result - its words for steps two through five.
+    <b>A turn ends on a reply that carries no tool calls; everything before that is iteration.</b></figcaption>
+  </figure>
+
+  <p>Two details of this cycle are easy to misread from the outside.
+  First, the model does not run anything: every <code>tool_use</code> block is a <em>request</em>, and the harness decides later - at the trust gate, lesson 0050's subject - whether it runs.
+  Second, results travel back as ordinary conversation content, not as a special channel: a denied call produces a rejection <em>as the tool result</em>, so the model learns of your refusal through the same door as a successful command's output.</p>
+
+  <h2 id="stops">2. Who ends the turn</h2>
+  <p>The natural stop is a reply with no tool calls.
+  Everything interesting is the exception list, because each harness has a different theory about how much its loop should be trusted to run unattended.
+  The table is the whole cast; every row names the function where the loop actually lives.</p>
+
+  <table>
+    <thead><tr><th>Harness</th><th>The loop lives in</th><th>Turn ends when</th><th>Ceiling shipped</th></tr></thead>
+    <tbody>
+      <tr><td>Aider</td><td><a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/coders/base_coder.py"><code>run_one</code>, base_coder.py</a></td><td>no edit-block reflection pending</td><td>3 reflections</td></tr>
+      <tr><td>Claude Code</td><td><a href="https://code.claude.com/docs/en/agent-sdk/agent-loop">Agent SDK loop</a> (docs only)</td><td>reply carries no tool calls</td><td>none by default; <code>maxTurns</code>/<code>maxBudgetUsd</code> opt-in</td></tr>
+      <tr><td>Codex CLI</td><td><a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/core/src/session/turn.rs"><code>run_turn</code>, turn.rs</a></td><td><code>needs_follow_up</code> false - no tool call, no pending input</td><td>stop hooks may block or force-stop</td></tr>
+      <tr><td>Gemini CLI</td><td><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/core/client.ts"><code>processTurn</code>, client.ts</a></td><td><code>checkNextSpeaker</code> says the user speaks next</td><td><code>MAX_TURNS = 100</code></td></tr>
+      <tr><td>Pi</td><td><a href="https://github.com/earendil-works/pi/blob/fe37e9f9b5fb2e7bd9ff504e678f08d115375230/packages/agent/src/agent-loop.ts"><code>runAgentLoop</code>, agent-loop.ts</a></td><td>no tool calls and both queues empty</td><td><b>none - no max-steps knob exists</b></td></tr>
+      <tr><td>Goose</td><td><a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/agent.rs"><code>reply_internal</code>, agent.rs</a></td><td>no content and stop-hook gate passes</td><td><code>DEFAULT_MAX_TURNS = 1000</code></td></tr>
+      <tr><td>Kimi CLI</td><td><a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py"><code>_agent_loop</code>, kimisoul.py</a></td><td><code>stop_reason="no_tool_calls"</code></td><td><code>max_steps_per_turn</code> default 1000</td></tr>
+      <tr><td>opencode</td><td><a href="https://github.com/anomalyco/opencode/blob/69aaa22793bcbe0b016ad9cfad22616906766df0/packages/opencode/src/session/prompt.ts"><code>runLoop</code>, prompt.ts</a></td><td>finish reason other than <code>tool-calls</code></td><td><code>agent.steps ?? Infinity</code></td></tr>
+      <tr><td>Cline</td><td><a href="https://github.com/ClineBot/cline/blob/491b30b806fdb8c93513f821f2b87d63a61542f5/sdk/packages/agents/src/agent-runtime.ts"><code>execute</code>, agent-runtime.ts</a></td><td><code>finishRun("completed")</code> or a terminal tool fires</td><td><code>maxIterations</code> optional</td></tr>
+      <tr><td>Roo Code</td><td><a href="https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/task/Task.ts"><code>initiateTaskLoop</code>, Task.ts</a></td><td><code>attempt_completion</code> ask answered "yes"</td><td>a task never completes autonomously - abort or mistake-limit asks</td></tr>
+      <tr><td>GitHub Copilot Chat</td><td><a href="https://github.com/microsoft/vscode-copilot-chat/blob/5863f5a7088958050792b5dccbe8b46c6e13eccc/src/extension/intents/node/toolCallingLoop.ts"><code>_runLoop</code>, toolCallingLoop.ts</a></td><td>no returned tool calls, after stop hooks</td><td><code>chat.agent.maxRequests</code> default 200</td></tr>
+      <tr><td>Cursor</td><td>closed - hooks are the skeleton (<a href="https://cursor.com/docs/hooks">hooks reference</a>)</td><td><code>stop</code> hook fires with <code>loop_count</code></td><td>follow-ups capped by <code>loop_limit</code>, default 5</td></tr>
+      <tr><td>Windsurf Cascade</td><td>closed - (<a href="https://docs.devin.ai/desktop/cascade/cascade">Cascade docs</a>)</td><td>model stops calling tools</td><td>20 tool calls per prompt, then Continue costs a credit</td></tr>
+      <tr><td>Antigravity</td><td><a href="https://github.com/Google-Antigravity/antigravity-sdk-python/blob/main/google/antigravity/types.py">SDK types.py</a> + docs; core closed</td><td>the built-in <code>finish</code> tool runs</td><td>Stop hook reports <code>max_steps_exceeded</code></td></tr>
+      <tr><td>pi-launcher</td><td>n/a - it launches pi and exits</td><td colspan="2">the loop belongs to the process it signed and started</td></tr>
+      <tr><td>The model layer</td><td>each wire dialect</td><td><code>end_turn</code>, plain text, or final text</td><td>servers can cap too - xAI ships <code>max_turns</code></td></tr>
+    </tbody>
+  </table>
+
+  <p>The ceilings deserve their own look, because they are the same loop wearing different amounts of leash.
+  Windsurf stops after twenty calls and charges you a prompt credit to continue; Cursor auto-continues at most five times; Gemini CLI hard-stops at one hundred turns; Goose and Kimi CLI sit at a thousand; Pi ships no knob at all.
+  These are code constants and documented defaults at the commits cited above, so you can check each one.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Log-scale horizontal bar chart of each harness's default loop ceiling: Cursor five follow-ups, Windsurf twenty tool calls per prompt, Gemini CLI one hundred turns, Copilot two hundred requests, Kimi CLI and Goose one thousand steps.">
+      <line class="axis" x1="170" y1="20" x2="170" y2="260"/>
+      <rect class="m-stat" x="171" y="35"  width="94"  height="22"/>
+      <rect class="m-stat" x="171" y="75"  width="174" height="22"/>
+      <rect class="m-stat" x="171" y="115" width="254" height="22"/>
+      <rect class="m-stat" x="171" y="155" width="287" height="22"/>
+      <rect class="m-stat" x="171" y="195" width="360" height="22"/>
+      <rect class="m-stat" x="171" y="235" width="360" height="22"/>
+      <text class="lbl-sm" x="162" y="51"  text-anchor="end">Cursor follow-ups</text>
+      <text class="lbl-sm" x="162" y="91"  text-anchor="end">Windsurf calls/prompt</text>
+      <text class="lbl-sm" x="162" y="131" text-anchor="end">Gemini MAX_TURNS</text>
+      <text class="lbl-sm" x="162" y="171" text-anchor="end">Copilot maxRequests</text>
+      <text class="lbl-sm" x="162" y="211" text-anchor="end">Kimi steps/turn</text>
+      <text class="lbl-sm" x="162" y="251" text-anchor="end">Goose DEFAULT_MAX_TURNS</text>
+      <text class="lbl-sm" x="273" y="51"  text-anchor="start">5</text>
+      <text class="lbl-sm" x="353" y="91"  text-anchor="start">20</text>
+      <text class="lbl-sm" x="433" y="131" text-anchor="start">100</text>
+      <text class="lbl-sm" x="466" y="171" text-anchor="start">200</text>
+      <text class="lbl-sm" x="539" y="211" text-anchor="start">1,000</text>
+      <text class="lbl-sm" x="539" y="251" text-anchor="start">1,000</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>default ceiling (log scale)</span></div>
+    <figcaption>Default loop ceilings on a log scale - each bar's length is log10 of the value over three decades, so Cursor's bar at 94 pixels reads as roughly 10<sup>0.7</sup>. Claude Code and Pi carry no ceiling by default and so have no bar.
+    <b>The spread from 5 to 1,000 to unlimited is a trust decision, not an engineering constraint.</b></figcaption>
+  </figure>
+
+  <h2 id="steering">3. Where mid-turn input lands</h2>
+  <p>You will type while the agent works.
+  What happens to those keystrokes is a second axis of divergence, and it decides whether steering feels like a conversation or like queueing at a counter.
+  Pi polls a steering queue before <em>every</em> model call - <code>config.getSteeringMessages()</code> at the top of each iteration - so your correction shapes the very next request.
+  Codex drains pending input inside <code>run_turn</code> the same way.
+  At the other end, Windsurf queues messages until the current task finishes, and Cursor splits the difference: queued messages wait for task end, but "send now" is delivered at the next tool-call boundary.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  IN["You type while the agent works"]
+  IN --> D["Drained into the next model call"]
+  IN --> Q["Held at a boundary"]
+  D --> PI["pi getSteeringMessages&lt;br/&gt;polled every iteration"]
+  D --> CX["codex pending input&lt;br/&gt;drained in run_turn"]
+  Q --> WS["windsurf queued messages&lt;br/&gt;run after task end"]
+  Q --> CU["cursor send-now&lt;br/&gt;lands at next tool call"]
+    </div>
+    <figcaption>Two families of answer to one question. The first family spends tokens re-sending history sooner; the second keeps turns clean at the cost of a stale agent working past your correction.
+    <b>Steering latency is a designed property of the loop, not a UI accident.</b></figcaption>
+  </figure>
+
+  <p>One cast member breaks the cycle's shape itself: GitHub Copilot Chat has no separate dispatch phase at all.
+  Tool calls from round N execute <em>inside the prompt renderer</em> while round N+1's context is being assembled - the <code>ChatToolCalls</code> element runs the tools as it renders them into the message list.
+  Parse, dispatch, and assembly collapse into one step, which is why its loop is a render loop that happens to call a model.</p>
+
+  <h2 id="principles">4. What this demonstrates</h2>
+  <p>Two of the design principles lesson 0010 distills are visible here in their purest form.
+  First, <b>everything serves the loop</b>: the trust gate, the context assembler, and the extension surface exist because the eight steps need deciding, and a harness that cannot state its stop condition cannot be trusted with a long task.
+  Second, <b>defaults are the product</b>: the ceiling table shows sixteen teams who agree on the cycle disagreeing entirely about the leash, and those choices are visible to you every day as the difference between an agent that stops to breathe and one that burns your budget overnight.
+  When you reach the deep dives, watch each loop reappear - Pi's is the one shipped as a library, and it gets its own page there.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A reply arrives carrying three tool_use blocks and some prose. What does the loop do next?</div>
+      <button class="q-opt">Ends the turn, since prose means the model is addressing the user directly</button>
+      <button class="q-opt">Executes the requested calls and feeds the results back as another iteration</button>
+      <button class="q-opt">Asks the trust gate to approve the whole reply before parsing anything further</button>
+      <button class="q-opt">Restarts the turn from scratch so the context window stays a fixed size</button>
+      <div class="q-fb">Tool calls mean iterate: dispatch, append results, resend. Prose alongside calls is normal narration, not a stop signal - the stop is a reply with no calls. The gate evaluates calls at dispatch rather than ending the turn, and nothing about a turn resets the window.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your agent is mid-task and you type a correction. Under which loop design does your text influence the very next model request?</div>
+      <button class="q-opt">Windsurf's, which queues the message for when the task finishes cleanly</button>
+      <button class="q-opt">Copilot Chat's, where tools run during the next prompt render pass</button>
+      <button class="q-opt">Cursor's default queue, which holds new messages until task end</button>
+      <button class="q-opt">Pi's, whose steering queue is polled before every single model call</button>
+      <div class="q-fb">Pi drains steering at the top of each iteration, so the next request carries your correction. Windsurf's and Cursor's queues hold until a boundary - exactly the opposite trade-off. Copilot's render-time execution is about where dispatch happens, not about when your input enters.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Clone one open harness from the table above - Pi is the smallest read.
+      Find its loop function, then write down, without reading ahead in the file: what the stop condition checks, whether any maximum-iterations constant exists anywhere in the repository (grep for <code>MAX_TURNS</code>, <code>maxSteps</code>, <code>max_iterations</code>), and where user input typed mid-turn would enter.</p>
+      <p><b>Find</b>: the function name, the stop expression, the presence or absence of a ceiling, and the steering entry point - four artifacts, each cited by file and line.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>In Pi the whole answer is one file: <code>packages/agent/src/agent-loop.ts</code>. Search it for <code>shouldStopAfterTurn</code>, <code>getFollowUpMessages</code>, and <code>getSteeringMessages</code>.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The loop.</b> <code>runAgentLoop</code> in <code>agent-loop.ts</code> - an outer loop that polls follow-up messages, wrapped around an inner loop that runs while tool calls remain.</li>
+        <li><b>The stop.</b> No tool calls in the last assistant message, neither the steering nor the follow-up queue returns anything, and <code>shouldStopAfterTurn</code> did not fire - then <code>agent_end</code> emits.</li>
+        <li><b>The ceiling.</b> Grep finds no max-steps constant: Pi deliberately ships none, unlike Goose's <code>DEFAULT_MAX_TURNS = 1000</code>.</li>
+        <li><b>The steering entry.</b> <code>await config.getSteeringMessages()</code> at the top of the inner loop, injected as user messages before the model call.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Four artifacts from one small file means you found a real loop; if your four came from four different subsystems, you probably found the UI shell instead.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the cycle still feels abstract, ask it to re-walk your last real task through the eight steps, naming what the context assembly step must have included. If the ceilings surprised you, ask why a team would ship 5 versus none, and steelman both.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Anthropic's description of the loop its own SDK runs - receive, evaluate, execute, repeat, return - is the cleanest public statement of the cycle: <a href="https://code.claude.com/docs/en/agent-sdk/agent-loop">How the agent loop works</a>. Read it after this page and map each of its five stages onto the table's sixteen rows.</p>
+
+  <div class="pager">
+    <a href="0000-what-is-a-coding-harness.html"><span class="dir">&larr; Previous</span><span class="ttl">What a coding harness is - the seven layers</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 02 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
