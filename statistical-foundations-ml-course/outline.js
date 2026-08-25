@@ -165,6 +165,20 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0033-the-fast-track-recap.html"
         }
       ]
+    },
+    {
+      "n": "HW1",
+      "title": "Homework 1: Practice Set 1, explained",
+      "lessons": [
+        {
+          "title": "Practice: independence and conditioning",
+          "href": "lessons/0039-practice-independence-and-conditioning.html"
+        },
+        {
+          "title": "Practice: counting and arrangements",
+          "href": "lessons/0040-practice-counting-and-arrangements.html"
+        }
+      ]
     }
   ],
   "extras": [
