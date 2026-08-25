@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What fires when, and how plugins talk back - Herdr from Zero</title>
+<meta name="description" content="The plugin runtime: which trigger starts what, the injected environment, the invocation context, the command log, and every way back into herdr.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HERDR FROM ZERO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+<div class="eyebrow">Module 05 &middot; Plugin development &middot; Lesson 12</div>
+<h1>Every run is spawn, environment, callback, log</h1>
+<p class="paper-meta">
+  <span class="pill med">working</span>
+  <span class="pill">9 min</span>
+  Which trigger starts what, the variables your process receives, and every route back into herdr.
+  &middot; <a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/runtime.rs#L16-L181">the spawn chokepoint</a>
+</p>
+
+<div class="card tldr">
+  <h2 class="h-label">The one-minute version</h2>
+  <ul>
+    <li>Five triggers start plugin commands: actions, startup hooks, event hooks, link clicks, and pane opens.</li>
+    <li>Every run gets a <b>HERDR_PLUGIN_*</b> environment; the full context also arrives as one JSON blob.</li>
+    <li>To act, the plugin calls back through <b>HERDR_BIN_PATH</b> or the socket - the same API you type.</li>
+    <li>Each run leaves one log record: status, exit code, capped stdout and stderr.</li>
+  </ul>
+</div>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  K["keybind pressed"] --> S
+  C["CLI invoke"] --> S
+  E["event fires"] --> S
+  L["ctrl-click URL"] --> S
+  B["session restored"] --> S
+  S["HERDR SERVER&lt;br/&gt;finds enabled entrypoint&lt;br/&gt;and spawns it"] --> P["PLUGIN PROCESS&lt;br/&gt;with injected env"]
+  P --> R["callback via HERDR BIN PATH&lt;br/&gt;or raw socket"]
+  </div>
+  <figcaption>Where this sits: lesson 11 ran one trigger by hand; this page is the map of all five.
+  <b>Whatever starts it, a plugin command is always the same shape - child process, environment, optional callback, log record.</b></figcaption>
+</figure>
+
+<h2>1. What herdr puts in your environment</h2>
+<p>The spawn function is one code path for actions, hooks and events (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/runtime.rs#L39-L81">env injection</a>). Pane opens add their own (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/panes.rs#L236-L270">pane env</a>).</p>
+
+<table>
+  <thead>
+    <tr><th>Variable</th><th>Set when</th><th>Carries</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>HERDR_PLUGIN_ID</code></td><td>every run</td><td>your id from the manifest</td></tr>
+    <tr><td><code>HERDR_PLUGIN_ROOT</code></td><td>every run</td><td>the installed folder (treat as read-only)</td></tr>
+    <tr><td><code>HERDR_PLUGIN_CONFIG_DIR</code></td><td>every run</td><td>user-editable config home - put .env files here</td></tr>
+    <tr><td><code>HERDR_PLUGIN_STATE_DIR</code></td><td>every run</td><td>durable state home herdr never touches</td></tr>
+    <tr><td><code>HERDR_BIN_PATH</code></td><td>every run</td><td>absolute path to the running binary - your callback route</td></tr>
+    <tr><td><code>HERDR_SOCKET_PATH</code></td><td>every run</td><td>raw JSON API endpoint (unix path or windows pipe)</td></tr>
+    <tr><td><code>HERDR_PLUGIN_CONTEXT_JSON</code></td><td>every run</td><td>the whole invocation context as JSON</td></tr>
+    <tr><td><code>HERDR_PLUGIN_ACTION_ID</code></td><td>actions only</td><td>which action fired</td></tr>
+    <tr><td><code>HERDR_PLUGIN_EVENT</code>, <code>_EVENT_JSON</code></td><td>hooks only</td><td>event name plus the full event envelope</td></tr>
+    <tr><td><code>HERDR_PLUGIN_CLICKED_URL</code>, <code>_LINK_HANDLER_ID</code></td><td>link clicks only</td><td>what was clicked and which handler matched</td></tr>
+    <tr><td><code>HERDR_WORKSPACE_ID</code>, <code>_TAB_ID</code>, <code>_PANE_ID</code></td><td>when known</td><td>convenience copies of context fields</td></tr>
+  </tbody>
+</table>
+
+<h2>2. The context, decoded</h2>
+<p><code>HERDR_PLUGIN_CONTEXT_JSON</code> answers "where am I, what is focused, what just happened". Its shape (<a href="https://github.com/herdrdev/herdr/blob/master/src/api/schema/plugins.rs#L364-L395">schema</a>):</p>
+<ul>
+  <li><b>workspace_id / label / cwd</b> - which workspace, its display name and folder</li>
+  <li><b>tab_id / label</b>, <b>focused_pane_id / cwd</b> - where the user is looking</li>
+  <li><b>focused_pane_agent / agent_status</b> - which AI runs there and its state</li>
+  <li><b>selected_text</b> - live terminal selection, when there is one</li>
+  <li><b>clicked_url, link_handler_id</b> - for link-click invocations</li>
+  <li><b>invocation_source, correlation_id</b> - why this ran: cli, keybinding, link_click, startup, api</li>
+</ul>
+<p>Fields are filled when they are known. An event about a closed tab still carries its ids even after the object is gone (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/context.rs#L39-L189">per-event mapping</a>) - read defensively.</p>
+
+<h2>3. One run, end to end</h2>
+
+<figure class="diagram">
+  <div class="mermaid">
+sequenceDiagram
+  participant T as Trigger keybinding
+  participant A as Herdr server
+  participant P as Plugin process
+  participant B as herdr CLI
+  T->>A: user presses prefix g
+  A->>A: refresh registry then find action
+  A->>P: spawn argv with HERDR_PLUGIN_* env
+  P->>P: reads context json does its work
+  P->>B: exec HERDR_BIN_PATH terminal title set Done
+  B->>A: socket request
+  A-->>B: ok
+  P-->>A: exits with code 0
+  A->>A: marks the log record succeeded
+  </div>
+  <figcaption>A callback round trip, exactly as lesson 11's script would do it.
+  <b>The plugin never holds a connection - it spawns, calls back if needed, and exits.</b></figcaption>
+</figure>
+
+<figure class="diagram">
+  <div class="mermaid">
+stateDiagram-v2
+  [*] --> Running : spawn succeeds
+  Running --> Succeeded : exit code zero
+  Running --> Failed : nonzero or spawn error
+  Failed --> [*]
+  Succeeded --> [*]
+  </div>
+  <figcaption>Every command log record walks this tiny machine (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/schema/plugins.rs#L315-L343">record schema</a>).
+  <b>Exit zero means success - a soft failure should still exit zero with a message on stderr.</b></figcaption>
+</figure>
+
+<div class="callout warn">
+Concurrency is capped at 32 simultaneous plugin commands; excess requests fail fast with <code>plugin_command_limit_reached</code>. Long-running hook processes eat the budget (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/runtime.rs#L82-L102">limit</a>). Hooks should restore state and exit, not supervise.
+</div>
+
+<h2>4. Every route back into herdr</h2>
+<ul>
+  <li><b>Any CLI command</b> via <code>HERDR_BIN_PATH</code> - workspace, pane, terminal title, layout export/apply. This is the recommended route because it hides unix-socket versus windows-pipe differences (<a href="https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/plugins.mdx#L277-L283">docs</a>).</li>
+  <li><b>Raw JSON requests</b> to the socket at <code>HERDR_SOCKET_PATH</code> - eleven <code>plugin.*</code> methods plus everything else the API serves (<a href="https://github.com/herdrdev/herdr/blob/master/docs/next/website/src/content/docs/socket-api.mdx#L492-L646">socket docs</a>).</li>
+  <li><b>Your own files</b> under CONFIG_DIR and STATE_DIR - no storage API exists, so durable state is yours to own.</li>
+</ul>
+
+<div class="callout key"><span class="tag">The habit</span>
+Read individual env vars for ids; parse CONTEXT_JSON for everything else; call back through HERDR_BIN_PATH. Three habits cover nearly every plugin ever shipped.</div>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <h3 class="h-label">Retrieval practice</h3>
+  <p class="note-sm">Answer from memory before revealing.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">When is HERDR_PLUGIN_ACTION_ID present in the environment?</div>
+    <button class="q-opt">Only for action invocations</button>
+    <button class="q-opt">On every single spawn</button>
+    <button class="q-opt">Only during startup hooks</button>
+    <button class="q-opt">Never - removed in v1</button>
+    <div class="q-fb">It is set only on the action path; startup and event hooks get HERDR_PLUGIN_EVENT instead, and panes get HERDR_PLUGIN_ENTRYPOINT_ID (<a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/runtime.rs#L55-L60">branching</a>). That split is how one script can tell why it was started.</div>
+  </div>
+
+  <div class="q" data-answer="3">
+    <div class="q-stem">You want a hook that reacts to every keystroke an agent types. Possible?</div>
+    <button class="q-opt">Yes - subscribe to pane.output_changed</button>
+    <button class="q-opt">Yes - with the events.subscribe API</button>
+    <button class="q-opt">Only inside plugin popup panes</button>
+    <button class="q-opt">No - high-volume events are excluded</button>
+    <div class="q-fb">The hookable event list deliberately excludes output_changed and other noisy kinds until semantics exist for them, enforced by test (<a href="https://github.com/herdrdev/herdr/blob/master/src/api/schema/events.rs#L350-L358">exclusion test</a>). events.subscribe exists for clients, but manifest hooks cannot name these events - unknown names are warnings and simply never fire.</div>
+  </div>
+</div>
+
+<h2>How this connects</h2>
+<ul>
+  <li><b>Next, <a href="0013-testing-and-publishing.html">Testing and publishing</a></b> closes the loop: debug the loop you just learned, then ship the plugin to the marketplace.</li>
+</ul>
+
+<div class="teacher-note"><b>Your teacher.</b> If the context JSON feels opaque, ask the agent to print it from a real invocation and annotate each field against this page's table, field by field.</div>
+
+<h2 class="h-label">Primary source to go deeper</h2>
+<p>The runtime module behind every claim on this page: <a href="https://github.com/herdrdev/herdr/blob/master/src/app/api/plugins/runtime.rs">src/app/api/plugins/runtime.rs</a>, read this session at herdr master 7d56b4c5.</p>
+
+<div class="pager">
+  <a href="0011-build-your-first-plugin.html"><span class="dir">&larr; Previous</span><span class="ttl">Build your first plugin</span></a>
+  <a class="nxt" href="0013-testing-and-publishing.html"><span class="dir">Next &rarr;</span><span class="ttl">Testing and publishing</span></a>
+</div>
+
+<footer><p>Herdr from Zero &middot; Lesson 12</p></footer>
+
+</main>
+</body>
+</html>

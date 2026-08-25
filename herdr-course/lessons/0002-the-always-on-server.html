@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The always-on server - Herdr from Zero</title>
+<meta name="description" content="One binary plays two roles: a background server daemon owns the real terminals, and your terminal runs a disposable viewer that attaches to it.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HERDR FROM ZERO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+<div class="eyebrow">Module 02 &middot; How it works &middot; Lesson 02</div>
+<h1>One binary plays two roles - a keeper and a viewer</h1>
+<p class="paper-meta">
+  <span class="pill med">working</span>
+  <span class="pill">7 min</span>
+  The background server, the attachable client, the sockets between them, and the real terminals underneath.
+  &middot; <a href="https://herdr.dev/docs/session-state/">herdr.dev/docs/session-state</a>
+</p>
+
+<div class="card tldr">
+  <h2 class="h-label">The one-minute version</h2>
+  <ul>
+    <li>Typing <b><code>herdr</code></b> starts a hidden <b>server daemon</b> (first time) or attaches as a <b>thin client</b> (every time after).</li>
+    <li>The server owns the real terminals - <b>PTYs</b> - where your shells and agents live; the client only sends keystrokes and paints frames.</li>
+    <li>Detaching kills the viewer and nothing else; the server keeps parsing output and saving snapshots even with zero clients.</li>
+    <li>The cost of this design: a stopped server means dead processes - restore rebuilds shape, not running programs.</li>
+  </ul>
+</div>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  P1["Lesson 01&lt;br/&gt;the whole idea in one picture"] --> T["THIS PAGE&lt;br/&gt;the machine under the idea"]
+  T --> N["Enables&lt;br/&gt;why detach is safe and restart is not"]
+  W["The herdr runtime&lt;br/&gt;this is a part of"] -.- T
+    </div>
+    <figcaption>Lesson 01 drew the boxes; this page opens them up.
+    <b>Two processes and two sockets explain nearly everything Herdr does.</b></figcaption>
+</figure>
+
+<h2>1. The keeper and the viewer</h2>
+<p>Picture a night watchman for a floor of tiny offices. Every pane is an office with a worker - an agent - who does not go home just because you left the building. The watchman is the <b>server daemon</b>: he holds the keys to every office (the PTY master ends), walks the halls all night, and writes on his clipboard whether each worker is busy or stuck. Your terminal runs the <b>client</b>, which is just a window into the building. Both are the same binary: the first <code>herdr</code> spawns the daemon detached so it survives your shell, then every <code>herdr</code> after that becomes a viewer (<code>src/server/autodetect.rs:290-306</code>).</p>
+
+<figure class="diagram">
+  <div class="mermaid">
+flowchart LR
+  TERM["Your terminal app"] --> C["herdr client&lt;br/&gt;thin TUI viewer"]
+  C -->|"keystrokes and mouse&lt;br/&gt;binary frames"| CS["herdr-client.sock"]
+  CS --> S["herdr server daemon&lt;br/&gt;one tick loop"]
+  S --> PTY["PTYs - real terminals&lt;br/&gt;shells and agents"]
+  CLI["herdr status and agents"] -->|"JSON lines"| JS["herdr.sock - the API"]
+  JS --> S
+    </div>
+    <figcaption>Two sockets, two audiences: framed pixels for viewers, JSON lines for commands.
+    <b>Agents and scripts talk to the same server you do - no extra daemon anywhere.</b></figcaption>
+</figure>
+
+<p>The split is load-bearing. The client encodes your input and paints the frames it receives; it holds nothing. The server owns every PTY, runs its render loop even when <i>no</i> client is attached - so background panes stay current and reattaching is seamless (<code>src/server/headless.rs</code> server loop; arch report section 2.3). The two processes speak a version-pinned binary protocol on one socket and newline-delimited JSON on the other; a client and server that disagree on protocol version refuse to pair (<code>src/protocol/wire.rs:16</code>).</p>
+
+<h2>2. What a detach actually does</h2>
+<figure class="diagram">
+  <div class="mermaid">
+sequenceDiagram
+  participant Y as You
+  participant C as client process
+  participant S as server daemon
+  Y->>C: herdr
+  C->>S: connect - or spawn the daemon first
+  S-->>C: Welcome - protocol agreed
+  Y->>C: ctrl+b q
+  C->>S: Detach message
+  Note over C: the client process exits
+  Note over S: nothing else happens - agents keep printing
+  Y->>C: herdr again from any terminal
+  S-->>C: frame stream resumes
+    </div>
+    <figcaption>Detach is one message and one process exit.
+    <b>The viewer is disposable by design - that is the whole safety model.</b></figcaption>
+</figure>
+
+<p>Because the watchman never sleeps, a network drop or a closed lid is just a longer detach. The harder case is the server itself stopping - and here the honest answer is a table:</p>
+
+<table>
+  <tr><th>Event</th><th>What survives</th><th>Why</th></tr>
+  <tr><td>detach / network drop</td><td>everything - processes, layout, live screens</td><td>the server held the PTYs all along</td></tr>
+  <tr><td>server stop</td><td>layout, directories, labels, agent conversation refs</td><td>a <code>session.json</code> snapshot on disk</td></tr>
+  <tr><td>machine restart</td><td>same snapshot; processes are gone</td><td>restore re-spawns shells in saved cwds</td></tr>
+  <tr><td>update with <code>--handoff</code></td><td>even the live terminals change hands</td><td>real PTY file descriptors passed to the new server</td></tr>
+</table>
+<p class="note-sm">The persistence half of this table is a mechanism, not magic: see the hotel metaphor below and <code>docs/next/website/src/content/docs/session-state.mdx</code> "What survives".</p>
+
+<div class="callout warn">
+  The one-way door: <code>herdr server stop</code> ends the server and its pane processes together. Restore can rebuild the rooms from the photo album, but the workers inside them are new shells - unless an integration re-dials the agent's saved conversation.
+</div>
+
+<p>Persistence works like a hotel that photographs every room nightly. While you live in the hotel, nothing needs restoring - your stuff is simply still there. If it burns down, the photo album (<code>session.json</code>, saved with a five-second debounce after every change) shows the exact furniture arrangement, and housekeeping rebuilds each room (<code>src/persist/snapshot.rs</code>, arch report section 4.1). Guests who bookmarked their place in a conversation get the concierge treatment: the same phone call is re-dialed - <code>claude --resume &lt;id&gt;</code> - instead of starting a new one.</p>
+
+<h2>Check yourself</h2>
+<div class="quiz">
+  <h3 class="h-label">Retrieval practice</h3>
+  <p class="note-sm">Answer from memory before revealing.</p>
+
+  <div class="q" data-answer="0">
+    <div class="q-stem">You detach and close the lid for three hours. What is true when you return?</div>
+    <button class="q-opt">The server kept parsing output and saving snapshots</button>
+    <button class="q-opt">The server paused until a client returned</button>
+    <button class="q-opt">Pane output was discarded while nobody watched</button>
+    <button class="q-opt">A hidden client kept rendering to a file</button>
+    <div class="q-fb">The server renders even with zero clients, so reattach is seamless. Pausing describes suspend, discarding describes a dumb logger - the emulator keeps full state - and there is no hidden renderer, only the daemon's own loop.</div>
+  </div>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">One-shot commands like <code>herdr status</code> speak on which socket?</div>
+    <button class="q-opt">The binary frame socket as a fake viewer</button>
+    <button class="q-opt">An HTTPS request to the herdr.dev site</button>
+    <button class="q-opt">The JSON API socket, one line per command</button>
+    <button class="q-opt">A temp file written beside session.json</button>
+    <div class="q-fb">Commands and agents use the JSON API - the same surface plugins and scripts use. The binary socket carries framed pixels for TUI viewers, herdr.dev serves releases and docs, and the snapshot file is output, not transport.</div>
+  </div>
+</div>
+
+<h2>How this connects</h2>
+<ul>
+  <li><b>Next, <a href="0003-sessions-workspaces-panes.html">Sessions, workspaces, panes</a></b> names the rooms the watchman manages: the object model you navigate every day.</li>
+</ul>
+
+<div class="teacher-note"><b>Your teacher.</b> If the two-process split did not land, ask the agent to trace one keystroke from your keyboard to claude and one frame back - naming the socket at each hop.</div>
+
+<h2 class="h-label">Primary source to go deeper</h2>
+<p><a href="https://herdr.dev/docs/session-state/">Session state and restore - herdr.dev</a>, opened this session; the architecture report behind this page cites the server loop and wire protocol at <code>src/server/headless.rs</code> and <code>src/protocol/wire.rs</code>.</p>
+
+<div class="pager">
+  <a href="0001-what-is-herdr.html"><span class="dir">&larr; Previous</span><span class="ttl">What is Herdr</span></a>
+  <a class="nxt" href="0003-sessions-workspaces-panes.html"><span class="dir">Next &rarr;</span><span class="ttl">Sessions, workspaces, panes</span></a>
+</div>
+
+<footer><p>Herdr from Zero &middot; Lesson 02</p></footer>
+</main>
+</body>
+</html>
