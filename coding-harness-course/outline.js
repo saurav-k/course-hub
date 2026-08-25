@@ -15,6 +15,16 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0000-what-is-a-coding-harness.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Deep Dives - the cast of fifteen",
+      "lessons": [
+        {
+          "title": "Windsurf - the human trajectory as context",
+          "href": "lessons/0180-windsurf.html"
+        }
+      ]
     }
   ],
   "extras": [
