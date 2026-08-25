@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pi-launcher - a signed identity for an agent - Coding Harness Engineering</title>
+<meta name="description" content="Two hundred lines of C giving a coding agent a stable Developer ID identity on macOS, wrapped without breaking job control, shipped through a supply-chain pipeline that quarantines what fails.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 25</div>
+  <h1>The smallest harness in this course wraps one so the OS can vouch for it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Read from source at <a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c">commit <code>564fa16</code></a> (launcher 1.2.1, bundling Pi v0.84.1).
+    &middot; <a href="https://developer.apple.com/library/archive/technotes/tn2206/_index.html">Apple TN2206, code signing in depth</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <b>Repository:</b> <a href="https://github.com/kunchenguid/pi-launcher">kunchenguid/pi-launcher</a> &middot; MIT &middot; one 237-line C11 file plus Python and shell machinery &middot;
+    analysis pinned to commit <code>564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50</code>, launcher 1.2.1.<br>
+    <b>Read these five files, in this order:</b>
+    <ol>
+      <li><code>src/pi-launcher.c</code> - the entire product: fork-and-stay wrapping, signal rules, target resolution</li>
+      <li><code>README.md</code> - the problem statement, the credential-broker consumer, and the honest limits section</li>
+      <li><code>packaging/pi-release.json</code> - the pin holding upstream's tag, URLs, and SHA-256 hashes</li>
+      <li><code>scripts/fetch-pi.sh</code> - dual verification against the pin and upstream's own published sums</li>
+      <li><code>.github/workflows/upstream-pi-sync.yml</code> - the daily upstream-follow workflow with its gates and quarantine</li>
+    </ol>
+    <b>Community:</b> GitHub issues on the repository; releases ship through GitHub Releases and a Homebrew cask (<code>homebrew/pi-launcher.rb</code>). It wraps <a href="https://github.com/earendil-works/pi">earendil-works/pi</a>, whose own deep dive is lesson 024 of this course.
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Pi ships ad-hoc signed, which runs fine but presents <b>no stable identity</b>: its cdhash changes on every build.</li>
+      <li>The launcher is a <b>fork-and-stay parent</b>: it execs Pi as a child and remains in the tree forever, wearing the one Developer ID signature.</li>
+      <li>It touches nothing else: <b>terminal transparency</b> by never touching the terminal and never delivering a signal twice.</li>
+      <li>A <b>gated pipeline</b> pins upstream by checksum, signs inside-out, notarizes, re-downloads its own artifact - and quarantines an upstream release that fails any gate.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0060 named the gap&lt;br/&gt;ad-hoc signatures have no stable identity"] --> T["THIS PAGE&lt;br/&gt;a 237-line C program that closes it&lt;br/&gt;for one specific agent"]
+  T --> N["What it enables&lt;br/&gt;ancestry-based policy tools get&lt;br/&gt;a designated requirement that survives updates"]
+  W["Its payload&lt;br/&gt;the Pi deep dive of lesson 024"] -.- T
+    </div>
+    <figcaption>Where this sits: lesson 0060 taught why a coding agent needs an OS-visible identity; this page reads the smallest existing artifact built for exactly that job, layer seven alone.
+    <b>It adds zero agent features on purpose - the interesting engineering is entirely under the agent.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Author</td><td>Kun Chen (<code>kunchenguid</code>), Apple Developer Team ID <code>9T2J7MNUP9</code></td></tr>
+      <tr><td>License / language</td><td>MIT for the launcher / C11 against libSystem only; Python and POSIX shell carry build, test, and release machinery</td></tr>
+      <tr><td>Platform</td><td>macOS arm64 only, minimum macOS 13.0</td></tr>
+      <tr><td>Versions</td><td>launcher 1.2.1 bundling upstream Pi v0.84.1; commit read <code>564fa16</code></td></tr>
+      <tr><td>Distribution</td><td>notarized zip from GitHub Releases; Homebrew cask bumped automatically after verification</td></tr>
+      <tr><td>Scope</td><td>a signed identity and a provenance pipeline for one payload - nothing about the agent changes</td></tr>
+    </tbody>
+  </table>
+
+  <p>The problem it solves is lesson 0060's in miniature: official Pi binaries are ad-hoc signed, so they satisfy the kernel and fool nobody at Gatekeeper, and their cdhash - the fingerprint of one exact build - differs after every rebuild.
+  A credential broker that approves access by walking process ancestry finds nothing durable to match.
+  Wrap Pi in a Developer-ID-signed app and every Pi process sits under a parent whose designated requirement names identifier, <code>anchor apple generic</code>, and Team ID - identical across releases.</p>
+
+  <h2 id="process">Process architecture: fork and stay alive</h2>
+  <p>A classic CLI wrapper calls <code>execve</code> and becomes its target.
+  That single syscall would erase the whole point here: once replaced, the process tree shows Pi's unsigned Mach-O again.
+  So the launcher forks and stays alive as Pi's direct parent permanently (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L175"><code>pi-launcher.c:175</code></a> fork, <a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L199"><code>:199</code> execve).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Z["zsh login shell&lt;br/&gt;session leader owns the controlling tty"] -->|"forks as a foreground job"| L["pi-launcher pid P&lt;br/&gt;Developer ID identity - waitpid loop"]
+  L -->|"child resets dispositions then execve&lt;br/&gt;into Contents/Resources/pi/pi"| PI["pi - Bun JavaScriptCore&lt;br/&gt;same pgrp same tty allow-jit"]
+  PI --> K["bash git gh&lt;br/&gt;tools Pi spawns unchanged"]
+  N["No setsid no setpgid no tcsetpgrp&lt;br/&gt;one process group from shell to agent"] -.-> L
+    </div>
+    <figcaption>The whole runtime, top to bottom. Because neither setsid nor setpgid nor tcsetpgrp is ever called, everything shares the shell's session, group, and terminal - the tree looks exactly like a direct <code>pi</code> run except one more ancestor exists.
+    <b>That extra ancestor is the product.</b></figcaption>
+  </figure>
+
+  <p>What the launcher may execute is a set of size one, enforced by code shape rather than convention: it resolves its own path with <code>proc_pidpath</code>, canonicalizes it with <code>realpath</code> - dissolving symlink games - strips the last component, and joins the compile-time constant <code>../Resources/pi/pi</code>.
+  There is exactly one <code>execve</code> call site, no PATH search, no argument parsing, no environment override; a missing target exits 127, an unrunnable one 126.
+  Arguments pass byte-for-byte into the child's argv, untouched.</p>
+
+  <h2 id="transparency">Terminal transparency</h2>
+  <p>An extra process in the foreground job can wreck job control, so the design rule is <em>never touch the terminal, never deliver a signal twice</em>.</p>
+
+  <table>
+    <thead><tr><th>Event</th><th>Mechanism</th><th>The launcher's move</th></tr></thead>
+    <tbody>
+      <tr><td>Ctrl-C, Ctrl-\</td><td>line discipline delivers SIGINT/SIGQUIT to the whole foreground group</td><td>sets both to <code>SIG_IGN</code> in itself, so Pi receives exactly one copy (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L148-L150"><code>:148-150</code></a>)</td></tr>
+      <tr><td>Ctrl-Z then <code>fg</code></td><td>group-wide stop, later group continue</td><td>keeps default stop dispositions and passes no <code>WUNTRACED</code>, leaving stops to the shell</td></tr>
+      <tr><td>window resize</td><td>kernel sends SIGWINCH on <code>TIOCSWINSZ</code></td><td>nothing - the group gets it either way</td></tr>
+      <tr><td><code>kill</code> aimed at the wrapper</td><td>SIGHUP, SIGTERM, SIGUSR1, SIGUSR2 (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L54"><code>:54</code></a>)</td><td>forwarded once to the child, so killing the wrapper cannot orphan a live agent</td></tr>
+      <tr><td>Pi dies by signal</td><td><code>waitpid</code> reports <code>WIFSIGNALED</code></td><td>resets that signal to <code>SIG_DFL</code> and raises it on itself (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L228-L234"><code>:228-234</code></a>)</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant K as Keyboard
+    participant T as TTY discipline
+    participant L as Launcher
+    participant P as pi
+    K->>T: Ctrl-C byte 0x03
+    T->>L: SIGINT to foreground group
+    T->>P: SIGINT to foreground group
+    Note over L: disposition is SIG_IGN so it survives
+    alt pi handles SIGINT
+        P->>P: cancels current work and keeps running
+    else pi dies by default disposition
+        P-->L: exits with WIFSIGNALED
+        L->>L: reset SIGINT to SIG_DFL then raise it
+        L-->K: exit status 130 matching a direct run
+    end
+    </div>
+    <figcaption>One keystroke, one signal, two recipients. Forwarding would deliver SIGINT twice - once from the kernel, once from the launcher - so the wrapper declines to relay what the line discipline already broadcast.
+    <b>The reproduction rule is what keeps shells honest: dying by signal raises that signal on itself, so <code>$?</code> and the job notification read identically with or without the wrapper.</b></figcaption>
+  </figure>
+
+  <p>One race deserves notice: between <code>fork</code> and recording the child's PID, a forwarded signal could be lost, so those four signals are blocked around the fork and unblocked only after the PID is stored.
+  And because ignored dispositions survive <code>execve</code> (<a href="https://pubs.opengroup.org/onlinepubs/9699919799/functions/exec.html">POSIX <code>exec</code></a>), the child resets every catchable signal to default before loading Pi - otherwise the parent's <code>SIG_IGN</code> would leak into the agent.</p>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>The security boundary is the payload path, and it holds because there is nothing else to reach.
+  Negative tests attack each escape hatch and fail to break in: a poisoned <code>PATH</code> changes nothing, environment variables named like targets are ignored, flag-shaped arguments pass through as Pi arguments, and a bare copy of the binary outside a bundle exits 127 rather than running anything.
+  Entitlements are a posture too: the launcher ships with zero, asserted by its own verification gate, while bundled Pi carries exactly one - <code>com.apple.security.cs.allow-jit</code> (<a href="https://developer.apple.com/documentation/bundleresources/entitlements/com.apple.security.cs.allow-jit">Apple's reference</a>) - because it is a Bun-compiled JavaScriptCore runtime and the hardened runtime blocks JIT memory without it.</p>
+
+  <div class="callout warn">
+    What this is not: not a sandbox - Pi still runs with your full user permissions; not authorization - a stable designated requirement gives a policy tool something to match, but whether that tool grants anything is unproven until tested; and not runtime re-verification - nothing re-checks a signature at each exec, so provenance is enforced by the release pipeline, not per launch. The guarantee also bottoms out in trusting upstream's own release channel.
+  </div>
+
+  <p>The skeleton's other rows are absences by design, and the absence is the architecture: no loop lives here (the loop belongs to Pi - see lesson 024's deep dive), no context is assembled, there is no extension surface beyond replacing the bundle, and model behavior passes through untouched.
+  Every row a harness page fills in, this page answers "delegated, unchanged".</p>
+
+  <h2 id="distinctive">The distinctive mechanism: a pipeline that refuses to ship</h2>
+  <p>The strongest material is the machine that produces the artifact you install.
+  Upstream Pi is pinned by version, URL, and SHA-256; every fetch verifies against both the pinned hash and upstream's published <code>SHA256SUMS</code> (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/scripts/fetch-pi.sh#L57-L71"><code>fetch-pi.sh:57-71</code></a>); signing runs inside-out through nested code with hardened runtime and secure timestamps; and the release workflow verifies and launches the artifact repeatedly - including a fresh re-download of the published zip checked byte-for-byte - before the Homebrew cask is allowed to move.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  UP["upstream publishes vX.Y.Z"] --> D["daily discovery on ubuntu&lt;br/&gt;stable-tag contract digest cross-check"]
+  D -->|"newer tag found"| Q{"tag quarantined?"}
+  Q -->|yes| HOLD["held back - visible no-op"]
+  Q -->|no| G["candidate pin written never committed&lt;br/&gt;diff must touch only the pin"]
+  G --> F["fetch dual verify&lt;br/&gt;pinned sha256 AND upstream sums"]
+  F --> S["full suite on macOS&lt;br/&gt;lint strict compile functional pty smoke contracts"]
+  S -->|"any failure"| QUAR["file or refresh upstream-pi-blocked issue&lt;br/&gt;tag frozen while open"]
+  S -->|green| PUSH["commit pin then release-please PR merges"]
+  PUSH --> SG["sign inside-out&lt;br/&gt;hardened runtime secure timestamps"]
+  SG --> NT["notarytool submit --wait then staple"]
+  NT --> PB["publish zip plus sha256 sidecar"]
+  PB --> RD["re-download published artifact&lt;br/&gt;verify checksum and launch again"]
+  RD --> HB["bump Homebrew cask"]
+    </div>
+    <figcaption>The upstream-follow workflow, end to end. Discovery runs with zero secrets and accepts only fully published stable releases whose sums agree with GitHub's own reported digests; nothing reaches users that did not pass every gate on the real artifact.
+    <b>The failure path is the design: a failed gate writes a durable quarantine issue keyed by tag, and that tag is never retried while it stays open.</b></figcaption>
+  </figure>
+
+  <p>This fired in anger once: upstream Pi v0.84.2 was quarantined after a contract script hard-coded the previous launcher version and failed.
+  The fix derived the version from published git tags instead, and the incident now lives on as a regression test citing the failing run - a gate that failed correctly, blast radius contained, root cause converted into a test.</p>
+
+  <h2 id="testing">How it proves all this</h2>
+  <p>Claims about invisible inter-process behavior cannot be unit-tested, so four suites drive real processes instead.
+  Functional tests swap a probe binary into the identical bundle layout - the launcher cannot tell the difference, which is the point - and assert byte-exact argv passing, exit codes across the full range, five different signal deaths reproduced, and the negative boundary attacks above.
+  PTY tests build a fake interactive shell on a real pseudo-terminal with <code>setsid</code> and <code>TIOCSCTTY</code>, then prove ISATTY on all stdio, one SIGWINCH per resize, one SIGINT per Ctrl-C, and suspend-and-resume via keyboard and via Pi's own group-stop style.
+  Automation tests exercise the updater and quarantine scripts against a fake GitHub API, including the reproduced v0.84.2 incident.
+  Finally a smoke test runs the real bundled Pi through the real launcher, because signature structure is not launchability.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">You press Ctrl-C while the agent runs under pi-launcher. Why does the launcher not forward SIGINT to Pi?</div>
+      <button class="q-opt">The tty already sent it to every member of the foreground group</button>
+      <button class="q-opt">The kernel forbids forwarding signals generated by the terminal</button>
+      <button class="q-opt">Pi installs its own SIGINT handler, making a forward redundant</button>
+      <button class="q-opt">The launcher converts the interrupt into a gentler SIGTERM first</button>
+      <div class="q-fb">Group delivery is the mechanism: forwarding would double-deliver, so the launcher sets SIGINT to ignored and lets the line discipline do the work once. Nothing forbids forwarding terminal signals, Pi's handler choice does not change the launcher's arithmetic, and no conversion exists anywhere in the source.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An upstream Pi release passes discovery but fails one full-suite gate on macOS. What does the sync workflow do?</div>
+      <button class="q-opt">Retries that exact tag daily until the failing gate turns green</button>
+      <button class="q-opt">Ships the pin anyway since discovery already validated the asset</button>
+      <button class="q-opt">Opens one quarantine issue keyed by the tag and freezes it there</button>
+      <button class="q-opt">Skips the tag silently and moves on to next day's check</button>
+      <div class="q-fb">Quarantine is durable and human-owned: while the labelled issue stays open the tag is never attempted, though newer releases are judged fresh. Daily retries against a red gate, shipping untested, and silent skips are precisely the behaviors the design refuses.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, reading only</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Open <a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/scripts/verify-app.sh"><code>scripts/verify-app.sh</code></a> at the pinned commit and list every check the verification gate performs - structure, architectures, signing identity, hardened runtime, timestamps, entitlement counts, designated requirements, stapled tickets, <code>spctl</code> acceptance.</p>
+      <p><b>Find</b>: for each check, the one-line claim it proves, then name a property a buyer might assume that <em>no</em> check in the file covers.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The checks prove facts about the artifact as distributed. Ask which claims concern the artifact's behavior <em>after</em> distribution - say, at every future launch - and look for their absence.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Tabulate the checks.</b> Each maps to one claim: arm64-only Mach-Os, Developer ID authority with the right Team ID, hardened-runtime flags, secure timestamps, exactly one entitlement on Pi and none on the launcher, correct designated requirements, valid stapled ticket, Gatekeeper acceptance.</li>
+        <li><b>Hunt the uncovered assumption.</b> Nothing re-verifies the signature at each launch - provenance is established at build and install time only.</li>
+        <li><b>Price it.</b> A user who later replaces or tampers with the payload inside the bundle is outside every gate in this file.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your list should have roughly ten distinct claims and your uncovered column should include per-launch re-verification - the same limit the page's warning callout states.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the fork-and-stay rationale has not landed, ask for the counterfactual: rewrite the launcher as a ten-line exec shim and name everything that breaks. For the pipeline, ask it to rank the gates by cost of removal - which one would you drop last?</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Start at the source: <a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c">the entire C file at the pinned commit</a> is shorter than this page's prose, and Apple's <a href="https://developer.apple.com/library/archive/technotes/tn2206/_index.html">TN2206</a> explains every signing term the pipeline uses.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 25 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
