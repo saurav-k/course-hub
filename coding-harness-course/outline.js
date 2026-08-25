@@ -143,6 +143,16 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0270-build-a-harness.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Deep Dives - the cast of fifteen",
+      "lessons": [
+        {
+          "title": "Kimi CLI - model-driven context time travel",
+          "href": "lessons/0260-kimi-cli.html"
+        }
+      ]
     }
   ],
   "extras": [
