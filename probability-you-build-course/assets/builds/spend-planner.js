@@ -352,7 +352,7 @@
       cell(x0, padT + hShipC, wC, hRefC, rgba(c.gold, 0.35), c.grid, 'refuse', fmt(ps * (1 - a), 4));
       // wrong column
       cell(x0 + wC, padT, wW, hShipW, rgba(c.warn, 0.45), c.grid, 'ship', fmt((1 - ps) * b, 4));
-      cell(x0 + wW, padT + hShipW, wW, hRefW, rgba(c.ok, 0.28), c.grid, 'refuse', fmt((1 - ps) * (1 - b), 4));
+      cell(x0 + wC, padT + hShipW, wW, hRefW, rgba(c.ok, 0.28), c.grid, 'refuse', fmt((1 - ps) * (1 - b), 4));
 
       ctx.fillStyle = c.soft;
       ctx.textAlign = 'center';
