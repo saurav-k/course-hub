@@ -139,6 +139,16 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0803-ai-and-ml-services.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Resilience: the map the promise rests on",
+          "href": "lessons/0901-resilience-migration-four-clouds.html"
+        }
+      ]
     }
   ],
   "extras": []
