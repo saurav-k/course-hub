@@ -733,7 +733,7 @@
 
       var c = colors();
       var ctx = ctx2d(fig.querySelector('canvas'), W, H);
-      var padL = 48, padB = 32, padT = 24, base = H - padB;
+      var padL = 48, padB = 32, padT = 46, base = H - padB;
       var groups = [
         { label: 'P(at least one right)', prom: anyA, simv: simAny.p },
         { label: 'P(majority right)', prom: majA, simv: simMaj.p }
@@ -752,12 +752,9 @@
         ctx.textAlign = 'center';
         ctx.fillText(g.label, x0, H - 8);
         ctx.fillStyle = c.accent;
-        ctx.textAlign = 'left';
-        ctx.fillText('analytic ' + fmt(g.prom), x0 - bw - 3, base - g.prom * (base - padT) - 6);
+        ctx.fillText('analytic ' + fmt(g.prom), x0 - bw / 2 - 3, 18);
         ctx.fillStyle = c.accent2;
-        ctx.textAlign = 'right';
-        ctx.fillText('simulated ' + fmt(g.simv), x0 + bw + 3, base - g.simv * (base - padT) - 6);
-        ctx.textAlign = 'center';
+        ctx.fillText('simulated ' + fmt(g.simv), x0 + bw / 2 + 3, 34);
       });
     }
 
