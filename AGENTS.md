@@ -151,7 +151,11 @@ matrix (`figure.cmatrix`), rendered by `hub.js` from `cloud-comparison-course/ma
 the single committed home of the capability taxonomy. `validate_site.py` gates that file - row
 completeness, cell states, widget binding - and `--vendor-links` extends it with a live fetch of
 every vendor link. The widget contract is in the widget reference's "The capability matrix"
-section; an unfilled cell and a declared absence are different states and must never look alike.
+section. Four cell states, and no two of them may look alike. The pair that matters is `absent`
+against `elsewhere`: both arrive as a `gaps` entry in the same inventory and they make opposite
+claims, so **NO EQUIVALENT is reserved for `absent`** and a cell must never imply a cloud cannot do
+something it demonstrably can. Which gaps are which is a list the research directory holds, not
+something to read out of the prose - the wording does not separate them.
 
 Nine traps in that design system, all found on the published site:
 
