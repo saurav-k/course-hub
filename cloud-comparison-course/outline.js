@@ -93,6 +93,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0703-the-telemetry-streams.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Security, delivery, integration and intelligence",
+      "lessons": [
+        {
+          "title": "The security services layer",
+          "href": "lessons/0800-security-services.html"
+        },
+        {
+          "title": "Infrastructure as code and deployment",
+          "href": "lessons/0801-iac-and-deployment.html"
+        },
+        {
+          "title": "Integration and messaging",
+          "href": "lessons/0802-integration-and-messaging.html"
+        },
+        {
+          "title": "AI and ML services",
+          "href": "lessons/0803-ai-and-ml-services.html"
+        }
+      ]
     }
   ],
   "extras": []

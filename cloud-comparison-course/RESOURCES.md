@@ -104,6 +104,37 @@ stale rather than as a typo.
   carries three clouds and marks the fourth as not recorded rather than
   guessing it.
 
+## Module 08 - security, delivery, integration and intelligence
+
+The four lessons of this module rest on the same verified round as the matrix
+(2026-08-26) and cite the vendor pages that round recorded.
+Eighty-three vendor links carry these four pages, and every one of them was checked
+to resolve on 2026-08-27; seventy-seven are the `doc_url` of a `matrix.js` cell and
+the other six are the four certification blueprints above plus two AWS pages the
+verified round cited directly:
+
+- **AWS CodeDeploy deployment configurations** -
+  <https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations.html>
+- **Amazon API Gateway canary release deployments** -
+  <https://docs.aws.amazon.com/apigateway/latest/developerguide/canary-release.html>
+
+The CodeDeploy page is the only vendor page in this area that publishes traffic
+shapes as named, exact percentages and intervals, which is what the rollout chart on
+lesson 0801 is drawn from.
+
+### Gaps found while writing this module
+
+- **Nothing was left out of a page for want of a source.** Every claim on the four
+  pages traces to a cell in `matrix.js` or to a vendor page the verified round
+  recorded, and no fact was added from memory or from the open web.
+- **Retirement and preview facts are carried without their dates**, because this
+  course forbids dates on a page. Where a service is retiring or in preview the page
+  says so and the matrix badge carries the state; the round's dates stay here and in
+  the research directory.
+- **Exam weights for this module's areas are domain-level only.** No blueprint gives
+  infrastructure as code, integration or AI a domain of its own, so each page names
+  the domain the area sits inside rather than inventing a share for the area itself.
+
 ## Gaps
 
 - One row is a content question the research directory has raised and not
