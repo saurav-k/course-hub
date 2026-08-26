@@ -175,15 +175,15 @@
       }
 
       /* ---- readout and the living caption ---- */
-      outSeed.textContent = p.seed;
-      outAcc.textContent = p.layers.glow ? pybGarden.fmt(accPct, 1) + '%' : '-';
+      if (outSeed) outSeed.textContent = p.seed;
+      if (outAcc) outAcc.textContent = p.layers.glow ? pybGarden.fmt(accPct, 1) + '%' : '-';
       var bits = [];
       if (p.layers.stars) bits.push('3,000 uniform stars');
       if (p.layers.glow) bits.push('keeps 2,600 proposals under exp(-' + p.k + 'r) (acceptance ' + pybGarden.fmt(accPct, 1) + '%)');
       if (p.layers.splats) bits.push('splats 320 normals, sigma ' + p.sig);
       if (p.layers.walks) bits.push('walks 22 agents of 140 steps');
       if (p.layers.rings) bits.push('rings r = -ln(1-u)/' + p.lam);
-      outSpec.textContent = 'This piece draws ' + bits.join(', ') + '. Seed ' + p.seed + '.';
+      if (outSpec) outSpec.textContent = 'This piece draws ' + bits.join(', ') + '. Seed ' + p.seed + '.';
     }
 
     function refresh() { render(); writeHash(); }
@@ -211,11 +211,13 @@
       });
     }
 
+    /* wire the theme observer BEFORE the first render so a failure later in
+       init can never leave the canvas deaf to mode or palette changes */
     paintSprites();
     readHash();
-    render();
-    writeHash();
     var rerender = render;
     pybGarden.wireTheme(function () { paintSprites(); rerender(); });
+    render();
+    writeHash();
   });
 })();
