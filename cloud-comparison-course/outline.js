@@ -29,6 +29,30 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Storage and data",
+      "lessons": [
+        {
+          "title": "Storage: the menu is the same, the failure domain is not",
+          "href": "lessons/0301-storage-four-clouds.html"
+        },
+        {
+          "title": "Databases: pick by packaging, not by engine",
+          "href": "lessons/0302-databases-four-clouds.html"
+        }
+      ]
+    },
+    {
+      "n": "04",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "Analytics: one pipeline, four cuts",
+          "href": "lessons/0401-analytics-four-clouds.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Networking, delivery and edge",
       "lessons": [
@@ -113,6 +137,16 @@ window.COURSE_OUTLINE = {
         {
           "title": "AI and ML services",
           "href": "lessons/0803-ai-and-ml-services.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Resilience: the map the promise rests on",
+          "href": "lessons/0901-resilience-migration-four-clouds.html"
         }
       ]
     }

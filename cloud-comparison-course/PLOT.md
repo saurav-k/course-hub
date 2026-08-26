@@ -14,6 +14,16 @@ roadmap of what remains.
 `0203`, one per capability area: `compute-iaas`, `compute-scaling`, `containers`,
 `serverless-app`.
 
+**Module 03, Storage and data.** Two lessons, one per capability area.
+
+| Lesson | Name | Capability area |
+|---|---|---|
+| `0301` | Storage: the menu is the same, the failure domain is not | `storage` |
+| `0302` | Databases: pick by packaging, not by engine | `databases` |
+
+**Module 04, Analytics.** One lesson, `0401`, Analytics: one pipeline, four cuts,
+covering the whole `analytics` area.
+
 **Module 05, Networking, delivery and edge.** Four lessons, one per capability area.
 
 | Lesson | Name | Capability area |
@@ -51,14 +61,16 @@ It was placed here rather than in module 07 because a security service acts on a
 running workload the way delivery and integration do, while module 07 governs the
 estate around it, and the module name was widened to say so.
 
+**Module 09, Resilience and migration.** One lesson, `0901`, Resilience: the map
+the promise rests on, covering the whole `resilience-migration` area.
+
 **Numbering is by module block, and this file's module table is what assigns it.**
 A module owns the hundred its own number opens: module 02 owns `0200` to `0299`,
-module 05 owns `0500` to `0599`, module 06 owns `0600` to `0699`, module 07 owns
-`0700` to `0799`, and module 08 owns `0800` to `0899`. Modules are written in
-parallel, so a single
-running sequence collides the moment two contributors add a lesson at once. The
-eyebrow, the card `.ln` and the footer carry the four digits unchanged. Module
-grouping on the map carries teaching order, and file order is free to disagree
+module 03 owns `0300` to `0399`, and so on to module 09.
+Modules are written in parallel, so a single running sequence collides the moment
+two contributors add a lesson at once.
+The eyebrow, the card `.ln` and the footer carry the four digits unchanged.
+Module grouping on the map carries teaching order, and file order is free to disagree
 with it.
 
 ## Planned, in order
@@ -70,9 +82,6 @@ takes one comparison that names alone do not settle.
 | # | Module | Draws its rows from |
 |---|---|---|
 | 01 | How to read a four-way comparison | the whole matrix - method before findings |
-| 03 | Storage and data | `storage`, `databases` |
-| 04 | Analytics | `analytics` |
-| 09 | Resilience and migration | `resilience-migration` |
 
 ## Why this order and no other
 
@@ -85,8 +94,8 @@ earlier. Resilience closes because it is the property the whole design is judged
 
 ## Reserved, unwritten
 
-- **The four unwritten modules above**, none yet started. Each takes the hundred
-  its module number opens, so nothing already published is renumbered or renamed.
+- **The one unwritten module above**, not yet started. It takes the hundred its
+  module number opens, so nothing already published is renumbered or renamed.
 - **Reference: the capability taxonomy explained.** A glossary of what each of the
   twenty-four areas covers, linked from every lesson foot. Not written yet.
 

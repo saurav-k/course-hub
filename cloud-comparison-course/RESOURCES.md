@@ -28,6 +28,10 @@ the verified round dated 2026-08-26:
   <https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf>
 - **Oracle Cloud Infrastructure Architect Professional, 1Z0-997-26** -
   <https://mylearn.oracle.com/ou/exam/oracle-cloud-infrastructure-architect-professional-1z0-997-26/163295/161770/271322>
+- **AWS Certified Solutions Architect - Associate, SAA-C03** -
+  <https://docs.aws.amazon.com/aws-certification/latest/solutions-architect-associate-03/solutions-architect-associate-03.html>
+- **Microsoft AZ-104 study guide** -
+  <https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-104>
 
 A weight is expressed as the domain an area belongs to and that domain's official
 percentage, never as a schedule, a countdown or a study plan.
@@ -134,6 +138,38 @@ lesson 0801 is drawn from.
 - **Exam weights for this module's areas are domain-level only.** No blueprint gives
   infrastructure as code, integration or AI a domain of its own, so each page names
   the domain the area sits inside rather than inventing a share for the area itself.
+
+## Modules 03, 04 and 09 - storage, data, analytics and durability
+
+The four lessons of these modules rest on the same verified round as the matrix
+(2026-08-26) and cite the vendor pages that round recorded. Every external link
+on the four pages was fetched and returned HTTP 200 on 2026-08-27.
+
+Two of the links sit outside the four documentation roots above, and both are
+where the vendor itself publishes the thing:
+
+- **OCI Data Transfer Appliance**, which Oracle documents on its cloud blog
+  rather than under `docs.oracle.com`. `matrix.js` links the same place, and the
+  `## Gaps` note below records that this row is already flagged for re-reading.
+- **The Oracle exam blueprint**, on `mylearn.oracle.com`, as recorded above.
+
+### Gaps found while writing these modules
+
+- **Per-volume input/output ceilings for Azure and Google Cloud.** The verified
+  round records a per-volume figure for AWS gp3 and io2 Block Express and for OCI
+  Block Volume, and none for Azure Premium SSD v2 and Ultra Disk or for Google
+  Hyperdisk, although all of them tune performance independently of volume size.
+  The chart on lesson `0301` draws the two clouds that publish a figure and its
+  caption says the other two are left out rather than guessed at.
+- **Headline region and zone counts for Azure and Google Cloud.** AWS and OCI
+  publish one on their own infrastructure pages and the other two publish
+  per-region availability tables instead. The Google figure the round did record
+  is marked in that round as needing a re-read before publication, so it is not
+  used. The chart on lesson `0901` draws AWS and OCI and names the omission.
+- **No analytics-specific certification domain.** None of the four blueprints
+  above weights analytics as a domain of its own, so lesson `0401` carries no
+  "what this certification tests" section rather than stretching a domain that
+  covers something else. The other three lessons carry one.
 
 ## Gaps
 
