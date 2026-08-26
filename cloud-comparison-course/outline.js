@@ -34,19 +34,19 @@ window.COURSE_OUTLINE = {
       "lessons": [
         {
           "title": "Hierarchy and guardrails",
-          "href": "lessons/0070-hierarchy-and-guardrails.html"
+          "href": "lessons/0700-hierarchy-and-guardrails.html"
         },
         {
           "title": "Policy, drift and inventory",
-          "href": "lessons/0071-policy-drift-and-inventory.html"
+          "href": "lessons/0701-policy-drift-and-inventory.html"
         },
         {
           "title": "The observability stack",
-          "href": "lessons/0072-observability-stack.html"
+          "href": "lessons/0702-observability-stack.html"
         },
         {
           "title": "The telemetry streams",
-          "href": "lessons/0073-the-telemetry-streams.html"
+          "href": "lessons/0703-the-telemetry-streams.html"
         }
       ]
     }
