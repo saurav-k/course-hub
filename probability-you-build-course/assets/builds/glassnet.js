@@ -187,7 +187,9 @@
       const gn = (lp - lm) / (2 * eps), ga = g.gW[l][i];
       const rel = Math.abs(ga - gn) / Math.max(1, Math.abs(ga) + Math.abs(gn));
       worst = Math.max(worst, rel);
-      rows.push('W' + l + '[' + i + '] analytical ' + ga.toFixed(6) + ', numerical ' + gn.toFixed(6));
+      /* Fixed decimals flatten a gradient of 1.4e-6 to "0.000001" for both estimates, so
+         the reader cannot see whether they agree. Significant figures show the agreement. */
+      rows.push('W' + l + '[' + i + ']  ' + ga.toExponential(4) + ' vs ' + gn.toExponential(4));
     }
     return { worst: worst, rows: rows };
   }
@@ -396,7 +398,11 @@
         ctx.fillStyle = P.faint; ctx.textAlign = 'right';
         ctx.fillText('layer ' + (l + 1), c.x + 50, y + bh - 5);
         ctx.textAlign = 'left';
-        ctx.fillText(st.deltas[l].toFixed(3), c.x + 60 + Math.max(1, w), y + bh - 5);
+        /* Three decimals print 0.0007 and 0.0003 identically as "0.000", which is exactly
+           the range where the vanishing story lives. Switch to two significant figures once
+           a bar drops below a thousandth. */
+        const v = st.deltas[l];
+        ctx.fillText(v >= 1e-3 ? v.toFixed(3) : v.toExponential(1), c.x + 60 + Math.max(1, w), y + bh - 5);
       }
     }
     function render(printSafe) {
@@ -455,7 +461,9 @@
     if (ui.split) ui.split.addEventListener('change', reset);
     if (ui.check) ui.check.addEventListener('click', () => {
       const r = checkGradients(st.net, st.train);
-      if (ui.ckout) ui.ckout.textContent = 'max relative error ' + r.worst.toExponential(2) + '  (' + r.rows.join('; ') + ')';
+      if (ui.ckout) ui.ckout.textContent = 'max relative error ' + r.worst.toExponential(2)
+        + (r.worst < 1e-6 ? ' - PASS. ' : ' - FAIL, see the symptom table. ')
+        + 'analytic vs numerical: ' + r.rows.join('; ');
     });
     let hoverPending = false;
     canvas.addEventListener('pointermove', e => {
