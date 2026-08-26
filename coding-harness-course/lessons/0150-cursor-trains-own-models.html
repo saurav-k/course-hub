@@ -1,0 +1,274 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cursor - the harness that trains its own models - Coding Harness Engineering</title>
+<meta name="description" content="Cursor deep dive: one harness, four surfaces, a classifier-gated sandboxed loop, and the only cast member that trains its own models on its own telemetry. Covered from official documentation because it is closed source.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 15</div>
+  <h1>Cursor: the harness that trains its own models</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Closed source - covered entirely from Anysphere's official documentation, changelog, and engineering posts, all fetched August 2026.
+    &middot; <a href="https://cursor.com/docs">cursor.com/docs</a>
+  </p>
+
+  <div class="card">
+    <h2 class="h-label">Explore it yourself</h2>
+    <p><b>No repository exists to open.</b> Cursor is a closed product by <a href="https://anysphere.inc">Anysphere</a>: proprietary license, no public source tree, so there is no pinned commit SHA and no file list. The desktop editor is built on the VS Code codebase (<a href="https://cursor.com/docs/configuration/migrations/vscode">the docs say so directly</a>) and the terminal CLI ships as a standalone binary via an install script - neither is inspectable the way this course's open members are.</p>
+    <p><b>Read these five official pages instead, in this order:</b></p>
+    <ol>
+      <li><a href="https://cursor.com/docs/agent/overview">Agent overview</a> - components, tools, checkpoints, queueing</li>
+      <li><a href="https://cursor.com/docs/rules">Rules</a> - rule types, frontmatter, precedence</li>
+      <li><a href="https://cursor.com/docs/agent/security/run-modes">Run Modes</a> - Auto-review classifier, sandbox platforms, network defaults</li>
+      <li><a href="https://cursor.com/docs/hooks">Hooks reference</a> - the event catalog that doubles as the loop's skeleton</li>
+      <li><a href="https://cursor.com/blog/tab-rl">Tab RL engineering post</a> - the training loop behind the distinctive mechanism</li>
+    </ol>
+    <p><b>Where the community is:</b> the <a href="https://cursor.com/changelog">changelog</a> ships several entries a month, the <a href="https://cursor.com/blog">engineering blog</a> carries the mechanism posts cited below, and users gather on <a href="https://forum.cursor.com">forum.cursor.com</a>.</p>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["What came before&lt;br/&gt;the eleven principles of lesson 0010"] --> T["THIS PAGE&lt;br/&gt;one closed harness read through them"]
+  T --> N["What it enables&lt;br/&gt;comparing any IDE-fork harness against it"]
+  HUB["The deep-dive skeleton&lt;br/&gt;same seven sections every time"] -.- T
+    </div>
+    <figcaption>Where this sits: the first closed member of the deep-dive module, read with documentation instead of source.
+    <b>Watch for principle 10 from lesson 0010 - telemetry closing the loop - because here it stops being a principle and becomes a business model.</b></figcaption>
+  </figure>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Cursor is <b>one harness wearing four surfaces</b> - editor, Agents Window, web/mobile, CLI - all driving the same loop, rules, skills, MCP servers, and hooks.</li>
+      <li>Its trust posture is <b>classify-first</b>: an allowlist runs instantly, sandbox-eligible commands run boxed in, and everything else is judged by a small model before you are bothered.</li>
+      <li>Its sandbox profiles are <b>generated at runtime</b> from your workspace settings and ignore files, not shipped as static policy.</li>
+      <li>The distinctive mechanism: Cursor <b>trains its own models on its own harness telemetry</b>, continuously - the loop closes through weights, which no other cast member can copy.</li>
+    </ul>
+  </div>
+
+  <h2 id="identity">Identity</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Vendor</td><td>Anysphere, Inc.</td></tr>
+      <tr><td>Evidence</td><td>official documentation only - closed source, no commit to pin</td></tr>
+      <tr><td>Shape</td><td>VS Code fork (editor) + Agents Window + web/mobile agents + standalone CLI binary (<code>agent</code>)</td></tr>
+      <tr><td>First release</td><td>March 2023; changelog 0.2.0 records the move from a CodeMirror prototype to "a fork of VSCodium"</td></tr>
+      <tr><td>Scale signal</td><td>Tab serves over 400 million accept-or-reject requests per day</td></tr>
+      <tr><td>Self-claim</td><td>"Cursor is a coding agent for building ambitious software."</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="loop">The loop</h2>
+  <p>The loop's code is closed, but its instrumentation is public and precise: the hooks reference names every stage where user code can attach, and those event names are the authoritative turn skeleton.
+  A prompt passes <code>beforeSubmitPrompt</code>; context is assembled from the eight categories below; one request carries per-model parameters (<code>thinking</code>, <code>effort</code>, <code>context</code>, plus a <code>fast</code> switch); the reply parses into text, thinking blocks, and tool calls.
+  Each call then meets the gate - <code>beforeShellExecution</code>, <code>beforeMCPExecution</code>, or <code>beforeReadFile</code> hooks, plus the active Run Mode - which may allow, ask, deny, or rewrite the input before execution, possibly inside the sandbox.
+  Results append through <code>afterShellExecution</code>, <code>afterMCPExecution</code>, and <code>afterFileEdit</code>, and the cycle repeats until the reply carries no tool calls.
+  Two documented extensions make the stop conditional: a <code>stop</code> hook receives a <code>loop_count</code> and may return a <code>followup_message</code> that auto-continues the agent up to a configurable limit defaulting to five, and steering messages injected mid-task wait for the next tool-call boundary rather than interrupting an action.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as You
+    participant H as Harness
+    participant M as Model gateway
+    participant T as Tools
+    U->>H: prompt - beforeSubmitPrompt hook
+    H->>H: assemble context - rules skills MCP mentions
+    H->>M: request with thinking effort context params
+    M-->>H: text thinking blocks tool calls
+    H->>T: preToolUse gate then dispatch
+    T-->>H: result - shell may have run sandboxed
+    H->>H: afterTool hooks append results
+    alt more tool calls
+        Note over H,M: next iteration begins
+    else no tool calls remain
+        H->>H: stop hook may return a followup message up to five times
+        H-->>U: final answer - checkpoint saved locally
+    end
+    </div>
+    <figcaption>The documented turn cycle, reconstructed from the hook-event catalog rather than source.
+    <b>Closed does not mean opaque: a complete hook surface pins down where every stage begins and ends.</b></figcaption>
+  </figure>
+
+  <h2 id="context">Context assembly</h2>
+  <p>Every chat shares one window, and Cursor's own settings tray divides it into eight named categories: system prompt, tools, rules, skills, MCP, subagents, summarized conversation, and conversation.
+  Rules land at the start; they follow a documented precedence of Team, then Project, then User, with earlier sources winning conflicts.
+  Project rules are <code>.mdc</code> files under <code>.cursor/rules</code> whose frontmatter decides inclusion: <code>alwaysApply</code> attaches unconditionally, <code>globs</code> attach when a matching file appears in context, and a description alone makes the model pull the rule in when relevant.
+  Plain <code>AGENTS.md</code> works at the root and nested directories, deeper files winning - and the CLI additionally reads <code>CLAUDE.md</code>.
+  Skills contribute their description lines up front and load bodies progressively, scoped by path globs.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  W["one shared window per chat"] --> C1["system prompt - tuned per frontier model"]
+  W --> C2["tool definitions"]
+  W --> C3["rules - Team then Project then User - AGENTS.md nested"]
+  W --> C4["skill descriptions - scoped by path globs"]
+  W --> C5["MCP instructions and tool catalog"]
+  W --> C6["subagent documentation"]
+  W --> C7["mentions - files folders diffs terminals browser"]
+  W --> C8["conversation and summarized conversation"]
+  S["retrieval underneath"] -.-> C7
+  S1["semantic search - embeddings of encrypted chunks"] --- S
+  S2["Instant Grep - local trigram index replacing ripgrep"] --- S
+  S3["Explore subagent - searches in its own window"] --- S
+    </div>
+    <figcaption>The eight documented categories in fill order, with the three retrieval mechanisms that feed the mention slot.
+    <b>Retrieval is two-layered by design - fuzzy meaning on the server over encrypted chunks, exact matching locally over a trigram index built because ripgrep scans took fifteen seconds on enterprise monorepos.</b></figcaption>
+  </figure>
+  <p>Near the limit, older turns compress into a summary automatically or on demand via <code>/summarize</code>; per-model parameters such as <code>claude-opus-5[context=300k]</code> raise ceilings.
+  This is principle 3 from <a href="0010-agentic-system-design.html">lesson 0010</a> with the dial unpublished - Cursor shows a fullness ring, never a number.</p>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>Since version 3.6 the recommended default is <strong>Auto-review</strong>, the classify-first posture: allowlisted calls run immediately; commands that fit the sandbox's file and network limits run inside it; everything else goes to a classifier running Claude 4.5 Haiku or GPT-5.4 Mini, which may allow the call, tell the agent to try another approach, or escalate to you.
+  Two config files steer the gate without asking each time: <code>permissions.json</code> holds allowlist patterns for MCP tools and terminal command prefixes plus free-text <code>autoRun</code> guidance, and team-admin dashboard settings override both.
+  Cursor states plainly that none of this is a security boundary - the boundary work lives one layer down.</p>
+  <p>The sandbox is generated at runtime, not shipped: on macOS a Seatbelt profile compiled from workspace settings, admin settings, and <code>.cursorignore</code>; on Linux Landlock plus seccomp mapping the workspace into an overlay where ignored files become unreadable stubs; on Windows the Linux sandbox inside WSL2.
+  Network is deny-by-default with a package-manager allowlist, RFC 1918 and cloud-metadata addresses are always blocked against SSRF, and protected paths like <code>.git/config</code> and <code>.git/hooks</code> are never writable even by configuration.
+  Escape hatches exist and are honest about it: an <code>insecure_none</code> sandbox type, network Allow All, and a Run Everything mode.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  CALL["a shell or MCP call arrives"] --> ALLOW["on your allowlist - runs now"]
+  CALL -->   FITS{"fits sandbox&lt;br/&gt;file and net limits"}
+  FITS -- yes --> SBX["run sandboxed silently"]
+  FITS -- no --> CLS["classifier judges it"]
+  CLS -- fine --> SBX
+  CLS -- risky --> REDIRECT["agent told to try another approach"]
+  CLS -- unclear --> YOU["escalated to you"]
+    </div>
+    <figcaption>Auto-review's decision shape: deterministic where possible, sandboxed where eligible, classified where uncertain.
+    <b>A plain-language autoRun instruction steers the classifier - governance you write in English, enforced by a small model, backed by an OS box.</b></figcaption>
+  </figure>
+
+  <h2 id="extensions">Extension surface</h2>
+  <table>
+    <thead><tr><th>Mechanism</th><th>Form</th><th>What makes it Cursor's</th></tr></thead>
+    <tbody>
+      <tr><td>MCP</td><td>config schema (<code>mcp.json</code>)</td><td>stdio, SSE, and Streamable HTTP; OAuth with static credentials; team marketplace distribution</td></tr>
+      <tr><td>Skills</td><td>file convention (<code>SKILL.md</code>)</td><td>reads <code>.agents/skills/</code>, <code>.cursor/skills/</code>, plus compatibility dirs <code>.claude/skills/</code> and <code>.codex/skills/</code>; around eighteen built-ins</td></tr>
+      <tr><td>Subagents</td><td>markdown + YAML frontmatter in <code>.cursor/agents/</code></td><td>frontmatter picks model with inline effort and context overrides, readonly flag, background flag; nesting capped at two levels</td></tr>
+      <tr><td>Hooks</td><td>config schema (<code>hooks.json</code>)</td><td>about twenty events across agent, Tab, and app surfaces; JSON over stdio; exit code 2 blocks unless fail-closed is off; also reads Claude Code hooks</td></tr>
+      <tr><td>Plugins</td><td>marketplace bundles</td><td>Agent Plugins standard packages rules, skills, agents, MCP servers, and hooks as git repos</td></tr>
+      <tr><td>Custom modes</td><td>derived from skills</td><td>a keystroke pins any skill as a session-long mode</td></tr>
+      <tr><td>Programmatic</td><td>runtime APIs</td><td>TypeScript and Python SDKs drive agents including Router as a model id; the CLI speaks ACP for custom clients</td></tr>
+    </tbody>
+  </table>
+  <p>The compatibility directories are the tell: Cursor treats other harnesses' conventions as import formats, which is protocol adoption - principle 7 - doing sales work (<a href="0010-agentic-system-design.html">lesson 0010</a>).</p>
+
+  <h2 id="models">Model behavior</h2>
+  <p>One gateway fronts Anthropic, OpenAI, Google, xAI-partner, Moonshot, and Z.ai models alongside first-party ones, and the abstraction is deliberately uniform: every model takes the same parameter triple plus the fast switch, and Cursor states it tunes instructions and tools specifically for each frontier model rather than exposing provider differences to users.
+  The differences still leak where money and behavior meet: cache-write billing exists for some families and not others, reasoning-effort variants appear as separate model ids, and long-context surcharges differ per row of the pricing table.
+  The affinity, though, is structural.
+  Composer, the first-party model, is tuned for tool use, file edits, and terminal operations inside Cursor; its Shell tool descriptions were rewritten by hand to explain sandbox constraints until agents recovered gracefully, measured on an internal benchmark; and on legacy plans subagents run on Composer regardless of any model configuration.
+  A harness that owns its models can bind them to itself - the rest of the cast can only describe their tools better.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p>Every harness routes prompts to models.
+  Cursor is the only member of the cast that closes the loop in both directions between the harness and the weights.
+  Downward: Composer's reinforcement learning used targeted textual feedback that re-inserts the harness's real tool list at the offending step of a failed rollout - the model studies this harness's tool surface as training signal.
+  Upward: Tab runs on hundreds of millions of human accept-or-reject decisions a day, feeding online RL whose reward is shaped around a 25 percent accept-probability threshold, with new checkpoints rolled out many times a day - a release cadence quarterly-trained competitors structurally cannot match.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  T["accept-reject telemetry&lt;br/&gt;400M+ decisions a day"] --> R["reward around&lt;br/&gt;a 25 percent accept bar"]
+  R --> W["checkpoints roll out&lt;br/&gt;many times a day"]
+  W --> H["harness changes feed back&lt;br/&gt;sandbox-aware tool descriptions"]
+  H --> E["Composer trained on&lt;br/&gt;this harness's real tool lists"]
+  E --> T
+    </div>
+    <figcaption>The flywheel: production use trains the next checkpoint, the harness change feeds the next training run, and both directions close through weights.
+    <b>This is principle 10 from lesson 0010 carried to its endpoint - and the reason the affinity section reads differently for Cursor than for any harness that rents its models.</b></figcaption>
+  </figure>
+
+  <p>An honest caveat belongs here, because each ingredient exists elsewhere.
+  Kernel sandboxes are Codex CLI's home turf, LLM permission classifiers are Claude Code's, next-edit prediction descends from Copilot's lineage, with Supermaven acquired along the way.
+  The novel thing is ownership: one vendor operating the harness, the telemetry, the training stack, and the weights as a single system on a daily cadence.
+  That integration - not any single part - is what a competitor cannot fork.</p>
+
+  <div class="callout warn">
+    Everything on this page rests on official documentation, not source. Function names do not exist publicly; the loop is reconstructed from the hook-event catalog; the byte-level ordering of the context window and the failed-edit retry path are not publicly documented and are marked as such wherever they matter. Treat undocumented corners as unknown, not as absent.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">You type a shell command-shaped request. It is not on your allowlist and exceeds the sandbox limits. Under default Auto-review, who decides next?</div>
+      <button class="q-opt">The Run Everything fallback executes it and logs the decision afterward</button>
+      <button class="q-opt">The stop hook counts the attempt and continues within the loop limit</button>
+      <button class="q-opt">The trigram index checks whether the command touches indexed files first</button>
+      <button class="q-opt">A small classifier model judges it and may allow, redirect, or escalate to you</button>
+      <div class="q-fb">That escalation chain is exactly Auto-review's middle case: too big for the box, so a Haiku-class model adjudicates before your evening is interrupted. Option one describes an opt-in mode, not the default path. Option two belongs to loop termination, which never gates execution. Option four confuses retrieval infrastructure with the trust gate.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What makes Cursor's model affinity structurally different from a harness that writes excellent per-family prompts?</div>
+      <button class="q-opt">It trains its own models on real tool lists and accept-reject telemetry</button>
+      <button class="q-opt">It hides provider differences by sending identical request bodies to every provider</button>
+      <button class="q-opt">It locks subagents to first-party models on all plan types for cost reasons</button>
+      <button class="q-opt">It standardizes thinking, effort, and context parameters across the whole catalog</button>
+      <div class="q-fb">Prompts describe tools; training reshapes the model around them - the RL rollouts literally re-insert Cursor's tool lists, and Tab's accept signal shapes daily checkpoints. Option two is backwards: tuning happens per family precisely because requests are not identical. Option three misstates the plan detail and mistakes a pricing fact for the mechanism. Option four describes the uniform abstraction every provider-facing harness builds.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with Cursor installed</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Recover the loop's skeleton behaviorally, the way this page had to.
+      In one session: submit a task that needs one shell command and watch which approvals fire; add a <code>beforeShellExecution</code> hook that logs its input and exit; run a long task until the summary notice appears; then press rewind and confirm the checkpoint restores files that git status shows as untracked.</p>
+      <p><b>Find</b>: for each of the four observations, the corresponding stage on the sequence diagram above, and one thing the observation told you that the docs did not.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The hook log gives you timestamps: gaps between entries are model time, bursts are tool time.
+      For the checkpoint check, pick a fresh directory without <code>git init</code> - if restore still works, checkpoints live outside git, as documented.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Approval observation maps to the gate stage.</b> Which calls prompted and which ran silently tells you your effective allowlist, whether or not you ever opened permissions.json.</li>
+        <li><b>The hook log maps to beforeShellExecution.</b> Its payload confirms the documented input schema and - the doc-free bonus - shows the sandbox flag value attached to the call.</li>
+        <li><b>The summary notice maps to summarized conversation.</b> Comparing the ring before and after estimates the reclaim without any published threshold number.</li>
+        <li><b>Rewind in a non-git directory maps to checkpoints stored separately from git.</b> Restore working there proves the storage claim behaviorally.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Four observations should land on four different diagram stages; two landing on the same stage usually means one observation was really measuring the other.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the flywheel did not land, ask it to contrast this page with the Codex CLI deep dive on one axis only - who owns the weights - and to explain why Codex cannot retrain gpt on Codex telemetry. If trust posture feels fuzzy, ask it to walk your last ten Cursor approvals through the flowchart above.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The engineering post behind the distinctive mechanism: <a href="https://cursor.com/blog/tab-rl">Tab's online RL</a>, paired with <a href="https://cursor.com/blog/composer-2-5">Composer 2.5's training notes</a>. Read them after this page and note how much of the loop section above those two posts assume rather than explain.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 15 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

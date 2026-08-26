@@ -13,6 +13,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "What a coding harness is - the seven layers",
           "href": "lessons/0000-what-is-a-coding-harness.html"
+        },
+        {
+          "title": "Eleven principles behind every harness",
+          "href": "lessons/0010-agentic-system-design.html"
         }
       ]
     },
@@ -57,6 +61,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "OpenAI Codex CLI - enforce first, ask second",
           "href": "lessons/0140-codex-cli.html"
+        },
+        {
+          "title": "Cursor - the harness that trains its own models",
+          "href": "lessons/0150-cursor-trains-own-models.html"
         },
         {
           "title": "Windsurf - the human trajectory as context",
