@@ -281,7 +281,7 @@ The author writes only the frame, and the figcaption is theirs to word:
 <figure class="cmatrix" id="capability-matrix">
   <figcaption>The capability matrix: one row per capability, one column per cloud.
   Filter by area, search by service name, and follow any cell to that vendor's own documentation.
-  <b>A dashed cell means nobody has written it yet; a gold cell means the cloud genuinely has no equivalent; a green cell means it has the capability inside a service listed on another row.</b></figcaption>
+  <b>A cell marked NO EQUIVALENT means the cloud genuinely ships nothing for that capability. A cell marked DELIVERED ELSEWHERE means it has the capability inside a service this table lists on another row, and links you there.</b></figcaption>
 </figure>
 ```
 
@@ -291,6 +291,11 @@ The page also loads the data file in the head, before `hub.js`, exactly as
 ```html
 <script src="matrix.js"></script>
 ```
+
+Word the figcaption by the tag a cell wears, not by its colour. The page prints,
+and the print block flattens both `--gold` and `--ok` to the same grey, so a
+caption that says "the gold cell" describes nothing on paper and nothing to a
+reader who cannot separate the two hues.
 
 `hub.js` finds every `figure.cmatrix` and builds the legend, the area filter,
 the search box, the sticky column headers and the rows from

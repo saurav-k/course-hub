@@ -1112,7 +1112,11 @@
           td.appendChild(el('span', 'cmx-elsewhere-tag', 'Delivered elsewhere'));
           if (cellData.reason) td.appendChild(el('span', 'cmx-reason', cellData.reason));
           if (cellData.see && rowTitle[cellData.see]) td.appendChild(crossLink(cellData.see));
-          haystack += ' delivered elsewhere';
+          // This is the one reason text worth indexing. A cross-reference names
+          // the service that DOES answer the capability, which is what the
+          // search box is for; an absence names what does not, and indexing
+          // that would answer a service search with the rows lacking it.
+          haystack += ' delivered elsewhere ' + (cellData.reason || '').toLowerCase();
         } else if (cellData.state === 'service' && Array.isArray(cellData.services)) {
           td.classList.add('cmx-service');
           cellData.services.forEach(function (s) {
