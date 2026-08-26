@@ -93,6 +93,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0120-aider.html"
         },
         {
+          "title": "Claude Code - the loop that reviews itself",
+          "href": "lessons/0130-claude-code.html"
+        },
+        {
           "title": "OpenAI Codex CLI - enforce first, ask second",
           "href": "lessons/0140-codex-cli.html"
         },

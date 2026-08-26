@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Code - the loop that reviews itself - Coding Harness Engineering</title>
+<meta name="description" content="Deep dive: how Anthropic's closed-source harness runs one engine behind every host, assembles context before your first keystroke, and replaces human approval with a second model judging every action against a published security policy.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 13</div>
+  <h1>Claude Code: the loop that reviews itself</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Closed source - covered entirely from Anthropic's official documentation, fetched August 2026, plus its documented <code>claude auto-mode defaults</code> export run locally.
+    &middot; <a href="https://code.claude.com/docs/en/overview">code.claude.com/docs</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <p><b>No repository exists to open.</b> Claude Code is closed by <a href="https://www.anthropic.com">Anthropic</a>: proprietary license, one native binary bundling its own runtime. Its GitHub repo (<a href="https://github.com/anthropics/claude-code">anthropics/claude-code</a>) hosts issues and the changelog only - no source tree, so no SHA or file list.</p>
+    <p><b>Five official pages, in reading order:</b></p>
+    <ol>
+      <li><a href="https://code.claude.com/docs/en/how-claude-code-works">How Claude Code works</a> - loop, sessions, checkpoints</li>
+      <li><a href="https://code.claude.com/docs/en/permission-modes">Choose a permission mode</a> - six modes, classifier policy</li>
+      <li><a href="https://code.claude.com/docs/en/permissions">Configure permissions</a> - rule syntax, precedence, hooks</li>
+      <li><a href="https://code.claude.com/docs/en/context-window">Explore the context window</a> - startup stack, compaction</li>
+      <li><a href="https://code.claude.com/docs/en/tools-reference">Tools reference</a> - full tool table, exact Edit semantics</li>
+    </ol>
+    <p><b>Where the community is:</b> design arguments live in the repo's issues; the docs tree is indexable via <a href="https://code.claude.com/docs/llms.txt">llms.txt</a>.</p>
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Claude Code is <b>one engine wearing every host</b> - terminal, IDE extensions, desktop, web, and the Agent SDK all drive the same loop.</li>
+      <li>The loop stops when the model stops calling tools - <b>no turn cap by default</b>; <code>maxTurns</code> and <code>maxBudgetUsd</code> are opt-in.</li>
+      <li>Context is <b>assembled before you speak</b>: about 7,850 startup tokens, <code>CLAUDE.md</code> arriving as a user message, not system prompt.</li>
+      <li>Its trust posture is <b>classify-first</b>: a second model judges each action against a maintained policy instead of asking you.</li>
+      <li>Distinctive mechanism: the classifier-gated loop - <b>default starting mode</b> on Pro, Max, and Team since v2.1.228.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["What came before&lt;br/&gt;lesson 0050 named classify-first&lt;br/&gt;among four postures"] --> T["THIS PAGE&lt;br/&gt;the whole machine&lt;br/&gt;behind that posture"]
+  T --> N["What it enables&lt;br/&gt;judging a trust design&lt;br/&gt;with no source to read"]
+  HUB["Lessons 0010 principles 2 3 5 6&lt;br/&gt;and the deep-dive skeleton"] -.- T
+    </div>
+    <figcaption>Where this sits: lessons 0010 and 0050 already used this harness as the second answer for context assembly, governed windows, trust outside the model, and hooks-as-policy. This page walks the machine that made those answers true.
+    <b>If you retain one sentence: Claude Code replaced the human at the permission prompt with a second model call against a written, inspectable policy.</b></figcaption>
+  </figure>
+
+  <h2 id="process">Identity, and one process behind every host</h2>
+  <p>Anthropic's docs name their own product an <i>agentic harness</i>: "the tools, context management, and execution environment that turn a language model into a capable coding agent" (<a href="https://code.claude.com/docs/en/how-claude-code-works">How Claude Code works</a>). First public release was the research preview of February 2025; today it ships as one native executable carrying the terminal UI, the agent loop, the tool executors, the MCP client, the hook runner, the permission engine, and the transcript writer. Because the binary is closed, those boundaries are read from documented behavior rather than file names - a limit worth holding onto for the whole page.</p>
+  <p>The same engine serves every surface. The VS Code and JetBrains extensions, the desktop app, claude.ai, Slack, and CI pipelines all drive the identical loop; the Agent SDK literally spawns the Claude Code binary as a subprocess. Around that one process live three kinds of neighbors: each shell command runs as its own child process, stdio MCP servers are long-lived children, and subagents run inside the same process but in their own context windows (<a href="https://code.claude.com/docs/en/sub-agents">sub-agents docs</a>).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  HOSTS["hosts - terminal IDE desktop web SDK"] --> ENG["one native binary - the engine&lt;br/&gt;loop - tools - MCP client - hooks - permissions"]
+  ENG -->|"each shell call"| PROC["child processes"]
+  ENG -->|"stdio servers"| MCPS["long-lived MCP children"]
+  ENG -->|"http sse ws"| NET["network MCP servers"]
+  ENG --> SUB["Agent tool - subagent loop&lt;br/&gt;own context window same process"]
+  ENG -->|"system prompt history tool defs"| API["Claude API over SSE"]
+    </div>
+    <figcaption>The component seams as the documentation describes them: hosts are thin clients, the engine is one process, and everything external is a child process or a protocol connection.
+    <b>Because every host drives the same engine, a feature like auto mode lands everywhere at once - there is one permission gate to change.</b></figcaption>
+  </figure>
+
+  <h2 id="loop">The loop: gather, act, verify, review</h2>
+  <p>The docs describe the cycle as three phases - gather context, take action, verify results - blended and repeated. The Agent SDK reference gives the precise turn vocabulary, and it runs the same loop: the session opens with a <code>SystemMessage</code> of subtype <code>init</code>, the model replies with text, one or more <code>tool_use</code> blocks, or both, the harness executes each requested tool, results return inside a <code>UserMessage</code> as <code>tool_result</code> content, and the round repeats until a response carries no tool calls (<a href="https://code.claude.com/docs/en/agent-sdk/agent-loop">Agent SDK loop</a>). Read-only tools may run concurrently; state-mutating ones run sequentially. When the turn ends, a <code>ResultMessage</code> carries the final text, cost, usage, session id, and a stop reason.</p>
+  <p>The stop condition is principle 1 from <a href="0010-agentic-system-design.html#p-loop">lesson 0010</a>, and here it is deliberately loose: no turn cap exists by default. <code>maxTurns</code> counts tool-use turns only, and <code>maxBudgetUsd</code> covers subagent spend too - both opt-in. You stay in the loop as the interrupt path: Esc cancels the running tool, and a typed correction joins between actions.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as You
+    participant L as Loop
+    participant G as Gate
+    participant C as Classifier
+    participant T as Tools
+    U->>L: prompt
+    L->>L: assemble context - request model
+    L->>G: each tool_use in the reply
+    alt deny rule matches
+        G-->>L: rejection travels back as tool_result
+    else PreToolUse hook exits 2
+        G-->>L: blocked before any rule runs
+    else auto mode - action is risky
+        G->>C: action plus policy context
+        C-->>G: allow or block verdict
+    else allowed by rule or mode
+        G->>T: dispatch
+        T-->>G: output plus exit code
+    end
+    G->>L: PostToolUse hook may inject context
+    L->>L: append results - repeat while tool calls remain
+    </div>
+    <figcaption>One turn through the gate. The alt branches are alternatives for one tool call, not stages: rules decide some calls, hooks others, and in auto mode the classifier decides instead of you.
+    <b>A denial is not an error - it is information delivered back to the model through the same channel as any other result.</b></figcaption>
+  </figure>
+
+  <h2 id="context">Context: the bill before your keystroke</h2>
+  <p><a href="0030-context-engineering.html#startup">Lesson 0030</a> charted the startup stack from Claude Code's own published simulation: system prompt near 4,200 tokens, auto memory index, environment info, deferred MCP tool names, skill descriptions, and your global plus project <code>CLAUDE.md</code>. Two structural facts matter more than the totals. Memory files are <b>not</b> part of the system prompt - the docs state plainly that CLAUDE.md content is delivered as a user message after it. And precedence is concatenation, not override: managed policy loads first, then user settings, then ancestor directories root-down, then the project file (<a href="https://code.claude.com/docs/en/memory">memory docs</a>). Loading is lazy where it can be: subdirectory CLAUDE.md files and path-scoped <code>.claude/rules/*.md</code> load when Claude reads a matching file, and MCP tool schemas stay deferred until <code>ToolSearch</code> fetches one - only names occupy the window before that.</p>
+  <p>The governor - principle 3 - fires when the window fills: clear older tool outputs first, then summarize. Compaction is not just shrinking. The conversation collapses into a structured summary keeping roughly 12 percent of the summarized tokens, and then the harness deterministically rebuilds a working set: it re-reads up to five recently modified files plus the rules matching them, and re-injects the body of every skill invoked this session, capped at 5,000 tokens each (<a href="https://code.claude.com/docs/en/context-window">context-window docs</a>). The skill <i>listing</i> does not come back.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two stacked horizontal bars comparing context composition before and after compaction, derived from the documentation's illustrative session: before holds a 7,850 token startup stack plus 14,375 tokens of verbatim conversation, after holds a 7,400 token startup stack, a 1,725 token summary, and about 8,190 tokens of reloaded files, rules, and invoked skills.">
+      <line class="axis" x1="150" y1="30" x2="150" y2="250"/>
+      <rect class="m-stat"   x="151" y="55"  width="155" height="38"/>
+      <rect class="m-noise"  x="306" y="55"  width="285" height="38"/>
+      <text class="lbl-sm" x="140" y="77" text-anchor="end">before /compact</text>
+      <text class="lbl-sm" x="228" y="47"  text-anchor="middle">startup 7,850</text>
+      <text class="lbl-sm" x="448" y="47"  text-anchor="middle">verbatim conversation 14,375</text>
+      <rect class="m-stat"   x="151" y="165" width="146" height="38"/>
+      <rect class="m-gold"   x="297" y="165" width="34"  height="38"/>
+      <rect class="m-signal" x="331" y="165" width="162" height="38"/>
+      <text class="lbl-sm" x="140" y="187" text-anchor="end">after /compact</text>
+      <text class="lbl-sm" x="224" y="157" text-anchor="middle">startup 7,400</text>
+      <text class="lbl-sm" x="314" y="220" text-anchor="middle">summary 1,725</text>
+      <text class="lbl-sm" x="412" y="157" text-anchor="middle">files rules skills reloaded 8,190</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>startup stack</span><span><i class="sw-noise"></i>history verbatim</span><span><i class="sw-gold"></i>structured summary</span><span><i class="sw-signal"></i>deterministically reloaded</span></div>
+    <figcaption>Compaction replaces history, then rebuilds a working set. Arithmetic from the docs' own illustrative session: 21 events sum to <span class="keynum">14,375</span> conversation tokens, whose 12 percent summary is 1,725, and the reloaded five files, matching rules, and one invoked skill sum to 8,190. Startup drops by the 450-token skill listing that does not survive.
+    <b>The summary is the smallest bar - most of the recovered context is re-read from disk by deterministic code, not remembered by the model.</b></figcaption>
+  </figure>
+
+  <h2 id="trust">Trust: classify-first, promoted to default</h2>
+  <p><a href="0050-permission-postures.html#classify-first">Lesson 0050</a> placed this harness at the classify-first posture; the mechanism pages behind that placement stack three layers. Permission modes set the baseline (<a href="https://code.claude.com/docs/en/permission-modes">permission modes</a>):</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th>What runs without asking</th></tr></thead>
+    <tbody>
+      <tr><td><code>default</code> (Manual)</td><td>reads only</td></tr>
+      <tr><td><code>acceptEdits</code></td><td>reads, edits, common filesystem commands in scope</td></tr>
+      <tr><td><code>plan</code></td><td>read-only research until you approve a plan</td></tr>
+      <tr><td><code>auto</code></td><td>everything, after the classifier judges each action</td></tr>
+      <tr><td><code>dontAsk</code></td><td>pre-approved tools only, rest denied silently</td></tr>
+      <tr><td><code>bypassPermissions</code></td><td>everything except what even bypass cannot approve</td></tr>
+    </tbody>
+  </table>
+
+  <p>Rules override per-tool on top of any mode, evaluated deny first, then ask, then allow - first match wins, and specificity never changes the order. Two details repay attention. A bare-name deny such as <code>Bash</code> removes the tool from the model's context entirely, so a forbidden capability costs zero tokens and zero prompts. And an approval you grant interactively becomes law: choosing "yes, and don't ask again" writes a rule into <code>.claude/settings.local.json</code>, resolved through worktrees so it applies across the repository (<a href="https://code.claude.com/docs/en/permissions">permissions docs</a>). Deny rules block in every mode including bypass; beneath them, an optional OS sandbox bounds what an approved action can reach - Seatbelt on macOS, bubblewrap plus a network proxy elsewhere (<a href="https://code.claude.com/docs/en/sandboxing">sandboxing docs</a>).</p>
+
+  <h2 id="extensions">Extensions: conventions and schemas, not plugins</h2>
+  <p>Every growable surface from <a href="0080-customization-primitives.html#four-questions">lesson 0080</a> is present, and nearly all of them are file conventions or config schema rather than runtime API. Skills are <code>SKILL.md</code> files with YAML frontmatter, loaded progressively - one-line descriptions at startup, full bodies on invoke - following the open standard this project originated and donated. Subagents are markdown files under <code>.claude/agents/</code> whose frontmatter selects tools, model, permission mode, even persistent memory. Hooks are a config key carrying around thirty lifecycle events, from <code>PreToolUse</code> through <code>PreCompact</code> to <code>Stop</code>, with handler types spanning shell commands, HTTP posts, MCP calls, LLM-judged prompts, and tool-using subagents; a blocking hook outranks an allow rule. MCP connects external tools over four transports, with project-scoped servers declared in <code>.mcp.json</code> and exposed as <code>mcp__server__tool</code>. Plugins bundle all of the above into one installable package, and custom slash commands are skills in disguise (<a href="https://code.claude.com/docs/en/skills">skills</a>, <a href="https://code.claude.com/docs/en/hooks">hooks</a>, <a href="https://code.claude.com/docs/en/mcp">MCP docs</a>).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+mindmap
+  root((extension surface))
+    Skills
+      SKILL.md frontmatter convention
+      progressive disclosure
+      scopes enterprise to project
+    Subagents
+      markdown files in .claude/agents
+      Explore and Plan built in
+      isolation worktree option
+    Hooks
+      about thirty lifecycle events
+      PreToolUse can deny any call
+      five handler types
+    MCP
+      stdio http sse ws transports
+      .mcp.json project scope
+      tool search defers schemas
+    Plugins
+      plugin.json bundles the rest
+    Slash commands
+      custom ones are skills
+    </div>
+    <figcaption>Everything growable, one view: protocol adoption (MCP), file conventions (skills, subagents, plugins), and runtime interception (hooks) coexist without a shared plugin API.
+    <b>This breadth is why the closed binary matters less than it seems - most of what you would want to change is defined outside it, in files you own.</b></figcaption>
+  </figure>
+
+  <h2 id="models">Models: co-evolved with its own family</h2>
+  <p>Native targets are the Claude families, addressed through aliases - <code>sonnet</code>, <code>opus</code>, <code>haiku</code>, <code>fable</code>, and <code>opusplan</code>, which plans with Opus and executes with Sonnet. Third-party providers are first-class: Amazon Bedrock, Google Cloud's Agent Platform, Microsoft Foundry, and any gateway speaking the Anthropic dialect via <code>ANTHROPIC_BASE_URL</code>, with aliases resolving per provider (<a href="https://code.claude.com/docs/en/model-config">model configuration</a>). This is <a href="0100-model-affinity.html#co-design">co-design</a> as a lived practice: features are keyed to model generations, not to the harness uniformly. Auto mode requires recent families and degrades to Manual on older ones, with different floors per provider. The Write-before-Read constraint relaxed only on newer models. Task-tracking tools are withheld on some models unless opted in. Each model carries its own prompt cache, so switching models pays a full uncached re-read of the stable prefix. The system-prompt text itself, and any per-model prompt differences, are unpublished - the docs describe behavior, not wording.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <div class="card callout key"><span class="tag">Why this one exists</span>
+  The classifier-gated autonomous loop. Where Codex CLI enforces first and asks second - the OS sandbox fails closed, then your approval amends its policy - Claude Code judges first: in auto mode, a second Claude model call reviews each action before execution, against a maintained security policy you can print. Run <code>claude auto-mode defaults</code> and the harness hands you the whole thing as JSON: seventeen named allow exceptions, sixty-seven named soft-denies, one hard deny called Data Exfiltration, and twenty environment entries defining your trusted infrastructure. The rule names are the design readable aloud - Code from External, Production Deploy, Git Destructive, Blind Apply, Merge Without Review, Self-Modification, Tmux Self Drive, Instruction Poisoning. This is not a heuristic filter bolted onto a prompt; it sits inside the loop between response parse and dispatch, caches verdicts per host and port, reviews inter-agent messages too, integrates with plan mode and the sandbox proxy, and became the default starting mode on Pro, Max, and Team plans in v2.1.228. No other member of this cast ships an LLM reviewer with a published, evolving, exportable policy as a first-class permission mode.</div>
+
+  <p>The honest costs sit in the same documents. Trust still lives outside the worker model's discretion - principle 5 holds - but it moved into another model, one Anthropic also controls, so the posture is available to Anthropic in a way competitors cannot copy wholesale. A misjudgment is silent by nature: the invisible error is classify-first's named failure mode. And the escape hatches are explicit: explicit ask rules always force a prompt, administrators kill it with <code>disableAutoMode</code>, and the docs themselves say to pair it with a sandbox for defense in depth.</p>
+
+  <div class="callout warn">
+    Everything on this page comes from official documentation and the policy export, not from source. The classifier's internal prompt, how verdicts are computed, and any per-model system-prompt differences are not publicly documented - where the docs describe behavior, this page says what they say, and no further.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">In auto mode, the classifier approves a request to a new network host. Minutes later the same session repeats the identical request, and no new content has entered the conversation. What happens?</div>
+      <button class="q-opt">The action is classified again by a fresh model call</button>
+      <button class="q-opt">You are prompted, because network access always asks</button>
+      <button class="q-opt">The cached allow verdict is reused without another call</button>
+      <button class="q-opt">It is denied, because caches only ever store denials</button>
+      <div class="q-fb">Verdicts cache per host and port: an allow is reused until new content enters the conversation, and a deny reached by evaluation lasts for the turn. Changing your permission mode or rules drops every cached verdict. The first option wastes the cache, the second confuses Manual-mode behavior with auto mode, and the third invents a one-sided cache the docs do not describe.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Managed settings deny <code>Bash(git push *)</code>. A session runs in bypassPermissions inside a container, and Claude tries <code>git push origin main</code>. What does the gate do?</div>
+      <button class="q-opt">Runs it, since bypass skips every rule and prompt</button>
+      <button class="q-opt">Runs it, since managed rules do not reach containers</button>
+      <button class="q-opt">Asks once, then saves an approval for the session</button>
+      <button class="q-opt">Blocks it, since deny rules apply in every mode</button>
+      <div class="q-fb">Deny-first precedence survives every mode including bypass - that is what makes managed deny rules an organizational guarantee. Bypass skips prompts and allow rules, not denies. Had the rule been a bare-name deny, the tool would have been removed from Claude's context entirely, and no approval path exists for that form.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Run <code>claude auto-mode defaults</code> and read the JSON it prints. Then, without looking back at this page: name the top-level keys, count the rules in each, and find which named rule would judge each of these three actions - piping a script from the internet into a shell, a force push, and Claude typing keystrokes into its own terminal pane.</p>
+      <p><b>Find</b>: the key names, the three counts, and the three rule names - then classify the policy overall using the four postures from lesson 0050.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The export separates absolute blocks from rules with a consent path - the two list types map onto hard versus soft denial, and the third list holds named exceptions to the blocks.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Name the keys.</b> <code>allow</code>, <code>soft_deny</code>, <code>hard_deny</code>, and <code>environment</code>, the last defining trusted infrastructure the other three refer to.</li>
+        <li><b>Count them.</b> At the version current while this page was written: 17 allow exceptions, 67 soft denies, 1 hard deny, 20 environment entries. Your counts may differ - the policy evolves release by release, which is the point of maintaining it.</li>
+        <li><b>Match the actions.</b> Piping remote script into shell is judged by <i>Code from External</i>; a force push by <i>Git Destructive</i>; driving its own pane by <i>Tmux Self Drive</i>.</li>
+        <li><b>Classify the posture.</b> Classify-first, with ask rules and the OS sandbox layered beneath - and note that printing the policy is itself unusual: most classifiers expose no rule text at all.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exact counts will drift with versions, but the four-key shape and the presence of named, sentence-length rules should not - if your export has unnamed one-line rules, you are likely looking at different tooling altogether.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the trust section did not land, ask it to walk one concrete command - a production deploy attempt, say - through deny rules, hooks, the classifier, and the sandbox in order, naming which layer could stop it first. If the compaction chart felt abstract, ask it to redo the arithmetic with your own session's <code>/context</code> output.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The permission-modes page is the richest single artifact behind this harness's signature decision - six modes, the classifier requirements, and both default rule lists: <a href="https://code.claude.com/docs/en/permission-modes">Choose a permission mode</a>. Read it after this page and count how many of its sections are layers you can now name.</p>
+
+  <div class="pager">
+    <a href="0050-permission-postures.html"><span class="dir">&larr; Previous</span><span class="ttl">Permission postures</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 13 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
