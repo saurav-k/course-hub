@@ -94,7 +94,8 @@
       return {
         bg: tok('--surface'), ink: tok('--ink'), inkSoft: tok('--ink-soft'),
         faint: tok('--ink-faint'), line: tok('--line'), surface: tok('--surface'),
-        surface2: tok('--surface-2'), alarm: tok('--alarm'), prob: tok('--prob')
+        surface2: tok('--surface-2'), alarm: tok('--alarm'), prob: tok('--prob'),
+        signal: tok('--signal')
       };
     }
 
