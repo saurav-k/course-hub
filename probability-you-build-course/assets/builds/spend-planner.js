@@ -752,9 +752,12 @@
         ctx.textAlign = 'center';
         ctx.fillText(g.label, x0, H - 8);
         ctx.fillStyle = c.accent;
-        ctx.fillText('analytic ' + fmt(g.prom), x0 - bw / 2 - 3, base - g.prom * (base - padT) - 6);
+        ctx.textAlign = 'left';
+        ctx.fillText('analytic ' + fmt(g.prom), x0 - bw - 3, base - g.prom * (base - padT) - 6);
         ctx.fillStyle = c.accent2;
-        ctx.fillText('simulated ' + fmt(g.simv), x0 + bw / 2 + 3, base - g.simv * (base - padT) - 6);
+        ctx.textAlign = 'right';
+        ctx.fillText('simulated ' + fmt(g.simv), x0 + bw + 3, base - g.simv * (base - padT) - 6);
+        ctx.textAlign = 'center';
       });
     }
 
