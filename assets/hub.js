@@ -922,7 +922,20 @@
        unfilled - nobody has written it yet; dashed and quiet
        absent   - a declared finding, with a reason; marked and loud
        service  - one or more services, each linking vendor documentation
+
+     A service that is not generally available carries a badge saying so. That
+     is what tells a reader which of two services in one cell a new design
+     should pick, because the pair is normally a current service beside the
+     legacy one it replaces.
      ============================================================ */
+  // What a non-GA badge means, spelled out for the reader who hovers it. A
+  // status outside this list still badges, with no explanation to invent.
+  var MATRIX_STATUS = {
+    preview: 'Preview: announced but not generally available, so terms and behaviour can still change.',
+    retiring: 'Retiring: still running, with a published end date. A new design should pick the current service beside it.',
+    deprecated: 'Deprecated: closed to new use or already shut down. A new design should pick the current service beside it.'
+  };
+
   function wireMatrix() {
     var frame = document.querySelector('figure.cmatrix');
     if (!frame) return;
@@ -955,6 +968,10 @@
       chip.appendChild(el('span', null, item[1] + ' - ' + item[2]));
       legend.appendChild(chip);
     });
+    // A cloud comparison with no date on it is a claim about today, forever.
+    if (data.snapshot) {
+      legend.appendChild(el('span', 'cmx-snapshot', 'Verified against vendor documentation on ' + data.snapshot));
+    }
     frame.insertBefore(legend, caption);
 
     /* ---------- controls ---------- */
@@ -1057,9 +1074,17 @@
             } else {
               svc.appendChild(el('b', null, s.short_name || s.name || ''));
             }
+            if (s.status && s.status !== 'ga') {
+              var badge = el('span', 'cmx-status', s.status);
+              if (MATRIX_STATUS[s.status]) {
+                badge.classList.add('cmx-st-' + s.status);
+                badge.title = MATRIX_STATUS[s.status];
+              }
+              svc.appendChild(badge);
+            }
             if (s.one_line) svc.appendChild(el('span', 'cmx-oneline', s.one_line));
             td.appendChild(svc);
-            haystack += ' ' + ((s.name || '') + ' ' + (s.short_name || '')).toLowerCase();
+            haystack += ' ' + ((s.name || '') + ' ' + (s.short_name || '') + ' ' + (s.status || '')).toLowerCase();
           });
         } else {
           // An unknown shape is rendered as unfilled-looking but titled honestly,
