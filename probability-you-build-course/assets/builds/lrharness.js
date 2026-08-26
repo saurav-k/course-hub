@@ -354,6 +354,13 @@
       (ok ? "MATCHES" : "CONTRADICTED") + "</span>";
   }
 
+  function verdictCell(rec) {
+    if (!rec.claim) {
+      return '<span style="color:' + token("--ink-faint") + '" title="no prediction written - write one, then re-run">not graded</span>';
+    }
+    return chip(rec.ok);
+  }
+
   const state = {};
   const stores = {};
 
@@ -376,7 +383,7 @@
         '<td style="padding:.3rem .5rem;border-bottom:1px solid ' + token("--line") + ';white-space:nowrap">' + rec.name + "</td>" +
         '<td style="padding:.3rem .5rem;border-bottom:1px solid ' + token("--line") + '">' +
         (rec.claim ? escapeHtml(rec.claim) : '<span style="color:' + token("--ink-faint") + '">(nothing written)</span>') + "</td>" +
-        '<td style="padding:.3rem .5rem;border-bottom:1px solid ' + token("--line") + '">' + chip(rec.ok) + "</td></tr>";
+        '<td style="padding:.3rem .5rem;border-bottom:1px solid ' + token("--line") + '">' + verdictCell(rec) + "</td></tr>";
     });
     html += "</tbody></table>";
     html += '<div style="margin-top:.5rem;color:' + token("--ink-soft") + ';font-family:ui-monospace,monospace;font-size:.92em;line-height:1.7">';
@@ -631,8 +638,12 @@
       if (i >= st.cases.length) {
         st.running = false;
         render(st);
-        const m = st.records.filter(r => r.ok).length;
-        st.sSum.innerHTML = "<b>" + m + " of " + st.records.length + " MATCH</b> - the rest contradict your claim. Lambda " + st.l2.toFixed(3) + ".";
+        const claimed = st.records.filter(r => r.claim);
+        const m = claimed.filter(r => r.ok).length;
+        const unwritten = st.records.length - claimed.length;
+        st.sSum.innerHTML = "<b>" + m + " of " + claimed.length + " MATCH</b> - the rest contradict your claim." +
+          (unwritten ? " " + unwritten + " case" + (unwritten === 1 ? "" : "s") + " ran with no prediction written." : "") +
+          " Lambda " + st.l2.toFixed(3) + ".";
         return;
       }
       const cs = st.cases[i];
