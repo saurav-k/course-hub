@@ -7,6 +7,56 @@ window.COURSE_OUTLINE = {
   "title": "Probability You Build",
   "sections": [
     {
+      "n": "W1",
+      "title": "Week 1: Core probability - the Spend Planner",
+      "lessons": [
+        {
+          "title": "Week 1: build the Spend Planner",
+          "href": "lessons/0000-week-1-start-here.html"
+        },
+        {
+          "title": "One request is two outcomes",
+          "href": "lessons/0001-sample-space-one-request.html"
+        },
+        {
+          "title": "The axioms and the complement rule",
+          "href": "lessons/0002-axioms-and-the-complement-rule.html"
+        },
+        {
+          "title": "The escalation check's two error rates",
+          "href": "lessons/0003-conditional-probability-check-quality.html"
+        },
+        {
+          "title": "Joint paths as products",
+          "href": "lessons/0004-multiplication-rule-paths-through-a-cascade.html"
+        },
+        {
+          "title": "Total probability prices the cascade",
+          "href": "lessons/0005-total-probability-the-cascade-decision.html"
+        },
+        {
+          "title": "Beliefs that move",
+          "href": "lessons/0006-bayes-updating-reliability-from-evidence.html"
+        },
+        {
+          "title": "Independence and when it lies",
+          "href": "lessons/0007-independence-and-when-it-lies.html"
+        },
+        {
+          "title": "Counting for majority vote",
+          "href": "lessons/0008-counting-for-majority-vote.html"
+        },
+        {
+          "title": "Expected cost and the assembled planner",
+          "href": "lessons/0009-expected-cost-and-the-planner.html"
+        },
+        {
+          "title": "Week 1 problem set",
+          "href": "lessons/0010-week-1-problems.html"
+        }
+      ]
+    },
+    {
       "n": "W2",
       "title": "Week 2: Random variables - the Distribution Garden",
       "lessons": [
