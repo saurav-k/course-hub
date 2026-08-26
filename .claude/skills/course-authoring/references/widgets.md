@@ -272,7 +272,7 @@ Build script rules (the full contract lives in that course's `BUILDER-SPEC.md`):
 A four-way comparison table: one row per capability key of the shared taxonomy,
 one column per cloud. `cloud-comparison-course` owns it; its course map opens
 with one. Unlike every widget above, an author does not write the rows - the
-widget renders itself from a data file, because 126 rows hand-written in HTML is
+widget renders itself from a data file, because 191 rows hand-written in HTML is
 a maintenance hole.
 
 The author writes only the frame, and the figcaption is theirs to word:
@@ -306,12 +306,16 @@ The data file is the single source of truth for the taxonomy, and
 
 ```js
 window.CLOUD_CAPABILITY_MATRIX = {
+  snapshot: "2026-08-26",                                // when the four inventories were verified
   clouds:  [ { key: "aws", short: "AWS", ... }, ... ],   // exactly aws, azure, gcp, oci; column order
   domains: [ { slug: "compute-iaas", name: ..., covers: ..., keys: ["vm-instances", ...] }, ... ],  // 24 areas
   rows:    [ { key: "vm-instances", domain: "compute-iaas", title: "VM instances",
                cells: { aws: {...}, azure: {...}, gcp: {...}, oci: {...} } }, ... ]
 };
 ```
+
+`snapshot` is optional and prints beside the legend.
+A cloud comparison with no date on it is a claim about today, forever, so a populated matrix owes one.
 
 One row per capability key; each key appears under exactly one area and as
 exactly one row; every row carries a cell for all four clouds. A cell is one of
@@ -321,7 +325,11 @@ exactly three states:
 |---|---|---|
 | unfilled | `{ "state": "unfilled" }` | dashed, quiet - *nobody has written this yet* |
 | absent | `{ "state": "absent", "reason": "..." }` | marked bar + tag - the cloud genuinely ships no equivalent, and why |
-| service | `{ "state": "service", "services": [{ "name": "...", "short_name": "...", "doc_url": "https://...", "one_line": "..." }] }` | linked service names into that vendor's own documentation |
+| service | `{ "state": "service", "services": [{ "name": "...", "short_name": "...", "doc_url": "https://...", "one_line": "...", "status": "ga" }] }` | linked service names into that vendor's own documentation |
+
+`status` is optional and is one of `ga`, `preview`, `retiring` or `deprecated`.
+Everything that is not `ga` renders as a badge on the service name; `ga` renders nothing, so the badge stays rare enough to notice.
+That badge is what tells a reader which of two services in one cell a new design should pick, because such a pair is normally a current service beside the legacy one it replaces.
 
 **An unfilled cell and a declared absence must never look alike.** They mean
 different things - missing data versus a finding - and the reader must be able
