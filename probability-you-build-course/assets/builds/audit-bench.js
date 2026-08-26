@@ -116,7 +116,7 @@ function AB_metrics(rows, T, thr, nb){
   let ece = 0;
   for (const b of bins) if (b.n) ece += b.n / n * Math.abs(b.pos / b.n - b.conf / b.n);
   return {
-    n, tp, fp, tn, fn, threshold: thr, temperature: T,
+    n, nb, tp, fp, tn, fn, threshold: thr, temperature: T,
     acc: (tp + tn) / n, tpr: tp / (tp + fn), fpr: fp / (fp + tn),
     fnr: fn / (fn + tp), tnr: tn / (tn + fp),
     prec: tp + fp ? tp / (tp + fp) : NaN, npv: tn + fn ? tn / (tn + fn) : NaN,
@@ -654,7 +654,7 @@ const AB_flatCache = {};          // the accuracy-flatness scan is expensive; do
 function AB_flatScan(rows, key){
   if (AB_flatCache[key]) return AB_flatCache[key];
   let nllMin = Infinity, tBest = 1, accMin = 1, accMax = 0;
-  for (let T = 0.05; T < 6; T += 0.05){
+  for (let T = 0.05; T < 6; T += 0.01){          // same grid as AB_fitT
     const m = AB_metrics(rows, T, 0.5);
     if (m.nll < nllMin){ nllMin = m.nll; tBest = T; }
     if (m.acc < accMin) accMin = m.acc;
