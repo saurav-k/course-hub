@@ -8,9 +8,13 @@
 
   /* ---- deterministic randomness (LCG, Box-Muller), exactly as prototyped ---- */
   function lcg(seed) {
-    let s = seed >>> 0;
-    while (s === 0) s = 42;
-    return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+    let s = (seed >>> 0) || 42;
+    /* Numerical-Recipes constants through Math.imul, the hub's convention: imul keeps the
+       product in exact 32-bit integer arithmetic, so the full 2^32 period survives and two
+       readers on different engines see byte-identical data. Written with a plain float
+       multiply the product passes 2^53, the low bits are rounded away, and the period
+       collapses to about 16000 draws. */
+    return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
   }
   function gaussFactory(rnd) {
     return function () {
@@ -192,20 +196,37 @@
   const probe = document.createElement('span');
   probe.style.display = 'none';
   document.body.appendChild(probe);
-  function col(name) {
-    probe.style.color = 'var(' + name + ')';
+  /* A token that does not exist computes to `inherit` for `color`, which silently returns
+     the surrounding text colour - every series then draws in the same hue and nothing warns
+     you. The explicit fallback makes a missing token loud instead. */
+  function col(name, fallback) {
+    probe.style.color = 'var(' + name + ', ' + fallback + ')';
     return getComputedStyle(probe).color;
   }
   function rgb(c) { const m = c.match(/\d+(\.\d+)?/g); return [+m[0], +m[1], +m[2]]; }
   function css(c) { return 'rgb(' + Math.round(c[0]) + ',' + Math.round(c[1]) + ',' + Math.round(c[2]) + ')'; }
   function mix(a, b, t) { return [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t]; }
+  /* Screen tokens on the left, their paper twins on the right. The chart tokens --stat,
+     --alarm and --prob have no --l- twin in hub.css, so print maps them onto tokens that
+     do exist rather than onto names that resolve to nothing. */
+  const TOKENS = {
+    c1:    ['--stat',      '--l-accent-2'],
+    c0:    ['--alarm',     '--l-warn'],
+    surf:  ['--surface',   '--l-surface'],
+    ink:   ['--ink',       '--l-ink'],
+    faint: ['--ink-faint', '--l-ink-faint'],
+    soft:  ['--ink-soft',  '--l-ink-soft'],
+    train: ['--prob',      '--l-accent'],
+    test:  ['--gold',      '--l-gold'],
+    bar:   ['--accent',    '--l-accent']
+  };
   function palette(printSafe) {
-    const p = printSafe ? '--l-' : '--';
+    const pick = k => col(TOKENS[k][printSafe ? 1 : 0], printSafe ? '#333' : 'currentColor');
     return {
-      c1: rgb(col(p + 'stat')), c0: rgb(col(p + 'alarm')),
-      surf: rgb(col(p + 'surface')), ink: col(p + 'ink'), faint: col(p + 'ink-faint'),
-      soft: rgb(col(p + 'ink-soft')), train: col(p + 'prob'), test: col(p + 'gold'),
-      bar: col(p + 'accent')
+      c1: rgb(pick('c1')), c0: rgb(pick('c0')),
+      surf: rgb(pick('surf')), ink: pick('ink'), faint: pick('faint'),
+      soft: rgb(pick('soft')), train: pick('train'), test: pick('test'),
+      bar: pick('bar')
     };
   }
 
