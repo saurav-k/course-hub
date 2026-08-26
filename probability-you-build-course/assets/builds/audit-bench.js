@@ -21,6 +21,7 @@
    independently of call order. All quoted page numbers were verified against
    this exact code under node before publication. */
 'use strict';
+(() => {
 
 /*==CORE==*/
 function AB_lcg(s){
@@ -607,3 +608,395 @@ AB_reg('ab-temp', {
     AB_setReadout(S.fig, [['state', 'unscaled (T=1)']]);
   }
 });
+
+/* Lesson 0505 - proper scoring rules: Brier, Murphy decomposition, log loss. */
+let AB_flatCache = null;          // the accuracy-flatness scan is expensive; do it once
+function AB_flatScan(rows){
+  if (AB_flatCache) return AB_flatCache;
+  let nllMin = Infinity, tBest = 1, accMin = 1, accMax = 0;
+  for (let T = 0.05; T < 6; T += 0.05){
+    const m = AB_metrics(rows, T, 0.5);
+    if (m.nll < nllMin){ nllMin = m.nll; tBest = T; }
+    if (m.acc < accMin) accMin = m.acc;
+    if (m.acc > accMax) accMax = m.acc;
+  }
+  AB_flatCache = { accMin, accMax, tBest };
+  return AB_flatCache;
+}
+function AB_constantRows(rows){
+  const pi = rows.reduce((a, r) => a + r.y, 0) / rows.length;
+  const z = AB_logit(pi);
+  return rows.map(r => ({ g: r.g, y: r.y, logit: z }));
+}
+AB_reg('ab-scores', {
+  input(S){
+    const v = AB_role(S.fig, 'scorer').value;
+    S.rows = v === 'constant' ? AB_constantRows(AB_DATA.pop)
+           : v === 'scaled'   ? AB_DATA.pop.map(r => ({ g: r.g, y: r.y,
+               logit: r.logit / 0.69 }))
+           : AB_DATA.pop;
+    S.render(S);
+  },
+  click(S){ S.render(S); },
+  init(S){ S.rows = AB_DATA.pop; }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  const w = cv.width, h = cv.height, pad = 40;
+  const m = AB_metrics(S.rows, 1, 0.5);
+  const mu = AB_murphy(m);
+  // waterfall: uncertainty -> minus resolution -> plus reliability = Brier
+  const scale = v => v / 0.30 * (w - pad * 2);
+  let x = pad;
+  const y0 = h * 0.42, barH = 30;
+  const steps = [
+    ['uncertainty ' + mu.unc.toFixed(4), mu.unc, AB_tok('--ink-faint'), +1],
+    ['- resolution ' + mu.res.toFixed(4), mu.res, AB_tok('--ok'), -1],
+    ['+ reliability ' + mu.rel.toFixed(4), mu.rel, AB_tok('--warn'), +1]
+  ];
+  c.font = AB_font(false, 11);
+  steps.forEach(([lab, v, col]) => {
+    const bw = scale(v);
+    c.fillStyle = col;
+    c.fillRect(x, y0, bw, barH);
+    c.strokeStyle = AB_tok('--line-strong');
+    c.strokeRect(x, y0, bw, barH);
+    c.fillStyle = AB_tok('--ink');
+    c.fillText(lab, Math.min(x + 4, w - 200), y0 - 6);
+    x += bw;
+  });
+  c.fillStyle = AB_tok('--accent');
+  c.fillRect(pad, y0 + barH + 18, scale(m.brier), barH);
+  c.strokeStyle = AB_tok('--line-strong');
+  c.strokeRect(pad, y0 + barH + 18, scale(m.brier), barH);
+  c.fillStyle = AB_tok('--ink');
+  c.fillText('Brier total ' + m.brier.toFixed(4), pad + 4, y0 + barH + 12);
+  const check = mu.unc - mu.res + mu.rel;
+  c.font = AB_font(true, 11);
+  c.fillStyle = AB_tok('--ink-soft');
+  c.fillText('unc - res + rel = ' + check.toFixed(4) + '  (binning-approximate; matches to '
+             + Math.abs(check - m.brier).toFixed(4) + ')', pad, y0 + barH * 2 + 52);
+  const flat = AB_flatScan(S.rows);
+  c.font = AB_font(false, 11);
+  c.fillStyle = AB_tok('--ink');
+  c.fillText('log loss here: ' + m.nll.toFixed(4) + '   - lower is honest, and it is what fit-T minimises',
+             pad, h - pad + 24);
+  AB_setReadout(S.fig, [
+    ['Brier', m.brier.toFixed(4)],
+    ['log loss', m.nll.toFixed(4)],
+    ['uncertainty', mu.unc.toFixed(4)],
+    ['resolution', mu.res.toFixed(4)],
+    ['reliability', mu.rel.toFixed(4)],
+    ['accuracy-optimal T', flat.accMax - flat.accMin < 1e-12
+      ? 'every T in [0.05, 6): the target is flat'
+      : flat.accMin.toFixed(3) + '..' + flat.accMax.toFixed(3)],
+    ['log-loss-optimal T', flat.tBest.toFixed(2)]
+  ]);
+});
+
+/* Lesson 0506 - group rates, the three gaps, and the collision. */
+AB_reg('ab-groups', {
+  input(S){
+    const v = AB_role(S.fig, 'scorer').value;
+    S.rows = v === 'baserate' ? AB_baseRateScorer(AB_DATA.pop) : AB_DATA.pop;
+    S.render(S);
+  },
+  click(S){ S.render(S); },
+  init(S){ S.rows = AB_DATA.pop; }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  const thr = +AB_role(S.fig, 'thr').value;
+  const g = AB_groupRates(S.rows, 1, thr);
+  const w = cv.width, h = cv.height, pad = 44;
+  const metricsList = [['selection', 'sel'], ['TPR', 'tpr'], ['FPR', 'fpr'], ['PPV', 'ppv']];
+  const gw = w - pad * 2, slot = gw / metricsList.length;
+  const bh = 16, bgap = 8;
+  c.font = AB_font(true, 12);
+  metricsList.forEach(([lab, key], k) => {
+    const x0 = pad + k * slot;
+    c.fillStyle = AB_tok('--ink');
+    c.textAlign = 'center';
+    c.fillText(lab, x0 + slot / 2, pad - 10);
+    c.textAlign = 'left';
+    [0, 1].forEach(gi => {
+      const v = g[gi] ? g[gi][key] : null;
+      const y = pad + gi * (bh + bgap);
+      const bw = v == null || Number.isNaN(v) ? 0 : v * (slot - 46);
+      c.fillStyle = gi === 0 ? AB_tok('--stat') : AB_tok('--prob');
+      c.fillRect(x0, y, bw, bh);
+      c.strokeStyle = AB_tok('--line');
+      c.strokeRect(x0, y, slot - 46, bh);
+      c.fillStyle = AB_tok('--ink');
+      c.font = AB_font(true, 11);
+      c.fillText(v == null || Number.isNaN(v) ? '-' : v.toFixed(2), x0 + slot - 40, y + bh - 4);
+    });
+  });
+  c.font = AB_font(false, 11);
+  c.fillStyle = AB_tok('--stat');
+  c.fillText('group 0 (prev ' + (g[0] ? g[0].prev.toFixed(2) : '-') + ')', pad, h - pad + 22);
+  c.fillStyle = AB_tok('--prob');
+  c.fillText('group 1 (prev ' + (g[1] ? g[1].prev.toFixed(2) : '-') + ')', pad + 170, h - pad + 22);
+  const dpGap = g[0] && g[1] ? g[1].sel - g[0].sel : null;
+  AB_setReadout(S.fig, [
+    ['demographic-parity gap (sel1-sel0)', dpGap == null ? '-' : dpGap.toFixed(3)],
+    ['TPR gap', g[0] && g[1] ? (g[1].tpr - g[0].tpr).toFixed(3) : '-'],
+    ['FPR gap', g[0] && g[1] ? (g[1].fpr - g[0].fpr).toFixed(3) : '-'],
+    ['PPV gap', g[0] && g[1] && Number.isFinite(g[0].ppv) && Number.isFinite(g[1].ppv)
+      ? (g[1].ppv - g[0].ppv).toFixed(3) : '-']
+  ]);
+});
+
+/* Lesson 0507 - bootstrap confidence intervals on a headline number. */
+AB_reg('ab-ci', {
+  click(S, role){
+    if (role !== 'run') return;
+    const statName = AB_role(S.fig, 'stat').value;
+    const B = Math.min(4000, Math.max(100, +AB_role(S.fig, 'resamples').value || 1000));
+    const seedVal = (+AB_role(S.fig, 'seed').value || 99) >>> 0;
+    const scoreFns = {
+      acc: s => AB_metrics(s, 1, 0.5).acc,
+      auc: s => AB_curves(s, 1).auc,
+      ece: s => AB_metrics(s, 1, 0.5).ece,
+      ppvgap: s => { const g = AB_groupRates(s, 1, 0.5); return g[1].ppv - g[0].ppv; }
+    };
+    const point = scoreFns[statName](AB_DATA.pop);
+    const ci = AB_bootCI(AB_DATA.pop, B, scoreFns[statName], seedVal);
+    const R = AB_lcg(seedVal ^ 0x9e37);
+    const draws = [];
+    for (let b = 0; b < B; b++){
+      const sample = new Array(AB_DATA.pop.length);
+      for (let i = 0; i < sample.length; i++) sample[i] = AB_DATA.pop[(R.next() * sample.length) | 0];
+      draws.push(scoreFns[statName](sample));
+    }
+    S.result = { statName, B, point, ci, draws };
+    S.render(S);
+  }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  const w = cv.width, h = cv.height, pad = 44;
+  c.font = AB_font(false, 12);
+  c.fillStyle = AB_tok('--ink-soft');
+  if (!S.result){
+    c.fillText('press Run: resample the 2000 rows with replacement, recompute, look at the spread',
+               pad, h / 2);
+    return;
+  }
+  const { ci, draws, point, statName, B } = S.result;
+  const lo = Math.min(...draws), hi = Math.max(...draws);
+  const K = 34, hist = new Array(K).fill(0);
+  for (const d of draws) hist[Math.min(K - 1, ((d - lo) / (hi - lo || 1) * K) | 0)]++;
+  const hmax = Math.max(...hist);
+  const gw = w - pad * 2, gh = h - pad * 2 - 26, bw = gw / K;
+  const X = v => pad + (v - lo) / (hi - lo || 1) * gw;
+  hist.forEach((n, k) => {
+    const bh2 = n / hmax * gh;
+    const inCI = (() => {
+      const v0 = lo + (k + 0.5) / K * (hi - lo);
+      return v0 >= ci[0] && v0 <= ci[1];
+    })();
+    c.fillStyle = inCI ? AB_tok('--accent') : AB_tok('--ink-faint');
+    c.fillRect(pad + k * bw, pad + gh - bh2, bw - 1, bh2);
+  });
+  [ci[0], ci[1]].forEach(v => {
+    c.strokeStyle = AB_tok('--warn');
+    c.beginPath(); c.moveTo(X(v), pad); c.lineTo(X(v), pad + gh + 14); c.stroke();
+  });
+  c.strokeStyle = AB_tok('--ok');
+  c.beginPath(); c.moveTo(X(point), pad); c.lineTo(X(point), pad + gh); c.stroke();
+  c.fillStyle = AB_tok('--ink');
+  c.font = AB_font(true, 11);
+  c.fillText(lo.toFixed(3), pad, h - 8);
+  c.fillText(hi.toFixed(3), w - pad - 34, h - 8);
+  c.fillText(point.toFixed(4), Math.min(Math.max(X(point) - 20, pad), w - pad - 60), pad - 8);
+  AB_setReadout(S.fig, [
+    ['statistic', statName],
+    ['point estimate', point.toFixed(4)],
+    ['95% CI (' + B + ' resamples)', ci[0].toFixed(4) + ' .. ' + ci[1].toFixed(4)],
+    ['width', (ci[1] - ci[0]).toFixed(4)]
+  ]);
+});
+
+/* Lesson 0508 - the complete bench feeding the printable audit card.
+   The card itself is page markup (<section id="audit-card"> in lesson 0508)
+   with container elements this panel fills; numbers flow, prose stays human. */
+function AB_parsePaste(text){
+  const rows = JSON.parse(text);
+  if (!Array.isArray(rows) || !rows.length) throw new Error('expected a non-empty JSON array');
+  return rows.map(r => {
+    let logit = r.logit;
+    if (logit == null && r.p != null) logit = Math.log(Math.min(1 - 1e-9, Math.max(1e-9, r.p)) / (1 - Math.min(1 - 1e-9, Math.max(1e-9, r.p))));
+    if (logit == null || r.y == null) throw new Error('every row needs y and logit (or p)');
+    return { g: r.g == null ? 0 : r.g, y: +r.y, logit: +logit };
+  });
+}
+const AB_NAMES = {
+  pop: 'embedded two-group scorer (seed 7, n=2000, prevalences .30/.55)',
+  ctrl: 'embedded calibrated control (seed 17, n=2000)',
+  rare: 'embedded rare-event scorer (seed 42, n=2000, prevalence ~2%)',
+  degen: 'embedded degenerate scorer (seed 43, n=2000, perfect AUC)',
+  paste: 'pasted evaluation rows (provenance is yours to state)'
+};
+function AB_fillCard(S, m, cvx, g, Tinfo, cis){
+  const $ = id => document.getElementById(id);
+  if (!$('audit-card')) return;
+  const prov = $('ac-provenance');
+  if (prov) prov.innerHTML =
+    '<b>Source:</b> ' + S.dataName + '. <b>Evaluation set:</b> ' + m.n +
+    ' rows, scored at temperature ' + (Tinfo && Tinfo.T ? Tinfo.T.toFixed(2) : '1') +
+    '. <b>Binning:</b> 10 equal-width probability bins. <b>Intervals:</b> percentile bootstrap, 1000 resamples, seeded stream.';
+  const head = $('ac-headline');
+  if (head) head.innerHTML =
+    '<div>accuracy ' + m.acc.toFixed(4) + (cis ? ' <i>CI ' + cis.acc[0].toFixed(3) + '..' + cis.acc[1].toFixed(3) + '</i>' : '') +
+    '; always-no baseline ' + ((m.tn + m.fn) / m.n).toFixed(4) + '</div>' +
+    '<div>AUC ' + cvx.auc.toFixed(4) + (cis ? ' <i>CI ' + cis.auc[0].toFixed(3) + '..' + cis.auc[1].toFixed(3) + '</i>' : '') +
+    '; average precision ' + cvx.ap.toFixed(4) + '</div>';
+  const cal = $('ac-calib');
+  if (cal){
+    const verdict = m.ece < 0.03 ? 'probabilities are close to frequencies'
+                  : m.ece < 0.10 ? 'visibly miscalibrated - read the diagram before quoting any probability'
+                  : 'badly miscalibrated - treat scores as rankings only';
+    cal.innerHTML =
+      '<div>ECE ' + m.ece.toFixed(4) + (cis ? ' <i>CI ' + cis.ece[0].toFixed(3) + '..' + cis.ece[1].toFixed(3) + '</i>' : '') +
+      '; Brier ' + m.brier.toFixed(4) + '; log loss ' + m.nll.toFixed(4) + '</div>' +
+      '<div>Verdict: ' + verdict + '.' +
+      (Tinfo && Tinfo.T ? ' After temperature scaling (T*=' + Tinfo.T.toFixed(2) +
+        ', fitted on ' + Tinfo.nFit + ' held-out rows): ECE ' + Tinfo.afterECE.toFixed(4) +
+        ', accuracy bit-identical (' + Tinfo.beforeAcc.toFixed(4) + ').'
+        : ' No rescaling applied.') + '</div>';
+  }
+  const pol = $('ac-policy');
+  if (pol) pol.innerHTML =
+    '<div>All rates computed at ONE declared threshold t = ' + m.threshold.toFixed(2) + '.</div>' +
+    '<div>Who pays: of ' + (m.tp + m.fp) + ' flagged rows, ' + m.fp + ' are false flags; of ' +
+    (m.fn + m.tn) + ' released rows, ' + m.fn + ' were truly positive and were missed.</div>';
+  const grp = $('ac-groups');
+  if (grp){
+    if (!g[0] || !g[1]){
+      grp.innerHTML = '<div>Single group present - no group analysis possible from these rows.</div>';
+    } else {
+      const rowG = gi => '<tr><td>' + gi + '</td><td>' + g[gi].prev.toFixed(3) + '</td><td>' +
+        g[gi].sel.toFixed(3) + '</td><td>' + g[gi].tpr.toFixed(3) + '</td><td>' +
+        g[gi].fpr.toFixed(3) + '</td><td>' + (Number.isFinite(g[gi].ppv) ? g[gi].ppv.toFixed(3) : '-') + '</td></tr>';
+      const gapLine = (lab, v) => '<div>' + lab + ': ' + (v == null ? '-' : v.toFixed(3)) +
+        (cis && cis.ppvgap && lab === 'PPV gap (ppv1-ppv0)' ?
+          ' <i>CI ' + cis.ppvgap[0].toFixed(3) + '..' + cis.ppvgap[1].toFixed(3) + '</i>' : '') + '</div>';
+      grp.innerHTML =
+        '<table class="aci-table"><thead><tr><th>group</th><th>prev</th><th>sel</th><th>TPR</th><th>FPR</th><th>PPV</th></tr></thead><tbody>' +
+        rowG(0) + rowG(1) + '</tbody></table>' +
+        gapLine('Demographic-parity gap (sel1-sel0)', g[1].sel - g[0].sel) +
+        gapLine('Equalised-odds gaps (TPR1-TPR0)', g[1].tpr - g[0].tpr) +
+        gapLine('Equalised-odds gaps (FPR1-FPR0)', g[1].fpr - g[0].fpr) +
+        gapLine('PPV gap (ppv1-ppv0)', Number.isFinite(g[0].ppv) && Number.isFinite(g[1].ppv) ? g[1].ppv - g[0].ppv : null);
+    }
+  }
+}
+AB_reg('ab-card', {
+  input(S, role){
+    if (role === 'thr'){ S.render(S); return; }
+    if (role === 'dataset'){
+      const v = AB_role(S.fig, 'dataset').value;
+      if (v !== 'paste'){ S.rows = AB_DATA[v]; S.dataName = AB_NAMES[v]; S.Tinfo = null; S.cis = null; }
+      S.render(S);
+    }
+  },
+  click(S, role){
+    try {
+      if (role === 'dataset'){
+        const v = AB_role(S.fig, 'dataset').value;
+        if (v !== 'paste'){ S.rows = AB_DATA[v]; S.dataName = AB_NAMES[v]; }
+      }
+      if (role === 'apply'){
+        S.rows = AB_parsePaste(AB_role(S.fig, 'paste').value);
+        S.dataName = AB_NAMES.paste;
+        S.Tinfo = null; S.cis = null;
+      }
+      if (!S.rows) { S.rows = AB_DATA.pop; S.dataName = AB_NAMES.pop; }
+      if (role === 'fit'){
+        const sp = AB_split(S.rows, 0.5);
+        const T = AB_fitT(sp.fit);
+        S.Tinfo = {
+          T, nFit: sp.fit.length,
+          afterECE: AB_metrics(sp.test, T, +AB_role(S.fig, 'thr').value).ece,
+          beforeAcc: AB_metrics(sp.test, 1, +AB_role(S.fig, 'thr').value).acc
+        };
+      }
+      if (role === 'cis'){
+        S.cis = {
+          acc: AB_bootCI(S.rows, 1000, s => AB_metrics(s, 1, +AB_role(S.fig, 'thr').value).acc),
+          auc: AB_bootCI(S.rows, 1000, s => AB_curves(s, 1).auc),
+          ece: AB_bootCI(S.rows, 1000, s => AB_metrics(s, 1, +AB_role(S.fig, 'thr').value).ece),
+          ppvgap: AB_bootCI(S.rows, 1000, s => {
+            const g = AB_groupRates(s, 1, +AB_role(S.fig, 'thr').value);
+            return g[0] && g[1] && Number.isFinite(g[0].ppv) && Number.isFinite(g[1].ppv) ? g[1].ppv - g[0].ppv : NaN;
+          })
+        };
+      }
+    } catch (err){ S.error = String(err.message || err); }
+    S.render(S);
+  },
+  init(S){ S.rows = AB_DATA.pop; S.dataName = AB_NAMES.pop; }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  const thr = +AB_role(S.fig, 'thr').value;
+  const w = cv.width, h = cv.height;
+  if (S.error){
+    c.font = AB_font(false, 12);
+    c.fillStyle = AB_tok('--warn');
+    c.fillText('import error: ' + S.error, 20, h / 2);
+    return;
+  }
+  const m = AB_metrics(S.rows, 1, thr);
+  const cvx = AB_curves(S.rows, 1);
+  const g = AB_groupRates(S.rows, 1, thr);
+  // left half: confusion strip; right half: reliability overlay if fitted
+  const pad = 40;
+  const cells = [['TN', m.tn], ['FP', m.fp], ['FN', m.fn], ['TP', m.tp]];
+  const maxCell = Math.max(...cells.map(x => x[1])) || 1;
+  const cw = 92, ch = 62, gx0 = pad + 8, gy0 = h / 2 - ch;
+  c.font = AB_font(true, 13);
+  cells.forEach(([lab, v], k) => {
+    const x = gx0 + (k % 2) * (cw + 4), y = gy0 + ((k / 2) | 0) * (ch + 4);
+    c.globalAlpha = 0.18 + 0.6 * (v / maxCell);
+    c.fillStyle = (lab === 'TP' || lab === 'TN') ? AB_tok('--ok') : AB_tok('--warn');
+    c.fillRect(x, y, cw, ch);
+    c.globalAlpha = 1;
+    c.strokeStyle = AB_tok('--line-strong');
+    c.strokeRect(x, y, cw, ch);
+    c.fillStyle = AB_tok('--ink');
+    c.fillText(lab + ' ' + v, x + 8, y + 20);
+  });
+  const gw = 250, gh = h - pad * 2, grx = w - gw - pad + 30;
+  c.strokeStyle = AB_tok('--line');
+  c.strokeRect(grx, pad, gw, gh);
+  c.save();
+  c.strokeStyle = AB_tok('--ink-faint');
+  c.setLineDash([4, 4]);
+  c.beginPath(); c.moveTo(grx, pad + gh); c.lineTo(grx + gw, pad); c.stroke();
+  c.restore();
+  function rel(mm, col){
+    mm.bins.forEach(b => {
+      if (!b.n) return;
+      const conf = b.conf / b.n, obs = b.pos / b.n;
+      c.strokeStyle = col;
+      c.beginPath();
+      c.moveTo(grx + conf * gw, pad + gh - conf * gh);
+      c.lineTo(grx + conf * gw, pad + gh - obs * gh);
+      c.stroke();
+      c.fillStyle = col;
+      c.beginPath(); c.arc(grx + conf * gw, pad + gh - obs * gh, 3.5, 0, 7); c.fill();
+    });
+  }
+  rel(m, AB_tok('--prob'));
+  if (S.Tinfo){
+    const sp = AB_split(S.rows, 0.5);
+    rel(AB_metrics(sp.test, S.Tinfo.T, thr), AB_tok('--ok'));
+  }
+  AB_fillCard(S, m, cvx, g, S.Tinfo, S.cis);
+  AB_setReadout(S.fig, [
+    ['rows', m.n],
+    ['accuracy @ t', m.acc.toFixed(4)],
+    ['AUC', cvx.auc.toFixed(4)],
+    ['ECE', m.ece.toFixed(4)],
+    ['card', document.getElementById('audit-card') ? 'filled below' : '(no card section on this page)']
+  ]);
+});
+})();
