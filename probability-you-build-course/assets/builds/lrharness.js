@@ -600,8 +600,10 @@
       const row = document.createElement("label");
       row.style.cssText = "display:block;font-size:.85em";
       const saved = localStorage.getItem(predKey(fig.id, cs.name)) || "";
-      row.innerHTML = "<b>" + escapeHtml(cs.name) + "</b> <span style=\"color:" + token("--ink-faint") + "\">- " +
-        escapeHtml(resolveGen(cs).label || "") + "</span><br>" +
+      const genLabel = resolveGen(cs).label || "";
+      row.innerHTML = "<b>" + escapeHtml(cs.name) + "</b>" +
+        (genLabel ? " <span style=\"color:" + token("--ink-faint") + "\">- " + escapeHtml(genLabel) + "</span>" : "") +
+        "<br>" +
         '<textarea rows="2" name="prediction-' + i + '" data-lrh-pred="' + i + '" style="width:min(100%,52ch);margin-top:.2rem" ' +
         'placeholder="Your prediction, written before you run - honour system.">' + escapeHtml(saved) + "</textarea>";
       box.appendChild(row);
