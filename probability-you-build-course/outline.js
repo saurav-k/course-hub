@@ -5,6 +5,53 @@
 window.COURSE_OUTLINE = {
   "key": "probability-you-build",
   "title": "Probability You Build",
-  "sections": [],
+  "sections": [
+    {
+      "n": "W2",
+      "title": "Week 2: Random variables - the Distribution Garden",
+      "lessons": [
+        {
+          "title": "The Distribution Garden: start here",
+          "href": "lessons/0100-week-2-start-here.html"
+        },
+        {
+          "title": "A random variable is a function",
+          "href": "lessons/0101-random-variable-is-a-function.html"
+        },
+        {
+          "title": "PMFs, histograms and counts",
+          "href": "lessons/0102-pmf-histograms-and-counts.html"
+        },
+        {
+          "title": "Density as brightness: rejection sampling",
+          "href": "lessons/0103-pdf-brightness-rejection-sampling.html"
+        },
+        {
+          "title": "The CDF and the u-machine",
+          "href": "lessons/0104-cdf-and-the-u-machine.html"
+        },
+        {
+          "title": "Normal splats: variance you can see",
+          "href": "lessons/0105-normal-splats-variance-you-can-see.html"
+        },
+        {
+          "title": "Joints and marginals at the edges",
+          "href": "lessons/0106-joints-and-marginals-at-the-edges.html"
+        },
+        {
+          "title": "Walks, sums and the bell",
+          "href": "lessons/0107-walks-sums-and-the-bell.html"
+        },
+        {
+          "title": "Gallery: compose, caption, share",
+          "href": "lessons/0108-gallery-compose-caption-share.html"
+        },
+        {
+          "title": "Week 2 problems: the garden, on paper",
+          "href": "lessons/0109-week-2-problems.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };
