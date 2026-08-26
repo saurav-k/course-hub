@@ -117,6 +117,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0210-roo-code.html"
         },
         {
+          "title": "opencode - model behavior as data",
+          "href": "lessons/0220-opencode.html"
+        },
+        {
           "title": "Goose - recipes, scheduling, and the self-scheduling agent",
           "href": "lessons/0230-goose.html"
         },
@@ -127,16 +131,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "pi-launcher - a signed identity for an agent",
           "href": "lessons/0250-pi-launcher.html"
-        }
-      ]
-    },
-    {
-      "n": "06",
-      "title": "Deep Dives - the cast of fifteen",
-      "lessons": [
-        {
-          "title": "opencode - model behavior as data",
-          "href": "lessons/0220-opencode.html"
         }
       ]
     },
