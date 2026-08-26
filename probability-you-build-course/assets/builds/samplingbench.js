@@ -6,10 +6,12 @@
 (function () {
   'use strict';
 
+  /* The hub's seeded generator: Math.imul keeps the product in exact 32-bit integer
+     arithmetic, so the full 2^32 period survives and every reader draws the same tokens
+     from the same seed. */
   function lcg(seed) {
-    let s = seed >>> 0;
-    while (s === 0) s = 42;
-    return function () { s = (s * 1103515245 + 12345) % 2147483648; return s / 2147483648; };
+    let s = (seed >>> 0) || 42;
+    return function () { s = (Math.imul(s, 1664525) + 1013904223) >>> 0; return s / 4294967296; };
   }
 
   /* The concrete completion the bench completes. Fixed vocabulary of six candidates. */
@@ -35,14 +37,21 @@
   const probe = document.createElement('span');
   probe.style.display = 'none';
   document.body.appendChild(probe);
-  function col(name) { probe.style.color = 'var(' + name + ')'; return getComputedStyle(probe).color; }
+  /* An undefined custom property computes to `inherit` for `color`, so a probe reading a
+     token that does not exist quietly returns the body text colour and every bar draws the
+     same. The fallback makes that loud instead. */
+  function col(name, fallback) { probe.style.color = 'var(' + name + ', ' + fallback + ')'; return getComputedStyle(probe).color; }
   function rgb(c) { const m = c.match(/\d+(\.\d+)?/g); return [+m[0], +m[1], +m[2]]; }
+  /* --stat has no --l- twin in hub.css, so paper uses --l-accent-2, which does exist. */
+  const PAINT = {
+    bar:    ['--stat',      '--l-accent-2'],
+    altBar: ['--noise',     '--l-ink-soft'],
+    ink:    ['--ink',       '--l-ink'],
+    faint:  ['--ink-faint', '--l-ink-faint']
+  };
   function palette(printSafe) {
-    const p = printSafe ? '--l-' : '--';
-    return {
-      bar: rgb(col(p + 'stat')), altBar: rgb(col(p + 'surface-2')),
-      ink: col(p + 'ink'), faint: col(p + 'ink-faint')
-    };
+    const pick = k => col(PAINT[k][printSafe ? 1 : 0], printSafe ? '#333' : 'currentColor');
+    return { bar: rgb(pick('bar')), altBar: rgb(pick('altBar')), ink: pick('ink'), faint: pick('faint') };
   }
   function cssOf(c) { return 'rgb(' + c.map(Math.round).join(',') + ')'; }
 
@@ -74,6 +83,10 @@
       const L = 56, R = 20, BOT = CH - 46, H = BOT - 34;
       const n = TOKENS.length, bw = (CW - L - R) / n;
       const ps = probs();
+      /* the leading candidate is whichever logit is currently highest, not whichever
+         token happens to sit first: the reader can drag any slider to the top */
+      let top = 0;
+      for (let i = 1; i < n; i++) if (ps[i] > ps[top]) top = i;
       /* uniform reference: if all six candidates were equally likely, each bar is exactly this high */
       const yU = BOT - (1 / n) * H;
       ctx.strokeStyle = P.faint; ctx.setLineDash([4, 4]);
@@ -83,8 +96,8 @@
       for (let i = 0; i < n; i++) {
         const x = L + i * bw + bw * 0.18, w = bw * 0.64;
         const h = ps[i] * H;
-        ctx.fillStyle = cssOf(i === 0 ? P.bar : P.altBar);
-        ctx.globalAlpha = i === 0 ? 1 : 0.8;
+        ctx.fillStyle = cssOf(i === top ? P.bar : P.altBar);
+        ctx.globalAlpha = i === top ? 1 : 0.7;
         ctx.fillRect(x, BOT - h, w, h);
         ctx.globalAlpha = 1;
         ctx.strokeStyle = P.ink; ctx.lineWidth = 0.8; ctx.strokeRect(x + 0.5, BOT - h + 0.5, w - 1, Math.max(h - 1, 1));
@@ -105,10 +118,14 @@
       draw();
     }
 
+    /* inverse-CDF sampling: walk the bars left to right, accumulating probability, and
+       stop at the first one whose running total passes the uniform draw. The final index
+       is the fallback for the rounding case where the totals stop a hair below u. */
     function sample() {
       if (!st.rnd) st.rnd = lcg(ui.seed ? +ui.seed.value : 42);
-      const ps = probs();
-      let u = st.rnd(), acc = 0, pick = n - 1;
+      const ps = probs(), n = TOKENS.length;
+      const u = st.rnd();
+      let acc = 0, pick = n - 1;
       for (let i = 0; i < n; i++) { acc += ps[i]; if (u < acc) { pick = i; break; } }
       st.drawn++;
       if (ui.drawn) ui.drawn.textContent = String(st.drawn);
