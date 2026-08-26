@@ -21,6 +21,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "How much of the cluster you run",
           "href": "lessons/0202-how-much-of-the-cluster-you-run.html"
+        },
+        {
+          "title": "The function and container boundary",
+          "href": "lessons/0203-the-function-container-boundary.html"
         }
       ]
     }
