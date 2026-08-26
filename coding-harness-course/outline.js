@@ -131,6 +131,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "pi-launcher - a signed identity for an agent",
           "href": "lessons/0250-pi-launcher.html"
+        },
+        {
+          "title": "Kimi CLI - model-driven context time travel",
+          "href": "lessons/0260-kimi-cli.html"
         }
       ]
     },
@@ -141,16 +145,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "Capstone - build a minimal harness",
           "href": "lessons/0270-build-a-harness.html"
-        }
-      ]
-    },
-    {
-      "n": "06",
-      "title": "Deep Dives - the cast of fifteen",
-      "lessons": [
-        {
-          "title": "Kimi CLI - model-driven context time travel",
-          "href": "lessons/0260-kimi-cli.html"
         }
       ]
     }
