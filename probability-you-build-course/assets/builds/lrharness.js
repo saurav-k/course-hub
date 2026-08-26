@@ -118,6 +118,46 @@
   };
 
   // ---------- measurement ----------
+  const CASES = {
+    separable: {
+      name: "perfect separation", gen: "separable",
+      predict: "unbounded fit: train accuracy pins at 100% and confidence saturates past 0.999",
+      check: r => r.acc === 1 && r.minConf > 0.99 },
+    balanced: {
+      name: "clean overlap", gen: "balanced",
+      predict: "converges: the norm settles, accuracy lands between 70% and 95%, boundary between the clouds",
+      check: r => r.normGrowth < 1.1 && r.acc > 0.7 && r.acc < 0.95 },
+    imbalanced: {
+      name: "class imbalance 19:1", gen: "imbalanced",
+      predict: "accuracy looks great (>90%) but the model misses most positives",
+      check: r => r.acc > 0.9 && r.minorityRecall < 0.5 },
+    correlated: {
+      name: "correlated features", gen: "correlated",
+      predict: "predictions stay good, but each coefficient alone swings wildly across refits",
+      check: r => r.coefCorr < -0.6 && r.acc > 0.7 },
+    xorish: {
+      name: "XOR shape", gen: "xorish",
+      predict: "stuck near chance accuracy: no straight line separates these corners",
+      check: r => r.acc < 0.7 },
+    outlier: {
+      name: "one far outlier", gen: "outlier",
+      predict: "the boundary twists several degrees toward the outlier even though training accuracy never notices",
+      check: r => r.tiltDeg !== null && Math.abs(r.tiltDeg) > 3 },
+    labelnoise: {
+      name: "15% label noise", gen: "labelnoise",
+      predict: "probabilities near the boundary stay compressed (never 0.99); accuracy ceiling below 92%",
+      check: r => r.maxProbNear < 0.97 && r.acc < 0.92 && r.acc > 0.7 },
+    tiny: {
+      name: "tiny sample n=6", gen: "tiny",
+      predict: "refits disagree wildly: P(positive) at the origin swings across seeds",
+      check: r => r.seedSpread > 0.35 }
+  };
+
+  function resolveCase(spec) {
+    if (typeof spec === "string") return CASES[spec];
+    return spec;
+  }
+
   function resolveGen(cs) {
     if (typeof cs.gen === "string") {
       const entry = GENS[cs.gen];
@@ -377,6 +417,7 @@
     if (!st.fig.isConnected) return;
     if (st.mode === "sigma") { drawSigma(st.canvas, st); return; }
     if (st.mode === "trainer") { renderTrainer(st); return; }
+    if (st.mode === "geometry") { renderGeometry(st); return; }
     if (st.mode === "suite") {
       if (st.records.length) renderSuite(st);
       else { drawEmptyPlot(st.canvas); renderShellMessage(st); }
@@ -469,12 +510,50 @@
     st.sStep.innerHTML = "steps <b>" + st.steps + "</b> of 4000";
   }
 
+  function mountGeometry(fig, cfg) {
+    const canvas = fig.querySelector(".build-canvas");
+    canvas.width = W; canvas.height = H;
+    const genName = cfg.gen || "balanced";
+    const entry = GENS[genName];
+    const data = entry.make(makeGen(entry.seed));
+    const st = {
+      fig: fig, canvas: canvas, mode: "geometry",
+      data: data, genLabel: entry.label, th: [cfg.th0 || 0, cfg.th1 || 0, cfg.th2 || 0]
+    };
+    const controls = fig.querySelector(".build-controls");
+    controls.innerHTML =
+      '<label>bias \u03b80 <input type="range" min="-5" max="5" step="0.1" value="' + st.th[0] + '" data-lrh="t0"></label>' +
+      '<label>weight \u03b81 <input type="range" min="-5" max="5" step="0.1" value="' + st.th[1] + '" data-lrh="t1"></label>' +
+      '<label>weight \u03b82 <input type="range" min="-5" max="5" step="0.1" value="' + st.th[2] + '" data-lrh="t2"></label>';
+    const readout = fig.querySelector(".build-readout");
+    readout.innerHTML = "";
+    const sAcc = document.createElement("span"), sOrg = document.createElement("span");
+    readout.appendChild(sAcc); readout.appendChild(sOrg);
+    st.sAcc = sAcc; st.sOrg = sOrg;
+    ["t0", "t1", "t2"].forEach((k, i) => {
+      controls.querySelector('[data-lrh="' + k + '"]').addEventListener("input", e => {
+        st.th[i] = Number(e.target.value);
+        render(st);
+      });
+    });
+    return st;
+  }
+
+  function renderGeometry(st) {
+    const w = [st.th[0], st.th[1], st.th[2]];
+    const rec = { w: w, data: st.data, acc: accuracy(w, st.data) };
+    drawScatter(st.canvas, rec, st.genLabel.split(",")[0] + " - your boundary");
+    st.sAcc.innerHTML = "accuracy at your line <b>" + rec.acc.toFixed(2) + "</b>";
+    st.sOrg.innerHTML = "\u03c3(origin) <b>" + predict(w, [0, 0]).toFixed(2) + "</b>";
+  }
+
   function mountSuite(fig, cfg) {
     const canvas = fig.querySelector(".build-canvas");
     canvas.width = W; canvas.height = H;
+    const caseList = (cfg.cases || []).map(resolveCase);
     const st = {
       fig: fig, canvas: canvas, mode: "suite",
-      cases: cfg.cases.slice(),
+      cases: caseList,
       includeMine: !!cfg.includeMine,
       l2: 0, selected: 0, records: [], running: false, stale: false
     };
@@ -576,6 +655,7 @@
     let st;
     if (cfg.mode === "sigma") st = mountSigma(fig, cfg);
     else if (cfg.mode === "trainer") st = mountTrainer(fig, cfg);
+    else if (cfg.mode === "geometry") st = mountGeometry(fig, cfg);
     else st = mountSuite(fig, cfg);
     state[figId] = st;
     render(st);
