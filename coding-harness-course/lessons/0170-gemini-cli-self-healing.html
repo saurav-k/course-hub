@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gemini CLI - the self-healing edit pipeline - Coding Harness Engineering</title>
+<meta name="description" content="Inside Google's open-source terminal agent at a pinned commit: the two-driver loop, tiered GEMINI.md context, the policy gate, and the edit pipeline that repairs itself with a model call.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 17</div>
+  <h1>Gemini CLI - the harness that fixes its own broken tool calls</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Read from source, TypeScript, Apache-2.0, at pinned commit <code>812f7a2b</code> (nightly v0.56.0, August 2026).
+    &middot; <a href="https://github.com/google-gemini/gemini-cli">google-gemini/gemini-cli</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">Explore it yourself</h2>
+    <p><b>Google Gemini CLI.</b> Open source under Apache-2.0, written in TypeScript for Node&nbsp;20+, at <a href="https://github.com/google-gemini/gemini-cli">github.com/google-gemini/gemini-cli</a>.
+    Every claim on this page is pinned to commit <code>812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8</code> - append that SHA to any blob URL to read exactly what we read.</p>
+    <p><b>The five files to read first, in reading order:</b></p>
+    <ol>
+      <li><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/tools/edit.ts"><code>packages/core/src/tools/edit.ts</code></a> - the self-healing cascade, this harness's signature</li>
+      <li><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/scheduler/scheduler.ts"><code>packages/core/src/scheduler/scheduler.ts</code></a> - dispatch, policy gate, confirmation bus</li>
+      <li><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/core/client.ts"><code>packages/core/src/core/client.ts</code></a> - <code>processTurn</code>, compression triggers, loop detection</li>
+      <li><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/utils/memoryDiscovery.ts"><code>packages/core/src/utils/memoryDiscovery.ts</code></a> - the four GEMINI.md tiers</li>
+      <li><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/cli/src/ui/hooks/useGeminiStream.ts"><code>packages/cli/src/ui/hooks/useGeminiStream.ts</code></a> - where the React UI closes the loop</li>
+    </ol>
+    <p><b>The community:</b> <a href="https://github.com/google-gemini/gemini-cli/issues">issue tracker</a>, <a href="https://github.com/google-gemini/gemini-cli/discussions">discussions</a>, and Google's <a href="https://github.com/orgs/google-gemini/projects/11">public roadmap board</a>.</p>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  B["Before&lt;br/&gt;lesson 0040 surveyed every editor"] --> T["THIS PAGE&lt;br/&gt;one cast member in full"]
+  T --> N["Enables&lt;br/&gt;reading any other deep dive against it"]
+  L["Lesson 0000&lt;br/&gt;the seven layers"] -.- T
+    </div>
+    <figcaption>Where this sits: lesson 0040 drew this harness's recovery ladder among eight others; now the whole machine - identity, loop, context, trust, extensions, models, and the mechanism it is known for.
+    <b>The skeleton here is the same one all fifteen deep dives wear, so any two can be read side by side.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <p>Google's terminal agent describes itself as "an open-source AI agent that brings the power of Gemini directly into your terminal."
+  The repository appeared in April 2025, the npm package followed that June, and by August 2026 it carried roughly 106,700 stars and 14,500 forks - the fastest-growing artifact this course studies.
+  One npm workspace, seven packages, but two matter: <code>@google/gemini-cli-core</code>, the headless engine, and <code>@google/gemini-cli</code>, an Ink/React terminal UI that owns loop closure in interactive mode.
+  The split is real - core never imports cli; they talk through typed event streams (<code>ServerGeminiStreamEvent</code>) and a confirmation <code>MessageBus</code>.</p>
+
+  <h2 id="loop">The loop</h2>
+  <p>One engine, two drivers.
+  Headless (<code>gemini -p "..."</code>) runs a plain while-loop over events; interactive mode hands the same job to a React hook whose completion callback re-submits tool results as a continuation.
+  Inside the engine, <code>processTurn</code> compresses history when needed, refreshes model-specific tool declarations, and streams; every <code>functionCalls[]</code> entry becomes a <code>ToolCallRequest</code> event with a synthesized id.
+  Two stop conditions deserve attention.
+  The next-speaker check is an extra structured model call asking who talks next - the turn may not end just because no tools are pending.
+  And loop detection watches every event, nudging once ("take a step back") before aborting on a second consecutive repeat.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant Y as You
+    participant U as React UI
+    participant C as GeminiClient
+    participant T as Turn
+    participant S as Scheduler
+    participant M as Model API
+    Y->>U: submitQuery
+    U->>C: sendMessageStream
+    C->>T: processTurn - hooks - compression
+    T->>M: stream contents plus tools
+    M-->>T: chunks with functionCall parts
+    T-->>U: ToolCallRequest events
+    U->>S: scheduleToolCalls
+    S->>S: policy gate then confirmation bus
+    S-->>U: CompletedToolCall responses
+    U->>C: continuation with functionResponses
+    C-->>U: Content events until no calls remain
+    Note over C,M: stop requires no pending calls AND the next-speaker check
+    </div>
+    <figcaption>The turn cycle with real names. The UI is not chrome - it closes the loop by re-submitting results, which is why the same engine serves headless scripts unchanged.
+    <b>Denials travel through the same channel as results, so a refused command is information, not an exception.</b></figcaption>
+  </figure>
+
+  <h2 id="context">Context assembly</h2>
+  <p>The window fills in a fixed order.
+  The system instruction is composed from named snippets - conditionally included per model and mode - and can be swapped wholesale via the <code>GEMINI_SYSTEM_MD</code> environment variable or dumped with <code>GEMINI_WRITE_SYSTEM_MD</code>.
+  Then memory: GEMINI.md files load from four tiers - global, extension context, project files walked upward from cwd to git root, and a private <code>.gemini/MEMORY.md</code> index - with recursive <code>@path</code> imports up to depth five.
+  The filename itself is configurable, so teams run AGENTS.md conventions by setting <code>contextFileName</code>.
+  Precedence is written into the prompt: deeper files override shallower ones on style, never on safety mandates.
+  When high-intent tools touch a subdirectory later in the session, JIT discovery appends that directory's GEMINI.md to the tool output - memory arriving exactly when it becomes relevant.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["systemInstruction&lt;br/&gt;snippets plus global GEMINI.md"] --- B["msg one user&lt;br/&gt;session_context block"]
+  B --- C["memory tiers&lt;br/&gt;extension then project root-to-leaf"]
+  C --- D["history&lt;br/&gt;turns and tool results"]
+  D --- E["current turn&lt;br/&gt;user parts or functionResponses"]
+  K["compression at half of 1M tokens&lt;br/&gt;keeps newest 30 percent"] -.- D
+  J["JIT subdirectory memory rides on tool output"] -.- D
+    </div>
+    <figcaption>What occupies the window, left to right in load order, with the three pressure valves: auto-compression, stale tool-output masking, and just-in-time memory appended to tool results.
+    <b>Context composition here is layered, configurable, and partly deferred until a tool proves it relevant.</b></figcaption>
+  </figure>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>Four approval modes sit on top of a real policy engine, not a boolean: <code>default</code> asks for writes and shell, <code>auto_edit</code> approves edits, <code>yolo</code> approves everything, and plan mode restricts the toolset outright.
+  Every call passes <code>checkPolicy</code> against TOML rule files from system, user, and workspace scopes; outcomes are ALLOW, DENY, or ASK_USER, and "always allow" writes narrowed persistent rules keyed by tool plus argument patterns rather than blanket grants.
+  Sandboxing ships behind one factory with four implementations - macOS Seatbelt profiles, Linux bubblewrap, a Windows restricted-token sandbox, and container mode via docker, podman, or gVisor with network egress through a local proxy.
+  Folder trust gates whether workspace-local commands, MCP servers, and skills load at all; untrusted tool output is wrapped in <code>&lt;untrusted_context&gt;</code> tags carrying a standing instruction to ignore directives inside.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  C["tool call arrives"] --> P{"checkPolicy&lt;br/&gt;TOML rules"}
+  P -->|"ALLOW"| X["executor runs it"]
+  P -->|"DENY"| R["rejection travels as the tool result"]
+  P -->|"ASK_USER"| B["MessageBus to the UI"]
+  B -->|"approved"| SB["sandbox pick&lt;br/&gt;Seatbelt - bubblewrap - container"]
+  B -->|"refused"| R
+  SB --> X
+    </div>
+    <figcaption>Every call crosses the policy engine regardless of approval mode; the sandbox wraps execution only after a human or rule says yes.
+    <b>The escape hatch is live too: a blocked command can request a mid-failure sandbox-expansion dialog instead of dying silently.</b></figcaption>
+  </figure>
+
+  <h2 id="extensions">Extension surface</h2>
+  <table>
+    <thead><tr><th>Mechanism</th><th>Form</th><th>Where it lives</th></tr></thead>
+    <tbody>
+      <tr><td>MCP servers</td><td>Config schema - stdio, SSE, or Streamable HTTP with OAuth; tools namespaced into the registry</td><td><code>settings.json</code>; extension manifests</td></tr>
+      <tr><td>Extensions</td><td>Installable packages with <code>gemini-extension.json</code>: servers, context files, excluded tools, settings, themes</td><td>File convention under <code>~/.gemini/extensions</code></td></tr>
+      <tr><td>Skills</td><td><code>SKILL.md</code> with YAML frontmatter, surfaced through an <code>activate_skill</code> tool</td><td>File convention, discovered recursively</td></tr>
+      <tr><td>Subagents</td><td>Markdown definitions (or remote A2A agents) invoked via <code>invoke_agent</code>; built-ins include <code>codebase-investigator</code></td><td>File convention plus runtime registry</td></tr>
+      <tr><td>Hooks</td><td>Commands or functions on eleven lifecycle events from BeforeAgent to SessionEnd; can deny, ask, or rewrite arguments</td><td>Config schema plus runtime API</td></tr>
+      <tr><td>Slash commands</td><td>TOML files alongside built-ins like <code>/memory</code> and <code>/restore</code></td><td>File convention in <code>commands/</code> dirs</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="models">Model behavior</h2>
+  <p>This harness is Gemini-only by design - there is no Anthropic or OpenAI adapter, and auth flows through Google identities: OAuth personal login, API key, Vertex AI, Cloud Shell, or a gateway base-URL override for proxies.
+  Affinity shows up as explicit per-family forks rather than folklore.
+  <code>getToolSet(modelId)</code> returns a rewritten manifest for Gemini 3 versus a legacy set - Gemini 3's grep description advertises symbol matching the legacy one does not, and its <code>replace</code> makes the semantic <code>instruction</code> parameter required.
+  <code>supportsModernFeatures</code> switches between two whole system-prompt dialects.
+  Most tellingly, Gemini 3 validates <code>thoughtSignature</code> on replayed function calls, and the harness injects a synthetic signature rather than let the API reject unsigned calls - compatibility shims shaped exactly to one model family's wire dialect, the phenomenon the Models module names per-family affinity.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p><a href="0040-edit-problem.html">Lesson 0040</a> placed this harness alone in school three: when an edit fails to match, most harnesses bounce an error and burn a full agentic round-trip.
+  Gemini CLI instead spends its own machinery first - a graded deterministic cascade, and then the step nobody else ships: a targeted micro-inference whose only job is to repair the harness's failed decode of the model's intent.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  A["old_string against current file"] --> B{"exact literal match"}
+  B -->|yes| W["preview diff and apply"]
+  B -->|no| C{"flexible whitespace-insensitive lines"}
+  C -->|yes| W
+  C -->|no| D{"token regex tolerating formatting drift"}
+  D -->|yes| W
+  D -->|no| F{"Levenshtein sliding window score-gated"}
+  F -->|yes| W
+  F -->|no| L["FixLLMEditWithInstruction&lt;br/&gt;sends instruction - old/new - file - failure reason"]
+  L -->|"corrected pair re-enters cascade"| W
+  L -->|"no changes needed"| N["accepted as EDIT_NO_CHANGE_LLM_JUDGEMENT"]
+  L -->|still fails| E["EDIT_NO_OCCURRENCE_FOUND advises a fresh read"]
+    </div>
+    <figcaption>The full ladder inside <code>calculateReplacement</code> plus <code>attemptSelfCorrection</code>. Each strategy choice is logged as telemetry - exact, flexible, regex, fuzzy - so the team measures which layer saves real failures.
+    <b>The repair call treats a broken tool call as recoverable with one cheap inference instead of one expensive agentic retry.</b></figcaption>
+  </figure>
+
+  <p>The economics are the point.
+  A bounced edit costs a complete round-trip: the model reads the error, re-reads the file, and re-emits the whole edit.
+  The repair call sends a narrow envelope - instruction, the failed pair, current content refreshed from disk if it changed underneath, the specific failure reason - and receives back a corrected pair that re-enters the deterministic cascade from the top.
+  It can even conclude "no changes required," converting a would-be failure into a legitimate no-op result.
+  Copilot Chat independently grew the same organ for patches and credits this codebase in its healing header - convergent evolution across competing vendors, which is about as strong a signal as this course gets.</p>
+
+  <div class="callout key"><span class="tag">The reframing</span>
+  Self-healing moves reliability from the model's discipline into the harness's machinery.
+  Where the wrapper believer sees "the model fixed its mistake," the engineer sees a pipeline that refuses to hand its own decode failure back upstream.</div>
+
+  <p>Honest runners-up: shadow-git checkpointing (a hidden repo snapshots your tree before restorable calls, so <code>/restore</code> works even outside git projects) resembles peer rewind features but stands on its own work-tree implementation; and the next-speaker check - spending a model call to decide whether the turn may end - is a genuine second novelty this harness runs every single turn.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A turn's reply contains no tool calls. What else must happen before Gemini CLI ends the turn?</div>
+      <button class="q-opt">A cooldown tick confirms the stream stays quiet for one interval</button>
+      <button class="q-opt">The scheduler drains its queue of completed background shells</button>
+      <button class="q-opt">The next-speaker check asks the model who talks next</button>
+      <button class="q-opt">Loop detection certifies the reply differs from prior replies</button>
+      <div class="q-fb">checkNextSpeaker is a second structured model call over the BaseLlmClient, and its verdict gates the stop. Cooldowns and queue draining are not part of the design. Loop detection fires only on repeated events - it nudges first and aborts on a repeat, it does not certify normal stops.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does the repair path refresh file content from disk before calling the fixer?</div>
+      <button class="q-opt">The file may have changed underneath since the model last read it</button>
+      <button class="q-opt">Disk content bypasses the tokenizer and saves context tokens</button>
+      <button class="q-opt">The sandbox forbids passing cached content between processes</button>
+      <button class="q-opt">Fresh reads reset the telemetry counters between strategies</button>
+      <div class="q-fb">Repairing against stale bytes would produce another mismatch - the code detects content drift and reloads before the call. Token savings, sandbox rules, and telemetry resets are not what the refresh is for.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Clone the repository at the pinned commit: <code>git clone https://github.com/google-gemini/gemini-cli</code>, then <code>git checkout 812f7a2b</code>.
+      Trace one edit end to end without running anything: find where <code>replace</code> enters the cascade, name the four deterministic strategies in order, and locate the exact object sent to the repair model.</p>
+      <p><b>Find</b>: the function names and line regions for each strategy, the score gate on the fuzzy matcher, and the field list of the repair request.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Start at <code>calculateReplacement</code> in <code>edit.ts</code>; the strategies appear in the order the code tries them, and <code>utils/llm-edit-fixer.ts</code> holds the repair envelope.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Deterministic stages.</b> Exact literal, then flexible whitespace-insensitive line matching with indentation preservation, then token-based regex for formatting drift, then a Levenshtein sliding window gated by a complexity budget.</li>
+        <li><b>The repair boundary.</b> Only after all four fail does control pass to attemptSelfCorrection and llm-edit-fixer.</li>
+        <li><b>The envelope.</b> Instruction, the failed old/new strings, current file content refreshed if drifted, and the specific failure reason - answered by a corrected pair or a legitimate no-change verdict.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If you found five deterministic strategies, you counted the repair call itself - it is not deterministic, which is exactly the boundary this page draws.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the loop diagram felt busy, ask for a re-walk with a concrete task like "rename this variable" and name what each participant holds at each arrow. If the distinctive mechanism has not landed, ask it to contrast what happens on a failed edit here versus in a school-one harness, counting the round-trips.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The repository's own tour starts at the README and the docs tree, but the fastest route into the machinery is the two files this page leans on: <a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/tools/edit.ts"><code>edit.ts</code></a> and <a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/utils/llm-edit-fixer.ts"><code>llm-edit-fixer.ts</code></a> at the pinned commit.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 17 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
