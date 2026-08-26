@@ -84,7 +84,7 @@
         if (!counts[k]) continue;
         var dens = counts[k] / (n * BW);
         var bh = dens * yScale;
-        ctx.fillRect(hx0 + (k * BW + RANGE) * ((hx1 - hx0) / (2 * RANGE)),
+        ctx.fillRect(hx0 + (k * BW) * toPx,
                      hy0 - bh,
                      Math.max(1, (BW - 1) * ((hx1 - hx0) / (2 * RANGE))),
                      bh);
