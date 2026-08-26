@@ -5,6 +5,29 @@
 window.COURSE_OUTLINE = {
   "key": "cloud-comparison",
   "title": "Comparing the Four Clouds",
-  "sections": [],
+  "sections": [
+    {
+      "n": "02",
+      "title": "Compute: placement, scaling, containers",
+      "lessons": [
+        {
+          "title": "Where a workload physically lands",
+          "href": "lessons/0200-where-a-workload-lands.html"
+        },
+        {
+          "title": "Holding a fleet at a size",
+          "href": "lessons/0201-holding-a-fleet-at-a-size.html"
+        },
+        {
+          "title": "How much of the cluster you run",
+          "href": "lessons/0202-how-much-of-the-cluster-you-run.html"
+        },
+        {
+          "title": "The function and container boundary",
+          "href": "lessons/0203-the-function-container-boundary.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };
