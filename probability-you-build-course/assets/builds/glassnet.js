@@ -255,11 +255,19 @@
 
     const role = r => fig.querySelector('[data-role="' + r + '"]');
     const ui = {};
-    ['step', 'run', 'reset', 'lr', 'ds', 'h1size', 'h2size', 'act', 'split', 'trainer',
+    ['step', 'run', 'reset', 'lr', 'ds', 'h1size', 'h2size', 'shape', 'act', 'split', 'trainer',
       'check', 'ckout', 'epoch', 'losstr', 'losste', 'acctr', 'accte', 'insp'].forEach(k => { ui[k] = role(k); });
 
     const st = {};
+    /* Two ways a page may expose architecture. The pair of h1/h2 pickers keeps the
+       two-hidden-layer story of lesson 0402 concrete; a single `shape` select carries a
+       comma-separated list of hidden widths, which is how a page reaches depths the pair
+       cannot express - 2-4-4-4-4-1, for instance, where the gradient bars vanish. */
     function currentSizes() {
+      if (ui.shape) {
+        const mid = ui.shape.value.split(',').map(Number).filter(v => v > 0);
+        return [2].concat(mid, [1]);
+      }
       if (!ui.h1size) return sizesAttr.slice();
       const h1 = +ui.h1size.value, h2 = ui.h2size ? +ui.h2size.value : 8;
       const mid = h2 > 0 ? [h1, h2] : [h1];
@@ -431,6 +439,7 @@
     if (ui.reset) ui.reset.addEventListener('click', reset);
     if (ui.run) ui.run.addEventListener('click', () => { st.running = !st.running; ui.run.textContent = st.running ? 'pause' : 'run'; });
     if (ui.ds) ui.ds.addEventListener('change', reset);
+    if (ui.shape) ui.shape.addEventListener('change', reset);
     if (ui.h1size) ui.h1size.addEventListener('change', reset);
     if (ui.h2size) ui.h2size.addEventListener('change', reset);
     if (ui.act) ui.act.addEventListener('change', reset);
