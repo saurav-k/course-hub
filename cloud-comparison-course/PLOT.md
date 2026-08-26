@@ -14,6 +14,15 @@ roadmap of what remains.
 `0203`, one per capability area: `compute-iaas`, `compute-scaling`, `containers`,
 `serverless-app`.
 
+**Module 05, Networking, delivery and edge.** Four lessons, one per capability area.
+
+| Lesson | Name | Capability area |
+|---|---|---|
+| `0500` | The private network | `networking-core` |
+| `0501` | Load balancing and the edge | `networking-lb-edge` |
+| `0502` | DNS and domains | `dns-domains` |
+| `0503` | Hybrid connectivity | `hybrid-connectivity` |
+
 **Module 06, Identity and access.** Four lessons, one per capability area.
 
 | Lesson | Name | Capability area |
@@ -29,7 +38,8 @@ one per capability area: `org-tenancy`, `governance-policy`, `observability`,
 
 **Numbering is by module block, and this file's module table is what assigns it.**
 A module owns the hundred its own number opens: module 02 owns `0200` to `0299`,
-module 06 owns `0600` to `0699`, module 07 owns `0700` to `0799`. Modules are written in parallel, so a single
+module 05 owns `0500` to `0599`, module 06 owns `0600` to `0699`, and module 07
+owns `0700` to `0799`. Modules are written in parallel, so a single
 running sequence collides the moment two contributors add a lesson at once. The
 eyebrow, the card `.ln` and the footer carry the four digits unchanged. Module
 grouping on the map carries teaching order, and file order is free to disagree
@@ -46,7 +56,6 @@ takes one comparison that names alone do not settle.
 | 01 | How to read a four-way comparison | the whole matrix - method before findings |
 | 03 | Storage and data | `storage`, `databases` |
 | 04 | Analytics | `analytics` |
-| 05 | Networking, delivery and edge | `networking-core`, `networking-lb-edge`, `dns-domains`, `hybrid-connectivity` |
 | 08 | Delivery, integration and intelligence | `iac-deployment`, `integration-messaging`, `ai-ml` |
 | 09 | Resilience and migration | `resilience-migration` |
 
@@ -61,7 +70,7 @@ earlier. Resilience closes because it is the property the whole design is judged
 
 ## Reserved, unwritten
 
-- **The six unwritten modules above**, none yet started. Each takes the hundred
+- **The five unwritten modules above**, none yet started. Each takes the hundred
   its module number opens, so nothing already published is renumbered or renamed.
 - **Reference: the capability taxonomy explained.** A glossary of what each of the
   twenty-four areas covers, linked from every lesson foot. Not written yet.
