@@ -16,10 +16,12 @@ Eight checks, all deterministic and offline:
 8. The capability-matrix data (``window.CLOUD_CAPABILITY_MATRIX``, committed beside
    the comparison course): the taxonomy is intact, every capability key appears
    exactly once as a row, every row carries all four clouds, every cell is a
-   service, a declared absence with a reason, or explicitly unfilled, every page
-   rendering the widget binds to the documented ``figure.cmatrix`` frame, and every
-   vendor link is well formed. Pass ``--vendor-links`` to also fetch each vendor
-   link and fail on a dead one - the default run stays offline and deterministic.
+   service, a capability delivered under another row, a declared absence with a
+   reason, or explicitly unfilled, every cross-reference resolves to a row that
+   exists, every page rendering the widget binds to the documented
+   ``figure.cmatrix`` frame, and every vendor link is well formed. Pass
+   ``--vendor-links`` to also fetch each vendor link and fail on a dead one - the
+   default run stays offline and deterministic.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -96,7 +98,11 @@ MATRIX_DOMAIN_COUNT: int = 24
 
 KEBAB: re.Pattern[str] = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 
-CELL_STATES: frozenset[str] = frozenset({"unfilled", "absent", "service"})
+# The four cell states. "absent" and "elsewhere" both start life as a gap entry
+# in a cloud's inventory and they make opposite claims, so they are separate
+# states rather than one state with a flag: "absent" is the only one that lets a
+# reader conclude the cloud cannot do the thing.
+CELL_STATES: frozenset[str] = frozenset({"unfilled", "absent", "elsewhere", "service"})
 
 
 @dataclass(frozen=True)
@@ -716,6 +722,10 @@ def _matrix_problems(where: str, data: object) -> list[Problem]:
         return problems
 
     seen_rows: dict[str, int] = {}
+    # A cross-reference names the row the capability actually lives in. It can
+    # point forwards, so the targets are resolved once every row is known.
+    references: list[tuple[str, str, str, str]] = []
+    row_cells: dict[str, dict] = {}
     for i, row in enumerate(rows):
         at = f"{where}:rows[{i}]"
         if not isinstance(row, dict):
@@ -730,6 +740,7 @@ def _matrix_problems(where: str, data: object) -> list[Problem]:
                 Problem(at, f"capability {key} has two rows (first at index {seen_rows[key]})")
             )
         seen_rows[key] = i
+        row_cells[key] = row.get("cells") if isinstance(row.get("cells"), dict) else {}
         if key not in home_domain:
             problems.append(
                 Problem(at, f"row names capability {key}, which no taxonomy area declares - an orphan row")
@@ -758,15 +769,26 @@ def _matrix_problems(where: str, data: object) -> list[Problem]:
             state = cell.get("state") if isinstance(cell, dict) else None
             if state not in CELL_STATES:
                 problems.append(
-                    Problem(cell_at, f"cell state {state!r} is not one of unfilled / absent / service")
+                    Problem(cell_at, f"cell state {state!r} is not one of "
+                                     f"{' / '.join(sorted(CELL_STATES))}")
                 )
                 continue
-            if state == "absent" and not (
+            if state in ("absent", "elsewhere") and not (
                 isinstance(cell.get("reason"), str) and cell["reason"].strip()
             ):
+                owed = "a declared absence" if state == "absent" else "a cross-reference"
                 problems.append(
-                    Problem(cell_at, f"a declared absence in row {key} ({c}) owes a reason")
+                    Problem(cell_at, f"{owed} in row {key} ({c}) owes a reason")
                 )
+            if state == "elsewhere":
+                target = cell.get("see")
+                if target is not None:
+                    if not isinstance(target, str) or not KEBAB.match(target):
+                        problems.append(
+                            Problem(cell_at, f"cross-reference target {target!r} is not a capability key")
+                        )
+                    else:
+                        references.append((cell_at, key, c, target))
             if state == "service":
                 services = cell.get("services")
                 if not isinstance(services, list) or not services:
@@ -781,6 +803,30 @@ def _matrix_problems(where: str, data: object) -> list[Problem]:
                     ):
                         problems.append(Problem(svc_at, "service has no name"))
                     problems.extend(_vendor_url_problems(svc_at, svc.get("doc_url") if isinstance(svc, dict) else None))
+
+    # A cross-reference is a promise that the capability is somewhere the reader
+    # can reach. Pointing at a row that does not exist, at the cell itself, or at
+    # a cell that is not a service on that same cloud breaks the promise while
+    # still rendering as a confident sentence.
+    for cell_at, key, c, target in references:
+        if target not in row_cells:
+            problems.append(
+                Problem(cell_at, f"row {key} ({c}) says the capability lives in {target}, "
+                                 f"which is not a row in the matrix")
+            )
+            continue
+        if target == key:
+            problems.append(
+                Problem(cell_at, f"row {key} ({c}) cross-references itself")
+            )
+            continue
+        landing = row_cells[target].get(c)
+        landing_state = landing.get("state") if isinstance(landing, dict) else None
+        if landing_state != "service":
+            problems.append(
+                Problem(cell_at, f"row {key} ({c}) says the capability lives in {target}, "
+                                 f"but {c} carries no service there (it is {landing_state!r})")
+            )
 
     unrepresented = sorted(set(home_domain) - set(seen_rows))
     for k in unrepresented:

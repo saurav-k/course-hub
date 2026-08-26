@@ -8,7 +8,8 @@
                 carrying the capability keys that belong to it
      - rows     one row per capability key, one cell per cloud
 
-   A cell is exactly one of three states:
+   A cell is exactly one of four states, and the reader must be able to tell the
+   middle two apart at a glance, because they make opposite claims:
 
      {"state": "unfilled"}
          Nobody has filled this cell in yet. Rendered as a dashed, quiet box;
@@ -16,6 +17,16 @@
      {"state": "absent", "reason": "..."}
          A finding: this cloud genuinely ships no equivalent for the
          capability, and the reason says what is nearest and how it differs.
+         This is the only state that supports the reading "this cloud cannot
+         do that", which is why the widget spends the words NO EQUIVALENT here
+         and nowhere else.
+     {"state": "elsewhere", "reason": "...", "see": "<capability key>"}
+         The cloud has the capability. It is delivered by a service that holds
+         a row under another key, because only one of the four clouds packages
+         it as its own product. The reason names the service in the audit's own
+         words and "see" names the row it lives in, which the widget renders as
+         a link to that row. Five of these entries name no single row, so "see"
+         is absent on them and the reason carries the whole answer.
      {"state": "service", "services": [{"name": ..., "short_name": ...,
                                          "doc_url": ..., "one_line": ...,
                                          "status": ...}]}
@@ -31,12 +42,14 @@
 
    scripts/validate_site.py enforces all of this: every row resolves to a key
    in the taxonomy and appears once, every row carries all four clouds, every
-   cell is one of the three states, and every doc_url is well formed.
+   cell is one of the four states, every "see" resolves to a real row, and every
+   doc_url is well formed.
 
    Generated from the verified inventories, not hand-edited. Four clouds, two
-   independent audits each, then a reconciliation onto one vocabulary. Correct
-   a fact in the inventory it came from and regenerate; do not patch a cell
-   here, because the next regeneration would silently drop the patch. */
+   independent audits each, then a reconciliation onto one vocabulary and a
+   repair pass. Correct a fact in the inventory it came from and regenerate; do
+   not patch a cell here, because the next regeneration would silently drop the
+   patch. */
 window.CLOUD_CAPABILITY_MATRIX = {
   "version": 1,
   "note": "One row per capability key; one column per cloud. A cell is a service (with a link to that vendor's own documentation), a declared absence with a reason, or unfilled until verified research fills it.",
@@ -545,8 +558,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Confidential compute",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "AWS Nitro Enclaves is the peer capability, an isolated attested execution environment carved out of an instance. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "AWS Nitro Enclaves",
+              "short_name": "Nitro Enclaves",
+              "doc_url": "https://docs.aws.amazon.com/enclaves/latest/user/nitro-enclave.html",
+              "one_line": "Isolated hardened virtual machines carved out of an EC2 instance, with no persistent storage, no interactive access, and no external networking.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "service",
@@ -573,8 +594,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "OCI offers confidential VMs and bare metal on AMD SEV-capable shapes. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "OCI Confidential Computing",
+              "short_name": "Confidential VMs",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/Compute/References/confidential_compute.htm",
+              "one_line": "Virtual machine and bare metal shapes whose memory is encrypted from the hypervisor by AMD Secure Encrypted Virtualization.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -620,8 +649,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Dedicated Virtual Machine Hosts are the peer capability, a single-tenant physical host that runs only your VMs. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Dedicated Virtual Machine Hosts",
+              "short_name": "Dedicated VM Hosts",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/Compute/Concepts/dedicatedvmhosts.htm",
+              "one_line": "A single-tenant physical server that runs only your virtual machines, for licensing, isolation, or placement control.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -1102,8 +1139,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           "reason": "No workload-aware Kubernetes backup service. AWS Backup does not cover EKS objects, so teams run Velero themselves."
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Backup for AKS is the peer capability, covering cluster resources and persistent volumes. It is named inside the backup-service row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Backup for AKS",
+              "short_name": "AKS Backup",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/backup/azure-kubernetes-service-backup-overview",
+              "one_line": "Workload-aware backup and restore of AKS cluster resources together with their persistent volumes, scheduled and retained by a backup vault policy.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -1133,8 +1178,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           "reason": "No fleet abstraction across clusters. EKS clusters are managed one at a time, with policy applied through the account and organisation layers."
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Kubernetes Fleet Manager is the peer capability, grouping clusters for coordinated upgrades and multi-cluster workload placement. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Kubernetes Fleet Manager",
+              "short_name": "Fleet Manager",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/kubernetes-fleet/overview",
+              "one_line": "A fleet resource that groups AKS clusters so upgrades, workload placement, and multi-cluster load balancing are managed once rather than cluster by cluster.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -1172,12 +1225,14 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Node autoprovisioning in AKS is the peer capability and is Karpenter-based, but it is a mode of the cluster rather than a separate product. See managed-kubernetes."
+          "state": "elsewhere",
+          "reason": "Node autoprovisioning in AKS is the peer capability and is Karpenter-based, but it is a mode of the cluster rather than a separate product.",
+          "see": "managed-kubernetes"
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Node auto-provisioning and the cluster autoscaler are built into GKE, and Autopilot removes node management entirely. See managed-kubernetes."
+          "state": "elsewhere",
+          "reason": "Node auto-provisioning and the cluster autoscaler are built into GKE, and Autopilot removes node management entirely.",
+          "see": "managed-kubernetes"
         },
         "oci": {
           "state": "absent",
@@ -1861,7 +1916,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
         },
         "oci": {
           "state": "absent",
-          "reason": "OCI Storage Gateway is the peer capability, an on-premises NFS appliance backed by Object Storage. Not captured as its own row in this snapshot."
+          "reason": "No first-party storage gateway. OCI Storage Gateway, the on-premises NFS appliance backed by Object Storage, is retired: Oracle's own documentation page for it now says only that the service is no longer available. On-premises access to Object Storage is left to the CLI, rclone, S3-compatible clients, or a partner appliance."
         }
       }
     },
@@ -1939,7 +1994,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
         },
         "azure": {
           "state": "absent",
-          "reason": "Premium block blob accounts are the nearest thing: SSD-backed, single-digit millisecond first-byte latency, priced per transaction. Described inside the object-storage row rather than captured separately."
+          "reason": "No single-zone high-performance object class. Premium block blob accounts are SSD-backed with single-digit millisecond first-byte latency and per-transaction pricing, but they stay regionally redundant, so they do not make the trade this capability describes: dropping cross-zone redundancy to buy consistently low latency."
         },
         "gcp": {
           "state": "service",
@@ -1982,7 +2037,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
         },
         "gcp": {
           "state": "absent",
-          "reason": "BigLake managed Iceberg tables on Cloud Storage are the peer capability, with automatic storage optimisation. Described inside the data-lake row rather than captured separately."
+          "reason": "Cloud Storage has no table-aware bucket type. BigLake managed Iceberg tables do give managed Iceberg storage with automatic optimisation, but the tables are created and maintained by BigQuery over ordinary buckets, so the storage service itself still holds table files as opaque objects. Recorded in the data-lake row."
         },
         "oci": {
           "state": "absent",
@@ -1996,11 +2051,12 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Change data capture",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Delivered as the ongoing-replication mode of Database Migration Service rather than as a separate product. See db-migration-service."
+          "state": "elsewhere",
+          "reason": "Delivered as the ongoing-replication mode of Database Migration Service rather than as a separate product.",
+          "see": "db-migration-service"
         },
         "azure": {
-          "state": "absent",
+          "state": "elsewhere",
           "reason": "Delivered as the online mode of Database Migration Service plus Data Factory and Fabric change data capture. There is no standalone CDC product."
         },
         "gcp": {
@@ -2055,8 +2111,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Database Management is the peer capability, with fleet health, performance, and diagnostics across Oracle databases. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Database Management",
+              "short_name": "DB Management",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/database-management/home.htm",
+              "one_line": "Fleet-wide console for Oracle databases showing health, performance, storage, and configuration across the estate rather than one database at a time.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -2121,8 +2185,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Globally distributed SQL",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Amazon Aurora DSQL is the peer capability, an active-active distributed SQL database with multi-region strong consistency. Not captured as its own row in this snapshot and needs a verified entry."
+          "state": "service",
+          "services": [
+            {
+              "name": "Amazon Aurora DSQL",
+              "short_name": "Aurora DSQL",
+              "doc_url": "https://docs.aws.amazon.com/aurora-dsql/latest/userguide/what-is-aurora-dsql.html",
+              "one_line": "Serverless PostgreSQL-compatible distributed SQL with an active-active design and strongly consistent multi-region writes.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "absent",
@@ -2141,8 +2213,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Globally Distributed Autonomous Database is the peer capability, sharding Autonomous Database across regions. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Globally Distributed Autonomous Database",
+              "short_name": "Distributed ADB",
+              "doc_url": "https://docs.oracle.com/en/cloud/paas/globally-distributed-autonomous-database/user/overview-distributed-adb1.html",
+              "one_line": "Autonomous Database sharded across availability domains or regions, presenting one logical database while each shard holds its own subset of the data.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -2302,16 +2382,32 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Confidential Ledger is the peer capability, a tamper-evident append-only store backed by confidential computing. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure confidential ledger",
+              "short_name": "Confidential Ledger",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/confidential-ledger/overview",
+              "one_line": "Tamper-evident append-only store running inside hardware enclaves, returning a cryptographic receipt for every write.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "absent",
           "reason": "No managed ledger/QSQL-style product. Nearest: Bucket Lock/Object Retention Lock immutability plus Spanner for transactional history."
         },
         "oci": {
-          "state": "absent",
-          "reason": "Oracle Blockchain Platform is the peer capability, a managed Hyperledger Fabric network; Autonomous Database blockchain tables serve the single-party immutable case. Neither is captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Oracle Blockchain Platform",
+              "short_name": "Blockchain Platform",
+              "doc_url": "https://docs.oracle.com/en/cloud/paas/blockchain-cloud/index.html",
+              "one_line": "Managed Hyperledger Fabric network for multi-party permissioned ledgers, with membership, ordering, and smart contracts run by Oracle.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -2695,12 +2791,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Microsoft ships confidential clean rooms built on confidential computing. They are not captured in this snapshot and their availability stage needs verification before this cell is rendered."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Confidential Clean Rooms",
+              "short_name": "Clean Rooms",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/confidential-computing/confidential-clean-rooms",
+              "one_line": "Protected environment where several parties analyse combined sensitive datasets without exposing their raw rows to each other or to the operator.",
+              "status": "preview"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Delivered as BigQuery data clean rooms, an Analytics Hub capability rather than a separate service. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "BigQuery data clean rooms",
+              "short_name": "Data clean rooms",
+              "doc_url": "https://cloud.google.com/bigquery/docs/data-clean-rooms",
+              "one_line": "Analytics Hub listings that let several parties query joined data under privacy policies, without any party reading the other's rows.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
           "state": "absent",
@@ -3077,15 +3189,24 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Delivered as the Synapse serverless SQL pool and the Fabric SQL analytics endpoint, billed per terabyte scanned over lake files. Described inside the data-warehouse row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Synapse serverless SQL pool",
+              "short_name": "Serverless SQL",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/synapse-analytics/sql/on-demand-workspace-overview",
+              "one_line": "T-SQL run directly over files in the data lake with no cluster to provision, billed per terabyte of data processed.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Delivered by BigQuery itself, which is serverless and bills per byte scanned over both managed storage and external lake tables. See data-warehouse."
+          "state": "elsewhere",
+          "reason": "Delivered by BigQuery itself, which is serverless and bills per byte scanned over both managed storage and external lake tables.",
+          "see": "data-warehouse"
         },
         "oci": {
-          "state": "absent",
+          "state": "elsewhere",
           "reason": "Delivered by Autonomous AI Lakehouse external tables and Data Flow SQL over Object Storage, rather than as a standalone per-query engine."
         }
       }
@@ -3096,8 +3217,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Stream analytics",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Amazon Managed Service for Apache Flink is the peer capability, running windowed SQL and Flink jobs over streams. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Amazon Managed Service for Apache Flink",
+              "short_name": "Managed Flink",
+              "doc_url": "https://docs.aws.amazon.com/managed-flink/latest/java/what-is.html",
+              "one_line": "Managed Apache Flink for stateful stream processing: windowed SQL, the DataStream and Table APIs, checkpointed state, and exactly-once sinks.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "service",
@@ -3112,12 +3241,14 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Delivered by Dataflow, whose Apache Beam pipelines carry windowing, triggers, and exactly-once semantics over unbounded sources. See etl-service."
+          "state": "elsewhere",
+          "reason": "Delivered by Dataflow, whose Apache Beam pipelines carry windowing, triggers, and exactly-once semantics over unbounded sources.",
+          "see": "etl-service"
         },
         "oci": {
-          "state": "absent",
-          "reason": "Delivered by Data Flow Spark Streaming and GoldenGate Stream Analytics rather than as a dedicated streaming SQL product. See managed-spark."
+          "state": "elsewhere",
+          "reason": "Delivered by Data Flow Spark Streaming and GoldenGate Stream Analytics rather than as a dedicated streaming SQL product.",
+          "see": "managed-spark"
         }
       }
     },
@@ -3203,11 +3334,11 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "BGP dynamic routing",
       "cells": {
         "aws": {
-          "state": "absent",
+          "state": "elsewhere",
           "reason": "The BGP speaker is embedded in the virtual private gateway, the Direct Connect gateway, and Transit Gateway rather than exposed as its own resource."
         },
         "azure": {
-          "state": "absent",
+          "state": "elsewhere",
           "reason": "The BGP speaker is embedded in the VPN Gateway and the ExpressRoute gateway rather than exposed as its own resource."
         },
         "gcp": {
@@ -3223,7 +3354,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
+          "state": "elsewhere",
           "reason": "The BGP speaker is embedded in the Dynamic Routing Gateway rather than exposed as its own resource."
         }
       }
@@ -3246,8 +3377,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "IPAM pools inside Azure Virtual Network Manager are the peer capability. Not captured as their own row in this snapshot. See network-manager."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Virtual Network Manager IP address management",
+              "short_name": "AVNM IPAM",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/virtual-network-manager/concept-ip-address-management",
+              "one_line": "Central address pools that plan CIDR space, allocate non-overlapping ranges to Azure resources automatically, and report utilisation across the estate.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "absent",
@@ -3585,8 +3724,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Shared VPC",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "VPC sharing delivers the same pattern: an owning account shares subnets with participant accounts through Resource Access Manager. See cross-account-resource-sharing."
+          "state": "elsewhere",
+          "reason": "VPC sharing delivers the same pattern: an owning account shares subnets with participant accounts through Resource Access Manager.",
+          "see": "cross-account-resource-sharing"
         },
         "azure": {
           "state": "absent",
@@ -3616,8 +3756,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Stateful packet filter",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Security groups (stateful, at the interface) and network ACLs (stateless, at the subnet) are the peer capability. They are not captured as their own row in this snapshot and need verified entries."
+          "state": "service",
+          "services": [
+            {
+              "name": "Security groups and network ACLs",
+              "short_name": "SG / NACL",
+              "doc_url": "https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html",
+              "one_line": "Stateful allow-only rules at the network interface (security groups) plus stateless numbered allow and deny rules at the subnet edge (network ACLs).",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "service",
@@ -3632,12 +3780,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "VPC firewall rules and hierarchical firewall policies are the peer capability. They are described inside the cloud-firewall row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "VPC firewall rules and hierarchical firewall policies",
+              "short_name": "VPC firewall rules",
+              "doc_url": "https://cloud.google.com/firewall/docs/firewalls",
+              "one_line": "Distributed stateful filter enforced at every instance interface, with rules targeted by network tag, secure tag, or service account rather than only by address.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Security lists (at the subnet) and network security groups (at the VNIC) are the peer capability. They are not captured as their own row in this snapshot and need verified entries."
+          "state": "service",
+          "services": [
+            {
+              "name": "Security lists and network security groups",
+              "short_name": "Security lists / NSG",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/securityrules.htm",
+              "one_line": "Stateful ingress and egress rules applied at the subnet (security lists) or at the individual VNIC (network security groups), with both evaluated together.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -3914,7 +4078,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
             {
               "name": "Edge DDoS protection",
               "short_name": "DDoS",
-              "doc_url": "https://www.oracle.com/security/ddos/",
+              "doc_url": "https://docs.oracle.com/en/solutions/learn-ddos-prevention-oci/understand-ddos-layers-and-oracle-ddos-protection1.html",
               "one_line": "Always-on volumetric protection included on OCI edge for public endpoints, with SOC monitoring.",
               "status": "ga"
             }
@@ -3940,8 +4104,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "The Gateway SKU of Azure Load Balancer is the peer capability, chaining third-party appliances transparently. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Load Balancer (Gateway SKU)",
+              "short_name": "Gateway LB",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/load-balancer/gateway-overview",
+              "one_line": "Bump-in-the-wire insertion point that chains third-party network virtual appliances into the traffic path without changing the application's addressing.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "absent",
@@ -4386,8 +4558,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           "reason": "No first-party circuit into another provider's fabric. Cross-cloud links are built from Direct Connect plus a colocation or partner cross-connect."
         },
         "azure": {
-          "state": "absent",
-          "reason": "ExpressRoute reaches other providers only through a partner or a colocation cross-connect. The direct Oracle Interconnect for Microsoft Azure is the exception and is not captured in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "ExpressRoute to OCI FastConnect direct interconnect",
+              "short_name": "Azure-OCI interconnect",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/connectivity-to-other-providers-oci",
+              "one_line": "Direct private path between Azure and Oracle Cloud Infrastructure, pairing an ExpressRoute circuit with an OCI FastConnect circuit and no cross-connect of your own.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -4402,8 +4582,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "The Oracle Interconnect partnerships with Microsoft Azure and Google Cloud are the peer capability, alongside FastConnect partner circuits. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Oracle Interconnect for Azure and Google Cloud",
+              "short_name": "Oracle Interconnect",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/multicloud/interconnect-azure.htm",
+              "one_line": "Direct private links between OCI and another provider's fabric, pairing a FastConnect circuit with the partner cloud's own circuit and no cross-connect of your own.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -4620,8 +4808,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Router appliance spokes on Network Connectivity Center are the peer capability, attaching a third-party SD-WAN virtual appliance to the hub. Named inside the transit-hub row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Network Connectivity Center router appliance spokes",
+              "short_name": "Router appliance",
+              "doc_url": "https://cloud.google.com/network-connectivity/docs/network-connectivity-center/concepts/ra-overview",
+              "one_line": "Attaches a third-party SD-WAN or router virtual appliance to the Network Connectivity Center hub as a spoke, so branch routes join the cloud routing domain over BGP.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
           "state": "absent",
@@ -4694,8 +4890,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           "reason": "VMware Cloud on AWS is no longer sold by AWS following the Broadcom transition, so there is no first-party VMware stack in this snapshot. Verify the current offer before rendering this cell."
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure VMware Solution is the peer capability, a VMware Cloud Foundation stack on dedicated Azure hosts. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure VMware Solution",
+              "short_name": "AVS",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/azure-vmware/introduction",
+              "one_line": "VMware Cloud Foundation stack running on dedicated Azure bare-metal hosts, administered with vCenter, NSX, and vSAN exactly as on-premises.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -4710,8 +4914,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Oracle Cloud VMware Solution is the peer capability, a customer-administered VMware Cloud Foundation stack on OCI bare metal. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Oracle Cloud VMware Solution",
+              "short_name": "OCVS",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/VMware/Concepts/ocvsoverview.htm",
+              "one_line": "Customer-administered VMware Cloud Foundation stack on OCI bare metal, with vCenter, NSX, and vSAN run by you rather than by Oracle.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -4737,12 +4949,21 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Delivered as Access Context Manager access levels applied through IAM conditions and Identity-Aware Proxy, rather than as one sign-in policy engine. See zero-trust-app-access."
+          "state": "elsewhere",
+          "reason": "Delivered as Access Context Manager access levels applied through IAM conditions and Identity-Aware Proxy, rather than as one sign-in policy engine.",
+          "see": "zero-trust-app-access"
         },
         "oci": {
-          "state": "absent",
-          "reason": "Delivered as identity domain sign-on policies with adaptive risk scoring, described inside the federation and MFA rows rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Identity domain sign-on policies with Adaptive Security",
+              "short_name": "Sign-on policies",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/Identity/adaptivesecurity/overview.htm",
+              "one_line": "Sign-on policy rules that allow, deny, or step up authentication per sign-in based on group, network perimeter, client, and a risk score.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -4928,12 +5149,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Microsoft Entra Domain Services is the peer capability, a managed domain offering LDAP, Kerberos, and domain join. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Microsoft Entra Domain Services",
+              "short_name": "Entra DS",
+              "doc_url": "https://learn.microsoft.com/en-us/entra/identity/domain-services/overview",
+              "one_line": "Managed Active Directory domain offering LDAP, Kerberos, NTLM, and domain join with no domain controllers of your own to run.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Managed Service for Microsoft Active Directory is the peer capability. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Managed Service for Microsoft Active Directory",
+              "short_name": "Managed AD",
+              "doc_url": "https://cloud.google.com/managed-microsoft-ad/docs/overview",
+              "one_line": "Managed Active Directory domain running real Microsoft domain controllers, offering LDAP, Kerberos, and domain join with no controllers of your own to patch.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
           "state": "absent",
@@ -4947,12 +5184,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "OS login",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "EC2 Instance Connect pushes short-lived SSH keys authorised by IAM, and Session Manager avoids SSH altogether. Neither is captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "EC2 Instance Connect",
+              "short_name": "Instance Connect",
+              "doc_url": "https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-instance-connect-methods.html",
+              "one_line": "IAM-authorised SSH to EC2: a one-time public key is pushed to instance metadata for 60 seconds instead of a long-lived key kept on the instance.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "The Entra login extension for Linux and Windows VMs authorises sign-in through Entra roles. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Microsoft Entra login for virtual machines",
+              "short_name": "Entra VM login",
+              "doc_url": "https://learn.microsoft.com/en-us/entra/identity/devices/howto-vm-sign-in-azure-ad-linux",
+              "one_line": "VM extension that authorises operating-system sign-in through Entra ID roles and Conditional Access instead of keys or local accounts managed inside the guest.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -5134,8 +5387,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Agent identity",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Delivered inside Bedrock AgentCore rather than as a directory object: AgentCore Identity issues and scopes agent credentials. See agent-platform."
+          "state": "elsewhere",
+          "reason": "Delivered inside Bedrock AgentCore rather than as a directory object: AgentCore Identity issues and scopes agent credentials.",
+          "see": "agent-platform"
         },
         "azure": {
           "state": "service",
@@ -5593,8 +5847,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Not captured as its own row in this snapshot. Vault accepts customer-supplied key material and the dedicated single-tenant HSM gives exclusive custody, so this needs a verified entry rather than being read as an absence."
+          "state": "service",
+          "services": [
+            {
+              "name": "Vault imported key material and Dedicated Key Management",
+              "short_name": "BYOK / Dedicated KMS",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/KeyManagement/Tasks/importingkeys.htm",
+              "one_line": "Import your own key material into a Vault key, or hold keys in a single-tenant HSM partition that only your tenancy uses.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -5604,8 +5866,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Certificate authority",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "AWS Private Certificate Authority is the peer capability. It is not captured as its own row in this snapshot; the certificate-manager row covers public certificates only."
+          "state": "service",
+          "services": [
+            {
+              "name": "AWS Private Certificate Authority",
+              "short_name": "Private CA",
+              "doc_url": "https://docs.aws.amazon.com/privateca/latest/userguide/PcaWelcome.html",
+              "one_line": "Managed private CA hierarchies that issue, renew, and revoke internal X.509 certificates for mutual TLS between your own workloads.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "absent",
@@ -5624,8 +5894,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Delivered inside the Certificates service, which runs a managed internal CA alongside imported third-party certificates. See certificate-manager."
+          "state": "elsewhere",
+          "reason": "Delivered inside the Certificates service, which runs a managed internal CA alongside imported third-party certificates.",
+          "see": "certificate-manager"
         }
       }
     },
@@ -5874,16 +6145,40 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Reservations and the Azure savings plan for compute are the peer capability. They are described inside the cost-management row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Reservations and savings plan for compute",
+              "short_name": "Reservations / Savings plan",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/save-compute-costs-reservations",
+              "one_line": "Term commitments traded for a lower rate: a reservation commits to a specific resource type in a region, the savings plan commits to an hourly compute spend that flexes across eligible services and regions.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Committed use discounts, both resource-based and spend-based, are the peer capability. They are not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Committed use discounts",
+              "short_name": "CUDs",
+              "doc_url": "https://cloud.google.com/docs/cuds",
+              "one_line": "One-year or three-year commitments traded for a lower rate, either resource-based against a machine family in a region or spend-based against an hourly dollar amount.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Oracle sells commitment through Universal Credits and Annual Flex agreements rather than as a per-service commitment product. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Oracle Universal Credits (Annual Flex)",
+              "short_name": "Universal Credits",
+              "doc_url": "https://www.oracle.com/cloud/universal-credits/",
+              "one_line": "An annual dollar commitment drawn down by any eligible OCI service in any region, traded for a discount off pay-as-you-go rates.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -5912,16 +6207,40 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Advisor is the peer capability, with cost, reliability, security, performance, and operational excellence recommendations. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Advisor",
+              "short_name": "Advisor",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/advisor/advisor-overview",
+              "one_line": "Personalised recommendations across cost, reliability, security, performance, and operational excellence, scored against the Well-Architected pillars.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Recommender and Active Assist are the peer capability, including machine-type, idle-resource, and commitment recommendations. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Recommender and Active Assist",
+              "short_name": "Recommender",
+              "doc_url": "https://cloud.google.com/recommender/docs/overview",
+              "one_line": "Automated recommendations across cost, security, performance, reliability, and manageability, each with an estimated impact and an apply path.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "OCI Cloud Advisor is the peer capability, with cost, performance, availability, and security recommendations. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "OCI Cloud Advisor",
+              "short_name": "Cloud Advisor",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/CloudAdvisor/Concepts/cloudadvisoroverview.htm",
+              "one_line": "Automated recommendations across cost, performance, availability, and security, each with an estimated saving and a direct apply action.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -6339,12 +6658,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Managed Applications and Azure Deployment Environments are the peer capabilities for curated self-service provisioning. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Managed Applications and Deployment Environments",
+              "short_name": "Managed Apps / ADE",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/azure-resource-manager/managed-applications/overview",
+              "one_line": "Curated templated products that internal users deploy themselves inside guardrails: managed applications publish a locked-down resource group, deployment environments hand teams pre-approved infrastructure templates.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Google Cloud Service Catalog is the peer capability, publishing approved solutions to internal users. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Google Cloud Service Catalog",
+              "short_name": "Service Catalog",
+              "doc_url": "https://cloud.google.com/service-catalog/docs/overview",
+              "one_line": "Internal catalogue where an administrator publishes approved solutions and users deploy them into their own projects inside the guardrails set for them.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
           "state": "absent",
@@ -6754,8 +7089,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
           "reason": "No automatic exception grouping service. CloudWatch Logs metric filters and Application Signals surface error rates but do not deduplicate stack traces into tracked issues."
         },
         "azure": {
-          "state": "absent",
-          "reason": "Delivered inside Application Insights, whose failures view groups exceptions by problem ID. Not a separate service. See distributed-tracing."
+          "state": "elsewhere",
+          "reason": "Delivered inside Application Insights, whose failures view groups exceptions by problem ID. Not a separate service.",
+          "see": "distributed-tracing"
         },
         "gcp": {
           "state": "service",
@@ -6843,12 +7179,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Managed Prometheus",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Amazon Managed Service for Prometheus is the peer capability, a managed PromQL-queryable store. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Amazon Managed Service for Prometheus",
+              "short_name": "AMP",
+              "doc_url": "https://docs.aws.amazon.com/prometheus/latest/userguide/what-is-Amazon-Managed-Service-Prometheus.html",
+              "one_line": "Managed Prometheus-compatible metric store queried with PromQL, with agentless collection from EKS and Alertmanager-compatible rules.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Monitor managed service for Prometheus is the peer capability, storing metrics in an Azure Monitor workspace with PromQL and Managed Grafana on top. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Monitor managed service for Prometheus",
+              "short_name": "Managed Prometheus",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-metrics-overview",
+              "one_line": "Managed Prometheus-compatible metric store in an Azure Monitor workspace, queried with PromQL and alerted on with Prometheus rule groups.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -6929,12 +7281,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Network diagnostics",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Reachability Analyzer, Network Access Analyzer, and CloudWatch Network Monitor are the peer capabilities. They are not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "VPC Reachability Analyzer and Network Access Analyzer",
+              "short_name": "Reachability Analyzer",
+              "doc_url": "https://docs.aws.amazon.com/vpc/latest/reachability/what-is-reachability-analyzer.html",
+              "one_line": "Configuration analysis of network paths: Reachability Analyzer says whether one resource can reach another and names the blocking component, Network Access Analyzer finds which paths exist against a stated intent.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Network Watcher is the peer capability, with connection troubleshoot, IP flow verify, effective rules, and packet capture. Not captured as its own row in this snapshot; its Traffic Analytics component is filed under network-flow-log."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Network Watcher",
+              "short_name": "Network Watcher",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/network-watcher/network-watcher-overview",
+              "one_line": "Diagnostic suite for network paths: connection troubleshoot, IP flow verify, next hop, effective security rules, and packet capture.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -6949,8 +7317,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Network Path Analyzer is the peer capability, tracing intended paths across VCN gateways and rules. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Network Path Analyzer",
+              "short_name": "Path Analyzer",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/path_analyzer.htm",
+              "one_line": "Traces the intended path between two endpoints across gateways, route tables, security lists, and network security groups, and names what blocks it.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -7007,12 +7383,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Service health dashboard",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "The AWS Health Dashboard and Health API are the peer capability, with account-scoped events and organisation-wide views. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "AWS Health Dashboard",
+              "short_name": "AWS Health",
+              "doc_url": "https://docs.aws.amazon.com/health/latest/ug/what-is-aws-health.html",
+              "one_line": "Account-scoped feed of service events, scheduled changes, and account notifications, naming the resources of yours that are affected.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Service Health is the peer capability, with subscription-scoped service issues, planned maintenance, and health advisories. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Service Health",
+              "short_name": "Service Health",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/service-health/overview",
+              "one_line": "Subscription-scoped feed of service issues, planned maintenance, and health advisories, naming the resources of yours that are affected.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -7027,8 +7419,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "The OCI status page plus tenancy Announcements deliver scoped notices. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Console Announcements",
+              "short_name": "Announcements",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/General/Concepts/announcements.htm",
+              "one_line": "Tenancy-scoped feed of service events, planned maintenance, and required actions, delivered in the console and subscribable through Notifications.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -7112,8 +7512,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "The Azure Monitor Agent plus the Azure Monitor OpenTelemetry distro are the peer capability, with data collection rules deciding what each machine sends. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Monitor Agent",
+              "short_name": "AMA",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/azure-monitor/agents/azure-monitor-agent-overview",
+              "one_line": "Supported collector that ships host logs, performance counters, and events into Log Analytics, with data collection rules deciding what each machine sends.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -7128,8 +7536,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "The Management Agent and the unified monitoring agent ship host logs and metrics into Logging and Monitoring. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Management Agent",
+              "short_name": "Management Agent",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/management-agents/home.htm",
+              "one_line": "Supported collector installed on cloud or on-premises hosts that ships logs, host metrics, and Prometheus scrapes into Logging and Monitoring.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -7631,12 +8047,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "AI safety guardrails",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Amazon Bedrock Guardrails is the peer capability, with content filters, denied topics, and contextual grounding checks. It is not captured as its own row in this snapshot and needs a verified entry."
+          "state": "service",
+          "services": [
+            {
+              "name": "Amazon Bedrock Guardrails",
+              "short_name": "Guardrails",
+              "doc_url": "https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html",
+              "one_line": "Configurable safeguards for generative AI applications: harmful-content filters, denied topics, word filters, sensitive-information redaction, and contextual grounding checks.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure AI Content Safety is the peer capability, screening prompts and responses for harmful content and jailbreak attempts. It is not captured as its own row in this snapshot and needs a verified entry."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure AI Content Safety",
+              "short_name": "Content Safety",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview",
+              "one_line": "Detects harmful user-generated and model-generated content in text and images, in front of any model endpoint.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -7662,8 +8094,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Bastion",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "Delivered by Systems Manager Session Manager, an agent-brokered shell that needs no open port, no public IP, and no jump host. See config-management."
+          "state": "elsewhere",
+          "reason": "Delivered by Systems Manager Session Manager, an agent-brokered shell that needs no open port, no public IP, and no jump host.",
+          "see": "config-management"
         },
         "azure": {
           "state": "service",
@@ -7678,8 +8111,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Delivered by Identity-Aware Proxy TCP forwarding, which tunnels SSH and RDP to instances that have no public IP. See zero-trust-app-access."
+          "state": "elsewhere",
+          "reason": "Delivered by Identity-Aware Proxy TCP forwarding, which tunnels SSH and RDP to instances that have no public IP.",
+          "see": "zero-trust-app-access"
         },
         "oci": {
           "state": "service",
@@ -7811,12 +8245,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Packet mirroring",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "VPC Traffic Mirroring is the peer capability, copying ENI traffic to an out-of-band collector. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Amazon VPC Traffic Mirroring",
+              "short_name": "Traffic Mirroring",
+              "doc_url": "https://docs.aws.amazon.com/vpc/latest/mirroring/what-is-traffic-mirroring.html",
+              "one_line": "Copies traffic from an elastic network interface to out-of-band security and monitoring appliances for content inspection, threat monitoring, and troubleshooting.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Virtual network TAP is the peer capability; verify its availability stage before rendering this cell, because the service has been re-scoped more than once."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure virtual network TAP",
+              "short_name": "VNet TAP",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-tap-overview",
+              "one_line": "Streams a virtual machine's network traffic continuously from its network interface to a packet collector or analytics appliance.",
+              "status": "preview"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -7831,8 +8281,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "VCN Traffic Mirroring (VTAP) is the peer capability, copying VNIC traffic to a collector behind a network load balancer. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "VCN Traffic Mirroring (VTAP)",
+              "short_name": "VTAP",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/vtap.htm",
+              "one_line": "Copies traffic from a source VNIC, subnet, or load balancer to an out-of-band collector for intrusion detection and packet analysis.",
+              "status": "ga"
+            }
+          ]
         }
       }
     },
@@ -7909,12 +8367,14 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Delivered inside Microsoft Sentinel, whose investigation graph and entity pages correlate incidents across sources. See threat-detection."
+          "state": "elsewhere",
+          "reason": "Delivered inside Microsoft Sentinel, whose investigation graph and entity pages correlate incidents across sources.",
+          "see": "threat-detection"
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Delivered inside Security Command Center Enterprise, which folds in Google SecOps case management and attack-path analysis. See threat-detection."
+          "state": "elsewhere",
+          "reason": "Delivered inside Security Command Center Enterprise, which folds in Google SecOps case management and attack-path analysis.",
+          "see": "threat-detection"
         },
         "oci": {
           "state": "absent",
@@ -7932,8 +8392,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           "reason": "No single perimeter object. The equivalent data perimeter is assembled from resource control policies, service control policies, VPC endpoint policies, and resource policy conditions, and it is evaluated per request rather than as one boundary."
         },
         "azure": {
-          "state": "absent",
-          "reason": "No general API-level perimeter that holds against valid credentials in this snapshot. Private Link plus per-service firewall rules restrict the network path only; network security perimeter is the emerging peer capability and its availability stage needs verification."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Network Security Perimeter",
+              "short_name": "NSP",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/private-link/network-security-perimeter-concepts",
+              "one_line": "Logical boundary around PaaS resources that blocks public network access by default, with explicit inbound and outbound access rules for the traffic allowed to cross it.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -8181,8 +8649,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Microsoft Entra Private Access, part of Global Secure Access, is the peer capability for VPN-less access to internal applications, with Conditional Access supplying the policy signals. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Microsoft Entra Private Access",
+              "short_name": "Entra Private Access",
+              "doc_url": "https://learn.microsoft.com/en-us/entra/global-secure-access/concept-private-access",
+              "one_line": "VPN-less access to internal applications through the Global Secure Access client and private connectors, with Conditional Access deciding each session.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -8465,12 +8941,28 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Kubernetes config management",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "AWS Controllers for Kubernetes is the peer capability, exposing AWS resources as Kubernetes custom resources. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "AWS Controllers for Kubernetes",
+              "short_name": "ACK",
+              "doc_url": "https://aws-controllers-k8s.github.io/community/docs/community/overview/",
+              "one_line": "Service-specific Kubernetes controllers that expose AWS resources as custom resources so kubectl and GitOps manage cloud objects.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Service Operator is the peer capability, exposing Azure resources as Kubernetes custom resources. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Service Operator",
+              "short_name": "ASO",
+              "doc_url": "https://azure.github.io/azure-service-operator/",
+              "one_line": "Kubernetes operator that exposes Azure resources as custom resources so one control plane reconciles both cluster workloads and cloud objects.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -8966,8 +9458,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure IoT Hub is the peer capability, a managed device broker over MQTT, AMQP, and HTTPS with device twins; Event Grid also serves MQTT v5. Neither is captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure IoT Hub",
+              "short_name": "IoT Hub",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/iot-hub/iot-concepts-and-iot-hub",
+              "one_line": "Managed device broker over MQTT, AMQP, and HTTPS with per-device identity, device twins for state, and routing of device messages into other services.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "absent",
@@ -9040,8 +9540,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Realtime messaging",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "AppSync Events and API Gateway WebSocket APIs cover managed fan-out to browsers. AppSync Events is described inside the graphql-api row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "API Gateway WebSocket APIs",
+              "short_name": "WebSocket APIs",
+              "doc_url": "https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html",
+              "one_line": "Managed two-way WebSocket connections to browsers and devices, routing inbound frames by a route key and pushing server-initiated messages back through a management API.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "service",
@@ -9056,8 +9564,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "Firebase Realtime Database and Firestore live listeners cover browser fan-out; Pub/Sub has no browser transport. Not captured as their own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Firebase Realtime Database and Cloud Firestore listeners",
+              "short_name": "Firebase listeners",
+              "doc_url": "https://firebase.google.com/docs/database",
+              "one_line": "Client SDKs hold an open connection and receive document or node changes as they happen, so the database itself is the fan-out path to browsers and devices.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
           "state": "absent",
@@ -9071,8 +9587,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Scheduler jobs",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "EventBridge Scheduler is the peer capability, with one-time and cron schedules against a wide target set. Named inside the event-bus row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Amazon EventBridge Scheduler",
+              "short_name": "EventBridge Scheduler",
+              "doc_url": "https://docs.aws.amazon.com/scheduler/latest/UserGuide/what-is-scheduler.html",
+              "one_line": "Serverless scheduler for one-time and recurring jobs, with cron and rate expressions, an explicit time zone, and an optional flexible time window.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
           "state": "absent",
@@ -9102,16 +9626,40 @@ window.CLOUD_CAPABILITY_MATRIX = {
       "title": "Telemetry export pipeline",
       "cells": {
         "aws": {
-          "state": "absent",
-          "reason": "CloudWatch Logs subscription filters and Data Firehose deliver the same routing to storage, OpenSearch, and third parties. Described inside the log-store and stream-ingest rows rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "CloudWatch Logs subscription filters",
+              "short_name": "Subscription filters",
+              "doc_url": "https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/SubscriptionFilters.html",
+              "one_line": "Near real-time delivery of log events out of CloudWatch Logs to Data Firehose, Kinesis Data Streams, or Lambda, and on to storage, OpenSearch, or a third party.",
+              "status": "ga"
+            }
+          ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Diagnostic settings route each resource's logs and metrics to Log Analytics, storage, Event Hubs, or a partner. Described inside the data-plane-access-log row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Monitor diagnostic settings",
+              "short_name": "Diagnostic settings",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/azure-monitor/platform/diagnostic-settings",
+              "one_line": "Per-resource routing of platform logs and metrics to Log Analytics, a storage account, an event hub, or a partner destination.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
-          "state": "absent",
-          "reason": "The Cloud Logging Log Router with sinks to Cloud Storage, BigQuery, and Pub/Sub delivers the same routing. Described inside the log-store row rather than captured separately."
+          "state": "service",
+          "services": [
+            {
+              "name": "Cloud Logging Log Router sinks",
+              "short_name": "Log Router",
+              "doc_url": "https://cloud.google.com/logging/docs/routing/overview",
+              "one_line": "Routes every log entry through inclusion and exclusion filters to sinks that land it in Cloud Storage, BigQuery, Pub/Sub, another log bucket, or a third party.",
+              "status": "ga"
+            }
+          ]
         },
         "oci": {
           "state": "service",
@@ -9330,8 +9878,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Delivered by Azure AI Search integrated vectorization together with the Foundry data-grounding flow, rather than as one managed pipeline product. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure AI Search integrated vectorization",
+              "short_name": "Integrated vectorization",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/search/vector-search-integrated-vectorization",
+              "one_line": "Indexer pipeline that pulls source documents, chunks them, calls an embedding model, and writes vectors into a searchable index, then embeds the query at search time.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -9346,8 +9902,9 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "oci": {
-          "state": "absent",
-          "reason": "Delivered inside Generative AI Agents, whose knowledge bases index Object Storage and OpenSearch content for grounded answers. See agent-platform."
+          "state": "elsewhere",
+          "reason": "Delivered inside Generative AI Agents, whose knowledge bases index Object Storage and OpenSearch content for grounded answers.",
+          "see": "agent-platform"
         }
       }
     },
@@ -9460,7 +10017,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
             {
               "name": "Vision",
               "short_name": "Vision",
-              "doc_url": "https://docs.oracle.com/en-us/iaas/vision/index.html",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/Content/vision/using/home.htm",
               "one_line": "Image classification, object/text detection (OCR), document AI extraction of tables and forms.",
               "status": "ga"
             },
@@ -9782,8 +10339,16 @@ window.CLOUD_CAPABILITY_MATRIX = {
           ]
         },
         "azure": {
-          "state": "absent",
-          "reason": "Azure Storage Mover is the peer capability for agent-based online migration into Azure Files and Blob Storage, alongside AzCopy and Data Factory. Not captured as its own row in this snapshot."
+          "state": "service",
+          "services": [
+            {
+              "name": "Azure Storage Mover",
+              "short_name": "Storage Mover",
+              "doc_url": "https://learn.microsoft.com/en-us/azure/storage-mover/service-overview",
+              "one_line": "Agent-based managed migration of file shares into Azure Files and Blob Storage, organised as projects and jobs with per-job copy logs.",
+              "status": "ga"
+            }
+          ]
         },
         "gcp": {
           "state": "service",
@@ -9911,7 +10476,7 @@ window.CLOUD_CAPABILITY_MATRIX = {
             {
               "name": "Full Stack DR drills",
               "short_name": "DR drills",
-              "doc_url": "https://blogs.oracle.com/maa/post/fullstackdr-drill-plans",
+              "doc_url": "https://docs.oracle.com/en-us/iaas/disaster-recovery/doc/disaster-recovery-terminology.html",
               "one_line": "Start-drill/stop-drill plans standing up an isolated replica in the standby region to validate recovery without impacting production.",
               "status": "ga"
             }
