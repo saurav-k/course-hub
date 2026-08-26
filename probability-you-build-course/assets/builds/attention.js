@@ -22,8 +22,11 @@
     [0.6, 2.8, 0.7, 0.5, 0.9, 1.4]
   ];
 
-  function col(name) {
-    probe.style.color = 'var(' + name + ')';
+  /* An undefined custom property computes to `inherit` for `color`, so a probe reading a
+     token hub.css does not define quietly returns the body text colour. The fallback keeps
+     a missing token visible rather than silent. */
+  function col(name, fallback) {
+    probe.style.color = 'var(' + name + ', ' + fallback + ')';
     return getComputedStyle(probe).color;
   }
   const probe = document.createElement('span');
@@ -31,9 +34,17 @@
   document.body.appendChild(probe);
   function rgb(c) { const m = c.match(/\d+(\.\d+)?/g); return [+m[0], +m[1], +m[2]]; }
   function cssOf(c) { return 'rgba(' + c.join(',') + ')'; }
+  /* --stat and --alarm carry no --l- twin in hub.css; paper uses tokens that exist. */
+  const PAINT = {
+    heat:  ['--stat',      '--l-accent-2'],
+    ink:   ['--ink',       '--l-ink'],
+    faint: ['--ink-faint', '--l-ink-faint'],
+    sel:   ['--alarm',     '--l-warn'],
+    paper: ['--surface',   '--l-surface']
+  };
   function palette(printSafe) {
-    const p = printSafe ? '--l-' : '--';
-    return { heat: rgb(col(p + 'stat')), ink: col(p + 'ink'), faint: col(p + 'ink-faint'), sel: col(p + 'alarm') };
+    const pick = k => col(PAINT[k][printSafe ? 1 : 0], printSafe ? '#333' : 'currentColor');
+    return { heat: rgb(pick('heat')), ink: pick('ink'), faint: pick('faint'), sel: pick('sel'), paper: pick('paper') };
   }
 
   const CW = 660, CH = 340;
@@ -71,7 +82,6 @@
         ctx.fillStyle = i === st.row ? P.sel : P.faint;
         ctx.fillText(SENTENCE[i], PAD_L - 8, PAD_T + i * CELL + CELL / 2 + 4);
       }
-      const ws = weights(st.row);
       for (let i = 0; i < 6; i++) {
         const wi = weights(i);
         for (let j = 0; j <= i; j++) {
@@ -84,7 +94,9 @@
           ctx.lineWidth = selRow ? 1.6 : 0.75;
           ctx.strokeRect(x + 1.5, y + 1.5, CELL - 3, CELL - 3);
           if (a >= 0.08 && (selRow || a >= 0.2)) {
-            ctx.fillStyle = a > 0.55 ? '#ffffff' : P.ink;
+            /* a dense cell is nearly opaque heat colour, so the label flips to the page
+               surface to stay legible - a token, so it follows theme and paper alike */
+            ctx.fillStyle = a > 0.55 ? P.paper : P.ink;
             ctx.textAlign = 'center';
             ctx.fillText((a * 100).toFixed(0) + '%', x + CELL / 2, y + CELL / 2 + 4);
           }
@@ -103,7 +115,10 @@
 
     function refresh() {
       const ws = weights(st.row);
-      if (ui.weights) ui.weights.textContent = SENTENCE.map((t, j) => t + ' ' + (ws[j] * 100).toFixed(1) + '%').join('   ');
+      /* only positions up to and including the attending token carry weight; the masked
+         future has no entry in ws at all, and printing it would read "NaN%" */
+      if (ui.weights) ui.weights.textContent = ws.map((w, j) => SENTENCE[j] + ' ' + (w * 100).toFixed(1) + '%').join('   ')
+        + (st.row < 5 ? '   (positions after "' + SENTENCE[st.row] + '" are masked)' : '');
       if (ui.sum) ui.sum.textContent = (ws.reduce((a, b) => a + b, 0) * 100).toFixed(1) + '%';
       if (ui.tout) ui.tout.textContent = String(st.beta);
       draw(false);
