@@ -53,6 +53,10 @@ window.COURSE_OUTLINE = {
       "title": "Extending",
       "lessons": [
         {
+          "title": "MCP and the tool ecosystem",
+          "href": "lessons/0070-mcp-and-tools.html"
+        },
+        {
           "title": "Skills, subagents, hooks and modes",
           "href": "lessons/0080-customization-primitives.html"
         },
@@ -95,28 +99,12 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0210-roo-code.html"
         },
         {
-          "title": "Pi - the agent loop as a library",
-          "href": "lessons/0240-pi.html"
-        }
-      ]
-    },
-    {
-      "n": "04",
-      "title": "Extending",
-      "lessons": [
-        {
-          "title": "MCP and the tool ecosystem",
-          "href": "lessons/0070-mcp-and-tools.html"
-        }
-      ]
-    },
-    {
-      "n": "06",
-      "title": "Deep Dives - the cast of fifteen",
-      "lessons": [
-        {
           "title": "Goose - recipes, scheduling, and the self-scheduling agent",
           "href": "lessons/0230-goose.html"
+        },
+        {
+          "title": "Pi - the agent loop as a library",
+          "href": "lessons/0240-pi.html"
         }
       ]
     }
