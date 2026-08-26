@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backpropagation, slowly, then yours - Probability You Build</title>
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../assets/hub.js"></script>
+<script src="../outline.js"></script>
+<script src="../assets/builds/glassnet.js" defer></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">PROBABILITY YOU BUILD</a>
+  <a href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+  <button class="theme-btn" onclick="toggleTheme()">light / dark</button>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Week 5 &middot; The Glass Network &middot; Lesson 5 of 8 &middot; milestone M3</div>
+  <h1>Backpropagation, slowly, then yours</h1>
+  <p class="paper-meta">
+    <span class="pill">14 min</span>
+    <span class="pill med">you code the backward pass</span>
+    The chain rule walked backwards through the layers, reusing work as it goes - first on a two-weight net you can check by hand, then in the page, where you replace the supplied trainer with your own and let the finite-difference checker prove it.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Backpropagation answers one question: how much does the loss blame each of the 88 weights? It answers all 88 at once by walking the chain rule from output to input and reusing every intermediate result.</li>
+      <li>The alternative - nudge each weight, measure the loss twice - is correct but costs 176 forward passes per gradient estimate. Backprop costs one backward sweep.</li>
+      <li><b>Your job today:</b> in your own copy of this page's build file, wipe out the marked body of <code>trainEpochMine</code> and type the backward pass yourself, guided line by line below.</li>
+      <li>The <b>checker button</b> perturbs five random weights and compares numerical against analytical gradients, printing max relative error. Below 1e-6 means your maths is right; the symptom table maps wrong values to their causes.</li>
+      <li>The new <b>gradient-flow bars</b> show mean |delta| per layer during training - vanishing gradients become visible instead of vocabulary.</li>
+    </ul>
+  </div>
+
+  <h2>1. Blame, allocated by the chain rule</h2>
+
+  <p>Gradient descent needs &part;L/&part;w for every weight w: if I nudge this weight up a hair, does the loss fall, and how fast? For the final neuron the answer is immediate, because you already know the composite derivative from week 4:</p>
+
+  <div class="math">&part;L/&part;z<sup>(out)</sup> = p&#770; - y
+    <span class="gloss">Cross-entropy chained through a sigmoid collapses to this famously clean form: the error is just "probability said minus truth observed". Every blame signal in the network starts from this number.</span>
+  </div>
+
+  <p>Every earlier weight is blamed <em>through</em> later ones, so the chain rule walks backwards. Do it once, slowly, on the smallest network that has a hidden layer: one input x = 1, one hidden neuron h = tanh(w<sub>1</sub>x), one output p&#770; = sigmoid(w<sub>2</sub>h), label y = 1, weights w<sub>1</sub> = w<sub>2</sub> = 1.</p>
+
+  <ol class="worked">
+    <li><b>Forward pass.</b> h = tanh(1) = <b>0.76159</b>. Then u = w<sub>2</sub>h = 0.76159, and p&#770; = sigmoid(u) = <b>0.68170</b>.</li>
+    <li><b>Output delta.</b> The blame at the output pre-activation: p&#770; - y = 0.68170 - 1 = <b>-0.31830</b>. Negative means "raise u to lower the loss".</li>
+    <li><b>Blame w&#8322; directly.</b> Raising w&#8322; raises u one-for-one per unit of h, so &part;L/&part;w&#8322; = (p&#770;-y)&middot;h = -0.31830 &times; 0.76159 = <b>-0.2424</b>.</li>
+    <li><b>Pass the blame back.</b> Raising w&#8321; changes h by tanh&prime;(z) = 1 - h&sup2; = 1 - 0.57902 = <b>0.41997</b> per unit, and that change reaches u scaled by w&#8322;. So &part;L/&part;w&#8321; = (p&#770;-y)&middot;w&#8322;&middot;(1-h&sup2;) = -0.31830 &times; 1 &times; 0.41997 = <b>-0.1337</b>.</li>
+  </ol>
+
+  <p>(Every one of those numbers reproduces to the digit shown - they were recomputed mechanically while writing this page.) Both gradients are negative: raising either weight pushes p&#770; toward 1, which is toward y. Notice what step 4 reused: steps 2 and 3's work, not a fresh sweep of the network. That reuse is the whole invention.</p>
+
+  <figure class="diagram"><div class="mermaid">
+flowchart LR
+  F["forward pass&lt;br/&gt;keep every z and a&lt;br/&gt;one sweep"] --> O["output delta&lt;br/&gt;p-hat minus y&lt;br/&gt;one subtraction"]
+  O --> B["walk layers backwards&lt;br/&gt;multiply by W and g-prime&lt;br/&gt;reuse, never recompute"]
+  B --> G["all 88 weight prices&lt;br/&gt;one backward sweep"]
+  </div><figcaption>Backpropagation is steps 2-4 generalised: cache the forward pass, compute the output error once, then walk backwards multiplying as you go. The full calculus treatment lives in <a href="../../math-for-ml-course/lessons/0081-the-chain-rule.html">the chain rule</a>, and the algebraic sibling of this exact algorithm is derived in <a href="../../math-for-ml-course/lessons/0086-backpropagation.html">backpropagation</a> - our lesson codes it; theirs proves it.</figcaption></figure>
+
+  <h2>2. Why not just nudge each weight and measure?</h2>
+
+  <p>You could estimate any weight's gradient without calculus: add a tiny epsilon to w<sub>j</sub>, run the whole dataset through, note the loss; subtract epsilon, do it again; divide the difference by 2&epsilon;. This <em>finite difference</em> is correct - for small enough epsilon it converges on the true derivative. What it is not is cheap. Each trial costs a full forward pass over every row, and you need two per weight: 88 weights &times; 2 passes = 176 sweeps to price one epoch's gradient, where backprop pays one backward sweep for all of them. Backpropagation is not an approximation of the finite-difference answer; both converge to the same numbers, which is precisely what makes the checker in section 4 meaningful.</p>
+
+  <p>The same arithmetic, run per-row and summed over the training set, gives the full-batch gradient this week's trainer descends along. (One pass over all rows before each step is batch gradient descent; the stochastic and mini-batch variants trade sweep size for noise, treated in <a href="../../math-for-ml-course/lessons/0104-stochastic-gradient-descent.html">stochastic gradient descent</a>, and the optimisers that adapt the learning rate for you live in <a href="../../math-for-ml-course/lessons/0106-adaptive-learning-rates.html">adaptive learning rates</a>. Our lr field stays honest and manual.)</p>
+
+  <h2>3. Now yours: replace the trainer</h2>
+
+  <p>The build below carries two trainers. <em>Supplied</em> is the instructor implementation, used by lessons 1-4. <em>Mine</em> is yours: in the copy of <code>assets/builds/glassnet.js</code> you keep locally, find the function <code>trainEpochMine</code>, delete everything between the STUDENT CODE marks, and type the backward pass yourself from the listing below - reading, not pasting. Then reload, select <em>mine</em>, train, and confirm the boundary behaves exactly as the supplied trainer's did.</p>
+
+  <pre><code>function computeGrads(net, data) {
+  /* zero accumulators gW[l], gb[l]; loop rows: */
+  const cache = {};                 // 1. cache the forward pass
+  const p = forward(net, row.x, cache);
+  let delta = [p - row.y];          // 2. output delta: probability minus truth
+  for (let l = lastLayer; l &gt;= 0; l--) {
+    // 3. price this layer: gb[l][j] += delta[j];
+    //    gW[l][i*nout+j] += delta[j] * activationsOf(l)[i]
+    // 4. pass blame down (if l &gt; 0):
+    //    nd[i] = sum_j W[l][i*nout+j] * delta[j], times (1 - a[i]*a[i]) for tanh
+    delta = nd;
+  }
+  /* divide every accumulator by data.length */
+}</code></pre>
+
+  <p>The two lines learners get wrong most often are both visible there. The blame passed to layer l must be multiplied by the activation derivative evaluated at layer l's <em>activations</em> - for tanh that is 1&nbsp;-&nbsp;a&sup2;, applied to the array you cached, not recomputed from z. And the accumulators must be fresh zeros each epoch: writing into a copy of the weight array instead of the gradient array produces gradients of exactly zero, which trains nothing and looks like a stuck loss curve.</p>
+
+  <h2>4. Prove it with the checker</h2>
+
+  <p>Pressing <b>check gradients</b> runs both estimators on five random weights: your analytical gradient from <code>computeGrads</code>, and the numerical central difference (L(w+&epsilon;) - L(w-&epsilon;)) / 2&epsilon; with &epsilon; = 10&#8315;&#8309;. It prints the worst relative error, |g<sub>a</sub>&nbsp;-&nbsp;g<sub>n</sub>| / max(1,&nbsp;|g<sub>a</sub>|+|g<sub>n</sub>|), across the five. On a freshly initialised net the shipped maths prints around 10&#8315;&#185;&#8304;; anything under 10&#8315;&#8309; is a pass. Your typed version should match within rounding of that. When it does not, the value itself diagnoses the bug:</p>
+
+  <table>
+    <thead><tr><th>Checker prints</th><th>Cause</th><th>You wrote</th></tr></thead>
+    <tbody>
+      <tr><td>around 10&#8315;&#8326; or smaller</td><td>correct</td><td>the derivative chain, faithfully</td></tr>
+      <tr><td>around 10&#8315;&sup1; to 10&#8315;&sup2;</td><td>wrong activation derivative</td><td>tanh&prime; applied to pre-activations, or sigmoid&prime; where tanh&prime; belongs</td></tr>
+      <tr><td>exactly 0</td><td>gradients never accumulate</td><td>updates into a copy of the array, or deltas zeroed inside the row loop</td></tr>
+      <tr><td>NaN</td><td>overflow feeding the log</td><td>&epsilon; applied inside the logit rather than to the weight</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="build" id="glassnet-backprop" data-glassnet data-sizes="2,8,8,1" data-ds="moons,blobs,spiral" data-features="ds-picker,hiddens,gradbars,checker,trainer">
+    <div class="build-stage"><canvas class="build-canvas" width="880" height="396"></canvas></div>
+    <div class="build-controls">
+      <label>trainer
+        <select data-role="trainer"><option value="supplied" selected>supplied</option><option value="mine">mine</option></select>
+      </label>
+      <button type="button" data-role="check">check gradients</button>
+      <label>dataset
+        <select data-role="ds">
+          <option value="moons">two moons</option>
+          <option value="blobs">linear-ish blobs</option>
+          <option value="spiral">two spirals</option>
+        </select>
+      </label>
+      <button type="button" data-role="step">step &times;100</button>
+      <button type="button" data-role="run">run</button>
+      <button type="button" data-role="reset">reset</button>
+      <label>learning rate <input type="number" data-role="lr" value="2" min="0.1" max="8" step="0.1"></label>
+    </div>
+    <div class="build-readout">
+      <span>epoch <b data-role="epoch">0</b></span>
+      <span>loss <b data-role="losstr">-</b></span>
+      <span>accuracy <b data-role="acctr">-</b></span>
+      <span data-role="ckout">press check gradients to compare analytical against numerical</span>
+    </div>
+    <figcaption>Bottom right: the mean absolute delta flowing into each layer's weights during training, drawn live. Train moons and watch layer 2's bar sit visibly longer than layer 1's - the backward signal shrinks as it hops, because every hop multiplies by tanh-prime factors strictly below one. Deepen the stack via the pickers (try 2-4-4-4-4-1) and watch the leftmost bar flatten toward zero: <b>vanishing gradients, seen rather than described.</b> Press check gradients after switching the trainer to <em>mine</em>; the printed bound is your grade.</figcaption>
+  </figure>
+
+  <div class="callout"><span class="tag">Why the bars shrink leftwards</span>Each backward hop multiplies the signal by that layer's tanh&prime; factors, each strictly less than 1 away from the knee, so four hidden layers stack four attenuations between the loss and the earliest weights. The fix families - ReLU-style slopes of exactly 1 on the active branch, normalisation, residual adds that give the signal a skip path - each attack one term of that product; they belong to the deep-learning course, not this one. What you own from today is the diagnostic reflex: early-layer bars near zero mean late layers are hogging the learning.</div>
+
+  <h2>5. Check yourself</h2>
+
+  <div class="q" data-answer="1">
+    <div class="q-stem">Why does backpropagation beat "nudge each weight and measure the loss change", given both give the same gradients eventually?</div>
+    <button class="q-opt">Finite differences cannot be implemented numerically in browser JavaScript</button>
+    <button class="q-opt">Backprop reuses intermediate results: one backward sweep prices every weight at once</button>
+    <button class="q-opt">Finite differences are conceptually wrong about what a gradient is</button>
+    <button class="q-opt">Backprop needs fewer epochs to converge to a good model</button>
+    <div class="q-fb">Both estimators converge to the true derivative - the checker depends on that agreement - so accuracy is not the differentiator; cost is. Pricing 88 weights numerically costs 176 full forward passes; backprop caches one forward sweep and walks backwards once. Option four conflates the cost of estimating a gradient with the speed of descending on it; the estimator choice does not change how many epochs descent needs.</div>
+  </div>
+
+  <div class="q" data-answer="2">
+    <div class="q-stem">During training the last layer's mean absolute delta reads large while layer 1's sits near 0.001. What is this pattern, and what follows?</div>
+    <button class="q-opt">An exploding gradient - early layers are about to overshoot catastrophically</button>
+    <button class="q-opt">Overfitting setting in - the test curve must have turned upward too</button>
+    <button class="q-opt">A vanishing gradient - early layers receive almost no learning signal and barely move</button>
+    <button class="q-opt">Dead neurons - some units have stopped activating entirely</button>
+    <div class="q-fb">The backward signal attenuates with every hop through tanh-prime factors below one, so deep stacks starve their earliest layers - the bar chart above shows exactly this ordering live. Exploding is the opposite sign of trouble; overfitting is diagnosed from a test split, not from delta sizes; and dead neurons are a per-unit phenomenon, invisible in a per-layer average like this one.</div>
+  </div>
+
+  <h2 class="h-label">Where this came from</h2>
+  <p>Backpropagation's founding paper is Rumelhart, Hinton and Williams, <a href="https://doi.org/10.1038/323533a0"><em>Learning representations by back-propagating errors</em></a>, Nature 323:533-536 (1986). The slow-derivation style of section 1, and the reuse argument of section 2, follow Nielsen, <a href="http://neuralnetworksanddeeplearning.com/chap2.html"><em>Neural Networks and Deep Learning</em>, ch. 2</a>. The stability-minded reader should also know Karpathy's <a href="https://karpathy.ai/micrograd.html">micrograd</a>, a tiny autograd engine built from scratch under the same zero-dependency discipline this course keeps. The checker formula follows the relative-error convention used in the <a href="https://cs231n.github.io/">CS231n notes</a>.</p>
+
+  <div class="callout"><span class="tag">Practise this</span>P4 of <a href="0408-week-5-problems.html">Week 5 problems</a> walks the two-weight derivation with every intermediate shown; P5 is this lesson's checker as a coding exercise with its failure catalogue; P8 extends the bars into a recorded vanishing-gradient experiment on spirals.</div>
+
+  <div class="pager">
+    <a href="0403-open-the-hood-forward-pass-and-activations.html"><span class="dir">&larr; Lesson 4</span><span class="ttl">Open the hood: forward pass and activations</span></a>
+    <a class="nxt" href="0405-softmax-one-distribution-over-many-classes.html"><span class="dir">Lesson 6 &rarr;</span><span class="ttl">Softmax: one distribution over many classes</span></a>
+  </div>
+
+  <footer><p>Probability You Build &middot; Week 5, lesson 5 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
