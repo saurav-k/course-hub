@@ -246,8 +246,11 @@
       var octx = off.getContext('2d');
       for (j = 0; j < n; j++) {
         for (i = 0; i < n; i++) {
-          var t = hi > lo ? Math.max(0, (vals[j * n + i] - lo) / (hi - lo)) : 1;
-          octx.fillStyle = mix(C.surface2, C.prob, Math.pow(t, 1.4));
+          /* Scale against the peak, not the minimum: towers sit thousands of
+             log units down, and a min-max stretch would wash the whole map
+             into the top of the range. Show the ten units that matter. */
+          var t = Math.max(0, 1 - (hi - vals[j * n + i]) / 10);
+          octx.fillStyle = mix(C.surface2, C.prob, Math.pow(t, 1.2));
           octx.fillRect(i, n - 1 - j, 1, 1);
         }
       }
