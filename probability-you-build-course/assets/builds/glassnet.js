@@ -420,12 +420,21 @@
       render(false);
       if (st.hover && ui.insp) inspect(st.hover.x, st.hover.y);
     }
+    const INSP_IDLE = 'hover the map to replay the forward pass at that point';
     function inspect(x, y) {
       const cache = {}; const p = forward(st.net, [x, y], cache);
+      const last = st.net.sizes.length - 2;   /* index of the output layer's weights */
       const rows = [];
-      for (let l = 0; l < st.net.sizes.length - 1; l++) {
-        rows.push('layer ' + (l + 1) + ' pre-activation z: ' + fmtArr(cache.zs[l]));
-        if (l < st.net.sizes.length - 2) rows.push('layer ' + (l + 1) + ' activation   a: ' + fmtArr(cache.as[l + 1]));
+      for (let l = 0; l <= last; l++) {
+        if (l === last) {
+          /* The output layer's activation IS p-hat, so naming it twice would suggest two
+             numbers where there is one. Label its pre-activation as the logit instead,
+             which is the name lesson 0400 gave it. */
+          rows.push('output logit z: ' + fmtArr(cache.zs[l]) + ', sigmoid of which is');
+        } else {
+          rows.push('layer ' + (l + 1) + ' pre-activation z: ' + fmtArr(cache.zs[l]));
+          rows.push('layer ' + (l + 1) + ' activation   a: ' + fmtArr(cache.as[l + 1]));
+        }
       }
       ui.insp.innerHTML = '';
       const mk = (txt, strong) => { const s = document.createElement('span'); s.textContent = txt; if (strong) { const b = document.createElement('b'); b.textContent = strong; s.appendChild(b); } ui.insp.appendChild(s); };
@@ -460,9 +469,18 @@
         const y = RANGE - ((sy - MAP.y) / MAP.s) * 2 * RANGE;
         st.hover = { x: x, y: y };
       }
-      if (!hoverPending) { hoverPending = true; requestAnimationFrame(() => { hoverPending = false; render(false); if (st.hover && ui.insp) inspect(st.hover.x, st.hover.y); }); }
+      if (!hoverPending) {
+        hoverPending = true;
+        requestAnimationFrame(() => {
+          hoverPending = false; render(false);
+          if (st.hover) inspect(st.hover.x, st.hover.y); else clearInspector();
+        });
+      }
     });
-    canvas.addEventListener('pointerleave', () => { st.hover = null; render(false); });
+    /* Leaving the map must clear the readout too: a probe that is no longer on a point
+       but still prints that point's activations is worse than printing nothing. */
+    function clearInspector() { if (ui.insp) ui.insp.textContent = INSP_IDLE; }
+    canvas.addEventListener('pointerleave', () => { st.hover = null; clearInspector(); render(false); });
 
     (function loop() { if (st.running) doStep(20); requestAnimationFrame(loop); })();
 
