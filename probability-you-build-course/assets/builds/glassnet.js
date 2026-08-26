@@ -355,7 +355,11 @@
       ctx.fillText('cross-entropy loss', c.x + 8, c.y + 16);
       if (st.lossT.length < 2) return;
       const T = st.lossT, E = st.lossE;
-      let maxL = 0.1;
+      /* The ln 2 reference is the panel's whole reading - it is where the model stops being
+         worse than a coin flip - so the axis must always contain it. Scaling to the observed
+         maximum alone pushes the dashed line off the top whenever training starts below it,
+         leaving the caption pointing at a line nobody can see. */
+      let maxL = Math.LN2;
       for (let i = 0; i < T.length; i++) { if (T[i] > maxL) maxL = T[i]; }
       for (let i = 0; i < E.length; i++) { if (E[i] > maxL) maxL = E[i]; }
       maxL *= 1.05;
