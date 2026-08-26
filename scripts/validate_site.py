@@ -13,6 +13,13 @@ Eight checks, all deterministic and offline:
 7. Every lesson's name agrees between the course map, the generated rail and every
    pager that points at it, by the rules in ``scripts/check_titles.py``. The page's
    ``h1`` is a claim rather than a name and is not compared.
+8. The capability-matrix data (``window.CLOUD_CAPABILITY_MATRIX``, committed beside
+   the comparison course): the taxonomy is intact, every capability key appears
+   exactly once as a row, every row carries all four clouds, every cell is a
+   service, a declared absence with a reason, or explicitly unfilled, every page
+   rendering the widget binds to the documented ``figure.cmatrix`` frame, and every
+   vendor link is well formed. Pass ``--vendor-links`` to also fetch each vendor
+   link and fail on a dead one - the default run stays offline and deterministic.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -36,6 +43,9 @@ import re
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from urllib import request as _urlrequest
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlsplit
 
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 
@@ -69,6 +79,24 @@ HTML_COMMENT: re.Pattern[str] = re.compile(r"<!--.*?-->", re.DOTALL)
 NESTING_TAG: re.Pattern[str] = re.compile(r"<(?P<close>/?)(?P<tag>section|div)\b[^>]*>", re.IGNORECASE)
 
 MODULE_SECTION: re.Pattern[str] = re.compile(r'<section class="module">')
+
+# The capability matrix: the data assignment and the widget frame it must bind to.
+MATRIX_ASSIGNMENT: re.Pattern[str] = re.compile(
+    r"window\.CLOUD_CAPABILITY_MATRIX\s*=\s*(?P<payload>\{.*\})\s*;", re.DOTALL
+)
+
+MATRIX_FRAME: str = '<figure class="cmatrix"'
+
+# The four clouds are fixed by the research spec; a comparison column is one of
+# them and nothing else.
+MATRIX_CLOUDS: frozenset[str] = frozenset({"aws", "azure", "gcp", "oci"})
+
+# The taxonomy's areas are a closed list of twenty-four, fixed by the same spec.
+MATRIX_DOMAIN_COUNT: int = 24
+
+KEBAB: re.Pattern[str] = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
+
+CELL_STATES: frozenset[str] = frozenset({"unfilled", "absent", "service"})
 
 
 @dataclass(frozen=True)
@@ -572,6 +600,303 @@ def check_local_links_resolve() -> list[Problem]:
     return problems
 
 
+def _js_data_files(assignment: re.Pattern[str]) -> list[Path]:
+    """Every committed .js file carrying a given window.* data assignment."""
+    return sorted(
+        path
+        for path in REPO_ROOT.rglob("*.js")
+        if not any(part.startswith(".") for part in path.relative_to(REPO_ROOT).parts)
+        and "node_modules" not in path.parts
+        and assignment.search(path.read_text(encoding="utf-8"))
+    )
+
+
+def _vendor_url_problems(where: str, url: object) -> list[Problem]:
+    """Well-formedness for one vendor link. Offline and deterministic."""
+    if not isinstance(url, str) or not url.strip():
+        return [Problem(where, f"vendor link is missing or empty -> {url!r}")]
+    parts = urlsplit(url.strip())
+    if parts.scheme != "https" or not parts.netloc or " " in url.strip():
+        return [Problem(where, f"vendor link must be a well-formed https URL -> {url!r}")]
+    return []
+
+
+def _fetch_vendor_link(url: str, timeout: float = 20.0) -> str | None:
+    """Fetch one vendor link, returning why it is dead or None if it resolves.
+
+    A HEAD is tried first; servers that answer 405/501 to HEAD are retried with
+    GET. Only an HTTP error status or an unreachable host counts as dead - a
+    redirect is the vendor moving a page, which still serves the reader.
+    """
+    headers = {"User-Agent": "course-hub-link-check/1 (site validator)"}
+    for method in ("HEAD", "GET"):
+        req = _urlrequest.Request(url, headers=headers, method=method)
+        try:
+            with _urlrequest.urlopen(req, timeout=timeout):
+                return None
+        except HTTPError as error:
+            if error.code in (405, 501) and method == "HEAD":
+                continue
+            return f"HTTP {error.code}"
+        except URLError as error:
+            return f"unreachable ({error.reason})"
+        except TimeoutError:
+            return "timed out"
+    return "no usable response"
+
+
+def _matrix_problems(where: str, data: object) -> list[Problem]:
+    """The structural checks on one parsed capability-matrix payload.
+
+    The taxonomy - twenty-four areas and their keys - is the join key four
+    independently researched cloud columns meet on. A row that is not a key,
+    or a key that is not a row, splits the comparison silently; that is what
+    most of this function exists to prevent.
+    """
+    problems: list[Problem] = []
+    if not isinstance(data, dict):
+        return [Problem(where, "window.CLOUD_CAPABILITY_MATRIX is not an object")]
+
+    clouds = data.get("clouds")
+    if not isinstance(clouds, list) or len(clouds) != 4:
+        return [Problem(where, f"clouds must be exactly the four columns {sorted(MATRIX_CLOUDS)}")]
+    cloud_keys: list[str] = []
+    for i, c in enumerate(clouds):
+        key = c.get("key") if isinstance(c, dict) else None
+        if key not in MATRIX_CLOUDS:
+            problems.append(
+                Problem(where, f"clouds[{i}] key {key!r} is not one of {sorted(MATRIX_CLOUDS)}")
+            )
+        else:
+            cloud_keys.append(key)
+    if len(set(cloud_keys)) != len(cloud_keys):
+        problems.append(Problem(where, "a cloud column appears twice"))
+    if set(cloud_keys) != MATRIX_CLOUDS:
+        problems.append(
+            Problem(where, f"clouds must cover exactly {sorted(MATRIX_CLOUDS)}, got {cloud_keys}")
+        )
+        return problems
+
+    domains = data.get("domains")
+    if not isinstance(domains, list) or len(domains) != MATRIX_DOMAIN_COUNT:
+        problems.append(
+            Problem(where, f"the taxonomy has {MATRIX_DOMAIN_COUNT} areas; got "
+                           f"{len(domains) if isinstance(domains, list) else 'no list'}")
+        )
+        return problems
+
+    home_domain: dict[str, str] = {}
+    seen_slugs: set[str] = set()
+    for d in domains:
+        if not isinstance(d, dict):
+            problems.append(Problem(where, "a taxonomy area is not an object"))
+            continue
+        slug = d.get("slug")
+        if not isinstance(slug, str) or not KEBAB.match(slug):
+            problems.append(Problem(where, f"area slug {slug!r} is not kebab-case"))
+            continue
+        if slug in seen_slugs:
+            problems.append(Problem(where, f"area {slug} appears twice"))
+        seen_slugs.add(slug)
+        keys = d.get("keys")
+        if not isinstance(keys, list) or not keys:
+            problems.append(Problem(where, f"area {slug} carries no capability keys"))
+            continue
+        for k in keys:
+            if not isinstance(k, str) or not KEBAB.match(k):
+                problems.append(Problem(where, f"capability key {k!r} in {slug} is not kebab-case"))
+            elif k in home_domain:
+                problems.append(Problem(where, f"capability key {k} belongs to both {home_domain[k]} and {slug}"))
+            else:
+                home_domain[k] = slug
+
+    rows = data.get("rows")
+    if not isinstance(rows, list):
+        problems.append(Problem(where, "rows is not a list"))
+        return problems
+
+    seen_rows: dict[str, int] = {}
+    for i, row in enumerate(rows):
+        at = f"{where}:rows[{i}]"
+        if not isinstance(row, dict):
+            problems.append(Problem(at, "row is not an object"))
+            continue
+        key = row.get("key")
+        if not isinstance(key, str) or not KEBAB.match(key):
+            problems.append(Problem(at, f"row key {key!r} is not kebab-case"))
+            continue
+        if key in seen_rows:
+            problems.append(
+                Problem(at, f"capability {key} has two rows (first at index {seen_rows[key]})")
+            )
+        seen_rows[key] = i
+        if key not in home_domain:
+            problems.append(
+                Problem(at, f"row names capability {key}, which no taxonomy area declares - an orphan row")
+            )
+        domain = row.get("domain")
+        expected_home = home_domain.get(key)
+        if domain != expected_home:
+            problems.append(
+                Problem(at, f"row {key} sits in area {domain!r} but the taxonomy files it under {expected_home!r}")
+            )
+
+        cells = row.get("cells")
+        if not isinstance(cells, dict):
+            problems.append(Problem(at, f"row {key} carries no cells object"))
+            continue
+        missing = [c for c in cloud_keys if c not in cells]
+        extra = [c for c in cells if c not in MATRIX_CLOUDS]
+        if missing:
+            problems.append(Problem(at, f"row {key} has no cell for {', '.join(sorted(missing))}"))
+        for c in extra:
+            problems.append(Problem(at, f"row {key} carries a cell for unknown cloud {c!r}"))
+
+        for c in [c for c in cloud_keys if c in cells]:
+            cell_at = f"{at}:cells[{c}]"
+            cell = cells[c]
+            state = cell.get("state") if isinstance(cell, dict) else None
+            if state not in CELL_STATES:
+                problems.append(
+                    Problem(cell_at, f"cell state {state!r} is not one of unfilled / absent / service")
+                )
+                continue
+            if state == "absent" and not (
+                isinstance(cell.get("reason"), str) and cell["reason"].strip()
+            ):
+                problems.append(
+                    Problem(cell_at, f"a declared absence in row {key} ({c}) owes a reason")
+                )
+            if state == "service":
+                services = cell.get("services")
+                if not isinstance(services, list) or not services:
+                    problems.append(
+                        Problem(cell_at, f'a "service" cell in row {key} ({c}) carries no services')
+                    )
+                    continue
+                for j, svc in enumerate(services):
+                    svc_at = f"{cell_at}.services[{j}]"
+                    if not isinstance(svc, dict) or not (
+                        isinstance(svc.get("name"), str) and svc["name"].strip()
+                    ):
+                        problems.append(Problem(svc_at, "service has no name"))
+                    problems.extend(_vendor_url_problems(svc_at, svc.get("doc_url") if isinstance(svc, dict) else None))
+
+    unrepresented = sorted(set(home_domain) - set(seen_rows))
+    for k in unrepresented:
+        problems.append(
+            Problem(where, f"taxonomy key {k} has no row - the matrix cannot render its comparison")
+        )
+
+    return problems
+
+
+def check_comparison_matrix() -> list[Problem]:
+    """The capability-matrix gate: taxonomy integrity, complete rows, honest
+    cells, widget binding, and well-formed vendor links.
+
+    The matrix data lives in ``window.CLOUD_CAPABILITY_MATRIX``, and the widget
+    renders inside whatever page declares the documented ``figure.cmatrix``
+    frame. Both ends are checked against each other: a data file no page binds
+    to is invisible weight, and a frame with no data file renders as a
+    broken-page note rather than a matrix.
+    """
+    problems: list[Problem] = []
+
+    # Which published pages declare the frame, and which local .js files each loads.
+    frames: dict[Path, set[Path]] = {}
+    for page in html_pages():
+        body = page.read_text(encoding="utf-8", errors="replace")
+        if MATRIX_FRAME not in body:
+            continue
+        loaded: set[Path] = set()
+        for link in LINK_PATTERN.findall(body):
+            if not is_local(link):
+                continue
+            target = (page.parent / strip_suffixes(link)).resolve()
+            if target.suffix == ".js" and target.is_file():
+                loaded.add(target)
+        frames[page] = loaded
+
+    data_files = _js_data_files(MATRIX_ASSIGNMENT)
+    if not data_files:
+        for page in frames:
+            problems.append(
+                Problem(
+                    relative(page),
+                    "declares the capability-matrix frame but no "
+                    "window.CLOUD_CAPABILITY_MATRIX data file exists",
+                )
+            )
+        return problems
+
+    for path in data_files:
+        match = MATRIX_ASSIGNMENT.search(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(match.group("payload"))
+        except json.JSONDecodeError as error:
+            problems.append(
+                Problem(relative(path), f"window.CLOUD_CAPABILITY_MATRIX is not valid JSON: {error}")
+            )
+            continue
+        problems.extend(_matrix_problems(relative(path), payload))
+
+    resolved = {path.resolve(): path for path in data_files}
+    for page, loaded in frames.items():
+        if not (set(loaded) & set(resolved)):
+            problems.append(
+                Problem(relative(page), "renders the capability matrix but does not load any "
+                                        "matrix data file")
+            )
+    served = {target for loaded in frames.values() for target in loaded}
+    for path in resolved.values():
+        if path not in served:
+            problems.append(
+                Problem(relative(path), "no published page loads this capability-matrix data file")
+            )
+
+    return problems
+
+
+def check_matrix_vendor_links_live() -> list[Problem]:
+    """Fetch every vendor link in the matrix data and fail on a dead one.
+
+    Behind ``--vendor-links`` because the default run promises to be offline
+    and deterministic. This is the refresh-day command: run it before opening
+    a pull request that touches the data file.
+    """
+    problems: list[Problem] = []
+    for path in _js_data_files(MATRIX_ASSIGNMENT):
+        where = relative(path)
+        match = MATRIX_ASSIGNMENT.search(path.read_text(encoding="utf-8"))
+        try:
+            payload = json.loads(match.group("payload"))
+        except json.JSONDecodeError:
+            continue  # reported by check_comparison_matrix
+        rows = payload.get("rows", []) if isinstance(payload, dict) else []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            cells = row.get("cells", {})
+            if not isinstance(cells, dict):
+                continue
+            for cloud, cell in cells.items():
+                if not isinstance(cell, dict) or cell.get("state") != "service":
+                    continue
+                for j, svc in enumerate(cell.get("services", [])):
+                    url = svc.get("doc_url") if isinstance(svc, dict) else None
+                    if isinstance(url, str) and url.startswith("https://"):
+                        reason = _fetch_vendor_link(url)
+                        if reason:
+                            problems.append(
+                                Problem(
+                                    f"{where}:{row.get('key')}:{cloud}.services[{j}]",
+                                    f"dead vendor link ({reason}) -> {url}",
+                                )
+                            )
+    return problems
+
+
 def main() -> int:
     problems = (
         check_courses_are_registered()
@@ -584,7 +909,12 @@ def main() -> int:
         + check_titles_agree()
         + check_local_links_resolve()
         + check_no_local_markdown_links()
+        + check_comparison_matrix()
     )
+    if "--vendor-links" in sys.argv[1:]:
+        # Opt-in live reachability for the matrix's vendor links. The default
+        # run stays offline; this is the refresh-day command.
+        problems += check_matrix_vendor_links_live()
 
     if problems:
         print(f"Course Hub validation failed with {len(problems)} problem(s):\n")

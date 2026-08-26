@@ -267,6 +267,77 @@ Build script rules (the full contract lives in that course's `BUILDER-SPEC.md`):
 
 - Print hides the controls (inert on paper) and keeps stage, readout and caption. A build whose dark rendering would be unusable on white paper adds a `beforeprint` listener that redraws print-safe ink, restoring on `afterprint`; at minimum say in the caption what the printed figure shows.
 
+## The capability matrix
+
+A four-way comparison table: one row per capability key of the shared taxonomy,
+one column per cloud. `cloud-comparison-course` owns it; its course map opens
+with one. Unlike every widget above, an author does not write the rows - the
+widget renders itself from a data file, because 126 rows hand-written in HTML is
+a maintenance hole.
+
+The author writes only the frame, and the figcaption is theirs to word:
+
+```html
+<figure class="cmatrix" id="capability-matrix">
+  <figcaption>The capability matrix: one row per capability, one column per cloud.
+  Filter by area, search by service name, and follow any cell to that vendor's own documentation.
+  <b>A dashed cell means nobody has written it yet; a marked cell means the cloud genuinely has no equivalent.</b></figcaption>
+</figure>
+```
+
+The page also loads the data file in the head, before `hub.js`, exactly as
+`outline.js` is loaded:
+
+```html
+<script src="matrix.js"></script>
+```
+
+`hub.js` finds every `figure.cmatrix` and builds the legend, the area filter,
+the search box, the sticky column headers and the rows from
+`window.CLOUD_CAPABILITY_MATRIX`. Everything is DOM painted from semantic
+tokens, so a mode or palette change needs no re-render; the narrow-screen and
+print restacking is in `hub.css`. If the data file is missing or unreadable the
+frame shows a visible broken-page note rather than an empty box.
+
+### The data contract
+
+The data file is the single source of truth for the taxonomy, and
+`scripts/validate_site.py` gates all of this:
+
+```js
+window.CLOUD_CAPABILITY_MATRIX = {
+  clouds:  [ { key: "aws", short: "AWS", ... }, ... ],   // exactly aws, azure, gcp, oci; column order
+  domains: [ { slug: "compute-iaas", name: ..., covers: ..., keys: ["vm-instances", ...] }, ... ],  // 24 areas
+  rows:    [ { key: "vm-instances", domain: "compute-iaas", title: "VM instances",
+               cells: { aws: {...}, azure: {...}, gcp: {...}, oci: {...} } }, ... ]
+};
+```
+
+One row per capability key; each key appears under exactly one area and as
+exactly one row; every row carries a cell for all four clouds. A cell is one of
+exactly three states:
+
+| State | Markup | Reads as |
+|---|---|---|
+| unfilled | `{ "state": "unfilled" }` | dashed, quiet - *nobody has written this yet* |
+| absent | `{ "state": "absent", "reason": "..." }` | marked bar + tag - the cloud genuinely ships no equivalent, and why |
+| service | `{ "state": "service", "services": [{ "name": "...", "short_name": "...", "doc_url": "https://...", "one_line": "..." }] }` | linked service names into that vendor's own documentation |
+
+**An unfilled cell and a declared absence must never look alike.** They mean
+different things - missing data versus a finding - and the reader must be able
+to tell them apart at a glance, in every mode, palette and on paper. Any edit
+that moves the two states closer together is a defect even if it looks tidier.
+
+Every `doc_url` must be a well-formed https link; the validator fetches nothing
+by default, so before opening a pull request that touches the data file run:
+
+```bash
+python3 scripts/validate_site.py --vendor-links
+```
+
+which chases dead links over the network and fails on any HTTP error status or
+unreachable host.
+
 ## Formulas
 
 ```html
