@@ -614,10 +614,12 @@ AB_reg('ab-temp', {
     plotSeries(S.before, AB_tok('--prob'));
     plotSeries(S.after, AB_tok('--ok'));
     c.font = AB_font(true, 12);
+    /* Legend sits upper-left: the curve runs bottom-left to top-right, so the
+       upper-left corner is the only region no point can occupy. */
     c.fillStyle = AB_tok('--prob');
-    c.fillText('before T=1', pad + gw - 150, pad + 20);
+    c.fillText('before T=1', pad + 14, pad + 20);
     c.fillStyle = AB_tok('--ok');
-    c.fillText('after T*=' + S.T.toFixed(2), pad + gw - 150, pad + 38);
+    c.fillText('after T*=' + S.T.toFixed(2), pad + 14, pad + 38);
     /* The identity, run on the held-out half at the threshold the reader chose. */
     const bT = AB_metrics(S.test, 1, thr);
     const aT = AB_metrics(S.test, S.T, thr);
