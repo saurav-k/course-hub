@@ -67,6 +67,20 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "Models",
+      "lessons": [
+        {
+          "title": "Model affinity - tool-call encoding per family",
+          "href": "lessons/0100-model-affinity.html"
+        },
+        {
+          "title": "Compatibility endpoints and model substitution",
+          "href": "lessons/0110-compatibility-endpoints.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Deep Dives - the cast of fifteen",
       "lessons": [
@@ -105,20 +119,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "Pi - the agent loop as a library",
           "href": "lessons/0240-pi.html"
-        }
-      ]
-    },
-    {
-      "n": "05",
-      "title": "Models",
-      "lessons": [
-        {
-          "title": "Model affinity - tool-call encoding per family",
-          "href": "lessons/0100-model-affinity.html"
-        },
-        {
-          "title": "Compatibility endpoints and model substitution",
-          "href": "lessons/0110-compatibility-endpoints.html"
         }
       ]
     }
