@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context engineering - what actually fills the window - Coding Harness Engineering</title>
+<meta name="description" content="Every harness runs a budget allocator that decides what enters the context window: startup bills, memory-file strategies, retrieval style, and compaction thresholds all differ by design.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; The Loop &middot; Lesson 30</div>
+  <h1>Something decided what is in your window before you typed</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Read from each harness's public source at the commits pinned in this page's links.
+    &middot; <a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/coders/chat_chunks.py#L16-L26">example: Aider's chunk order</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Your conversation is a minority shareholder in the context window. A <b>budget allocator</b> inside the harness spends most of the space before you type a word.</li>
+      <li>The allocator has four jobs: pay the <b>startup bill</b>, load <b>memory files</b> under a precedence rule, choose <b>retrieval style</b> - a precomputed map or an agentic search loop - and run <b>compaction</b> when space runs out.</li>
+      <li>No two harnesses in our cast make the same choices. Compaction triggers alone spread from about 6 percent of the window to 95.</li>
+      <li>These choices are visible to you: what your agent seems to forget, when it slows down, and why one harness costs more per message than another.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Before this&lt;br/&gt;lesson 0020 traced one turn"] --> T["THIS PAGE&lt;br/&gt;who fills the window&lt;br/&gt;and by what rule"]
+  T --> N["Enables&lt;br/&gt;predicting any agent's&lt;br/&gt;context behavior"]
+  W["The seven-layer map&lt;br/&gt;context assembly is layer two"] -.- T
+    </div>
+    <figcaption>Where this sits: lesson 0020 followed a single turn through the loop; this page zooms into the step that turn skipped - assembling the messages. Every deep dive will answer these same four questions for its harness.
+    <b>If you can name the four allocator jobs, you can predict what any coding agent remembers and forgets.</b></figcaption>
+  </figure>
+
+  <h2 id="startup">The bill you never see</h2>
+  <p>Before your first keystroke, the harness has already spent tokens. Claude Code documents its own startup stack: a system prompt near four thousand tokens, then auto-memory, environment info, deferred tool names, skill descriptions, and your global plus project CLAUDE.md.
+  Summing the published estimates: 4,200 + 680 + 280 + 120 + 450 + 320 + 1,800 = <span class="keynum">7,850</span> tokens committed before you speak (<a href="https://code.claude.com/docs/en/context-window">Claude Code docs</a>, illustrative values).
+  Pi ships deliberately opposite: a base prompt near one thousand tokens including tool definitions, because nothing may enter the window behind the user's back.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing what four harnesses commit to the window at session start, from about one thousand tokens for Pi to about eight thousand for Codex's maximum project documentation budget.">
+      <line class="axis" x1="170" y1="20" x2="170" y2="250"/>
+      <rect class="m-stat" x="171" y="40"  width="49"  height="26"/>
+      <rect class="m-signal" x="171" y="90"  width="200" height="26"/>
+      <rect class="m-stat" x="171" y="140" width="383" height="26"/>
+      <rect class="m-noise" x="171" y="190" width="400" height="26"/>
+      <text class="lbl-sm" x="163" y="58"  text-anchor="end">Pi - whole base prompt</text>
+      <text class="lbl-sm" x="163" y="108" text-anchor="end">Aider - repo-map allowance</text>
+      <text class="lbl-sm" x="163" y="158" text-anchor="end">Claude Code - startup stack</text>
+      <text class="lbl-sm" x="163" y="208" text-anchor="end">Codex - AGENTS.md ceiling</text>
+      <text class="lbl-sm" x="228" y="58"  text-anchor="start">~1,000</text>
+      <text class="lbl-sm" x="379" y="108" text-anchor="start">up to 4,096</text>
+      <text class="lbl-sm" x="562" y="158" text-anchor="start">7,850</text>
+      <text class="lbl-sm" x="579" y="208" text-anchor="start">~8,190</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>pinned or published</span><span><i class="sw-signal"></i>aider budget, derived</span><span><i class="sw-noise"></i>derived from byte cap</span></div>
+    <figcaption>Four session-start bills, each bar saying what it includes. Sources: Pi's minimal prompt and Claude Code's stack are quoted above; Aider's repo-map allowance is clamped to between 1,024 and 4,096 tokens, or one eighth of the window capped (<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/models.py#L782-L789">models.py:782-789</a>); Codex caps project docs at <span class="keynum">32768</span> bytes, about 8,192 tokens at four bytes per token (<a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/config/defaults.toml#L8">defaults.toml:8</a>, arithmetic ours).
+    <b>An eight-fold spread exists before either side says hello - context composition is a harness decision, not a model property.</b></figcaption>
+  </figure>
+
+  <h2 id="rules">The rules layer: two loading strategies</h2>
+  <p>Every harness reads instruction files, but they disagree on which files, in what order, and - the sharpest split - whether everything loads eagerly or waits until relevant.
+  The eager camp concatenates: Codex walks every directory from root to your cwd gathering <code>AGENTS.md</code> files under one 32&nbsp;KiB budget, re-reading them fresh each step (<a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/core/src/agents_md.rs#L36-L39">agents_md.rs</a>); Pi concatenates ancestors too, with <code>AGENTS.override.md</code> beating <code>AGENTS.md</code> beating <code>CLAUDE.md</code>.
+  The lazy camp attaches: Cursor's <code>.mdc</code> rules carry frontmatter deciding their fate - <code>alwaysApply</code>, <code>globs</code> attached when a matching file enters context, or description-only where the model decides (<a href="https://cursor.com/docs/context/rules">Cursor docs</a>). Windsurf's rules use the same four-way switch (<a href="https://docs.windsurf.com/windsurf/cascade/memories">Windsurf docs</a>).</p>
+
+  <table>
+    <thead><tr><th>Harness</th><th>Files it reads</th><th>Precedence and budget</th></tr></thead>
+    <tbody>
+      <tr><td>Claude Code</td><td><code>CLAUDE.md</code> chain, <code>.claude/rules/*.md</code></td><td>managed policy, then user, then ancestors root-down; subdirectory rules lazy-load on path match</td></tr>
+      <tr><td>Codex CLI</td><td><code>AGENTS.md</code>, <code>AGENTS.override.md</code></td><td>root-to-cwd concat, deepest last, 32&nbsp;KiB shared budget</td></tr>
+      <tr><td>Gemini CLI</td><td><code>GEMINI.md</code> tiers, name configurable</td><td>global, extension, workspace walked upward; sub-directory beats root</td></tr>
+      <tr><td>Cursor</td><td><code>.cursor/rules/*.mdc</code>, <code>AGENTS.md</code></td><td>team beats project beats user; frontmatter gates each rule</td></tr>
+      <tr><td>Windsurf</td><td><code>global_rules.md</code>, <code>.devin/rules/*.md</code>, <code>AGENTS.md</code></td><td>global file 6,000 chars, workspace files 12,000 chars each</td></tr>
+      <tr><td>Copilot Chat</td><td><code>.github/copilot-instructions.md</code>, <code>*.instructions.md</code></td><td>chat variables first, then repo instructions, then settings</td></tr>
+      <tr><td>Cline / Roo Code</td><td><code>AGENTS.md</code> plus mode-scoped rules directories</td><td>mode-specific directory wins over generic; legacy <code>.cursorrules</code> still read</td></tr>
+      <tr><td>Goose</td><td><code>.goosehints</code>, <code>AGENTS.md</code></td><td>global config dir, then git-root down to cwd; others opt-in via config</td></tr>
+      <tr><td>Kimi CLI</td><td><code>AGENTS.md</code> family only</td><td>per-dir <code>.kimi/AGENTS.md</code> beats plain, deeper beats shallower, 32&nbsp;KiB allocated leaf-first</td></tr>
+      <tr><td>Pi</td><td><code>AGENTS.override.md</code> &gt; <code>AGENTS.md</code> &gt; <code>CLAUDE.md</code></td><td>every ancestor, root-first, wrapped in one tagged block</td></tr>
+      <tr><td>Aider</td><td>none automatically</td><td>you create e.g. <code>CONVENTIONS.md</code> and add it yourself with <code>/read</code></td></tr>
+    </tbody>
+  </table>
+  <p class="note-sm">Sources: linked in the prose above plus each project's repository or documentation; Aider's manual convention is its own docs page on conventions.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph EAGER["eager concat - pay every turn"]
+    C1["walk root to cwd"] --> C2["concat under budget"]
+    C2 --> C3["in window even if unused"]
+  end
+  subgraph LAZY["lazy attach - pay on touch"]
+    L1["frontmatter gate"] --> L2{"file touched&lt;br/&gt;matches globs"}
+    L2 -->|yes| L4["rule joins window"]
+    L2 -->|no| L5["costs zero"]
+  end
+    </div>
+    <figcaption>The two loading strategies drawn as pipelines. Eager pays a flat tax every request and never misses; lazy pays only on relevance but bets the model can tell when a rule matters.
+    <b>Claude Code runs both at once - CLAUDE.md eagerly, path-scoped rules lazily.</b></figcaption>
+  </figure>
+
+  <h2 id="retrieval">Filling the rest: map versus search</h2>
+  <p>After rules come the code files themselves, and here the cast splits by generation.
+  Aider, the oldest member, computes a ranked outline of the whole repository and injects it into every prompt - no searching happens at runtime because there was no mechanism to search with.
+  Every agentic member inverts this: the model gets search tools and pulls what it needs, paying latency and turns instead of upfront tokens.
+  Gemini CLI hedges with a hybrid - deep <code>GEMINI.md</code> files are pulled in JIT-style when a tool touches their directory.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant M as Model
+    participant H as Harness
+    participant R as Repository
+    Note over M,R: static front-load - Aider style
+    H->>R: rank every file once - tree-sitter PageRank
+    R-->>H: ranked outline fitted to token budget
+    H->>M: prompt carries the whole map every turn
+    Note over M,R: agentic pull - the modern loop
+    M->>H: call Grep on refreshToken
+    H->>R: run the search
+    R-->>M: matching lines return as tool result
+    M->>H: call Read on the promising file
+    R-->>M: contents enter window on demand
+    </div>
+    <figcaption>Two answers to the same question - how does the model learn about code nobody named? The map costs tokens on every turn even when irrelevant; search costs turns and latency but pays only for what is used.
+    <b>Aider front-loads retrieval because a 2023 model could not call Grep; the agentic cast inverted the trade once it could.</b></figcaption>
+  </figure>
+
+  <h2 id="compaction">When it stops fitting: compaction</h2>
+  <p>Long sessions overflow, and the trigger point is a pure design choice.
+  Gemini CLI compresses at half its window, keeping the newest 30 percent (<a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/context/chatCompressionService.ts#L38-L47">chatCompressionService.ts:38-47</a>).
+  Goose compacts at 80 percent into a structured summary (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose-context-management/src/lib.rs">goose-context-management lib.rs</a>); Copilot Chat starts background compaction at 80 percent and blocks the turn at 95 (<a href="https://github.com/microsoft/vscode-copilot-chat/blob/5863f5a7088958050792b5dccbe8b46c6e13eccc/src/extension/intents/node/agentIntent.ts#L452-L465">agentIntent.ts:452-465</a>);
+  Kimi fires at 85 percent or a 50k reserve (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/config.py#L88-L95">config.py:88-95</a>); Cline projects forward and triggers at 90 percent of input (<a href="https://github.com/cline/cline/blob/491b30b806fdb8c93513f821f2b87d63a61542f5/sdk/packages/core/src/extensions/context/compaction-shared.ts#L13-L18">compaction-shared.ts:13-18</a>).
+  Aider is the outlier: its history budget is one sixteenth of the window, clamped between 1,024 and 8,192 tokens (<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/models.py#L355-L358">models.py:355-358</a>) - it summarizes early because full file contents ride along in a separate chunk.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 330" role="img" aria-label="Horizontal bar chart of the fraction of the context window at which each harness triggers compaction, from Aider near six percent through fifty, eighty, eighty-five and ninety percent up to Copilot blocking at ninety-five.">
+      <line class="axis" x1="150" y1="20" x2="150" y2="290"/>
+      <rect class="m-alarm" x="151" y="30"  width="25"  height="24"/>
+      <rect class="m-stat" x="151" y="66"  width="200" height="24"/>
+      <rect class="m-stat" x="151" y="102" width="320" height="24"/>
+      <rect class="m-stat" x="151" y="138" width="320" height="24"/>
+      <rect class="m-stat" x="151" y="174" width="340" height="24"/>
+      <rect class="m-stat" x="151" y="210" width="360" height="24"/>
+      <rect class="m-noise" x="151" y="246" width="380" height="24"/>
+      <text class="lbl-sm" x="143" y="46"  text-anchor="end">Aider history</text>
+      <text class="lbl-sm" x="143" y="82"  text-anchor="end">Gemini CLI</text>
+      <text class="lbl-sm" x="143" y="118" text-anchor="end">Goose</text>
+      <text class="lbl-sm" x="143" y="154" text-anchor="end">Copilot start</text>
+      <text class="lbl-sm" x="143" y="190" text-anchor="end">Kimi CLI</text>
+      <text class="lbl-sm" x="143" y="226" text-anchor="end">Cline</text>
+      <text class="lbl-sm" x="143" y="262" text-anchor="end">Copilot block</text>
+      <text class="lbl-sm" x="184" y="46"  text-anchor="start">~6%</text>
+      <text class="lbl-sm" x="359" y="82"  text-anchor="start">50%</text>
+      <text class="lbl-sm" x="479" y="118" text-anchor="start">80%</text>
+      <text class="lbl-sm" x="479" y="154" text-anchor="start">80%</text>
+      <text class="lbl-sm" x="499" y="190" text-anchor="start">85%</text>
+      <text class="lbl-sm" x="519" y="226" text-anchor="start">90%</text>
+      <text class="lbl-sm" x="539" y="262" text-anchor="start">95%</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>trigger as share of window</span><span><i class="sw-alarm"></i>aider value derived</span><span><i class="sw-noise"></i>hard stop, not summarize</span></div>
+    <figcaption>Compaction triggers span fifteen-fold, window-share to window-share. Derivation for Aider: 128,000-token window &divide; 16 = 8,000-token history budget = 6.25 percent. Claude Code, Cursor and Roo Code leave their thresholds undocumented or purely configurable at the versions pinned here; Claude Code's docs do say a compact keeps roughly 12 percent of the summarized tokens as summary.
+    <b>There is no natural threshold - earlier means cheaper turns and more forgetting, later means the reverse.</b></figcaption>
+  </figure>
+
+  <h2 id="channels">Side channels and the explicit ledger</h2>
+  <p>Some context never appears on your screen.
+  Codex renders unchanged inputs as empty diffs so an untouched <code>AGENTS.md</code> costs zero new tokens on the next request; Roo Code stamps an environment block - open tabs, git status, clock - onto every single turn; Goose writes the model a private note each turn with time, working directory, and remaining budget; Claude Code appends environment info invisibly after its system prompt.
+  These channels exist because the model has no other way to know anything that happened outside its own replies.</p>
+  <p>Budgeting itself ranges from implicit to bookkept.
+  opencode prunes old tool outputs once past a 20,000-token floor, protecting the most recent 40,000 (<a href="https://github.com/anomalyco/opencode/blob/69aaa22793bcbe0b016ad9cfad22616906766df0/packages/opencode/src/session/compaction.ts#L28-L33">compaction.ts:28-33</a>).
+  Pi clamps every requested output cap against remaining space minus a safety margin.
+  Aider is the most explicit ledger in the cast: repo map, history, reminder - each chunk gets a stated allocation, and the final reminder is appended only if the estimated total still fits the model's window (<a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/coders/base_coder.py#L1294-L1329">base_coder.py:1294-1329</a>).</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+    "Why did my agent forget that?" is rarely about the model. It is about which chunk the allocator evicted - and every harness evicts by its own rule.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Your teammate's agent ignores a coding convention - until anyone opens a file in one specific directory, after which it complies. Which loading strategy explains this?</div>
+      <button class="q-opt">Eager concatenation, with the convention truncated by a byte budget</button>
+      <button class="q-opt">Model-decision attachment, where the model judged the rule irrelevant</button>
+      <button class="q-opt">Lazy glob attachment - it loads when a matching file enters context</button>
+      <button class="q-opt">Session memory, recording only conventions seen in past conversations</button>
+      <div class="q-fb">Compliance appearing exactly when a directory's files are opened is the signature of glob-gated lazy attachment - Cursor and Windsurf both ship it. Truncation would be flaky everywhere, not fixed by opening one directory. Model-decision gating depends on the request wording, not on file access, and session memory has nothing to do with directories.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Aider summarizes chat history far earlier, relative to the window, than any agentic harness. What best explains the design?</div>
+      <button class="q-opt">Its weak summarizer model can only handle a small context of its own</button>
+      <button class="q-opt">Whole file contents ride beside the history in the same window, crowding it</button>
+      <button class="q-opt">Pre-agentic models could not read summaries beyond a few thousand tokens</button>
+      <button class="q-opt">Git commits preserve the details, so dropping old chat is safe entirely</button>
+      <div class="q-fb">The chat-files chunk carries whole fenced source files every turn, so history competes for the same window and loses. The weak model handles long inputs fine - the budget is a fraction of the main window regardless. Summaries are not length-capped by era, and git preserves code changes, not conversational decisions like naming or constraints.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Aider sizes three allocations straight from the model's window size. For a model with a 160,000-token window, compute each from the rules in <a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/models.py#L355-L358">models.py:355-358</a> and <a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/models.py#L782-L789">models.py:782-789</a>:</p>
+      <p><b>Find</b>: the repo-map allowance (one eighth of the window, clamped to 1,024 to 4,096), the history budget (one sixteenth, clamped to 1,024 to 8,192), and the history share of the window as a percentage.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Compute the raw fractions first - 160,000 &divide; 8 and 160,000 &divide; 16 - then apply each clamp separately. Neither result lands outside its bounds here.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Repo-map raw fraction.</b> 160,000 &divide; 8 = 20,000, which exceeds the 4,096 cap, so the allowance is <span class="keynum">4,096</span> tokens.</li>
+        <li><b>History raw fraction.</b> 160,000 &divide; 16 = 10,000, which exceeds the 8,192 cap, so the budget is <span class="keynum">8,192</span> tokens.</li>
+        <li><b>History share.</b> 8,192 &divide; 160,000 = 0.0512, so about <b>5.1 percent</b> of the window.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Both caps bind above windows of 32,768 and 131,072 tokens respectively, so any modern large-window model lands at 4,096 and 8,192 - the clamps exist precisely so big windows cannot inflate these chunks.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask it to compare two harnesses you actually use: which memory files each reads, which compacts earlier, and which runs a static map versus live search. Then ask what you would see in each one's transcript when the window fills.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Claude Code's interactive walkthrough of its own context window - what loads, what each piece costs, and what survives a compact: <a href="https://code.claude.com/docs/en/context-window">Explore the context window</a>. Read it with this page's chart open and check the startup arithmetic yourself.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 30 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

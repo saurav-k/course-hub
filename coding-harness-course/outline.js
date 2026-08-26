@@ -17,6 +17,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "02",
+      "title": "The Loop",
+      "lessons": [
+        {
+          "title": "Context engineering - what actually fills the window",
+          "href": "lessons/0030-context-engineering.html"
+        }
+      ]
+    },
+    {
       "n": "04",
       "title": "Extending",
       "lessons": [
@@ -30,6 +40,10 @@ window.COURSE_OUTLINE = {
       "n": "06",
       "title": "Deep Dives - the cast of fifteen",
       "lessons": [
+        {
+          "title": "Aider - the repo map and the pre-agentic lineage",
+          "href": "lessons/0120-aider.html"
+        },
         {
           "title": "Windsurf - the human trajectory as context",
           "href": "lessons/0180-windsurf.html"
