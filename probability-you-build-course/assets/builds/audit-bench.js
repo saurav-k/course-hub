@@ -908,8 +908,11 @@ function AB_fillCard(S, m, cvx, g, Tinfo, cis){
         ', fitted on ' + Tinfo.nFit + ' held-out rows): ECE ' + Tinfo.afterECE.toFixed(4) +
         '. Scaling is monotone, so ranking is untouched (AUC identical) and the decision at' +
         ' t = 0.50 is bit-identical (accuracy ' + Tinfo.acc50.toFixed(4) + ' before and after).' +
-        ' At the declared t = ' + m.threshold.toFixed(2) + ' the same confusion matrix sits at' +
-        " t' = " + Tinfo.tPrime.toFixed(4) + ' on the rescaled scores.'
+        (Math.abs(m.threshold - 0.5) < 1e-9
+          ? ' The declared threshold IS 0.50, so every rate above is unmoved by the rescaling.'
+          : ' The declared threshold is ' + m.threshold.toFixed(2) + ', which is not the midpoint,'
+            + ' so read the pre-scaling rates back at t\u2019 = ' + Tinfo.tPrime.toFixed(4)
+            + ' on the rescaled scores - the same confusion matrix, relabelled.')
         : ' No rescaling applied.') + '</div>';
   }
   const pol = $('ac-policy');
@@ -994,6 +997,10 @@ AB_reg('ab-card', {
     c.font = AB_font(false, 12);
     c.fillStyle = AB_tok('--warn');
     c.fillText('import error: ' + S.error, 20, h / 2);
+    /* Clear the readout too: leaving the previous dataset's numbers standing
+       beside an error makes a failed import look like a successful one. */
+    AB_setReadout(S.fig, [['import', 'failed - ' + S.error],
+                          ['card', 'not updated; fix the rows and press Apply again']]);
     return;
   }
   const m = AB_metrics(S.rows, 1, thr);
