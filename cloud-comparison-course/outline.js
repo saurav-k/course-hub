@@ -29,6 +29,28 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "06",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "Workforce identity: where a grant attaches",
+          "href": "lessons/0600-workforce-identity-where-a-grant-attaches.html"
+        },
+        {
+          "title": "Machine identity: proving it without a secret",
+          "href": "lessons/0601-machine-identity-proving-it-without-a-secret.html"
+        },
+        {
+          "title": "Customer identity: the directory you build on",
+          "href": "lessons/0602-customer-identity-the-directory-you-build-on.html"
+        },
+        {
+          "title": "Secrets, keys and certificates: who holds custody",
+          "href": "lessons/0603-secrets-keys-and-certificates-who-holds-custody.html"
+        }
+      ]
+    },
+    {
       "n": "07",
       "title": "Governance, tenancy and telemetry",
       "lessons": [

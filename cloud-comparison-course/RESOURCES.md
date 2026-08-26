@@ -14,6 +14,24 @@ belong.
 Every filled cell in `matrix.js` links into the vendor's own docs for its cloud.
 Every comparison claim in a lesson links a page under one of these four roots.
 
+## Certification blueprints
+
+Where a lesson says what a certification tests, the weight is quoted from the
+vendor's own exam guide and never from a third party. Four guides, all read in
+the verified round dated 2026-08-26:
+
+- **AWS Certified Solutions Architect - Professional, SAP-C02** -
+  <https://docs.aws.amazon.com/aws-certification/latest/solutions-architect-professional-02/solutions-architect-professional-02.html>
+- **Microsoft AZ-305 study guide** -
+  <https://learn.microsoft.com/en-us/credentials/certifications/resources/study-guides/az-305>
+- **Google Professional Cloud Architect exam guide** -
+  <https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf>
+- **Oracle Cloud Infrastructure Architect Professional, 1Z0-997-26** -
+  <https://mylearn.oracle.com/ou/exam/oracle-cloud-infrastructure-architect-professional-1z0-997-26/163295/161770/271322>
+
+A weight is expressed as the domain an area belongs to and that domain's official
+percentage, never as a schedule, a countdown or a study plan.
+
 ## Provenance discipline
 
 Each course in this category records what it rests on with the date it was read,
@@ -98,3 +116,12 @@ stale rather than as a typo.
   still correct; only that detail is stale.
 - Every documentation URL in `matrix.js` carries the read date of its cloud's
   inventory above. No URL has a read date of its own.
+- No maximum lifetime is recorded for a Google Cloud short-lived credential. The
+  inventory says the metadata server and the IAM Credentials API issue temporary
+  credentials and states no ceiling, so lesson `0601` draws that row as unstated
+  rather than assuming the hour the other three clouds happen to use. A refresh
+  that reads the Google short-lived-credentials page can close it.
+- OCI's generic workload-identity federation coverage is recorded as narrower than
+  the AWS and Google Cloud token-exchange path, and the OCI report marks that
+  assessment open pending a dedicated check. Lesson `0601` names the narrower
+  supported paths rather than declaring an absence.
