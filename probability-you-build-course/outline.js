@@ -61,11 +61,11 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0200-the-method-that-found-a-hidden-chamber.html"
         },
         {
-          "title": "Every angular bin is a Poisson count",
+          "title": "Counting muons",
           "href": "lessons/0201-counting-muons.html"
         },
         {
-          "title": "The likelihood function grades every slider setting",
+          "title": "Sliding the hypothesis",
           "href": "lessons/0202-the-likelihood-function.html"
         },
         {
@@ -89,7 +89,7 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0207-where-mle-breaks.html"
         },
         {
-          "title": "Week 3 problem set",
+          "title": "Week 3 problems",
           "href": "lessons/0208-week-3-problems.html"
         }
       ]
