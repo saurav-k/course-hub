@@ -343,14 +343,15 @@
       ctx.strokeStyle = P.faint; ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(c.x + 2, yln); ctx.lineTo(c.x + c.w - 2, yln); ctx.stroke(); ctx.setLineDash([]);
       plot(T, P.train, []); if (E.length) plot(E, P.test, [5, 4]);
+      ctx.font = '11px ui-monospace, monospace';
+      ctx.fillStyle = P.faint; ctx.textAlign = 'right';
+      ctx.fillText(maxL.toFixed(2), c.x + c.w - 8, c.y + 16);
+      ctx.fillStyle = P.train; ctx.fillText('train', c.x + c.w - 8, c.y + 30);
+      if (E.length) { ctx.fillStyle = P.test; ctx.fillText('test', c.x + c.w - 8, c.y + 44); }
+      ctx.textAlign = 'left';
       ctx.fillStyle = P.faint;
-      ctx.fillText(maxL.toFixed(2), c.x + c.w - 46, c.y + 16);
       ctx.fillText('ln 2 dashed - the uninformed guess', c.x + 8, c.y + c.h - 6);
       ctx.fillText('epoch ' + st.epoch, c.x + c.w - 78, c.y + c.h - 6);
-      ctx.textAlign = 'right';
-      ctx.fillStyle = P.train; ctx.fillText('train', c.x + c.w - (E.length ? 58 : 10), c.y + 16);
-      if (E.length) { ctx.fillStyle = P.test; ctx.fillText('test', c.x + c.w - 10, c.y + 16); }
-      ctx.textAlign = 'left';
     }
     function drawBars(P) {
       const c = layout(feat).bars;
