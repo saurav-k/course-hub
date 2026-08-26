@@ -95,7 +95,7 @@
       var result = PYBRubric.score(state);
 
       //one horizontal track per axis, filled to its score out of 3
-      var left = 250, top = 40, trackW = 300, barH = 34, gap = 26;
+      var left = 200, top = 40, trackW = 400, barH = 34, gap = 26;
       for (var i = 0; i < PYBRubric.AXES.length; i++) {
         var ax = PYBRubric.AXES[i];
         var y = top + i * (barH + gap);
@@ -132,14 +132,21 @@
           ctx.lineTo(left + trackW * t / 3, y + barH);
           ctx.stroke();
         }
-        ctx.fillStyle = C.faint;
-        for (t = 0; t <= 3; t++) {
-          ctx.fillText(String(t), left + trackW * t / 3 - 3, y + barH + 14);
+        //the scale is the same on every track, so it is numbered once, under the last
+        if (i === PYBRubric.AXES.length - 1) {
+          ctx.fillStyle = C.faint;
+          for (t = 0; t <= 3; t++) {
+            ctx.fillText(String(t), left + trackW * t / 3 - 3, y + barH + 14);
+          }
         }
-        ctx.fillStyle = C.ink;
-        ctx.font = 'bold 14px sans-serif';
-        ctx.fillText(String(v), left + (v > 0 ? trackW * v / 3 : 0) - (v === 3 ? 16 : -6), y + barH / 2 + 5);
-        ctx.font = '13px sans-serif';
+        //a zero track already carries the words "zero - automatic fail" at its left
+        //edge, so the numeral would be drawn straight through them
+        if (v > 0) {
+          ctx.fillStyle = C.ink;
+          ctx.font = 'bold 14px sans-serif';
+          ctx.fillText(String(v), left + trackW * v / 3 - (v === 3 ? 16 : -6), y + barH / 2 + 5);
+          ctx.font = '13px sans-serif';
+        }
       }
 
       //the pass bar, drawn as a gate under the tracks
