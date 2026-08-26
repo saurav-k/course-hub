@@ -780,13 +780,15 @@
     var POLICIES = ['nano x1', 'frontier x1', 'any-correct', 'majority vote', 'cascade'];
 
     function readState() {
+      var n = Math.round(num(fig, 'n'));
+      if (n % 2 === 0) { n += 1; }
       return {
         q: num(fig, 'q') / 100,
         ps: num(fig, 'ps') / 100,
         pf: num(fig, 'pf') / 100,
         a: num(fig, 'a') / 100,
         b: num(fig, 'b') / 100,
-        n: Math.round(num(fig, 'n')),
+        n: n,
         clump: num(fig, 'clump') / 100,
         seed: num(fig, 'seed') || 42
       };
