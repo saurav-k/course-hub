@@ -45,6 +45,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Permission postures - ask, sandbox, classify, or nothing",
           "href": "lessons/0050-permission-postures.html"
+        },
+        {
+          "title": "Identity, provenance and supply chain",
+          "href": "lessons/0060-identity-and-supply-chain.html"
         }
       ]
     },
@@ -119,6 +123,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Pi - the agent loop as a library",
           "href": "lessons/0240-pi.html"
+        },
+        {
+          "title": "pi-launcher - a signed identity for an agent",
+          "href": "lessons/0250-pi-launcher.html"
         }
       ]
     }

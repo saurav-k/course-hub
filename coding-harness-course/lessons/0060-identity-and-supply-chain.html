@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Identity and supply chain - Coding Harness Engineering</title>
+<meta name="description" content="What identity the agent process presents to the operating system: ad-hoc versus Developer ID signatures, designated requirements, and the one cast member that treats provenance as a designed gate.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Trust &middot; Lesson 06</div>
+  <h1>Your agent has a body, and the operating system can see it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Grounded in Apple's code-signing documentation and in <a href="https://github.com/kunchenguid/pi-launcher">pi-launcher</a> read at commit <code>564fa16</code>.
+    &middot; <a href="https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b66df/web">Gatekeeper and runtime protection</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every tool call your agent makes executes inside a process carrying an <b>identity the OS can verify</b> - or an identity it cannot.</li>
+      <li>An <b>ad-hoc signature</b> seals the bytes but vouches for nobody: its cdhash changes on every build and nothing stable survives an update.</li>
+      <li>A <b>designated requirement</b> on Developer ID code names the signer rather than the bytes, so it stays constant across releases - which is what credential brokers match against.</li>
+      <li>One cast member, <b>pi-launcher</b>, designs this layer deliberately: a signed process identity plus a release pipeline that refuses to ship what fails a gate.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0050 asked&lt;br/&gt;which actions may run"] --> T["THIS PAGE&lt;br/&gt;what identity the process&lt;br/&gt;that runs them presents"]
+  T --> N["What it enables&lt;br/&gt;credential brokers and provenance checks&lt;br/&gt;get something stable to match"]
+  W["Layer seven of the map&lt;br/&gt;process identity from lesson 0000"] -.- T
+    </div>
+    <figcaption>Where this sits: permission postures decided what the agent may do; this page asks what the doing process <em>is</em>, in the only vocabulary the kernel understands.
+    <b>If a security tool cannot name your agent stably, every promise about gating it rests on sand.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">1. What macOS can actually see</h2>
+  <p>Every executable on Apple Silicon must carry a valid signature or the kernel refuses to map it.
+  The cheapest possible signature is the <dfn>ad-hoc</dfn> one, made with <code>codesign --sign -</code>: no certificate, no identity, just a cryptographic seal over the bytes.
+  That seal does two things - it satisfies the kernel, and it makes tampering detectable.
+  It deliberately does not do a third: it never answers <em>who vouches for this code</em>.</p>
+
+  <p>Two more terms carry the rest of the page.
+  The <dfn>cdhash</dfn> is the hash of the signature's code directory, which covers the page hashes of the whole executable - a unique fingerprint of one exact build (<a href="https://docs.developer.apple.com/documentation/technotes/tn3127-inside-code-signing-requirements">TN3127</a>).
+  Rebuild with a single changed byte and the cdhash changes.
+  The <dfn>designated requirement</dfn> (DR) exists to fix exactly that instability: it states what makes code <em>an instance of this program</em>, and Apple's tech note TN2206 says it should be satisfied by future updates too (<a href="https://developer.apple.com/library/archive/technotes/tn2206/_index.html">TN2206</a>).
+  For Developer ID code the DR names the identifier, <code>anchor apple generic</code>, and the Team ID - the signer, not the bytes.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Adhoc : codesign --sign minus
+  [*] --> DevID : Developer ID certificate
+  Adhoc --> BlockedAtLaunch : downloaded copy meets Gatekeeper
+  DevID --> Notarized : notarytool submit --wait
+  Notarized --> Accepted : stapled ticket passes spctl
+  Adhoc --> RunsLocally : copied straight onto the disk
+    </div>
+    <figcaption>How macOS sorts a binary at first contact. An ad-hoc build runs happily when you compile it yourself and fails precisely when provenance matters: a download, a first launch, a policy check.
+    <b>Only the notarized Developer ID path carries both an identity and Apple's blessing of it.</b></figcaption>
+  </figure>
+
+  <p><a href="https://support.apple.com/guide/security/gatekeeper-and-runtime-protection-sec5599b66df/web">Gatekeeper</a> is the policy face of all this: before first launch of downloaded software it verifies the code comes from an identified developer, was notarized by Apple, and has not been altered.
+  Its command-line form, <code>spctl</code>, accepts Developer ID or Mac App Store signatures.
+  An ad-hoc app fails both tests - not because the seal is broken, but because there is nobody behind it.</p>
+
+  <h2 id="consumer">2. Who eats this property</h2>
+  <p>The consumer that motivated pi-launcher is named in its README: <b>Automic Vault</b>, which approves credential access by walking the process ancestry and matching designated requirements along the way (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/README.md#L35"><code>README.md:35</code></a>).
+  When an agent asks for an API key, the vault inspects everything between the agent and your shell.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph broken["Direct ad-hoc pi"]
+    A1["user shell"] --> B1["pi - ad-hoc signature&lt;br/&gt;no certificate"]
+    B1 --> C1["cdhash differs on every build"]
+    C1 --> D1["vault walks ancestry&lt;br/&gt;finds no stable DR - approval cannot stick"]
+  end
+  subgraph fixed["pi under pi-launcher"]
+    A2["user shell"] --> B2["pi-launcher - Developer ID app"]
+    B2 --> C2["DR stable across releases&lt;br/&gt;identifier plus Team 9T2J7MNUP9"]
+    C2 --> D2["ancestry match succeeds every release"]
+  end
+    </div>
+    <figcaption>The same agent, same shell, same task - two different answers to "which program is asking".
+    <b>A policy keyed to a build fingerprint expires at the next build; a policy keyed to a signer does not.</b></figcaption>
+  </figure>
+
+  <p>Note what would and would not fix this.
+  Signing once is not enough - any later rebuild changes the cdhash again.
+  The fix is a signature whose <em>policy-facing part names something durable</em>.
+  That is the whole difference between the two halves of the figure above.</p>
+
+  <h2 id="wrapping">3. Wrapping without breaking the terminal</h2>
+  <p>So put a signed program above the agent.
+  The naive way is <code>execve</code>: the wrapper replaces its own image with the target's.
+  That destroys the point in one syscall - the moment the launcher execs into Pi, the process tree shows Pi's ad-hoc Mach-O again.
+  pi-launcher instead forks and stays alive as Pi's direct parent forever (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L175">fork at <code>pi-launcher.c:175</code></a>, <a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L199">execve at <code>:199</code></a>).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph replace["exec-and-replace - identity lost"]
+    S1["shell"] --> W1["wrapper image"] -->|execve| P1["pi - ad-hoc&lt;br/&gt;nothing signed remains above it"]
+  end
+  subgraph stay["fork-and-stay - identity kept"]
+    S2["shell"] --> L2["launcher pid stays alive - waitpid loop&lt;br/&gt;sits between shell and agent permanently"]
+    L2 -->|child resets dispositions then execve| P2["pi - same tty same pgrp&lt;br/&gt;a signed parent now shadows every child"]
+  end
+    </div>
+    <figcaption>Two wrapper designs, drawn as the process tree each leaves behind.
+    <b>The wrapper's whole value lives in being an ancestor, so it must refuse to become the child.</b></figcaption>
+  </figure>
+
+  <p>Staying alive as an extra family member creates the second problem: a wrapper that mishandles signals breaks job control in ways users feel instantly.
+  The launcher's rule is <em>never deliver a signal twice</em>.
+  Terminal-generated signals such as Ctrl-C go to the whole foreground process group, so the launcher ignores SIGINT and SIGQUIT itself rather than forwarding them; it forwards only signals aimed at its own PID - SIGHUP, SIGTERM, SIGUSR1, SIGUSR2 (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c#L54"><code>kForwardedSignals</code>, <code>pi-launcher.c:54</code></a>) - and if Pi dies by signal, the launcher raises that same signal on itself so <code>$?</code> matches a direct run exactly.
+  The deep dive on this project, lesson 025, walks the full Ctrl-C path and the test suite that proves it.</p>
+
+  <h2 id="provenance">4. Provenance is a pipeline, not a promise</h2>
+  <p>Identity answers <em>who signed this</em>; provenance answers <em>are these the bytes they published</em>.
+  pi-launcher's answer is mechanical.
+  The upstream Pi release is pinned by tag, tarball URL, and SHA-256 in <a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/packaging/pi-release.json"><code>packaging/pi-release.json</code></a>, and every build verifies the download twice: against the pinned hash and against the entry in upstream's own published <code>SHA256SUMS</code> (<a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/scripts/fetch-pi.sh#L57-L71"><code>fetch-pi.sh:57-71</code></a>).
+  Two independent references must agree before anything proceeds.</p>
+  <p>The signing chain runs inside-out through nested code, with hardened runtime and secure timestamps, then notarization and stapling; the release workflow verifies the artifact three times and launches it three times, including a fresh re-download of the published zip checked byte-for-byte.
+  When an upstream release fails any gate, the pipeline files a quarantine issue keyed by the exact tag and never retries that tag while the issue is open - a failed gate stops the world instead of shipping anyway.
+  Lesson 025 draws the whole pipeline as a figure; the transferable shape fits in one sentence: <b>pins, dual verification, and gates whose failure mode is quarantine, not a warning label.</b></p>
+
+  <h2 id="landscape">5. What about the other fifteen</h2>
+  <p>The uncomfortable result of surveying the cast is how few harnesses treat this layer as designed.
+  Our sixteen reports record distribution and update facts unevenly - and that unevenness is itself the finding: for most of the cast, process identity is an accident of the install method.
+  Read the table as questions to ask of any harness rather than as audited verdicts.</p>
+
+  <table>
+    <thead><tr><th>Subject</th><th>Reaches you as</th><th>What the reports recorded about updates and identity</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://github.com/anthropics/claude-code">Claude Code</a></td><td>npm-distributed native executable bundling its JS runtime</td><td>a background auto-updater replaces binaries under <code>~/.local/share/claude/versions/</code></td></tr>
+      <tr><td><a href="https://github.com/openai/codex">Codex CLI</a></td><td>npm launcher resolving a per-platform native binary</td><td>the npm shim spawns the real binary - a wrapper sits in the ancestry</td></tr>
+      <tr><td><a href="https://github.com/google-gemini/gemini-cli">Gemini CLI</a></td><td>npm package, TypeScript on Node</td><td>not documented</td></tr>
+      <tr><td><a href="https://github.com/Aider-AI/aider">Aider</a></td><td>Python package from PyPI</td><td>not documented</td></tr>
+      <tr><td><a href="https://cursor.com/docs">Cursor</a></td><td>standalone binary via install script, plus an Electron editor</td><td>not documented</td></tr>
+      <tr><td><a href="https://docs.windsurf.com">Windsurf / Devin Desktop</a></td><td>closed desktop installer</td><td>not documented</td></tr>
+      <tr><td><a href="https://docs.github.com/en/copilot">Copilot Chat</a></td><td>VS Code extension</td><td>marketplace-managed updates</td></tr>
+      <tr><td><a href="https://github.com/cline/cline">Cline</a></td><td>VS Code extension</td><td>marketplace-managed updates</td></tr>
+      <tr><td><a href="https://github.com/RooCodeInc/Roo-Code">Roo Code</a></td><td>VS Code extension</td><td>repository archived read-only in May 2026</td></tr>
+      <tr><td><a href="https://github.com/anomalyco/opencode">opencode</a></td><td>npm package, Bun runtime</td><td>not documented</td></tr>
+      <tr><td><a href="https://github.com/block/goose">Goose</a></td><td>Rust binary</td><td>checks <code>npx</code>/<code>uvx</code> extension launches against OSV malware advisories - and fails open when offline</td></tr>
+      <tr><td><a href="https://github.com/MoonshotAI/kimi-cli">Kimi CLI</a></td><td>Python package via uv</td><td>not documented</td></tr>
+      <tr><td><a href="https://github.com/earendil-works/pi">Pi</a></td><td>standalone Bun binaries per release</td><td>a third-party signed launcher exists - our lesson 025</td></tr>
+      <tr><td><a href="https://antigravity.google/docs">Antigravity</a></td><td>closed installers; the PyPI SDK wheel ships the compiled harness binary</td><td>not documented</td></tr>
+      <tr><td><a href="https://models.dev">models.dev</a></td><td>a data catalog, not a process</td><td>no process identity applies</td></tr>
+      <tr><td><a href="https://github.com/kunchenguid/pi-launcher">pi-launcher</a></td><td>signed, notarized macOS app bundle</td><td>dual-checksum pinning, gated release pipeline, stable designated requirement</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    A stable identity is not authorization, and it is not a sandbox.
+    Matching a designated requirement tells a policy tool <em>which program is asking</em> - whether to grant anything remains the tool's decision, untested until tested.
+    And the wrapped agent still runs with your full user permissions: signing changes who is vouching, never what the code may touch.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A teammate downloads a coding-agent binary directly and macOS blocks it at first launch. It was signed ad-hoc. Why?</div>
+      <button class="q-opt">Its cdhash changed at the last rebuild, voiding an old ticket</button>
+      <button class="q-opt">It carries no certificate, so no identified developer backs it</button>
+      <button class="q-opt">Apple requires every downloaded binary to carry a kernel signature</button>
+      <button class="q-opt">Its signature lapsed, because ad-hoc signatures expire in days</button>
+      <div class="q-fb">Gatekeeper and <code>spctl</code> accept Developer ID or App Store signatures; ad-hoc code has neither, so there is no developer to identify. The first option describes a real property - the cdhash does change - but that is not the rejection reason. The third invents a mechanism, and the fourth is false: ad-hoc signatures do not expire.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why must pi-launcher fork and stay alive instead of exec-ing straight into the agent?</div>
+      <button class="q-opt">execve cannot pass the open terminal descriptors across</button>
+      <button class="q-opt">Pi expects its parent to stay resident for job control</button>
+      <button class="q-opt">fork is the only portable way to copy signal dispositions</button>
+      <button class="q-opt">Replacing its image would erase the signed identity from the tree</button>
+      <div class="q-fb">Exec preserves file descriptors, so the first option is false; Pi needs no resident parent, and dispositions need resetting rather than copying. The real reason is structural: the launcher's value is being a signed ancestor, and exec turns it into the very unsigned binary it was wrapping.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>On a Mac, pick two programs you run daily - for example a GUI app in <code>/Applications</code> and an npm-installed CLI on your <code>PATH</code>.
+      Run <code>codesign -dr - &lt;path&gt;</code> on each and read the designated requirement it prints, then <code>codesign -dv --entitlements - &lt;path&gt;</code> for the entitlements.</p>
+      <p><b>Find</b>: for each binary, whether its DR names a Team ID (stable across updates) or nothing at all - and therefore whether a credential broker could say anything durable about it.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Apple-signed and Developer-ID apps typically print <code>identifier "..." and anchor apple generic and certificate ...</code> with a Team ID.
+      A script that is really a Node or shell entry point often prints nothing useful at all - ask what process the OS actually sees when it runs.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Run the inspection.</b> <code>codesign -dr -</code> prints the designated requirement, or reports that the binary is not signed at all.</li>
+        <li><b>Classify each result.</b> A DR naming <code>anchor apple generic</code> plus a Team ID survives updates; a missing or ad-hoc result identifies one build only, and an unsigned script identifies nothing.</li>
+        <li><b>Draw the consequence.</b> Any tool gating access by process identity can match the first kind forever and the second kind never.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> At least one of your two picks should show a Team-ID-backed DR and the other little or nothing - daily toolchains mix both worlds constantly, which is exactly why this layer usually goes unnoticed.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the cdhash-versus-designated-requirement distinction has not landed, ask for the thought experiment: what would a credential broker have to store to recognize a program rebuilt nightly? Then ask it to walk your own <code>PATH</code> guessing which entries could pass.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Apple's TN2206, <a href="https://developer.apple.com/library/archive/technotes/tn2206/_index.html">macOS Code Signing In Depth</a>, is the document this page compressed - designated requirements, nested code, and what Gatekeeper accepts, from the people who enforce it.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 06 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
