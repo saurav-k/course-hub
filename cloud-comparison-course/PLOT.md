@@ -36,10 +36,26 @@ roadmap of what remains.
 one per capability area: `org-tenancy`, `governance-policy`, `observability`,
 `audit-telemetry`.
 
+**Module 08, Security, delivery, integration and intelligence.** Four lessons, one
+per capability area.
+
+| Lesson | Name | Capability area |
+|---|---|---|
+| `0800` | The security services layer | `security-services` |
+| `0801` | Infrastructure as code and deployment | `iac-deployment` |
+| `0802` | Integration and messaging | `integration-messaging` |
+| `0803` | AI and ML services | `ai-ml` |
+
+`security-services` had no module in the original table.
+It was placed here rather than in module 07 because a security service acts on a
+running workload the way delivery and integration do, while module 07 governs the
+estate around it, and the module name was widened to say so.
+
 **Numbering is by module block, and this file's module table is what assigns it.**
 A module owns the hundred its own number opens: module 02 owns `0200` to `0299`,
-module 05 owns `0500` to `0599`, module 06 owns `0600` to `0699`, and module 07
-owns `0700` to `0799`. Modules are written in parallel, so a single
+module 05 owns `0500` to `0599`, module 06 owns `0600` to `0699`, module 07 owns
+`0700` to `0799`, and module 08 owns `0800` to `0899`. Modules are written in
+parallel, so a single
 running sequence collides the moment two contributors add a lesson at once. The
 eyebrow, the card `.ln` and the footer carry the four digits unchanged. Module
 grouping on the map carries teaching order, and file order is free to disagree
@@ -56,7 +72,6 @@ takes one comparison that names alone do not settle.
 | 01 | How to read a four-way comparison | the whole matrix - method before findings |
 | 03 | Storage and data | `storage`, `databases` |
 | 04 | Analytics | `analytics` |
-| 08 | Delivery, integration and intelligence | `iac-deployment`, `integration-messaging`, `ai-ml` |
 | 09 | Resilience and migration | `resilience-migration` |
 
 ## Why this order and no other
@@ -65,12 +80,12 @@ Module 01 teaches the reader how to read the matrix before any finding asks them
 Modules 02-05 walk outward from the workload core (compute and storage) through the
 plumbing (network) in the same order a first architecture meets them. Identity comes
 before governance because tenancy guardrails are expressed in identity terms on all
-four clouds. Delivery and integration come late because they act on everything
+four clouds. Security, delivery and integration come late because they act on everything
 earlier. Resilience closes because it is the property the whole design is judged on.
 
 ## Reserved, unwritten
 
-- **The five unwritten modules above**, none yet started. Each takes the hundred
+- **The four unwritten modules above**, none yet started. Each takes the hundred
   its module number opens, so nothing already published is renumbered or renamed.
 - **Reference: the capability taxonomy explained.** A glossary of what each of the
   twenty-four areas covers, linked from every lesson foot. Not written yet.
