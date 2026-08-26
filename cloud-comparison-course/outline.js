@@ -27,6 +27,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0203-the-function-container-boundary.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Governance, tenancy and telemetry",
+      "lessons": [
+        {
+          "title": "Hierarchy and guardrails",
+          "href": "lessons/0700-hierarchy-and-guardrails.html"
+        },
+        {
+          "title": "Policy, drift and inventory",
+          "href": "lessons/0701-policy-drift-and-inventory.html"
+        },
+        {
+          "title": "The observability stack",
+          "href": "lessons/0702-observability-stack.html"
+        },
+        {
+          "title": "The telemetry streams",
+          "href": "lessons/0703-the-telemetry-streams.html"
+        }
+      ]
     }
   ],
   "extras": []
