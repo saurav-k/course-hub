@@ -396,6 +396,8 @@
     drawScatter(st.canvas, st.records[st.selected].record, st.records[st.selected].name);
     const old = st.fig.querySelector(".lrh-report");
     if (old) old.remove();
+    const oldMsg = st.fig.querySelector(".lrh-shellmsg");
+    if (oldMsg) oldMsg.remove();
     st.readout.appendChild(buildReport(st));
     st.fig.querySelectorAll("[data-lrh-row]").forEach(tr => {
       tr.addEventListener("click", () => {
@@ -409,6 +411,7 @@
     const msg = document.createElement("div");
     msg.style.cssText = "width:100%;margin-top:.6rem;padding:.6rem .8rem;border:1px dashed " +
       token("--line-strong") + ";color:" + token("--ink-soft") + ";font-size:.88em";
+    msg.className = "lrh-shellmsg";
     msg.textContent = "The suite frame is wired and empty: zero cases registered. " +
       "Cases arrive from lesson 0303 onward - each one is declared as data, with your written prediction graded against the measured record.";
     st.readout.appendChild(msg);
