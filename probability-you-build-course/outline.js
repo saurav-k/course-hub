@@ -11,47 +11,47 @@ window.COURSE_OUTLINE = {
       "title": "Week 1: Core probability - the Spend Planner",
       "lessons": [
         {
-          "title": "Week 1 start here - the build hub, five milestones, and the frozen catalogue's provenance",
+          "title": "Week 1: build the Spend Planner",
           "href": "lessons/0000-week-1-start-here.html"
         },
         {
-          "title": "Sample spaces - one request, two outcomes, and the world function bernoulli(p)",
+          "title": "One request is two outcomes",
           "href": "lessons/0001-sample-space-one-request.html"
         },
         {
-          "title": "The axioms and the complement rule - why P(at least one hit) = 1 - P(all miss)",
+          "title": "The axioms and the complement rule",
           "href": "lessons/0002-axioms-and-the-complement-rule.html"
         },
         {
-          "title": "Conditional probability - the escalation check's sensitivity and false-alarm rate",
+          "title": "The escalation check's two error rates",
           "href": "lessons/0003-conditional-probability-check-quality.html"
         },
         {
-          "title": "The multiplication rule - joint paths through a cascade as products along the path",
+          "title": "Joint paths as products",
           "href": "lessons/0004-multiplication-rule-paths-through-a-cascade.html"
         },
         {
-          "title": "Total probability - partitioning by branch to price the cascade decision",
+          "title": "Total probability prices the cascade",
           "href": "lessons/0005-total-probability-the-cascade-decision.html"
         },
         {
-          "title": "Bayes updating - reliability estimates that move when evidence arrives",
+          "title": "Beliefs that move",
           "href": "lessons/0006-bayes-updating-reliability-from-evidence.html"
         },
         {
-          "title": "Independence and when it lies - correlated failures against the formulas' promises",
+          "title": "Independence and when it lies",
           "href": "lessons/0007-independence-and-when-it-lies.html"
         },
         {
-          "title": "Counting for majority vote - C(n,k) earned at the moment the vote needs it",
+          "title": "Counting for majority vote",
           "href": "lessons/0008-counting-for-majority-vote.html"
         },
         {
-          "title": "Expected cost and the planner - the dashboard, the decision line, and the honest infeasible message",
+          "title": "Expected cost and the assembled planner",
           "href": "lessons/0009-expected-cost-and-the-planner.html"
         },
         {
-          "title": "Week 1 problems - nine problems that make you produce every number the planner prints",
+          "title": "Week 1 problem set",
           "href": "lessons/0010-week-1-problems.html"
         }
       ]
