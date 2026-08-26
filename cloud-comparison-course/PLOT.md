@@ -6,9 +6,34 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing is written yet. The course map currently carries the capability matrix -
-which is the course's opening artefact, not a lesson - and the planned modules
-below as roadmap entries.
+The course map opens with the capability matrix - the course's opening artefact,
+not a lesson - then every module that has been written, in module order, then the
+roadmap of what remains.
+
+**Module 02, Compute: placement, scaling, containers.** Four lessons, `0200` to
+`0203`, one per capability area: `compute-iaas`, `compute-scaling`, `containers`,
+`serverless-app`.
+
+**Module 06, Identity and access.** Four lessons, one per capability area.
+
+| Lesson | Name | Capability area |
+|---|---|---|
+| `0600` | Workforce identity: where a grant attaches | `identity-workforce` |
+| `0601` | Machine identity: proving it without a secret | `identity-workload` |
+| `0602` | Customer identity: the directory you build on | `identity-customer` |
+| `0603` | Secrets, keys and certificates: who holds custody | `secrets-keys` |
+
+**Module 07, Governance, tenancy and telemetry.** Four lessons, `0700` to `0703`,
+one per capability area: `org-tenancy`, `governance-policy`, `observability`,
+`audit-telemetry`.
+
+**Numbering is by module block, and this file's module table is what assigns it.**
+A module owns the hundred its own number opens: module 02 owns `0200` to `0299`,
+module 06 owns `0600` to `0699`, module 07 owns `0700` to `0799`. Modules are written in parallel, so a single
+running sequence collides the moment two contributors add a lesson at once. The
+eyebrow, the card `.ln` and the footer carry the four digits unchanged. Module
+grouping on the map carries teaching order, and file order is free to disagree
+with it.
 
 ## Planned, in order
 
@@ -19,12 +44,9 @@ takes one comparison that names alone do not settle.
 | # | Module | Draws its rows from |
 |---|---|---|
 | 01 | How to read a four-way comparison | the whole matrix - method before findings |
-| 02 | Compute: placement, scaling, containers | `compute-iaas`, `compute-scaling`, `containers`, `serverless-app` |
 | 03 | Storage and data | `storage`, `databases` |
 | 04 | Analytics | `analytics` |
 | 05 | Networking, delivery and edge | `networking-core`, `networking-lb-edge`, `dns-domains`, `hybrid-connectivity` |
-| 06 | Identity and access | `identity-workforce`, `identity-workload`, `identity-customer`, `secrets-keys` |
-| 07 | Governance, tenancy and telemetry | `org-tenancy`, `governance-policy`, `observability`, `audit-telemetry` |
 | 08 | Delivery, integration and intelligence | `iac-deployment`, `integration-messaging`, `ai-ml` |
 | 09 | Resilience and migration | `resilience-migration` |
 
@@ -39,8 +61,8 @@ earlier. Resilience closes because it is the property the whole design is judged
 
 ## Reserved, unwritten
 
-- **The nine modules above**, none yet started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **The six unwritten modules above**, none yet started. Each takes the hundred
+  its module number opens, so nothing already published is renumbered or renamed.
 - **Reference: the capability taxonomy explained.** A glossary of what each of the
   twenty-four areas covers, linked from every lesson foot. Not written yet.
 
