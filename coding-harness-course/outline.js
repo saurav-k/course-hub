@@ -113,6 +113,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0180-windsurf.html"
         },
         {
+          "title": "Cline - plan and act as two programs",
+          "href": "lessons/0200-cline.html"
+        },
+        {
           "title": "Roo Code - the mode system",
           "href": "lessons/0210-roo-code.html"
         },
