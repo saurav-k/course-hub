@@ -25,5 +25,9 @@ and it wins wherever this file is silent or behind.
   Four Clouds".
 - Cloud order everywhere is AWS, Azure, Google Cloud, OCI - column order in
   `matrix.js`, and the order every table and diagram follows.
+  **Mermaid places sibling subgraphs in reverse**, so a figure that puts one cloud
+  per subgraph has to be declared backwards to render in that order, with a `%%`
+  comment saying why. Read the rendered figure rather than the source: the source
+  reads OCI-first and the page reads AWS-first, and that is correct.
 - The four per-cloud sibling courses own their platforms' depths; link out to them
   rather than re-teaching.
