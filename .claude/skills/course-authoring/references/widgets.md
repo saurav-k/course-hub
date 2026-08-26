@@ -228,6 +228,45 @@ They are not a per-course palette any more; a course's identity comes from its a
 
 One idea keeps one colour on every page of a course.
 
+## Interactive builds
+
+The wrapper every running artifact mounts inside: canvas, controls, readout, caption, one figure. `probability-you-build-course` uses it for every weekly build; any course whose pages carry a live widget uses the same shape.
+
+```html
+<figure class="build" id="<build-id>">
+  <div class="build-stage"><canvas class="build-canvas" width="640" height="360"></canvas></div>
+  <div class="build-controls">
+    <label>quality bar <input type="range" min="0.5" max="0.99" step="0.01" value="0.95" data-role="bar"></label>
+    <button type="button" data-role="simulate">Simulate</button>
+  </div>
+  <div class="build-readout">
+    <span>P(correct) analytic <b>0.95</b></span>
+    <span>simulated <b>0.9497</b></span>
+  </div>
+  <figcaption>What the reader should see when they move the control, and <b>why that is the lesson</b>.</figcaption>
+</figure>
+```
+
+Five parts, each with a job:
+
+- **`figure.build` with an `id`.** The frame: surface, border, shadow, like a diagram box. The `id` lets a quiz or a sentence link straight at the build (`#planner-build`). Required.
+- **`.build-stage` holds `.build-canvas`.** The stage is the drawing's plate. Give the canvas real pixel dimensions in its `width`/`height` attributes - it scales down responsively and stays centred, so pick a size (around 640 wide) whose drawn type survives scaling on a phone.
+- **`.build-controls` holds labelled native inputs.** `<label>` wrapping the control text, native `input`, `select`, `button` elements. Keyboard behaviour, focus rings and screen-reader names come from the platform; do not rebuild them in script.
+- **`.build-readout` holds live numeric output** as inline spans. It renders mono with tabular numerals; bold marks the moving numbers. This is where an analytic result sits beside its Monte Carlo twin.
+- **`figcaption` states what the reader should see and why**, per the house caption bar. A build without a stated takeaway is decoration.
+
+Build script rules (the full contract lives in that course's `BUILDER-SPEC.md`):
+
+- Shared scripts live at `probability-you-build-course/assets/builds/<name>.js` and load from the head with `defer`.
+- Draw colours only from CSS tokens, read at draw time, never literal hex: a canvas bakes colours into pixels, so unlike CSS it cannot follow a mode or palette change on its own. Keep state outside closures and re-render when the theme moves:
+
+  ```js
+  new MutationObserver(render)
+    .observe(document.documentElement, { attributes: true, attributeFilter: ['data-mode', 'data-palette'] });
+  ```
+
+- Print hides the controls (inert on paper) and keeps stage, readout and caption. A build whose dark rendering would be unusable on white paper adds a `beforeprint` listener that redraws print-safe ink, restoring on `afterprint`; at minimum say in the caption what the printed figure shows.
+
 ## Formulas
 
 ```html
