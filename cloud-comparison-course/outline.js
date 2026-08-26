@@ -13,6 +13,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Where a workload physically lands",
           "href": "lessons/0200-where-a-workload-lands.html"
+        },
+        {
+          "title": "Holding a fleet at a size",
+          "href": "lessons/0201-holding-a-fleet-at-a-size.html"
         }
       ]
     }
