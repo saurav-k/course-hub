@@ -918,10 +918,21 @@
      mode or palette change needs no re-render here - unlike Mermaid, whose
      colours are baked into the SVG at render time.
 
-     Three cell states, which must never look alike (see widgets.md):
-       unfilled - nobody has written it yet; dashed and quiet
-       absent   - a declared finding, with a reason; marked and loud
-       service  - one or more services, each linking vendor documentation
+     Four cell states, which must never look alike (see widgets.md):
+       unfilled  - nobody has written it yet; dashed and quiet
+       absent    - this cloud ships no equivalent; a gold bar, and the only
+                   state that says NO EQUIVALENT
+       elsewhere - the cloud HAS the capability, delivered by a service that
+                   holds a row under another key; a dotted green bar and a link
+                   to that row
+       service   - one or more services, each linking vendor documentation
+
+     absent and elsewhere make opposite claims and both arrive as a gap entry in
+     the inventories, so they are told apart on three signals at once, not one:
+     the bar style (solid against dotted), the hue (--gold against --ok, which
+     no palette aliases to each other), and the tag word. Print flattens both
+     hues to the same grey, which is why the bar style and the tag carry the
+     distinction on paper.
 
      A service that is not generally available carries a badge saying so. That
      is what tells a reader which of two services in one cell a new design
@@ -960,7 +971,8 @@
     var legend = el('div', 'cmx-legend');
     [
       ['cmx-lg-service', 'Filled', 'a service answering the capability'],
-      ['cmx-lg-absent', 'No equivalent', 'a declared finding, with a reason'],
+      ['cmx-lg-elsewhere', 'Delivered elsewhere', 'the cloud has it, inside a service listed on another row'],
+      ['cmx-lg-absent', 'No equivalent', 'the cloud ships nothing that answers it'],
       ['cmx-lg-unfilled', 'Not filled in yet', 'awaiting verified research']
     ].forEach(function (item) {
       var chip = el('span', 'cmx-lg');
@@ -1021,11 +1033,49 @@
     });
     table.appendChild(headRow);
 
+    // A cross-reference names the row a capability actually lives in, so the
+    // reader needs the row's title rather than its key, and a way to get there.
+    var rowTitle = {};
+    data.rows.forEach(function (r) { rowTitle[r.key] = r.title || r.key; });
+    var byKey = {};
+
+    /* The jump a cross-reference offers. The target row can be filtered out -
+       the reader is looking at one area and the capability lives in another -
+       and an anchor into a hidden row silently goes nowhere, so the filter is
+       cleared first whenever that would happen. */
+    function crossLink(key) {
+      var link = el('a', 'cmx-see');
+      link.href = '#cmx-row-' + key;
+      link.appendChild(el('span', 'cmx-see-arrow', '\u2192'));
+      link.appendChild(document.createTextNode(' see ' + rowTitle[key]));
+      link.title = 'Go to the ' + rowTitle[key] + ' row, where this cloud lists the service';
+      link.addEventListener('click', function (ev) {
+        var target = byKey[key];
+        if (!target) return;
+        ev.preventDefault();
+        if (target.hidden) {
+          select.value = 'all';
+          search.value = '';
+          state.area = 'all';
+          state.q = '';
+          apply();
+        }
+        target.scrollIntoView({ block: 'center' });
+        target.setAttribute('tabindex', '-1');
+        target.focus();
+        target.classList.add('cmx-hit');
+        setTimeout(function () { target.classList.remove('cmx-hit'); }, 2200);
+      });
+      return link;
+    }
+
     var bodyRows = [];
     data.rows.forEach(function (row) {
       var tr = el('div', 'cmx-row');
       tr.setAttribute('role', 'row');
       tr.dataset.domain = row.domain;
+      tr.id = 'cmx-row-' + row.key;
+      byKey[row.key] = tr;
 
       var cap = el('div', 'cmx-cap');
       cap.setAttribute('role', 'rowheader');
@@ -1055,6 +1105,14 @@
           td.appendChild(el('span', 'cmx-absent-tag', 'No equivalent'));
           if (cellData.reason) td.appendChild(el('span', 'cmx-reason', cellData.reason));
           haystack += ' no equivalent';
+        } else if (cellData.state === 'elsewhere') {
+          // The cloud has the capability. Only the packaging differs, so this
+          // must never wear the words the absence beside it wears.
+          td.classList.add('cmx-elsewhere');
+          td.appendChild(el('span', 'cmx-elsewhere-tag', 'Delivered elsewhere'));
+          if (cellData.reason) td.appendChild(el('span', 'cmx-reason', cellData.reason));
+          if (cellData.see && rowTitle[cellData.see]) td.appendChild(crossLink(cellData.see));
+          haystack += ' delivered elsewhere';
         } else if (cellData.state === 'service' && Array.isArray(cellData.services)) {
           td.classList.add('cmx-service');
           cellData.services.forEach(function (s) {
@@ -1090,7 +1148,7 @@
           // and validate_site.py fails the pull request that produced it.
           td.classList.add('cmx-broken');
           td.appendChild(el('span', 'cmx-unfilled-tag', 'Broken cell'));
-          td.title = 'This cell is neither a service, nor an absence with a reason, nor unfilled.';
+          td.title = 'This cell is none of the four states: a service, a capability delivered under another row, an absence with a reason, or unfilled.';
         }
 
         tr.dataset.haystack = haystack;

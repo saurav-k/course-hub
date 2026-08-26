@@ -281,7 +281,7 @@ The author writes only the frame, and the figcaption is theirs to word:
 <figure class="cmatrix" id="capability-matrix">
   <figcaption>The capability matrix: one row per capability, one column per cloud.
   Filter by area, search by service name, and follow any cell to that vendor's own documentation.
-  <b>A dashed cell means nobody has written it yet; a marked cell means the cloud genuinely has no equivalent.</b></figcaption>
+  <b>A dashed cell means nobody has written it yet; a gold cell means the cloud genuinely has no equivalent; a green cell means it has the capability inside a service listed on another row.</b></figcaption>
 </figure>
 ```
 
@@ -319,22 +319,43 @@ The widget does not paint it, because a course may forbid dates on its pages; `c
 
 One row per capability key; each key appears under exactly one area and as
 exactly one row; every row carries a cell for all four clouds. A cell is one of
-exactly three states:
+exactly four states:
 
 | State | Markup | Reads as |
 |---|---|---|
 | unfilled | `{ "state": "unfilled" }` | dashed, quiet - *nobody has written this yet* |
-| absent | `{ "state": "absent", "reason": "..." }` | marked bar + tag - the cloud genuinely ships no equivalent, and why |
+| absent | `{ "state": "absent", "reason": "..." }` | solid gold bar + NO EQUIVALENT - the cloud genuinely ships no equivalent, and why |
+| elsewhere | `{ "state": "elsewhere", "reason": "...", "see": "<capability key>" }` | dotted green bar + DELIVERED ELSEWHERE - the cloud **has** the capability, inside a service that holds a row under another key, with a link to that row |
 | service | `{ "state": "service", "services": [{ "name": "...", "short_name": "...", "doc_url": "https://...", "one_line": "...", "status": "ga" }] }` | linked service names into that vendor's own documentation |
+
+`see` is optional on an `elsewhere` cell, for the case where the capability is
+spread across several rows rather than living in one. When it is present the
+validator resolves it: the target must be a real row, must not be the cell's own
+row, and must be a `service` cell for that same cloud. A cross-reference into
+another absence would render as a confident sentence and be a lie.
 
 `status` is optional and is one of `ga`, `preview`, `retiring` or `deprecated`.
 Everything that is not `ga` renders as a badge on the service name; `ga` renders nothing, so the badge stays rare enough to notice.
 That badge is what tells a reader which of two services in one cell a new design should pick, because such a pair is normally a current service beside the legacy one it replaces.
 
-**An unfilled cell and a declared absence must never look alike.** They mean
-different things - missing data versus a finding - and the reader must be able
-to tell them apart at a glance, in every mode, palette and on paper. Any edit
-that moves the two states closer together is a defect even if it looks tidier.
+**No two of the four states may look alike.** They mean different things -
+missing data, a finding, a difference in packaging, an answer - and the reader
+must be able to tell them apart at a glance, in every mode, every palette and on
+paper. Any edit that moves two states closer together is a defect even if it
+looks tidier.
+
+`absent` and `elsewhere` are the pair that matters most, because they make
+opposite claims and both arrive as a `gaps` entry in the same inventory. A cell
+must never imply a cloud cannot do something it demonstrably can, so
+**NO EQUIVALENT is reserved for `absent`.** The widget separates the two on three
+signals at once, and each one covers a case the others miss:
+
+- the bar style, solid against dotted, which is the only signal that survives
+  print, where `--gold` and `--ok` both flatten to `#333`;
+- the hue, `--gold` against `--ok`, which no palette aliases to one another -
+  unlike `--accent-2`, which *equals* `--gold` in Sage and Aubergine and would
+  have made the two boxes identical for those readers;
+- the tag word, which is what a screen reader gets.
 
 Every `doc_url` must be a well-formed https link; the validator fetches nothing
 by default, so before opening a pull request that touches the data file run:
