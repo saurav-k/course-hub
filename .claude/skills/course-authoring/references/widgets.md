@@ -314,8 +314,8 @@ window.CLOUD_CAPABILITY_MATRIX = {
 };
 ```
 
-`snapshot` is optional and prints beside the legend.
-A cloud comparison with no date on it is a claim about today, forever, so a populated matrix owes one.
+`snapshot` is optional and is data, not page text: it records when the cells were verified so a refresh knows what it is refreshing.
+The widget does not paint it, because a course may forbid dates on its pages; `cloud-comparison-course` does, and keeps that date in its `RESOURCES.md` instead.
 
 One row per capability key; each key appears under exactly one area and as
 exactly one row; every row carries a cell for all four clouds. A cell is one of

@@ -968,10 +968,6 @@
       chip.appendChild(el('span', null, item[1] + ' - ' + item[2]));
       legend.appendChild(chip);
     });
-    // A cloud comparison with no date on it is a claim about today, forever.
-    if (data.snapshot) {
-      legend.appendChild(el('span', 'cmx-snapshot', 'Verified against vendor documentation on ' + data.snapshot));
-    }
     frame.insertBefore(legend, caption);
 
     /* ---------- controls ---------- */

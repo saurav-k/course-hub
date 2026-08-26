@@ -25,6 +25,10 @@
          a reader tells a current service from the legacy one beside it, and
          therefore which one a new design should pick.
 
+   "snapshot" is data, not page text. This course forbids dates on its pages, so
+   the widget does not paint it and RESOURCES.md carries the same date as the
+   reader-facing provenance. It sits here so a refresh knows what it refreshes.
+
    scripts/validate_site.py enforces all of this: every row resolves to a key
    in the taxonomy and appears once, every row carries all four clouds, every
    cell is one of the three states, and every doc_url is well formed.

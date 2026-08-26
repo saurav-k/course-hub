@@ -21,9 +21,13 @@ In this order: [`MISSION.md`](MISSION.md), [`NOTES.md`](NOTES.md),
 
 ## The rules that bite hardest here
 
-- **No cloud facts without verified research behind them.** The cells in
-  `matrix.js` ship unfilled on purpose; filling one is a later slice's job and it
-  cites its inventory. See `MISSION.md`.
+- **No cloud facts without verified research behind them.** Every cell in
+  `matrix.js` comes from a verified per-cloud inventory. See `MISSION.md`.
+- **`matrix.js` is generated, not hand-written.** It is joined from the four
+  verified inventories onto the canonical vocabulary, and both live outside this
+  repository. Correcting a cell here is lost at the next refresh: correct the
+  inventory it came from and regenerate. `RESOURCES.md` records the read dates and
+  the refresh procedure.
 - **`matrix.js` is the only home of capability keys**, and the validator gates it:
   row set, domains, cell states and link shape all fail the pull request when they
   drift. See `BUILDER-SPEC.md`.
