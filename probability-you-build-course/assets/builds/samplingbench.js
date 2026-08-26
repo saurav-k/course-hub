@@ -80,7 +80,7 @@
     function draw(printSafe) {
       const P = palette(printSafe);
       ctx.clearRect(0, 0, CW, CH);
-      const L = 56, R = 20, BOT = CH - 46, H = BOT - 34;
+      const L = 62, R = 60, BOT = CH - 46, H = BOT - 34;
       const n = TOKENS.length, bw = (CW - L - R) / n;
       const ps = probs();
       /* the leading candidate is whichever logit is currently highest, not whichever
@@ -89,10 +89,21 @@
       for (let i = 1; i < n; i++) if (ps[i] > ps[top]) top = i;
       /* uniform reference: if all six candidates were equally likely, each bar is exactly this high */
       const yU = BOT - (1 / n) * H;
-      ctx.strokeStyle = P.faint; ctx.setLineDash([4, 4]);
+      ctx.font = '11px ui-monospace, monospace';
+      /* The axis runs from 0 to the whole of the probability mass, so mark the top: the
+         empty space above the tallest bar is headroom, not missing data. */
+      ctx.strokeStyle = P.faint; ctx.fillStyle = P.faint;
+      ctx.beginPath(); ctx.moveTo(L, BOT - H); ctx.lineTo(L, BOT); ctx.stroke();
+      ctx.textAlign = 'right';
+      ctx.fillText('100%', L - 6, BOT - H + 10);
+      ctx.fillText('0%', L - 6, BOT);
+      /* The uniform reference sat at the left margin, directly under the leading bar, so
+         its label was unreadable whenever that bar was tall. Put it in the margin instead. */
+      ctx.setLineDash([4, 4]);
       ctx.beginPath(); ctx.moveTo(L, yU); ctx.lineTo(CW - R, yU); ctx.stroke(); ctx.setLineDash([]);
-      ctx.fillStyle = P.faint; ctx.font = '11px ui-monospace, monospace'; ctx.textAlign = 'left';
-      ctx.fillText((100 / n).toFixed(1) + '% = uniform', L + 4, yU - 4);
+      ctx.fillText((100 / n).toFixed(1) + '%', L - 6, yU + 4);
+      ctx.textAlign = 'left';
+      ctx.fillText('uniform', CW - R + 2, yU + 4);
       for (let i = 0; i < n; i++) {
         const x = L + i * bw + bw * 0.18, w = bw * 0.64;
         const h = ps[i] * H;
