@@ -1080,7 +1080,10 @@
             }
             if (s.one_line) svc.appendChild(el('span', 'cmx-oneline', s.one_line));
             td.appendChild(svc);
-            haystack += ' ' + ((s.name || '') + ' ' + (s.short_name || '') + ' ' + (s.status || '')).toLowerCase();
+            // 'ga' is every other service, so indexing it would match almost
+            // every row; the statuses worth finding are the ones that badge.
+            haystack += ' ' + ((s.name || '') + ' ' + (s.short_name || '') +
+                               (s.status && s.status !== 'ga' ? ' ' + s.status : '')).toLowerCase();
           });
         } else {
           // An unknown shape is rendered as unfilled-looking but titled honestly,
