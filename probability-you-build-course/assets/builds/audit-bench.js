@@ -733,42 +733,46 @@ AB_reg('ab-scores', {
   const w = cv.width, h = cv.height, pad = 40;
   const m = AB_metrics(S.rows, 1, 0.5);
   const mu = AB_murphy(m);
-  // waterfall: uncertainty -> minus resolution -> plus reliability = Brier
-  const scale = v => v / 0.30 * (w - pad * 2);
-  let x = pad;
-  const y0 = h * 0.42, barH = 30;
-  const steps = [
-    ['uncertainty ' + mu.unc.toFixed(4), mu.unc, AB_tok('--ink-faint'), +1],
-    ['- resolution ' + mu.res.toFixed(4), mu.res, AB_tok('--ok'), -1],
-    ['+ reliability ' + mu.rel.toFixed(4), mu.rel, AB_tok('--warn'), +1]
+  /* A true waterfall: uncertainty is the floor, resolution is SUBTRACTED from it
+     and reliability ADDED back, so each row starts where the running total sits.
+     Drawn as four stacked rows rather than one line of segments, because at these
+     magnitudes the reliability term is nineteen pixels wide and its label cannot
+     share a line with anything. */
+  const bw = w - pad * 2, barH = 22, rowGap = 40;
+  const full = 0.30;                              // fixed axis so rows compare across scorers
+  const X = v => pad + Math.max(0, Math.min(1, v / full)) * bw;
+  const after = mu.unc - mu.res;
+  const rows = [
+    ['uncertainty ' + mu.unc.toFixed(4) + '  - the base rate\u2019s floor, nobody beats it',
+     pad, X(mu.unc), AB_tok('--ink-faint')],
+    ['- resolution ' + mu.res.toFixed(4) + '  - what your ranking claws back',
+     X(after), X(mu.unc), AB_tok('--ok')],
+    ['+ reliability ' + mu.rel.toFixed(4) + '  - what miscalibration costs',
+     X(after), X(after + mu.rel), AB_tok('--warn')],
+    ['Brier ' + m.brier.toFixed(4) + '  - measured directly on the rows',
+     pad, X(m.brier), AB_tok('--accent')]
   ];
-  c.font = AB_font(false, 11);
-  steps.forEach(([lab, v, col]) => {
-    const bw = scale(v);
-    c.fillStyle = col;
-    c.fillRect(x, y0, bw, barH);
-    c.strokeStyle = AB_tok('--line-strong');
-    c.strokeRect(x, y0, bw, barH);
+  rows.forEach(([lab, x0, x1, col], k) => {
+    const y = pad + 14 + k * rowGap;
+    c.font = AB_font(false, 11);
     c.fillStyle = AB_tok('--ink');
-    c.fillText(lab, Math.min(x + 4, w - 200), y0 - 6);
-    x += bw;
+    c.fillText(lab, pad, y - 5);
+    c.strokeStyle = AB_tok('--line');
+    c.strokeRect(pad, y, bw, barH);             // the 0 .. 0.30 axis, same on every row
+    c.fillStyle = col;
+    c.fillRect(x0, y, Math.max(2, x1 - x0), barH);
+    c.strokeStyle = AB_tok('--line-strong');
+    c.strokeRect(x0, y, Math.max(2, x1 - x0), barH);
   });
-  c.fillStyle = AB_tok('--accent');
-  c.fillRect(pad, y0 + barH + 18, scale(m.brier), barH);
-  c.strokeStyle = AB_tok('--line-strong');
-  c.strokeRect(pad, y0 + barH + 18, scale(m.brier), barH);
-  c.fillStyle = AB_tok('--ink');
-  c.fillText('Brier total ' + m.brier.toFixed(4), pad + 4, y0 + barH + 12);
   const check = mu.unc - mu.res + mu.rel;
   c.font = AB_font(true, 11);
   c.fillStyle = AB_tok('--ink-soft');
-  c.fillText('unc - res + rel = ' + check.toFixed(4) + '  (binning-approximate; matches to '
-             + Math.abs(check - m.brier).toFixed(4) + ')', pad, y0 + barH * 2 + 52);
+  c.fillText('unc - res + rel = ' + check.toFixed(4) + ', measured Brier ' + m.brier.toFixed(4) +
+             ' - the ' + Math.abs(check - m.brier).toFixed(4) + ' gap is within-bin spread the binning drops',
+             pad, pad + 14 + 4 * rowGap + 6);
+  c.fillText('log loss ' + m.nll.toFixed(4) + ' - lower is honest, and it is what fit-T minimises',
+             pad, pad + 14 + 4 * rowGap + 24);
   const flat = AB_flatScan(S.rows, S.key || 'model');
-  c.font = AB_font(false, 11);
-  c.fillStyle = AB_tok('--ink');
-  c.fillText('log loss here: ' + m.nll.toFixed(4) + '   - lower is honest, and it is what fit-T minimises',
-             pad, h - pad + 24);
   AB_setReadout(S.fig, [
     ['Brier', m.brier.toFixed(4)],
     ['log loss', m.nll.toFixed(4)],
@@ -824,6 +828,30 @@ AB_reg('ab-groups', {
   c.fillText('group 0 (prev ' + (g[0] ? g[0].prev.toFixed(2) : '-') + ')', pad, h - pad + 22);
   c.fillStyle = AB_tok('--prob');
   c.fillText('group 1 (prev ' + (g[1] ? g[1].prev.toFixed(2) : '-') + ')', pad + 170, h - pad + 22);
+  /* The gaps themselves, each on a centre-zero axis of the same scale. The point
+     of the lesson is that these four cannot be driven to zero together, so they
+     have to be visible side by side against a common zero. */
+  const gy0 = pad + 2 * (bh + bgap) + 54, half = (slot - 60) / 2, SPAN = 0.6;
+  c.font = AB_font(true, 11);
+  c.fillStyle = AB_tok('--ink-soft');
+  c.fillText('gap (group 1 minus group 0), each on the same -0.30 to +0.30 axis', pad, gy0 - 22);
+  metricsList.forEach(([lab, key], k) => {
+    const cx = pad + k * slot + half + 6;
+    c.strokeStyle = AB_tok('--line');
+    c.beginPath(); c.moveTo(cx - half, gy0 + 24); c.lineTo(cx + half, gy0 + 24); c.stroke();
+    c.strokeStyle = AB_tok('--ink-faint');
+    c.beginPath(); c.moveTo(cx, gy0); c.lineTo(cx, gy0 + 48); c.stroke();
+    const v = g[0] && g[1] ? g[1][key] - g[0][key] : NaN;
+    if (Number.isFinite(v)){
+      const px = Math.max(-half, Math.min(half, v / SPAN * 2 * half));
+      c.fillStyle = Math.abs(v) < 0.02 ? AB_tok('--ok') : AB_tok('--alarm');
+      c.fillRect(Math.min(cx, cx + px), gy0 + 14, Math.max(2, Math.abs(px)), 20);
+    }
+    c.fillStyle = AB_tok('--ink');
+    c.font = AB_font(true, 11);
+    const txt = Number.isFinite(v) ? (v > 0 ? '+' : '') + v.toFixed(3) : 'undefined';
+    c.fillText(txt, cx - c.measureText(txt).width / 2, gy0 + 62);
+  });
   const dpGap = g[0] && g[1] ? g[1].sel - g[0].sel : null;
   AB_setReadout(S.fig, [
     ['demographic-parity gap (sel1-sel0)', dpGap == null ? '-' : dpGap.toFixed(3)],
