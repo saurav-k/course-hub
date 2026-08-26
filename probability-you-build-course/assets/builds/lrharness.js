@@ -567,6 +567,7 @@
     controls.innerHTML =
       '<button type="button" data-lrh="run">Run suite</button>' + lam;
     const readout = fig.querySelector(".build-readout");
+    st.readout = readout;
     readout.innerHTML = "";
     const sSum = document.createElement("span");
     sSum.setAttribute("aria-live", "polite");
@@ -597,7 +598,7 @@
       const saved = localStorage.getItem(predKey(fig.id, cs.name)) || "";
       row.innerHTML = "<b>" + escapeHtml(cs.name) + "</b> <span style=\"color:" + token("--ink-faint") + "\">- " +
         escapeHtml(resolveGen(cs).label || "") + "</span><br>" +
-        '<textarea rows="2" data-lrh-pred="' + i + '" style="width:min(100%,52ch);margin-top:.2rem" ' +
+        '<textarea rows="2" name="prediction-' + i + '" data-lrh-pred="' + i + '" style="width:min(100%,52ch);margin-top:.2rem" ' +
         'placeholder="Your prediction, written before you run - honour system.">' + escapeHtml(saved) + "</textarea>";
       box.appendChild(row);
     });
