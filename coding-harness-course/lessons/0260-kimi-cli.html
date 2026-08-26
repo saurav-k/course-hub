@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kimi CLI - model-driven context time travel - Coding Harness Engineering</title>
+<meta name="description" content="Kimi CLI checkpoints before every model step and ships a tool that truncates history back to any checkpoint, reinjecting a message the user never sees. A deep dive into Moonshot's Python harness.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 26</div>
+  <h1>The harness that lets a model mail its own past</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Read from source at <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505">MoonshotAI/kimi-cli, commit <code>cbc15c07</code></a> (v1.49.0).
+    &middot; <a href="https://github.com/MoonshotAI/kimi-cli">repository</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <b>Repository:</b> <a href="https://github.com/MoonshotAI/kimi-cli">MoonshotAI/kimi-cli</a> &middot; Apache-2.0 &middot; Python 3.12+ (asyncio, Typer, pydantic, prompt-toolkit, fastmcp) &middot;
+    analysis pinned to commit <code>cbc15c076d17f70fec9f89c90c0502e68657f505</code>, release 1.49.0.<br>
+    <b>Read these five files, in this order:</b>
+    <ol>
+      <li><code>src/kimi_cli/soul/kimisoul.py</code> - the whole agent loop: turns, steps, checkpoints, and the rewind handler</li>
+      <li><code>src/kimi_cli/soul/context.py</code> - the append-only <code>context.jsonl</code>, its checkpoint records, and <code>revert_to</code></li>
+      <li><code>src/kimi_cli/tools/dmail/__init__.py</code> - the <code>SendDMail</code> tool, small enough to read in one sitting</li>
+      <li><code>packages/kosong/src/kosong/chat_provider/kimi.py</code> - where every Kimi-only wire quirk lives</li>
+      <li><code>src/kimi_cli/agents/default/agent.yaml</code> - the default persona's tool list, including two tools commented out</li>
+    </ol>
+    <b>Community:</b> GitHub issues carry the design discussion; the README states the project is evolving into Kimi Code CLI and will be wound down gradually, so check both repositories before filing anything.
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Kimi CLI is one asyncio Python process whose seams are three internal libraries: <b>kosong</b> for model calls, <b>kaos</b> for file and process operations, <b>wire</b> for UI events.</li>
+      <li>A turn runs up to 1000 model steps, and each step writes a <b>checkpoint record</b> to an append-only context file first.</li>
+      <li>Safety has no sandbox: the system prompt says so outright, and everything rests on an <b>approval gate</b> plus workspace-path checks.</li>
+      <li>The distinctive move: a tool called <code>SendDMail</code> lets the <b>model itself</b> rewind history to a chosen checkpoint and continue from there, erasing the failed branch.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0020 to 0110&lt;br/&gt;the mechanisms in the abstract"] --> T["THIS PAGE&lt;br/&gt;one Python harness where&lt;br/&gt;every layer is readable"]
+  T --> N["What it enables&lt;br/&gt;a loop that checkpoints every step&lt;br/&gt;and a tool that rewinds history"]
+  W["Deep dive twelve of fifteen&lt;br/&gt;Moonshot AI Kimi CLI"] -.- T
+    </div>
+    <figcaption>Where this sits: every mechanism module taught so far - loop, context, trust, adapter - reappears here as named Python you can clone and read.
+    <b>Stay for the ending: this is the one cast member where the model can rewrite its own conversation.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Vendor</td><td>Moonshot AI (makers of the Kimi models)</td></tr>
+      <tr><td>License / language</td><td>Apache-2.0 / Python 3.12+, asyncio throughout</td></tr>
+      <tr><td>Shape</td><td>a uv workspace monorepo: the CLI, the kosong model layer, the kaos OS layer, and a standalone SDK</td></tr>
+      <tr><td>First public release</td><td>development began September 2025; GitHub repository created October 2025; earliest surviving release tag 0.32</td></tr>
+      <tr><td>Version read</td><td>1.49.0 at commit <code>cbc15c07</code> (August 2026)</td></tr>
+      <tr><td>Scale</td><td>on the order of eleven thousand stars and thirty contributors at analysis time; roughly five hundred Python files</td></tr>
+      <tr><td>Self-claim</td><td>"Kimi Code CLI is your next CLI agent." (<code>pyproject.toml</code>) - while the README simultaneously announces evolution into Kimi Code CLI and gradual wind-down of this repository</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="process">Process architecture: three libraries inside one process</h2>
+  <p>There is no daemon and no sidecar: one asyncio process hosts everything, and the Typer entrypoint only picks a UI mode - interactive TUI, non-interactive print, an Agent Client Protocol server over stdio, or a JSON event server, plus a FastAPI web app. All modes build the same stack through one constructor (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/app.py#L122"><code>app.py:122</code></a>). The real module boundaries are the three libraries:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph PROC["One asyncio Python process"]
+    CLI["cli entry&lt;br/&gt;picks the ui mode"] --> APP["app.py KimiCLI.create"]
+    APP --> SOUL["KimiSoul&lt;br/&gt;soul/kimisoul.py - the loop"]
+    APP --> RT["Runtime&lt;br/&gt;config oauth session skills"]
+    SOUL -->|"kosong.step"| GEN["kosong ChatProvider&lt;br/&gt;streaming chat client"]
+    SOUL -->|"ToolCall"| TS["KimiToolset&lt;br/&gt;soul/toolset.py"]
+    TS --> BT["builtin tools&lt;br/&gt;src/kimi_cli/tools"]
+    TS --> MCP["MCPTool&lt;br/&gt;fastmcp client"]
+    BT --> KAOS["kaos backend&lt;br/&gt;Local SSH ACP"]
+    SOUL --> WIRE["wire event queue&lt;br/&gt;mirrored to wire.jsonl"]
+    WIRE --> UIS["UIs - TUI print acp web"]
+  end
+    </div>
+    <figcaption>The whole runtime. Every arrow inside the box is an in-process function call; the four UIs are swappable views over the same wire event stream.
+    <b>kosong owns talking to models, kaos owns touching machines, wire owns telling humans - and the soul just orchestrates.</b></figcaption>
+  </figure>
+
+  <p><dfn>Kosong</dfn> reduces a model call to two functions: merge one streamed completion into a message, and layer concurrent tool dispatch on top of it (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/packages/kosong/src/kosong/__init__.py#L104"><code>kosong/__init__.py:104</code></a>). <dfn>Kaos</dfn> abstracts every read, write, and exec behind path objects with pluggable backends - local disk, SSH over asyncssh, or an editor client speaking ACP - so no tool ever touches <code>pathlib</code> directly. <dfn>Wire</dfn> is the typed event queue between soul and interface, mirrored to a per-session log. Even subagents are just more <code>KimiSoul</code> instances in the same process, each with its own context file under the session directory.</p>
+
+  <h2 id="loop">The loop: a turn is many steps, each checkpointed</h2>
+  <p>One user input is a <dfn>turn</dfn>; one model call inside it is a <dfn>step</dfn>. <code>run()</code> fires a <code>UserPromptSubmit</code> hook that can end the turn before the model ever sees the input, then enters the step loop (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py#L659"><code>kimisoul.py:659</code></a>). Each step appends to history, checks whether compaction is due, writes a checkpoint, and only then asks kosong for a completion (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py#L937"><code>:937</code></a>, <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py#L1036"><code>:1036</code></a>).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as UI
+    participant S as KimiSoul
+    participant K as kosong
+    participant M as Kimi API
+    participant T as Toolset
+    U->>S: user input
+    Note over S: UserPromptSubmit hook&lt;br/&gt;can end the turn here
+    S->>S: append message then write checkpoint
+    loop until no tool calls or 1000 steps
+        S->>K: step with history and schemas
+        K->>M: streamed chat request
+        M-->>U: text deltas as wire events
+        K->>T: dispatch each ToolCall
+        T-->>K: asyncio tasks
+        K-->>S: StepResult with token usage
+        S->>S: grow context and persist usage
+    end
+    S-->>U: TurnEnd with a stop reason
+    </div>
+    <figcaption>The turn cycle. Tool dispatch happens inside kosong - the library hands each completed call to the toolset and returns awaitable futures the soul collects afterwards.
+    <b>Note the checkpoint line: it runs before every single step, which is exactly what makes the last section of this page possible.</b></figcaption>
+  </figure>
+
+  <p>Stop conditions are plural by design: no tool calls ends the turn normally, a hard cap raises <code>MaxStepsReached</code> at 1000 steps per turn (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/config.py#L78"><code>config.py:78</code></a>, <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py#L1004"><code>kimisoul.py:1004</code></a>), twelve consecutive identical tool calls force the turn to stop, and a <code>Stop</code> hook may trigger exactly one corrective extra turn. That ladder - cap, repetition breaker, hook - is the design-principles page's claim that stop conditions are policy made concrete (lesson 0010).</p>
+
+  <h2 id="context">Context assembly: replay from an append-only file</h2>
+  <p>The system prompt is a Jinja template rendered once per session and then frozen into the context file - work directory listing, detected OS and shell, skill catalog, and the project's <code>AGENTS.md</code> baked in as template arguments (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/agent.py#L494"><code>agent.py:494</code></a>). Memory-file support is deliberately narrow: <code>AGENTS.md</code> only, walked from project root to working directory, deeper files winning, with the concatenation capped at 32 KiB and the budget allocated leaf-first so the most specific file survives truncation (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/agent.py#L87"><code>agent.py:87</code></a>). There is no indexer and no embeddings anywhere - retrieval is Glob and Grep tools plus explore subagents.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  R["Request body assembled every step"] --> A["system prompt - Jinja render frozen at session start"]
+  R --> H["history replayed from context.jsonl"]
+  H --> C["compaction summary - last two turns kept verbatim"]
+  H --> INJ["dynamic injections - reminders wrapped in system tags"]
+  H --> MSGS["user assistant and tool messages - adjacent users merged"]
+  R --> G["tools array - builtin plus MCP schemas patched for Kimi"]
+    </div>
+    <figcaption>What fills one request. The order never varies, because the request is literally replayed from the session's append-only file rather than reassembled from mutable state.
+    <b>Context engineering here is a file format question first and a prompt question second.</b></figcaption>
+  </figure>
+
+  <p>Token accounting is hybrid: real usage numbers from the API are persisted into the file as <code>_usage</code> records, and messages that have not been through the API yet carry a character-based estimate until corrected (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/context.py#L64"><code>context.py:64</code></a>). When tokens reach 85 percent of the model's window, or come within a 50k reserve of it, auto-compaction summarizes everything except the last two messages into a single user message prefixed <i>"Previous context has been compacted"</i> (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/compaction.py#L75"><code>compaction.py:75</code></a>, <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/compaction.py#L18"><code>:18</code></a>). Two cache-aware details reward attention: every request carries <code>prompt_cache_key=&lt;session_id&gt;</code> (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/llm.py#L362"><code>llm.py:362</code></a>), and even the side-question feature declares the full tool list it will never execute, purely to keep hitting the same cache prefix (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/btw.py#L1"><code>btw.py:1</code></a>).</p>
+
+  <h2 id="trust">Trust posture: a gate, not a box</h2>
+  <p>The system prompt tells the model the truth in one sentence: <i>"The operating environment is not in a sandbox"</i> (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/agents/default/system.md#L73"><code>system.md:73</code></a>). Enforcement lives entirely in an approval gate that every mutating tool must pass (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/approval.py#L200"><code>approval.py:200</code></a>), backed by workspace checks inside the file tools - a write outside the workspace needs absolute paths and takes a distinct approval action (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/tools/file/write.py#L142"><code>write.py:142</code></a>). MCP tool calls always go through the gate regardless of anything else.</p>
+
+  <div class="callout warn">
+    Compare the postures from lesson 0050: Codex CLI sandboxes first and asks second; Claude Code interposes a classifier. Kimi CLI ships neither - rejection depends on a human being present, or on nothing at all under <code>--yolo</code>, which auto-approves globally. The escape hatch is also the failure mode.
+  </div>
+
+  <p>The gate's answers are approve, reject with free-text feedback routed back to the model as the tool result, approve-for-session (persisted as an auto-approve set), yolo, and afk mode which implies yolo and auto-dismisses questions. Plan mode does not remove tools; instead each mutating tool checks plan state at call time and refuses, except writes to the designated plan file. Approvals are session-global - a subagent's request is projected onto the root conversation so the human answers once, in one place.</p>
+
+  <h2 id="extensions">Extension surface</h2>
+  <p>Everything grows by convention or config schema, not by writing Python:</p>
+  <table>
+    <thead><tr><th>Mechanism</th><th>Form</th><th>Notes</th></tr></thead>
+    <tbody>
+      <tr><td>MCP servers</td><td>config schema (fastmcp)</td><td>stdio and remote with OAuth; loading can defer until first use</td></tr>
+      <tr><td>Skills</td><td>file convention (<code>SKILL.md</code>)</td><td>discovered from <code>~/.kimi</code>, <code>~/.claude</code>, <code>~/.codex</code>, <code>~/.agents</code> and project equivalents; flow skills compile a Mermaid flowchart into a runnable state machine</td></tr>
+      <tr><td>Subagents</td><td>YAML agent specs</td><td>inheritance via <code>extend</code>, tool allowlists, instances persist per session and resume by id</td></tr>
+      <tr><td>Hooks</td><td>config schema (<code>config.toml</code>)</td><td>shell commands fed JSON on stdin; thirteen lifecycle events from <code>PreToolUse</code> to <code>PostCompact</code>; a block result aborts the tool call</td></tr>
+      <tr><td>Plugins</td><td>directory convention</td><td>declared tools run as subprocesses with host credentials injected</td></tr>
+      <tr><td>Custom personas</td><td>YAML file via flag</td><td>any system prompt plus import list becomes a runnable agent</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="models">Model behavior: the K2-only wing of the adapter</h2>
+  <p>Kosong speaks many providers - OpenAI-compatible, Anthropic, Google, Vertex - but the <code>kimi</code> provider gets code nobody else touches. Thinking rides a proprietary <code>extra_body.thinking</code> envelope rather than OpenAI's parameter, and reasoning round-trips through history as a non-standard <code>reasoning_content</code> field on assistant messages, including the subtlety that an empty-but-present reasoning string must survive the round-trip (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/packages/kosong/src/kosong/chat_provider/kimi.py#L214"><code>kimi.py:214</code></a>, <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/packages/kosong/src/kosong/chat_provider/kimi.py#L351"><code>:351</code></a>). Tool names starting with <code>$</code> are encoded as server-side builtin functions with no schema sent at all (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/packages/kosong/src/kosong/chat_provider/kimi.py#L365"><code>:365</code></a>).</p>
+  <p>The shims are equally specific. JSON schemas missing nested <code>type</code> fields are patched because the API rejects them; effectively-empty content next to a tool call is dropped entirely because the Kimi-for-Coding compatibility layer returns a 400 otherwise (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/packages/kosong/src/kosong/chat_provider/kimi.py#L342"><code>kimi.py:342</code></a>). And since 1.49.0, Kimi requests alone get an adaptive output budget recomputed every step - context size minus estimated input minus margin - which the changelog credits with fixing context-length overflow errors on long turns (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/llm.py#L181"><code>llm.py:181</code></a>). The guard is explicit: if the provider is not Kimi, none of these overrides apply (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/llm.py#L164"><code>llm.py:164</code></a>). This is lesson 0010's adapter principle with the favoritism left in, visible to the user as reliability gaps on every other family.</p>
+
+  <h2 id="distinctive">The distinctive mechanism: model-driven context time travel</h2>
+  <p>Every harness in this course can compact history forward. This is the only one where the model itself can erase it. Because the loop checkpoints before every step, history is always a list of resumable points; the tool <code>SendDMail</code> takes a message and a checkpoint id and posts them to a store named <dfn>DenwaRenji</dfn> - "telephone range", Steins;Gate naming throughout (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/tools/dmail/__init__.py#L12"><code>dmail/__init__.py:12</code></a>, <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/denwarenji.py#L17"><code>denwarenji.py:17</code></a>). Once the current step settles, the soul fetches any pending mail and raises <code>BackToTheFuture</code> (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py#L1313"><code>kimisoul.py:1313</code></a>); the loop catches it, physically rewrites the context file down to its prefix before the chosen checkpoint (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/context.py#L135"><code>context.py:135</code></a>), and injects the mail as a user message wrapped in a system tag instructing the model never to mention it.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Illustrative line chart of context size rising across eight steps, with a vertical drop between steps seven and eight marking the rewind to a checkpoint taken at step four.">
+      <line class="axis" x1="60" y1="20" x2="60" y2="250"/>
+      <line class="axis" x1="60" y1="250" x2="610" y2="250"/>
+      <line class="s-noise ref" x1="60" y1="150" x2="500" y2="150"/>
+      <polyline class="s-signal thick" points="80,235 160,210 240,180 320,155 400,120 480,95 500,95 500,150 580,140"/>
+      <circle class="m-alarm" cx="500" cy="95" r="5"/>
+      <text class="lbl-sm" x="80" y="268" text-anchor="middle">step 1</text>
+      <text class="lbl-sm" x="240" y="268" text-anchor="middle">step 3</text>
+      <text class="lbl-sm" x="400" y="268" text-anchor="middle">step 5</text>
+      <text class="lbl-sm" x="500" y="268" text-anchor="middle">step 7</text>
+      <text class="lbl-sm" x="580" y="268" text-anchor="middle">step 8</text>
+      <text class="lbl-sm" x="66" y="154" text-anchor="start">checkpoint from step 4</text>
+      <text class="lbl-sm t-alarm" x="512" y="88" text-anchor="start">SendDMail fires</text>
+      <text class="lbl-b" x="24" y="40" text-anchor="start">context size</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>history size per step</span><span><i class="sw-noise"></i>checkpoint level</span></div>
+    <figcaption>The rewind, drawn as the shape of the mechanism rather than a measurement: history grows across steps, the model mails a message to an earlier checkpoint, and the file itself shrinks back to that level before work resumes.
+    <b>This is branch-and-backjump over the conversation, not summarization - the failed branch stops existing instead of being compressed.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant M as Model
+    participant D as SendDMail
+    participant R as DenwaRenji
+    participant L as agent loop
+    participant C as context.jsonl
+    M->>D: message plus checkpoint id
+    D->>R: store the pending mail
+    D-->>M: ack - El Psy Kongroo
+    L->>R: fetch pending mail once the step settles
+    R-->>L: the D-Mail
+    L->>C: revert_to - rewrite the file to its prefix
+    L->>C: inject mail as a system-wrapped user message
+    Note over L,C: the step loop resumes from the checkpoint
+    </div>
+    <figcaption>The full circuit. The user watches the agent pause mid-task and then continue as if the detour never happened, because the wire events for the abandoned branch were already emitted but the durable history no longer contains it.
+    <b>The model recognized its own early decision was wrong, and the harness let it act on that recognition structurally.</b></figcaption>
+  </figure>
+
+  <p>Two honest limits belong next to that claim. First, the machinery ships fully wired and tested, but both time-travel tools sit commented out of the default persona's tool list (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/agents/default/agent.yaml#L9"><code>agent.yaml:9</code></a>) - today it is an opt-in capability for custom agents, not something a default user will meet. Second, only the conversation rewinds: the data model carries a TODO for restoring filesystem state too (<a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/denwarenji.py#L7"><code>denwarenji.py:7</code></a>), so files edited along the abandoned branch stay edited. What survives is the judgment, not yet the undo.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">SendDMail fires with a checkpoint id pointing three steps back. Once the current step settles, what does the loop do?</div>
+      <button class="q-opt">Compacts every turn before the checkpoint into one summary message</button>
+      <button class="q-opt">Replays the abandoned branch so you can edit the failed attempts</button>
+      <button class="q-opt">Spawns a fresh subagent that redoes the work without the detour</button>
+      <button class="q-opt">Truncates history to the checkpoint and injects the mail as input</button>
+      <div class="q-fb">Compaction summarizes forward and keeps recent turns verbatim - it never removes history. The abandoned branch is erased, not shown: the mail arrives wrapped in a system tag the reader never surfaces. No second agent exists; the same soul resumes from the rewritten file. Truncate-and-inject is the BackToTheFuture path at <code>kimisoul.py:1313</code> with the physical rewrite in <code>context.py:135</code>.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What actually enforces the boundary when Kimi CLI considers editing a file outside its working directory?</div>
+      <button class="q-opt">A kernel seatbelt profile denying writes before they land</button>
+      <button class="q-opt">An approval gate plus workspace checks inside the file tools</button>
+      <button class="q-opt">A classifier model scoring each path against a written policy</button>
+      <button class="q-opt">A per-command namespace sandbox built around every shell run</button>
+      <div class="q-fb">The system prompt states plainly that there is no sandbox (<code>system.md:73</code>); enforcement is <code>Approval.request</code> plus workspace verification, with outside writes taking a distinct approval action (<code>write.py:142</code>). Seatbelt profiles are Codex CLI's posture and the scoring classifier is Claude Code's - different cast members, compared in lesson 0050 - and no namespace sandbox exists anywhere in this tree.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, reading only</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Open the repository at the pinned commit. Find the two tools that ship fully implemented but sit commented out of the default persona, then trace what would happen if one ran anyway.</p>
+      <p><b>Find</b>: the two commented tool entries, the exception raised after a step settles when mail is pending, and the method that physically rewrites <code>context.jsonl</code> during the rewind.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Look at the top of the tools list in <code>src/kimi_cli/agents/default/agent.yaml</code>, then grep <code>kimisoul.py</code> for <code>BackToTheFuture</code> and follow where the loop catches it.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Read the tool list.</b> Lines 9 and 10 of <code>agent.yaml</code> comment out <code>kimi_cli.tools.dmail:SendDMail</code> and <code>kimi_cli.tools.think:Think</code> - implemented, tested, and dormant in the default persona.</li>
+        <li><b>Trace the trigger.</b> <code>SendDMail</code> stores one pending message in <code>DenwaRenji</code>; after the step settles, <code>_step</code> fetches it and raises <code>BackToTheFuture</code> (<code>kimisoul.py:1313</code>).</li>
+        <li><b>Find the rewrite.</b> The loop catches the exception and calls <code>Context.revert_to</code> (<code>context.py:135</code>), which rotates the current file aside and copies only the prefix before the chosen checkpoint into a fresh <code>context.jsonl</code>, then injects the mail as a system-wrapped user message.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> You should end at exactly one raise site and exactly one rewrite method; if you found a filesystem restore happening too, re-check - the data model carries that as a TODO, not an implementation.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the time-travel circuit has not landed, ask for the contrast drill: given the same wrong-turn scenario, walk what compaction does, what Cline's git checkpoints offer the human, and what SendDMail offers the model. Then ask which failures each one catches.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Clone the repository and read <a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py">the loop at the pinned commit</a> alongside this page - every section above names lines in it, and the file rewards a linear read more than most harness cores twice its size.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 26 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
