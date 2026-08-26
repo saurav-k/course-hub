@@ -25,6 +25,10 @@ window.COURSE_OUTLINE = {
       "title": "The Loop",
       "lessons": [
         {
+          "title": "The turn cycle - the loop every harness runs",
+          "href": "lessons/0020-the-turn-cycle.html"
+        },
+        {
           "title": "Context engineering - what actually fills the window",
           "href": "lessons/0030-context-engineering.html"
         }
@@ -73,6 +77,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Roo Code - the mode system",
           "href": "lessons/0210-roo-code.html"
+        },
+        {
+          "title": "Pi - the agent loop as a library",
+          "href": "lessons/0240-pi.html"
         }
       ]
     }
