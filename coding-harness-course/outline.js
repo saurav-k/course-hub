@@ -113,6 +113,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0180-windsurf.html"
         },
         {
+          "title": "Google Antigravity - artifacts as the review surface",
+          "href": "lessons/0190-antigravity.html"
+        },
+        {
           "title": "Cline - plan and act as two programs",
           "href": "lessons/0200-cline.html"
         },
