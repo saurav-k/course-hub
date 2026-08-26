@@ -143,6 +143,48 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0208-week-3-problems.html"
         }
       ]
+    },
+    {
+      "n": "W4",
+      "title": "Week 4: Logistic regression - the adversarial test suite",
+      "lessons": [
+        {
+          "title": "A test suite for a classifier",
+          "href": "lessons/0300-a-test-suite-for-a-classifier.html"
+        },
+        {
+          "title": "Logistic regression is maximum likelihood",
+          "href": "lessons/0301-logistic-regression-is-mle.html"
+        },
+        {
+          "title": "The gradient, derived then coded",
+          "href": "lessons/0302-the-gradient-derived-and-coded.html"
+        },
+        {
+          "title": "The geometry of the boundary",
+          "href": "lessons/0303-the-geometry-of-the-boundary.html"
+        },
+        {
+          "title": "Separation and imbalance",
+          "href": "lessons/0304-separation-and-imbalance.html"
+        },
+        {
+          "title": "Correlated features and missing capacity",
+          "href": "lessons/0305-correlated-and-insufficient.html"
+        },
+        {
+          "title": "Outliers, label noise, and six points",
+          "href": "lessons/0306-outliers-noise-and-six-points.html"
+        },
+        {
+          "title": "Reading coefficients honestly",
+          "href": "lessons/0307-reading-coefficients-honestly.html"
+        },
+        {
+          "title": "Week 4 problems",
+          "href": "lessons/0308-problems-week-4.html"
+        }
+      ]
     }
   ],
   "extras": []
