@@ -361,6 +361,7 @@
 
   function buildReport(st) {
     const rep = document.createElement("div");
+    rep.className = "lrh-report";
     rep.style.cssText = "width:100%;margin-top:.6rem;font-size:.85em";
     let html = '<table style="border-collapse:collapse;width:100%">' +
       "<thead><tr>" +
