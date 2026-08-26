@@ -187,6 +187,94 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "W5",
+      "title": "Week 5: Neural networks - the Glass Network",
+      "lessons": [
+        {
+          "title": "The neuron you already met",
+          "href": "lessons/0400-the-neuron-you-already-met.html"
+        },
+        {
+          "title": "Why one line is not enough",
+          "href": "lessons/0401-why-one-line-is-not-enough.html"
+        },
+        {
+          "title": "Stacking neurons into a network",
+          "href": "lessons/0402-stacking-neurons-into-a-network.html"
+        },
+        {
+          "title": "Open the hood: forward pass and activations",
+          "href": "lessons/0403-open-the-hood-forward-pass-and-activations.html"
+        },
+        {
+          "title": "Backpropagation, slowly, then yours",
+          "href": "lessons/0404-backpropagation-slowly-then-yours.html"
+        },
+        {
+          "title": "Softmax: one distribution over many classes",
+          "href": "lessons/0405-softmax-one-distribution-over-many-classes.html"
+        },
+        {
+          "title": "Temperature: shaping a distribution",
+          "href": "lessons/0406-temperature-shaping-a-distribution.html"
+        },
+        {
+          "title": "From glass network to large model, honestly",
+          "href": "lessons/0407-from-glass-network-to-large-model-honestly.html"
+        },
+        {
+          "title": "Week 5 problems",
+          "href": "lessons/0408-week-5-problems.html"
+        }
+      ]
+    },
+    {
+      "n": "W6",
+      "title": "Week 6: Probabilistic evaluation - the Audit Bench",
+      "lessons": [
+        {
+          "title": "Ninety-five percent sure and useless",
+          "href": "lessons/0500-ninety-five-percent-sure-and-useless.html"
+        },
+        {
+          "title": "One table, six dials",
+          "href": "lessons/0501-one-table-six-dials.html"
+        },
+        {
+          "title": "Two curves, two questions",
+          "href": "lessons/0502-two-curves-two-questions.html"
+        },
+        {
+          "title": "Do the probabilities mean anything?",
+          "href": "lessons/0503-do-the-probabilities-mean-anything.html"
+        },
+        {
+          "title": "Fixing the numbers without touching the model",
+          "href": "lessons/0504-fixing-the-numbers-without-touching-the-model.html"
+        },
+        {
+          "title": "Scores you cannot game",
+          "href": "lessons/0505-scores-you-cannot-game.html"
+        },
+        {
+          "title": "Three definitions of fair, one impossible",
+          "href": "lessons/0506-three-definitions-of-fair-one-impossible.html"
+        },
+        {
+          "title": "Price the claim",
+          "href": "lessons/0507-price-the-claim.html"
+        },
+        {
+          "title": "The audit card",
+          "href": "lessons/0508-the-audit-card.html"
+        },
+        {
+          "title": "Week 6 problems",
+          "href": "lessons/0509-problems.html"
+        }
+      ]
+    },
+    {
       "n": "CAP",
       "title": "Capstone: Beyond PAI - the final project",
       "lessons": [
