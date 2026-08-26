@@ -383,10 +383,14 @@
       ctx.fillText(maxL.toFixed(2), c.x + c.w - 8, c.y + 16);
       ctx.fillStyle = P.train; ctx.fillText('train', c.x + c.w - 8, c.y + 30);
       if (E.length) { ctx.fillStyle = P.test; ctx.fillText('test', c.x + c.w - 8, c.y + 44); }
-      ctx.textAlign = 'left';
+      /* Baselines sit clear of the panel border, and the epoch is right-aligned rather
+         than offset by a guessed width that a five-digit epoch would overrun. */
       ctx.fillStyle = P.faint;
-      ctx.fillText('ln 2 dashed - the uninformed guess', c.x + 8, c.y + c.h - 6);
-      ctx.fillText('epoch ' + st.epoch, c.x + c.w - 78, c.y + c.h - 6);
+      ctx.textAlign = 'left';
+      ctx.fillText('ln 2 dashed - the uninformed guess', c.x + 8, c.y + c.h - 9);
+      ctx.textAlign = 'right';
+      ctx.fillText('epoch ' + st.epoch, c.x + c.w - 8, c.y + c.h - 9);
+      ctx.textAlign = 'left';
     }
     function drawBars(P) {
       const c = layout(feat).bars;
