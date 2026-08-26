@@ -27,6 +27,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Trust",
+      "lessons": [
+        {
+          "title": "Permission postures - ask, sandbox, classify, or nothing",
+          "href": "lessons/0050-permission-postures.html"
+        }
+      ]
+    },
+    {
       "n": "04",
       "title": "Extending",
       "lessons": [
@@ -43,6 +53,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Aider - the repo map and the pre-agentic lineage",
           "href": "lessons/0120-aider.html"
+        },
+        {
+          "title": "OpenAI Codex CLI - enforce first, ask second",
+          "href": "lessons/0140-codex-cli.html"
         },
         {
           "title": "Windsurf - the human trajectory as context",

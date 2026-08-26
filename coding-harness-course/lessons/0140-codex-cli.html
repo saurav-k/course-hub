@@ -1,0 +1,277 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>OpenAI Codex CLI - enforce first, ask second - Coding Harness Engineering</title>
+<meta name="description" content="Deep dive: how OpenAI's Rust Codex CLI runs every command inside generated OS sandboxes, recovers through graded approvals that rewrite its own policy, and ships code mode as the default tool path.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 14</div>
+  <h1>Codex CLI: the sandbox decides first, and you teach it the rest</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Read from source at a pinned commit during this course's research phase.
+    &middot; <a href="https://github.com/openai/codex">openai/codex</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <p><b>Repository:</b> <a href="https://github.com/openai/codex">github.com/openai/codex</a> &middot;
+    <b>License:</b> Apache-2.0 &middot; <b>Language:</b> Rust (with a TypeScript SDK wrapper).
+    Analysis pinned to commit <code>7c6eb0eef113ddc16ae5b207ac9add364b489798</code>; paths below live under <code>codex-rs/</code>.</p>
+    <p><b>The five files to read first, in reading order:</b></p>
+    <ol class="worked">
+      <li><code>core/src/session/turn.rs</code> - <code>run_turn</code>: the whole agent loop in one function.</li>
+      <li><code>core/src/tools/orchestrator.rs</code> - approval, sandbox selection, and the retry-on-denial flow.</li>
+      <li><code>core/src/tools/handlers/apply_patch.lark</code> - the edit grammar, as an actual grammar file.</li>
+      <li><code>sandboxing/src/seatbelt.rs</code> - how a macOS sandbox profile is generated per invocation.</li>
+      <li><code>models-manager/models.json</code> - the model catalog that drives prompts, budgets, and which tools exist.</li>
+    </ol>
+    <p><b>Community:</b> design arguments happen in the repository's issues; releases and their notes live on the <a href="https://github.com/openai/codex/releases">releases page</a>.</p>
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Codex CLI is <b>one native binary</b> playing many CLIs: TUI, non-interactive exec, MCP server, IDE backend - all clients of one embedded app-server.</li>
+      <li>The loop captures a frozen <b>StepContext</b> per sampling request, executes parallel-safe tools concurrently, and lets you steer mid-turn.</li>
+      <li>Its trust posture is unique in this cast: <b>enforce first</b> - every command starts sandboxed - and approvals exist to recover, then persist as policy amendments.</li>
+      <li>Model behavior is <b>data, not code</b>: a bundled catalog carries per-model prompt templates, budgets, and even whether direct tools exist at all.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["What came before&lt;br/&gt;lesson 05 named its posture:&lt;br/&gt;sandbox first"] --> T["THIS PAGE&lt;br/&gt;the whole machine:&lt;br/&gt;loop context trust models"]
+  T --> N["What it enables&lt;br/&gt;reading any large Rust&lt;br/&gt;agent codebase by its seams"]
+  HUB["The mechanism module pages&lt;br/&gt;loop edits permissions"] -.- T
+    </div>
+    <figcaption>Where this sits: the first deep dive that reads a full harness at a pinned commit, and the reference implementation of the sandbox-first posture.
+    <b>If you retain one sentence: Codex treats the operating system as the permission system and uses you as its appeals court.</b></figcaption>
+  </figure>
+
+  <h2 id="process">1. One binary, many CLIs</h2>
+  <p>Install Codex and you get a single executable whose behavior depends on what you call it.
+  <code>codex-rs/arg0/src/lib.rs:60-174</code> inspects argv[0] and argv[1] and dispatches to entirely different programs from the same bytes: the interactive TUI, <code>apply_patch</code>, the Linux sandbox helper, and an escalation wrapper.
+  The code names the trick itself - deploy one executable, expose many CLIs (<a href="https://github.com/openai/codex">openai/codex</a>, <code>arg0/src/lib.rs:195-199</code>). Symlinks under <code>$CODEX_HOME/tmp/arg0/</code> put those aliases on the child process PATH, so even sandboxed commands can re-invoke them.</p>
+  <p>The second surprise is that the TUI never links the agent core.
+  Every surface is a JSON-RPC client of the app-server, and in the TUI process that server runs embedded over memory channels while speaking the same envelope as the network transports (<code>app-server/src/in_process.rs:1-24</code>).
+  Inside the core, communication is two queues per session: <code>Op</code> requests in, <code>EventMsg</code> events out (<code>protocol/src/protocol.rs:545-659</code>).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  BIN["one codex binary&lt;br/&gt;arg0 dispatch"] --> SURF["surfaces&lt;br/&gt;TUI - exec - IDE - mcp-server"]
+  SURF -->|"JSON-RPC"| AS["app-server&lt;br/&gt;MessageProcessor"]
+  AS --> TM["ThreadManager&lt;br/&gt;one thread per conversation"]
+  TM --> SESS["Session&lt;br/&gt;SQ Op in - EQ EventMsg out"]
+  SESS --> TR["ToolRouter&lt;br/&gt;frozen per sampling step"]
+  TR --> SBX["OS sandboxes&lt;br/&gt;Seatbelt - bwrap seccomp - WFP"]
+  SESS --> API["Responses API&lt;br/&gt;WebSocket first - SSE fallback"]
+    </div>
+    <figcaption>The component seams: surfaces are thin JSON-RPC clients, the core is queues plus a router, and enforcement hangs off the router rather than off any UI.
+    <b>Because every surface is a client of one server, a feature like mid-turn steering lands everywhere at once.</b></figcaption>
+  </figure>
+
+  <h2 id="loop">2. The loop: capture once, sample, steer</h2>
+  <p><code>run_turn</code> (<code>core/src/session/turn.rs:155</code>) is the loop its own doc comment describes: each sampling request returns function calls, which execute and feed back, or an assistant message, which ends the turn.
+  Three moves make it worth reading line by line:</p>
+  <p><b>Capture once.</b> Before sampling, the session freezes a <code>StepContext</code> - model info, approval policy, MCP binding, and a fully built <code>ToolRouter</code>. The comment gives the reason: context, advertised tools, and executed tool calls must share one request view (<code>turn.rs:335</code>). Tools cannot appear mid-step.</p>
+  <p><b>Steer anytime.</b> Input typed while the model works lands in a pending queue and drains into history between iterations - so redirection happens at a step boundary, never mid-tool-call.</p>
+  <p><b>Stop explicitly.</b> After each pass the loop continues only if the model emitted tool calls, asked for follow-up, or you queued input (<code>turn.rs:425</code>). When it stops, Stop hooks get a veto: they may inject a continuation prompt and force another iteration, or end the turn.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as You
+    participant L as run_turn
+    participant M as Responses stream
+    participant X as ToolCallRuntime
+    U->>L: Op TurnInput start or steer
+    loop while needs_follow_up
+        L->>L: freeze StepContext and ToolRouter
+        L->>M: Prompt - history clone plus tools
+        M-->>L: OutputItemDone events
+        alt FunctionCall or CustomToolCall
+            L->>X: boxed future per call
+            Note over X: shared RwLock gate&lt;br/&gt;readers parallel - writers exclusive
+            X-->>L: outputs recorded into history
+        else assistant message
+            L->>L: becomes last_agent_message
+        end
+        opt token limit reached
+            L->>L: auto-compact then continue
+        end
+    end
+    L->>L: Stop hooks may block or stop
+    L-->>U: TurnComplete with last message
+    </div>
+    <figcaption>The turn cycle with its three unusual residents: the frozen step context, the read-write lock that makes some tools concurrent and others exclusive, and hooks that can veto stopping.
+    <b>Steering is why the loop re-reads its input queue every iteration - your message waits for a boundary, then joins history like any other turn input.</b></figcaption>
+  </figure>
+
+  <h2 id="context">3. Context: the catalog is the constitution</h2>
+  <p>Nothing about Codex's prompt is hardcoded per model family.
+  Every entry in the bundled catalog <code>models-manager/models.json</code> carries its own full instruction template, context window, reasoning ladder, truncation policy, and tool configuration; unknown models fall back to generic metadata with a warning.
+  Per session the resolution order is config override, then resumed history, then the model's template (<code>core/src/session/mod.rs:658-676</code>).</p>
+  <p>Project memory arrives through an <code>AGENTS.md</code> walk refreshed every step: climb from the working directory to the project root, take one file per directory root-down - <code>AGENTS.override.md</code> beats <code>AGENTS.md</code> - concatenated deepest-last under a shared <span class="keynum">32&nbsp;KiB</span> budget (<code>core/src/agents_md.rs:267-281</code>, <code>config/src/config_toml.rs:73</code>).</p>
+  <p>The distinctive context move is <b>world-state diffing</b>: environment, permissions, and memory-file sections render only their change against the previous snapshot, so an unchanged fact costs zero tokens and a changed one announces itself as a replacement (<code>core/src/session/world_state.rs:32-299</code>).
+  When history outgrows the window, compaction has three engines - local summarization, provider-served remote compaction on OpenAI endpoints, or a fresh window when the token-budget feature is active - chosen at runtime by capability (<code>core/src/session/turn.rs:1191-1271</code>).</p>
+
+  <h2 id="trust">4. Trust: enforce first, ask second, learn forever</h2>
+  <p>This is the posture lesson 0050 introduced, seen from inside.
+  Four approval policies (<code>UnlessTrusted</code>, <code>OnRequest</code>, <code>Granular</code>, <code>Never</code>) sit on top of three containment levels (read-only default, workspace-write, full access), but the load-bearing wall is below all of them: on macOS every command runs under a freshly generated Seatbelt profile whose base policy denies by default; on Linux, bubblewrap builds the filesystem view and a two-stage seccomp filter drops capabilities and most sockets (<code>sandboxing/src/seatbelt.rs:844-1032</code>, <code>linux-sandbox/src/linux_run_main.rs:199-274</code>). Windows uses restricted tokens plus firewall filters.</p>
+  <p>The orchestrator's doc comment states the recovery doctrine outright - approval, select sandbox, attempt, retry escalated on denial (<code>core/src/tools/orchestrator.rs:4-7</code>).
+  Denials are recognized heuristically from exit codes and stderr keywords, one approval reruns the command unsandboxed, and <code>ApprovedForSession</code> caches the verdict so a repeated command does not re-prompt.
+  Two escalations are unusual enough to name.
+  A patched zsh intercepts every <code>execve</code> through a wrapper binary, so individual subcommands of a compound command can escape the sandbox on approval while the shell stays confined (<code>shell-escalation/README.md</code>).
+  And an approving user can choose <code>ApprovedExecpolicyAmendment</code>, which appends a Starlark <code>prefix_rule</code> to a policy file validated at load time - the approval becomes permanent, reviewable law (<code>execpolicy/README.md</code>).</p>
+  <p>A secondary layer, the Guardian reviewer, is an LLM session with strict JSON verdicts that fail closed; it can grant on-request approvals without showing you anything.</p>
+
+  <h2 id="edits">5. Edits: a grammar, a ladder, a trapdoor</h2>
+  <p>All editing goes through one custom tool, <code>apply_patch</code>, whose argument is raw patch text parsed against an embedded Lark grammar - add, delete, update, and optional move, with search-and-replace chunks anchored by optional <code>@@</code> context lines (<code>core/src/tools/handlers/apply_patch.lark</code>).
+  Because it is a freeform tool, the model emits the document directly, not JSON.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> parsing : freeform patch text
+    parsing --> verifying : hunks built - lenient mode strips heredocs
+    verifying --> stage1 : exact line match
+    stage1 --> stage2 : trim trailing whitespace
+    stage2 --> stage3 : trim both ends
+    stage3 --> stage4 : typographic unicode normalized
+    stage4 --> failed : no anchor found
+    stage1 --> applying : anchors located
+    applying --> done : files rewritten
+    failed --> [*] : error string returns to model
+    done --> [*]
+    </div>
+    <figcaption>The life of a patch: parsing is deliberately lenient because earlier models wrapped patches in heredoc markers, and matching degrades through four tolerances before giving up.
+    <b>Failure is a normal message back to the model - "failed to find expected lines" - which is why the same tool survives weak and strong models alike.</b></figcaption>
+  </figure>
+
+  <p>There is a trapdoor: patches routed through the shell tool are intercepted.
+  A tree-sitter Bash query recognizes exactly the <code>apply_patch &lt;&lt;'EOF'</code> pattern, extracts the heredoc, and applies it as if the model had called the tool - while a bare patch body passed as a command errors with <code>ImplicitInvocation</code> rather than applying silently (<code>core/src/tools/handlers/apply_patch.rs:507-553</code>).
+  Shell output comes back truncated to a per-model policy, ten thousand tokens by default, with the original count reported.</p>
+
+  <h2 id="models">6. Models: behavior shipped as data</h2>
+  <p>The wire layer collapsed to one protocol: <code>WireApi</code> holds a single variant, <code>Responses</code>, and configuring Chat Completions is a hard error (<code>model-provider-info/src/lib.rs:62-68</code>).
+  Requests carry <code>store: false</code> and replay encrypted reasoning items, keeping conversational state client-side.
+  Affinity is structural: freeform tools, remote compaction, and the WebSocket transport are Responses-side features other providers may lack, so the same harness quietly offers fewer tools elsewhere.</p>
+  <p>The catalog goes further than prompts.
+  Newest-family entries ship <code>"tool_mode": "code_mode_only"</code>: direct tools are hidden entirely, replaced by one freeform <code>exec</code> tool whose argument is TypeScript that calls nested tools through an out-of-process host over gRPC (<code>code-mode-protocol/src/lib.rs:50</code>).
+  The default model is simply the first picker-visible entry in the catalog - currently a member of that code-mode-only family.</p>
+
+  <h2 id="distinctive">7. The distinctive mechanism</h2>
+  <div class="card callout key"><span class="tag">Why this one exists</span>
+  Enforce-first trust that <b>amends itself</b>. Other harnesses gate execution socially - ask, or classify, or both. Codex gates physically, detects failure, and converts your single approval into three progressively durable things: a retry, a session grant, or a persisted Starlark rule. Combined with in-shell per-subcommand escalation, the result is a trust system with a learning curve measured in approvals, not configuration. Code mode - tools invoked from model-written TypeScript as the default path on newest models - is the runner-up worth watching.</div>
+
+  <h2 id="extensions">8. The extension surface at a glance</h2>
+  <p>The mechanism pages cover each of these in depth; what matters here is that all of them hang off config layers and the tool router rather than off any surface.
+  Config itself stacks nine layers - packaged defaults through MDM, user, project <code>.codex/</code>, and session flags - with higher layers winning (<code>config/src/config_layer_source.rs:6-58</code>).</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+mindmap
+  root((extension surface))
+    MCP
+      stdio and streamable HTTP
+      tools namespaced mcp server tool
+      Codex also serves MCP itself
+    Skills
+      SKILL.md frontmatter convention
+      eight thousand char catalog budget
+      dollar mention loads full body
+    Hooks
+      twelve lifecycle events
+      PreToolUse can rewrite inputs
+      Stop hook can block finishing
+    Plugins
+      plugin.json bundles skills servers apps hooks
+    Subagents
+      agent role TOML files
+      spawn_agent tool family
+    Slash commands
+      builtins plus imported custom prompts
+    </div>
+    <figcaption>Everything growable, one view: protocol extensions (MCP), file conventions (skills, plugins, roles), and runtime interception (hooks) coexist without a plugin API of their own.
+    <b>The breadth is why the arg0 single-binary choice matters - distribution stays one artifact no matter how many extension kinds exist.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A command fails inside the Codex sandbox with an operation-not-permitted error. What does the orchestrator do next?</div>
+      <button class="q-opt">Marks the task failed and ends the turn with an error event</button>
+      <button class="q-opt">Rewrites the command to avoid the blocked operation silently</button>
+      <button class="q-opt">Asks once for approval, then retries the command unsandboxed</button>
+      <button class="q-opt">Switches to a weaker model that stays inside the sandbox bounds</button>
+      <div class="q-fb">The documented flow is approval, sandbox selection, attempt, then retry with an escalated strategy on denial - one approval unlocks the unsandboxed rerun and caches for the session. The first option describes an abort, not a recovery. The second invents a command rewriter that does not exist. The fourth invents a model downgrade; model changes trigger compaction, not permission handling.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What makes an approved Codex command different from a "don't ask again" approval in most other harnesses?</div>
+      <button class="q-opt">It can append a permanent prefix rule to a validated policy file</button>
+      <button class="q-opt">It is stored only in memory and vanishes when the process exits</button>
+      <button class="q-opt">It requires countersignature by a second model before taking effect</button>
+      <button class="q-opt">It applies only while the working directory matches the original one</button>
+      <div class="q-fb">The amendment choice writes a Starlark prefix_rule into load-time-validated policy - approval becomes law. Session grants do exist as an intermediate rung, but the distinctive destination is the persisted rule. No second model countersigns approvals; the Guardian reviewer grants instead of you, it does not verify you. Directory scoping is not the distinguishing property.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, with the repository cloned</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Clone <a href="https://github.com/openai/codex">openai/codex</a>, check out the commit pinned above, and read the five files from the Explore card in order. Then answer with file and line references:</p>
+      <p><b>Find</b>: (1) the exact loop condition that decides whether another sampling iteration runs; (2) where the frozen StepContext is captured, and what it contains; (3) the four tolerance stages a patch match passes through; (4) the Starlark function name an approving user persists.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The loop condition lives near the end of the sampling-result match arm in <code>turn.rs</code>; search it for <code>needs_follow_up</code>. The patch tolerances live together in one seek function.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The loop condition.</b> <code>core/src/session/turn.rs:425</code>: continue while the model emitted tool calls, requested follow-up, or pending input exists.</li>
+        <li><b>The frozen context.</b> Captured per step via <code>capture_step_context_with_required_mcp_servers</code> (<code>core/src/session/mod.rs:3249</code>) - model info, reasoning settings, approval policy, environments, MCP binding, and the built ToolRouter.</li>
+        <li><b>The match ladder.</b> <code>apply-patch/src/seek_sequence.rs:12-115</code>: exact, trailing-trimmed, fully trimmed, then typographic-Unicode-normalized matching.</li>
+        <li><b>The persisted rule.</b> <code>prefix_rule</code>, appended by the execpolicy amendment path described in <code>codex-rs/execpolicy/README.md</code>.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> All four answers are findable with grep alone - if any took more than a few minutes, re-read the Explore card's ordering, which follows the call graph rather than the directory tree.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the trust section did not land, ask it to walk one concrete compound command - such as a build that shells out to a package manager - through Seatbelt denial, detection, approval, and amendment. If code mode felt abstract, ask how a fan-out of ten tool calls collapses into one TypeScript execution.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The repository itself, read at the pinned commit from the Explore card: <a href="https://github.com/openai/codex">github.com/openai/codex</a>. Start at <code>run_turn</code> and follow tool dispatch outward; the workspace layout under <code>codex-rs/</code> maps almost one-to-one onto this page's sections.</p>
+
+  <div class="pager">
+    <a href="0050-permission-postures.html"><span class="dir">&larr; Previous</span><span class="ttl">Permission postures</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 14 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
