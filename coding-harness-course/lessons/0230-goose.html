@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Goose - recipes, scheduling, and the self-scheduling agent - Coding Harness Engineering</title>
+<meta name="description" content="Goose deep dive: Block's Rust agent whose recipes and cron scheduler close into a loop the model itself controls - read from source at a pinned commit.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 23</div>
+  <h1>Goose is a workflow engine with an agent loop inside</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Read from source at <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/agent.rs">commit <code>7a678c1c</code></a> (v1.47.0, August 2026).
+    &middot; <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/documentation/docs/guides/recipes/session-recipes.md">recipe docs vendored in-repo</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    <b>Repository:</b> <a href="https://github.com/block/goose">block/goose</a> &middot; Apache-2.0 &middot; Rust core (about fifteen crates) with a TypeScript/Electron desktop shell &middot;
+    analysis pinned to commit <code>7a678c1c8b3b5134a13b7a0252a06a4ee668fdad</code>, v1.47.0.<br>
+    <b>Read these five files, in this order:</b>
+    <ol>
+      <li><code>crates/goose/src/agents/agent.rs</code> - the <code>reply</code> loop, the 1000-turn cap, the inspector chain</li>
+      <li><code>crates/goose/src/agents/extension_manager.rs</code> - every capability as MCP, transport zoo included</li>
+      <li><code>crates/goose/src/agents/prompt_manager.rs</code> - assembly order, with <code>crates/goose/src/prompts/system.md</code> beside it</li>
+      <li><code>crates/goose/src/agents/moim.rs</code> - the MOIM turn-context channel, goose's quietest good idea</li>
+      <li><code>crates/goose/src/agents/schedule_tool.rs</code> - <code>manage_schedule</code>, the self-scheduling seam, with <code>scheduler.rs</code> alongside</li>
+    </ol>
+    <b>Community:</b> issues and discussions on the repository, plus engineering posts vendored under <code>documentation/blog/</code>.
+    Block donated the project to the Agentic AI Foundation under the Linux Foundation.
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>One backend process serves <b>both front doors</b>: the CLI runs it in-process; the desktop app spawns it and speaks ACP over localhost TLS.</li>
+      <li>The loop is standard until you look closer: <b>persistence-first</b> (the user message commits to SQLite before any model call) with a five-inspector trust chain above it.</li>
+      <li>Every capability, first-party or third-party, speaks <b>MCP</b> - even bundled built-ins ride an in-process transport.</li>
+      <li>The distinctive move: <b>declarative recipes on a cron scheduler where registering the schedule is itself a tool the model calls</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["What came before&lt;br/&gt;the generic turn cycle"] --> T["THIS PAGE&lt;br/&gt;goose wraps the loop&lt;br/&gt;in a workflow engine"]
+  T --> N["What it enables&lt;br/&gt;an agent that books&lt;br/&gt;its own future runs"]
+  P7["Principles seven and nine&lt;br/&gt;grow by protocol - state by design"] -.- T
+    </div>
+    <figcaption>Where this sits: the turn cycle from lesson 0020 runs unmodified underneath everything here - what goose adds is a workflow layer around it.
+    <b>Read this page for what happens when a harness stops being a session and starts being a scheduler.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <table>
+    <thead><tr><th>Field</th><th>Value</th></tr></thead>
+    <tbody>
+      <tr><td>Vendor</td><td>Block, Inc. (Square); donated to the Agentic AI Foundation under the Linux Foundation</td></tr>
+      <tr><td>License / language</td><td>Apache-2.0 / Rust core, TypeScript + React + Electron desktop</td></tr>
+      <tr><td>Repository</td><td><a href="https://github.com/block/goose">block/goose</a></td></tr>
+      <tr><td>Age</td><td>repo created August 2024; v1.0.0 published January 2025</td></tr>
+      <tr><td>Version read</td><td>v1.47.0, commit <code>7a678c1c</code>; roughly 53,000 stars, 49-plus contributors</td></tr>
+      <tr><td>Self-claim</td><td>"a general-purpose AI agent that runs on your machine. Not just for code"</td></tr>
+    </tbody>
+  </table>
+  <p>There are two front doors into one process model.
+  The CLI links the agent library directly; the desktop app is UI-only and at startup spawns a local backend (<code>goose serve --tls --enable-scheduler</code>, <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/ui/desktop/src/gooseServe.ts">gooseServe.ts</a>), polls <code>GET /status</code> for readiness, pins the cert fingerprint the child prints as <code>GOOSED_CERT_FINGERPRINT=</code>, and then speaks ACP - Agent Client Protocol JSON-RPC - over <code>wss://127.0.0.1/acp?token=...</code> (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/acp/transport/mod.rs">acp/transport/mod.rs</a>).
+  Because the server receives the shared data directory, CLI and desktop see one session store.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph DESK["Electron desktop - pure UI"]
+    UI["React UI"] -->|"spawn poll status pin cert"| SERVE
+  end
+  subgraph BACK["goose serve process - also CLI in-process"]
+    SERVE["ACP server wss acp&lt;br/&gt;token auth plus TLS pin"]
+    AG["Agent reply loop&lt;br/&gt;agents agent.rs"]
+    PM["PromptManager&lt;br/&gt;assembly order"]
+    EM["ExtensionManager&lt;br/&gt;tools cache dispatch"]
+    PR["Provider registry&lt;br/&gt;79 providers"]
+    SCHED["Scheduler cron jobs&lt;br/&gt;schedule.json"]
+    DB[("SQLite sessions.db&lt;br/&gt;one store both doors")]
+  end
+  EXT["MCP servers external&lt;br/&gt;stdio http docker"]
+  SERVE --> AG
+  AG --> PM
+  AG --> EM
+  EM --> EXT
+  AG --> PR
+  SCHED -->|"headless sessions"| AG
+  AG --- DB
+    </div>
+    <figcaption>The process map. One backend, two clients, one store - and note the scheduler sits inside the same process graph as ordinary turns.
+    <b>A scheduled run is not a separate product; it is the same agent entered headlessly.</b></figcaption>
+  </figure>
+
+  <h2 id="loop">The loop</h2>
+  <p>Entry is <code>Agent::reply</code> flowing to <code>reply_impl</code> in <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/agent.rs">agent.rs</a>, and its first act is the one worth remembering: persist the user message to SQLite <em>before</em> asking the model anything, then reload the conversation from disk.
+  Each outer iteration drains steering messages the human queued mid-turn, enforces <code>DEFAULT_MAX_TURNS</code> of 1000 (overridable via <code>GOOSE_MAX_TURNS</code>), and streams from the provider.
+  Tool requests are categorized frontend-versus-backend, then handed to an inspection chain producing approved, needs-approval, or denied; approved calls execute concurrently through the ExtensionManager, results append to SQLite, and the loop continues while the stream carries content.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant U as User ACP or CLI
+    participant A as Agent reply_impl
+    participant DB as SQLite SessionManager
+    participant I as Inspectors
+    participant E as Extensions
+    participant P as Provider stream
+    U->>A: user message
+    A->>DB: add_message durable before any model call
+    A->>DB: get_session reloaded from disk
+    A->>P: stream with system prompt messages tools
+    P-->>A: chunks plus usage
+    alt response requests tools
+        A->>I: inspect each requested call
+        I-->>A: approved needs_approval denied
+        A-->>U: ActionRequired confirmation if needed
+        U-->>A: AllowAlways AllowOnce RejectOnce RejectAlways
+        A->>E: dispatch_tool_call by prefixed name
+        E-->>A: result stream
+        A->>DB: append request response pair
+        A->>P: next iteration with results appended
+    else no tool calls
+        A->>A: stop-hook gate then break
+    end
+    Note over A,DB: a crash loses only the partial assistant turn
+    </div>
+    <figcaption>The turn with real names attached. Denial flows back to the model through the same channel as results, and the stop-hook can veto a natural-looking finish.
+    <b>Persistence precedes inference: the durable artifact of a turn exists before intelligence is spent on it.</b></figcaption>
+  </figure>
+
+  <p>A second loop ships behind <code>GOOSE_STATE_MACHINE=1</code> (forced for bang-shell commands): the whole pipeline becomes ordered operations - entry hook, slash command, steer, max turns, compaction, approval, skill, recipe, tool execution, retry, stop hook, exit-on-error - with a final inference runner aggregating context and tools from all of them.
+  Same behavior, factored as a state machine; the migration is ongoing in the open.</p>
+
+  <h2 id="context">Context assembly</h2>
+  <p><code>SystemPromptBuilder::build</code> in <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/prompt_manager.rs">prompt_manager.rs</a> composes, in order: a deliberately small persona file (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/prompts/system.md">system.md</a>, thirty-nine lines with no working-directory or date line); additional instructions from enabled extensions; then hints.
+  Hint loading is a place where folklore beats facts: the defaults are exactly <code>.goosehints</code> and <code>AGENTS.md</code> - globals from the config directory, then project files walked from git root down to cwd (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/hints/load_hints.rs">load_hints.rs</a>).
+  <code>CLAUDE.md</code>, <code>.cursorrules</code>, and <code>GEMINI.md</code> are <strong>not</strong> loaded unless you add them via the <code>CONTEXT_FILE_NAMES</code> setting.
+  Two choices exist purely for cache hits: the extension catalog renders alphabetically, and the timestamp is truncated to the hour.</p>
+
+  <p>The unusual piece is <strong>MOIM</strong> ("top of mind", <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/moim.rs">moim.rs</a>): once per turn, goose appends an agent-only user message carrying minute-truncated time, working directory, remaining-token estimates once past half the budget, and extension-contributed state like the todo list.
+  It is persisted once and never edited, so caches survive and visible history stays clean.
+  Below 32k contexts it switches off entirely.</p>
+
+  <p>Compaction triggers proactively above 0.8 of the context limit (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose-context-management/src/lib.rs">DEFAULT_COMPACTION_THRESHOLD</a>) or reactively on overflow: one LLM call summarizes history into structured JSON - intent, files touched, pending tasks, next step - re-rendered as an agent-only summary message, originals kept in storage but hidden from the agent, latest real user message preserved verbatim.
+  Before that bites, older tool request/response pairs are replaced by one-line summaries in batches of ten.
+  Token counts estimate with tiktoken's <code>o200k_base</code> regardless of vendor; there are no embeddings anywhere - recall is SQL keyword search.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph WIN["context window each turn"]
+    SY["system.md persona minimal"] --- EX["extensions catalog alphabetical cache-stable"] --- HI["hints globals then project root to cwd"] --- PA["project addendum last"]
+  end
+  subgraph HIST["then the conversation"]
+    SUM["summary message if compacted"] --- MOIM["turn-context block per turn&lt;br/&gt;time dir budget todo"] --- TP["old tool pairs replaced by one-liners"] --- UM["latest real user message verbatim"]
+  end
+    </div>
+    <figcaption>What one model request carries, top to bottom. The stable prefix ends before MOIM, which changes every turn by design - the hour-truncated timestamp keeps even that cheap.
+    <b>Everything volatile lives in one narrow band, and everything cacheable sits above it.</b></figcaption>
+  </figure>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>Four modes (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose-provider-types/src/goose_mode.rs">goose_mode.rs</a>): <code>auto</code> approves everything, <code>approve</code> asks every call, <code>smart_approve</code> waves reads through and asks about the rest, <code>chat</code> removes tools entirely.
+  Decisions flow through five inspectors merged so any can deny or escalate but none can force-run: pattern security (disabled by default), egress telemetry (log-only, always allows), an opt-in LLM adversary reviewer (fails open), the permission inspector honoring your persisted lists in <code>permission.yaml</code>, and repetition detection.
+  Smart approve consults the server's own <code>read_only_hint</code>, then falls back to an LLM judge that sees arguments as untrusted data.
+  Persistent grants are per tool name and survive sessions; allow-once never persists.</p>
+
+  <div class="callout warn">
+    There is no OS-level sandbox. An experimental macOS Seatbelt integration shipped in v1.25.0 and was removed; the project's own post for that release says the server "runs with the same permissions as your user account and is not sandboxed at the OS level" (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/documentation/blog/2026-02-23-goose-v1-25-0/index.md">blog post, in-repo</a>).
+    Shell commands spawn as ordinary children with full privileges; Docker confinement exists only as an option for stdio MCP servers, and the malware-advisory screen on npx/uvx launches fails open without network.
+  </div>
+
+  <h2 id="extensions">Extension surface</h2>
+  <p>The <a href="0070-mcp-and-tools.html">tool-ecosystem page</a> placed Goose at the top of the adoption ladder; here is the mechanism in one breath.
+  Thirteen platform extensions implement the MCP client trait in-process (<code>developer</code>, <code>skills</code>, <code>summon</code>, <code>scheduler</code>, <code>todo</code>, <code>analyze</code>, and friends); bundled servers compile into the binary and speak over in-process duplex pipes; external servers connect by stdio, Streamable HTTP, or docker exec.
+  Two consequences are unique. The model can manage its own tooling mid-session - <code>extensionmanager__manage_extensions</code> enables and disables servers live (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/platform_extensions/ext_manager.rs">ext_manager.rs</a>).
+  And skills follow the agentskills.io convention but with a twist: every discovered <code>SKILL.md</code> automatically becomes a slash command, alongside nine built-ins, with precedence builtin over recipe over skill.
+  Hooks arrive through plugins - twelve lifecycle events, though only <code>PreToolUse</code> and <code>Stop</code> can block.
+  Subagents spawn via <code>delegate</code> as fresh in-process agents on dedicated sessions, twenty-five turns by default, nesting prohibited.</p>
+
+  <h2 id="models">Model behavior</h2>
+  <p>The <code>Provider</code> trait has exactly one required method - <code>stream</code> - and the registry layers fifteen preferred providers, twenty built-ins, and forty-four declarative JSON-defined endpoints.
+  Wire formats are a separate layer of formatter modules, so providers reuse dialects: Vertex routes Claude models through the Anthropic builder.
+  Per-family divergence concentrates in three places:</p>
+
+  <table>
+    <thead><tr><th>Concern</th><th>Claude</th><th>OpenAI</th><th>Gemini</th></tr></thead>
+    <tbody>
+      <tr><td>Thinking</td><td>signed thinking blocks replayed unless stale</td><td><code>reasoning_effort</code>, Responses API variants</td><td>thinkingConfig budget or level</td></tr>
+      <tr><td>Caching</td><td>explicit <code>cache_control</code> markers; auto-enabled across gateways</td><td>implicit prefix caching, strictness classified</td><td>none marked</td></tr>
+      <tr><td>System role</td><td>system blocks, always max_tokens</td><td>developer role for reasoning models, completion-token remaps</td><td>system_instruction</td></tr>
+      <tr><td>Detection</td><td>any "claude" name is a reasoning model</td><td>regex on o-series and gpt-5</td><td>gemini-3 prefix</td></tr>
+    </tbody>
+  </table>
+
+  <p>The affinity verdict is structural, not marketing: signed-thinking preservation implemented end to end, cache semantics special-cased for Claude on every gateway, a name-based Claude heuristic in core model logic - and goose's own CI driving its agent workflows on <code>claude-opus-*</code>.
+  Nothing excludes other families; the deepest integration simply follows the family goose runs on internally.</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p>Recipes plus the scheduler, closed into a loop the model itself controls.
+  A <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/recipe/mod.rs">recipe</a> is a declarative YAML artifact: instructions that join the system prompt or a prompt that becomes the user message; typed parameters; embedded extension requirements; provider/model settings; a JSON schema for structured output; retry policies whose success checks are predicates re-run against the transcript; and sub-recipes with parameter passing.
+  Rendering is template-sandboxed to the recipe's own directory, and validation rejects undeclared variables.
+  The scheduler executes recipes on six-field cron expressions, creating headless scheduled sessions and persisting jobs with hardened byte-for-byte copies of the recipe they will run.</p>
+
+  <p>The third step is the one no sibling harness takes: <code>manage_schedule</code> is exposed <em>to the model</em> as an ordinary tool (<a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/schedule_tool.rs">schedule_tool.rs</a>).
+  A running session can register future invocations of any recipe - including one it just wrote to disk moments earlier - then, days later, read those sessions' outputs back through the same tool's list-and-inspect actions.
+  Combined with <code>delegate</code>, one conversation can spawn parallel work now and book recurring work for later.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  RUN["live session&lt;br/&gt;writes recipe.yaml"] --> TOOL["manage_schedule called by the model itself"]
+  TOOL --> JOB["schedule.json gains a job&lt;br/&gt;plus hardened recipe copy"]
+  JOB --> CRON["cron fires&lt;br/&gt;six-field expression"]
+  CRON --> HEADLESS["headless scheduled session runs&lt;br/&gt;same agent same store"]
+  HEADLESS --> READ["later session inspects outputs&lt;br/&gt;via the same tool"]
+  READ -.->|"books more jobs"| TOOL
+    </div>
+    <figcaption>The closed loop. Every arrow is an ordinary mechanism you have already met - file write, tool call, cron dispatch, SQLite session - composed so the agent extends its own timeline.
+    <b>Autonomy here is not fewer gates; it is persistence across time that the model can operate.</b></figcaption>
+  </figure>
+
+  <p>Honest framing: the core REPL, hint files, approval modes, and MCP plumbing follow the industry pattern goose helped popularize as one of the first MCP-native agents in January 2025.
+  This page demonstrates principle seven - grow by adopting shared protocols - and principle nine, state as a designed artifact: SQLite is re-read before every reply, rollback truncates the conversation tail, forks copy sessions.
+  Even the stop condition is policy, principle one: a thousand-turn ceiling, and chat mode removing tools altogether.
+  The novelty is the workflow layer around the loop, not the loop.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does Goose's <code>manage_schedule</code> tool actually hand the model?</div>
+      <button class="q-opt">Permission to raise its own turn cap past the configured maximum</button>
+      <button class="q-opt">Auto-conversion of finished sessions into reusable recipe files</button>
+      <button class="q-opt">Crash recovery that replays a dead job's SQLite transcript verbatim</button>
+      <button class="q-opt">Booking of future recipe runs, including ones the session just wrote</button>
+      <div class="q-fb">The tool registers, lists, and inspects scheduled jobs - including recipes authored minutes earlier. Turn caps come from configuration, recipes are authored rather than extracted, and crash semantics belong to the session store, not the scheduler.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A fresh project contains <code>CLAUDE.md</code> and <code>AGENTS.md</code>. Which does Goose load by default?</div>
+      <button class="q-opt">AGENTS.md plus .goosehints, global first then root down to cwd</button>
+      <button class="q-opt">CLAUDE.md alone - AGENTS.md needs an explicit config entry</button>
+      <button class="q-opt">Both merged, with the copy nearest cwd winning every conflict</button>
+      <button class="q-opt">Neither - hint files load only when a recipe names them</button>
+      <div class="q-fb">The hardcoded defaults are exactly <code>.goosehints</code> and <code>AGENTS.md</code>. CLAUDE.md, .cursorrules, and GEMINI.md load only if you add them via <code>CONTEXT_FILE_NAMES</code>; there is no merge-with-precedence rule, and recipes have nothing to do with hint discovery.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Write a five-line recipe: a title, one instruction telling the agent to append today's date and one fact to a local log file, and nothing else.
+      Validate it with <code>goose recipe validate your-recipe.yaml</code>, run it once with <code>goose run --recipe your-recipe.yaml</code>, then ask a live goose session to schedule that recipe to run every minute using its own <code>manage_schedule</code> tool.</p>
+      <p><b>Find</b>: the new job in the scheduler's persisted file, the hardened copy of your recipe beside it, and the headless session rows appearing afterward in the session store.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>You are watching one SQLite store serve interactive and scheduled sessions at once. Compare session types after the cron fires twice.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Validate and run.</b> The validator rejects undeclared variables, so a minimal file passes only when truly minimal; the manual run proves the instruction works interactively first.</li>
+        <li><b>Schedule from inside the loop.</b> Asking the live session - rather than clicking a dialog - exercises <code>manage_schedule</code>: the model calls the tool with your recipe path and a cron expression.</li>
+        <li><b>Verify the artifacts.</b> The job lands in <code>schedule.json</code> with a hardened copy of the recipe under <code>scheduled_recipes/</code>, and each firing creates a new session row of the scheduled type.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If the scheduled runs appear in the same store as your interactive session, you confirmed the one-store claim; if the recipe copy differs from your file, you edited it after booking - the snapshot protects against exactly that.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the self-scheduling loop has not landed, ask for the threat model: what could a malicious recipe book, and which of the five inspectors would see it. If context assembly feels busy, ask why MOIM persists once per turn instead of updating in place.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The recipe guide vendored in the repository covers formats, parameters, scheduling, and sub-recipes with worked examples: <a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/documentation/docs/guides/recipes/session-recipes.md">Reusable Recipes, in-repo at the pinned commit</a>.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 23 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
