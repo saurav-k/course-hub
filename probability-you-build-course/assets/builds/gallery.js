@@ -32,17 +32,15 @@
 
     var sprites = {};
     function paintSprites() {
-      ['--ink-faint', '--gold', '--chart-plum'].forEach(function (name) {
-        var c = document.createElement('canvas');
-        c.width = 48; c.height = 48;
-        var g = c.getContext('2d').createRadialGradient(24, 24, 0, 24, 24, 24);
-        g.addColorStop(0, pybGarden.alpha(pybGarden.tokenHex(name), name === '--ink-faint' ? 0.9 : 0.5));
-        g.addColorStop(1, pybGarden.alpha(pybGarden.tokenHex(name), 0));
-        var cctx = c.getContext('2d');
-        cctx.fillStyle = g;
-        cctx.fillRect(0, 0, 48, 48);
-        sprites[name] = c;
-      });
+      /* the splat sprite wears --accent-2 so it never reads as glow */
+      var c = document.createElement('canvas');
+      c.width = 48; c.height = 48;
+      var g = c.getContext('2d').createRadialGradient(24, 24, 0, 24, 24, 24);
+      g.addColorStop(0, pybGarden.alpha(pybGarden.tokenHex('--accent-2'), 0.5));
+      g.addColorStop(1, pybGarden.alpha(pybGarden.tokenHex('--accent-2'), 0));
+      c.getContext('2d').fillStyle = g;
+      c.getContext('2d').fillRect(0, 0, 48, 48);
+      sprites.splat = c;
     }
 
     function params() {
@@ -97,8 +95,6 @@
     function render() {
       var p = params();
       var W = canvas.width, H = canvas.height;
-      var inkFaint = sprites['--ink-faint'];
-      var goldSpr = sprites['--gold'];
 
       ctx.fillStyle = pybGarden.tokenHex('--surface');
       ctx.fillRect(0, 0, W, H);
@@ -138,7 +134,7 @@
         var scx = W * 0.67, scy = H * 0.33;
         for (var s = 0; s < 320; s++) {
           var zx = rn.normal() * p.sig, zy = rn.normal() * p.sig;
-          ctx.drawImage(goldSpr, scx + zx * 1.15 - 24, scy + zy * 1.15 - 24);
+          ctx.drawImage(sprites.splat, scx + zx * 1.15 - 24, scy + zy * 1.15 - 24);
         }
       }
 
