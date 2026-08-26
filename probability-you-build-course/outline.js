@@ -229,6 +229,52 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "W6",
+      "title": "Week 6: Probabilistic evaluation - the Audit Bench",
+      "lessons": [
+        {
+          "title": "Ninety-five percent sure and useless",
+          "href": "lessons/0500-ninety-five-percent-sure-and-useless.html"
+        },
+        {
+          "title": "One table, six dials",
+          "href": "lessons/0501-one-table-six-dials.html"
+        },
+        {
+          "title": "Two curves, two questions",
+          "href": "lessons/0502-two-curves-two-questions.html"
+        },
+        {
+          "title": "Do the probabilities mean anything?",
+          "href": "lessons/0503-do-the-probabilities-mean-anything.html"
+        },
+        {
+          "title": "Fixing the numbers without touching the model",
+          "href": "lessons/0504-fixing-the-numbers-without-touching-the-model.html"
+        },
+        {
+          "title": "Scores you cannot game",
+          "href": "lessons/0505-scores-you-cannot-game.html"
+        },
+        {
+          "title": "Three definitions of fair, one impossible",
+          "href": "lessons/0506-three-definitions-of-fair-one-impossible.html"
+        },
+        {
+          "title": "Price the claim",
+          "href": "lessons/0507-price-the-claim.html"
+        },
+        {
+          "title": "The audit card",
+          "href": "lessons/0508-the-audit-card.html"
+        },
+        {
+          "title": "Week 6 problems",
+          "href": "lessons/0509-problems.html"
+        }
+      ]
+    },
+    {
       "n": "CAP",
       "title": "Capstone: Beyond PAI - the final project",
       "lessons": [
