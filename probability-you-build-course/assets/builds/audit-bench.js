@@ -95,15 +95,18 @@ const AB_DATA = {
   degen: AB_makeDegenerate(AB_lcg(43), 2000)
 };
 
-/* Everything measured at a temperature T and threshold thr. */
-function AB_metrics(rows, T, thr){
+/* Everything measured at a temperature T and threshold thr.
+   nb = number of equal-width probability bins for the reliability/ECE stats
+   (ECE inherits binning arbitrariness; lesson 0503 makes that visible). */
+function AB_metrics(rows, T, thr, nb){
+  nb = nb || 10;
   let tp = 0, fp = 0, tn = 0, fn = 0, brier = 0, ll = 0;
-  const bins = new Array(10).fill(0).map(() => ({ n: 0, pos: 0, conf: 0 }));
+  const bins = new Array(nb).fill(0).map(() => ({ n: 0, pos: 0, conf: 0 }));
   for (const r of rows){
     const p = AB_sig(r.logit / T);
     const d = p >= thr ? 1 : 0;
     if (d && r.y) tp++; else if (d && !r.y) fp++; else if (!d && !r.y) tn++; else fn++;
-    const bi = Math.min(9, Math.floor(p * 10));
+    const bi = Math.min(nb - 1, Math.floor(p * nb));
     bins[bi].n++; bins[bi].pos += r.y; bins[bi].conf += p;
     brier += (p - r.y) ** 2;
     ll    += -(r.y * Math.log(p + 1e-12) + (1 - r.y) * Math.log(1 - p + 1e-12));
@@ -409,4 +412,198 @@ AB_reg('ab-matrix', {
     ['TP+FP+TN+FN', m.tp + m.fp + m.tn + m.fn],
     ['t', thr.toFixed(2)]
   ]);
+});
+
+/* Lesson 0502 - PR and ROC panels; the degenerate perfect AUC. */
+AB_reg('ab-curves', {
+  input(S){
+    S.rows = AB_DATA[AB_role(S.fig, 'dataset').value];
+    S.render(S);
+  },
+  click(S){ S.render(S); },
+  init(S){ S.rows = AB_DATA[AB_role(S.fig, 'dataset').value]; }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  const thr = +AB_role(S.fig, 'thr').value;
+  const rows = S.rows;
+  const cvx = AB_curves(rows, 1);
+  const m = AB_metrics(rows, 1, thr);
+  const w = cv.width, h = cv.height, pad = 42;
+  const pw = (w - pad * 3) / 2, ph = h - pad * 2 - 14;
+  function panel(x0, pts, diag){
+    c.strokeStyle = AB_tok('--line');
+    c.strokeRect(x0, pad, pw, ph);
+    if (diag){
+      c.save();
+      c.strokeStyle = AB_tok('--ink-faint');
+      c.setLineDash([4, 4]);
+      c.beginPath(); c.moveTo(x0, pad + ph); c.lineTo(x0 + pw, pad); c.stroke();
+      c.restore();
+    }
+    c.strokeStyle = AB_tok('--stat');
+    c.lineWidth = 1.8;
+    c.beginPath();
+    pts.forEach(([u, v], k) => {
+      const X = x0 + u * pw, Y = pad + ph - v * ph;
+      k ? c.lineTo(X, Y) : c.moveTo(X, Y);
+    });
+    c.stroke();
+    c.lineWidth = 1;
+  }
+  // left: precision-recall; right: ROC
+  panel(pad, cvx.pr, false);
+  panel(pad * 2 + pw, cvx.roc, true);
+  // current threshold markers: the curve point at t
+  const prec = m.prec, rec = m.tpr, fpr = m.fpr;
+  c.fillStyle = AB_tok('--alarm') || AB_tok('--warn');
+  c.beginPath();
+  c.arc(pad + rec * pw, pad + ph - prec * ph, 4.5, 0, 7);
+  c.fill();
+  c.beginPath();
+  c.arc(pad * 2 + pw + fpr * pw, pad + ph - rec * ph, 4.5, 0, 7);
+  c.fill();
+  c.font = AB_font(false, 12);
+  c.fillStyle = AB_tok('--ink');
+  c.fillText('precision-recall', pad + pw / 2 - 46, pad - 10);
+  c.fillText('ROC', pad * 2 + pw + pw / 2 - 12, pad - 10);
+  c.font = AB_font(true, 11);
+  c.fillStyle = AB_tok('--ink-soft');
+  c.fillText('t=' + thr.toFixed(2), pad + Math.min(pw - 40, rec * pw + 6), pad + ph - prec * ph - 8);
+  AB_setReadout(S.fig, [
+    ['AUC', cvx.auc.toFixed(4)],
+    ['avg precision', cvx.ap.toFixed(4)],
+    ['precision @ t', AB_fmt(prec)],
+    ['recall @ t', rec.toFixed(3)],
+    ['flags everyone?', (m.sel > 0.999 ? 'yes - every row is above t' : 'no')]
+  ]);
+});
+
+/* Lesson 0503 - reliability diagram, ECE, and binning fragility. */
+AB_reg('ab-reliability', {
+  input(S){
+    const v = AB_role(S.fig, 'dataset').value;
+    S.rows = v === 'baserate' ? AB_baseRateScorer(AB_DATA.pop) : AB_DATA[v];
+    S.nb = +AB_role(S.fig, 'bins').value || 10;
+    S.render(S);
+  },
+  click(S){ S.render(S); },
+  init(S){
+    const v = AB_role(S.fig, 'dataset').value;
+    S.rows = v === 'baserate' ? AB_baseRateScorer(AB_DATA.pop) : AB_DATA[v];
+    S.nb = 10;
+  }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  if (S.nb == null) S.nb = 10;
+  const m = AB_metrics(S.rows, 1, 0.5, S.nb);
+  const w = cv.width, h = cv.height, pad = 46;
+  const gw = w - pad * 2, gh = h - pad * 2;
+  c.strokeStyle = AB_tok('--line');
+  c.strokeRect(pad, pad, gw, gh);
+  // perfect-calibration diagonal
+  c.save();
+  c.strokeStyle = AB_tok('--ink-faint');
+  c.setLineDash([4, 4]);
+  c.beginPath(); c.moveTo(pad, pad + gh); c.lineTo(pad + gw, pad); c.stroke();
+  c.restore();
+  // per-bin points with stems to the diagonal
+  let worst = { gap: -1 };
+  m.bins.forEach(b => {
+    if (!b.n) return;
+    const conf = b.conf / b.n, obs = b.pos / b.n;
+    const gap = Math.abs(obs - conf);
+    if (gap > worst.gap) worst = { gap, conf, obs, n: b.n };
+    const X = pad + conf * gw, Y = pad + gh - obs * gh;
+    c.strokeStyle = AB_tok('--gold');
+    c.beginPath(); c.moveTo(X, pad + gh - conf * gh); c.lineTo(X, Y); c.stroke();
+    c.fillStyle = AB_tok('--accent');
+    c.beginPath(); c.arc(X, Y, 3 + Math.min(6, Math.sqrt(b.n)), 0, 7); c.fill();
+  });
+  c.font = AB_font(false, 11);
+  c.fillStyle = AB_tok('--ink-soft');
+  c.fillText('predicted probability', w / 2 - 52, h - 8);
+  c.save();
+  c.translate(12, h / 2 + 44); c.rotate(-Math.PI / 2);
+  c.fillText('observed frequency', 0, 0);
+  c.restore();
+  c.font = AB_font(true, 12);
+  c.fillStyle = AB_tok('--ink');
+  c.fillText('ECE = ' + m.ece.toFixed(4), pad + 10, pad + 18);
+  c.font = AB_font(true, 10);
+  c.fillStyle = AB_tok('--ink-soft');
+  c.fillText(m.nb + ' bins, counts ' + m.bins.filter(b => b.n).map(b => b.n).join('/'), pad + 10, pad + 34);
+  AB_setReadout(S.fig, [
+    ['ECE (' + m.nb + ' bins)', m.ece.toFixed(4)],
+    ['worst bin gap', worst.gap >= 0 ? worst.gap.toFixed(3) : '-'],
+    ['worst bin mean p / observed', worst.gap >= 0 ? worst.conf.toFixed(2) + ' / ' + worst.obs.toFixed(2) : '-'],
+    ['rows', m.n]
+  ]);
+});
+
+/* Lesson 0504 - temperature scaling on held-out data; the invariance proof. */
+AB_reg('ab-temp', {
+  input(S, role){
+    if (role === 'split'){ S.fitted = null; }   // split moved: refit required
+    S.render(S);
+  },
+  click(S, role){
+    if (role === 'fit'){
+      const frac = (+AB_role(S.fig, 'split').value) / 100;
+      const sp = AB_split(S.rows || AB_DATA.pop, frac);
+      S.T = AB_fitT(sp.fit);
+      S.before = AB_metrics(sp.test, 1, 0.5);
+      S.after = AB_metrics(sp.test, S.T, 0.5);
+      S.nFit = sp.fit.length; S.nTest = sp.test.length;
+    }
+    if (role === 'reset'){ S.T = null; S.before = S.after = null; }
+    S.render(S);
+  },
+  init(S){ S.rows = AB_DATA.pop; S.T = null; }
+}, function (S){
+  const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
+  const w = cv.width, h = cv.height, pad = 46;
+  const gw = w - pad * 2, gh = h - pad * 2;
+  c.strokeStyle = AB_tok('--line');
+  c.strokeRect(pad, pad, gw, gh);
+  c.save();
+  c.strokeStyle = AB_tok('--ink-faint');
+  c.setLineDash([4, 4]);
+  c.beginPath(); c.moveTo(pad, pad + gh); c.lineTo(pad + gw, pad); c.stroke();
+  c.restore();
+  function plotSeries(mm, col){
+    mm.bins.forEach(b => {
+      if (!b.n) return;
+      const conf = b.conf / b.n, obs = b.pos / b.n;
+      const X = pad + conf * gw, Y = pad + gh - obs * gh;
+      c.strokeStyle = col;
+      c.beginPath(); c.moveTo(X, pad + gh - conf * gh); c.lineTo(X, Y); c.stroke();
+      c.fillStyle = col;
+      c.beginPath(); c.arc(X, Y, 4, 0, 7); c.fill();
+    });
+  }
+  if (S.before && S.after && S.T){
+    plotSeries(S.before, AB_tok('--prob'));
+    plotSeries(S.after, AB_tok('--ok'));
+    c.font = AB_font(true, 12);
+    c.fillStyle = AB_tok('--prob');
+    c.fillText('before T=1', pad + gw - 150, pad + 20);
+    c.fillStyle = AB_tok('--ok');
+    c.fillText('after T*=' + S.T.toFixed(2), pad + gw - 150, pad + 38);
+    const sameAcc = S.before.acc === S.after.acc &&
+                    S.before.tp === S.after.tp && S.before.fp === S.after.fp;
+    AB_setReadout(S.fig, [
+      ['T* (fit on ' + S.nFit + ' held-out rows)', S.T.toFixed(2)],
+      ['ECE on ' + S.nTest + ' test rows', S.before.ece.toFixed(4) + ' -> ' + S.after.ece.toFixed(4)],
+      ['Brier', S.before.brier.toFixed(4) + ' -> ' + S.after.brier.toFixed(4)],
+      ['log loss', S.before.nll.toFixed(4) + ' -> ' + S.after.nll.toFixed(4)],
+      ['accuracy', S.before.acc.toFixed(4) + ' -> ' + S.after.acc.toFixed(4)],
+      ['unchanged?', sameAcc ? 'true (bit-identical confusion matrix)' : 'FALSE']
+    ]);
+  } else {
+    plotSeries(AB_metrics(S.rows, 1, 0.5), AB_tok('--prob'));
+    c.font = AB_font(true, 12);
+    c.fillStyle = AB_tok('--ink-soft');
+    c.fillText('press Fit T - the fit uses only its half of the rows', pad + 12, pad + 20);
+    AB_setReadout(S.fig, [['state', 'unscaled (T=1)']]);
+  }
 });
