@@ -116,7 +116,7 @@ function AB_metrics(rows, T, thr, nb){
   let ece = 0;
   for (const b of bins) if (b.n) ece += b.n / n * Math.abs(b.pos / b.n - b.conf / b.n);
   return {
-    n, tp, fp, tn, fn,
+    n, tp, fp, tn, fn, threshold: thr, temperature: T,
     acc: (tp + tn) / n, tpr: tp / (tp + fn), fpr: fp / (fp + tn),
     fnr: fn / (fn + tp), tnr: tn / (tn + fp),
     prec: tp + fp ? tp / (tp + fp) : NaN, npv: tn + fn ? tn / (tn + fn) : NaN,
@@ -207,7 +207,7 @@ function AB_bootCI(rows, B, scoreFn, seedVal){
 /*==CORE-END==*/
 
 /* ---------- drawing helpers ---------- */
-const AB_PRINT = false;                 // flipped true while printing
+let AB_PRINT = false;                   // flipped true while printing
 function AB_tok(name){
   if (AB_PRINT){                        // print-safe ink on white paper (NOTES.md gotcha fix)
     switch (name){
@@ -215,11 +215,12 @@ function AB_tok(name){
       case '--ink-faint': return '#777';
       case '--line': return '#bbb'; case '--line-strong': return '#888';
       case '--surface': case '--bg': return '#ffffff';
+      case '--surface-2': return '#f2f0ec';
       case '--accent': case '--stat': return '#0f6e73';
       case '--accent-2': return '#333';
       case '--ok': return '#136b2c';
-      case '--warn': return '#b23c0a';
-      case '--prob': return '#444';
+      case '--warn': case '--alarm': return '#b23c0a';
+      case '--prob': return '#3f2fa0';
       case '--gold': return '#7a5a0a';
       default: return '#444';
     }
@@ -227,8 +228,15 @@ function AB_tok(name){
   const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
   return v || '#888';
 }
+function AB_cssVar(name){
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || '';
+}
 function AB_font(mono, px){
-  const fam = AB_tok(mono ? '--mono' : '--sans') || 'system-ui';
+  /* Font families always come from the live stylesheet: AB_tok() answers with a
+     COLOUR while printing, and "11px #444" is an invalid font that silently
+     leaves the previous one in place. */
+  const fam = AB_cssVar(mono ? '--mono' : '--sans') || 'system-ui, sans-serif';
   return px + 'px ' + fam;
 }
 function AB_setup(canvas){
@@ -541,10 +549,20 @@ AB_reg('ab-reliability', {
   ]);
 });
 
-/* Lesson 0504 - temperature scaling on held-out data; the invariance proof. */
+/* Lesson 0504 - temperature scaling on held-out data, and the invariance identity
+   demonstrated rather than asserted. Temperature scaling is a strictly increasing
+   map of the score, so it cannot reorder rows. Two consequences, both checked live:
+     (a) at t = 0.5 the decision is z >= 0 before AND after, so the confusion matrix
+         is bit-identical - this is the sense in which Guo et al. say accuracy is
+         untouched (their argmax);
+     (b) at any other t the SAME matrix reappears at the rescaled threshold
+         t' = sigmoid(logit(t) / T), because sigmoid(z/T) >= t' <=> z >= logit(t).
+   Claiming (a) for every t is false and the panel prints the counter-example. */
+const AB_cells = m => [m.tp, m.fp, m.tn, m.fn].join(' / ');
+const AB_sameCells = (a, b) => a.tp === b.tp && a.fp === b.fp && a.tn === b.tn && a.fn === b.fn;
 AB_reg('ab-temp', {
   input(S, role){
-    if (role === 'split'){ S.fitted = null; }   // split moved: refit required
+    if (role === 'split'){ S.T = null; S.before = S.after = null; }   // split moved: refit required
     S.render(S);
   },
   click(S, role){
@@ -552,11 +570,12 @@ AB_reg('ab-temp', {
       const frac = (+AB_role(S.fig, 'split').value) / 100;
       const sp = AB_split(S.rows || AB_DATA.pop, frac);
       S.T = AB_fitT(sp.fit);
+      S.test = sp.test;
       S.before = AB_metrics(sp.test, 1, 0.5);
       S.after = AB_metrics(sp.test, S.T, 0.5);
       S.nFit = sp.fit.length; S.nTest = sp.test.length;
     }
-    if (role === 'reset'){ S.T = null; S.before = S.after = null; }
+    if (role === 'reset'){ S.T = null; S.before = S.after = null; S.test = null; }
     S.render(S);
   },
   init(S){ S.rows = AB_DATA.pop; S.T = null; }
@@ -564,12 +583,21 @@ AB_reg('ab-temp', {
   const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
   const w = cv.width, h = cv.height, pad = 46;
   const gw = w - pad * 2, gh = h - pad * 2;
+  const thrEl = AB_role(S.fig, 'thr');
+  const thr = thrEl ? +thrEl.value : 0.5;
   c.strokeStyle = AB_tok('--line');
   c.strokeRect(pad, pad, gw, gh);
   c.save();
   c.strokeStyle = AB_tok('--ink-faint');
   c.setLineDash([4, 4]);
   c.beginPath(); c.moveTo(pad, pad + gh); c.lineTo(pad + gw, pad); c.stroke();
+  c.restore();
+  c.font = AB_font(true, 11);
+  c.fillStyle = AB_tok('--ink-soft');
+  c.fillText('predicted probability', pad + gw / 2 - 52, h - 12);
+  c.save();
+  c.translate(14, pad + gh / 2 + 46); c.rotate(-Math.PI / 2);
+  c.fillText('observed frequency', 0, 0);
   c.restore();
   function plotSeries(mm, col){
     mm.bins.forEach(b => {
@@ -590,29 +618,39 @@ AB_reg('ab-temp', {
     c.fillText('before T=1', pad + gw - 150, pad + 20);
     c.fillStyle = AB_tok('--ok');
     c.fillText('after T*=' + S.T.toFixed(2), pad + gw - 150, pad + 38);
-    const sameAcc = S.before.acc === S.after.acc &&
-                    S.before.tp === S.after.tp && S.before.fp === S.after.fp;
+    /* The identity, run on the held-out half at the threshold the reader chose. */
+    const bT = AB_metrics(S.test, 1, thr);
+    const aT = AB_metrics(S.test, S.T, thr);
+    const tPrime = AB_sig(AB_logit(thr) / S.T);
+    const aP = AB_metrics(S.test, S.T, tPrime);
     AB_setReadout(S.fig, [
       ['T* (fit on ' + S.nFit + ' held-out rows)', S.T.toFixed(2)],
       ['ECE on ' + S.nTest + ' test rows', S.before.ece.toFixed(4) + ' -> ' + S.after.ece.toFixed(4)],
       ['Brier', S.before.brier.toFixed(4) + ' -> ' + S.after.brier.toFixed(4)],
       ['log loss', S.before.nll.toFixed(4) + ' -> ' + S.after.nll.toFixed(4)],
-      ['accuracy', S.before.acc.toFixed(4) + ' -> ' + S.after.acc.toFixed(4)],
-      ['unchanged?', sameAcc ? 'true (bit-identical confusion matrix)' : 'FALSE']
+      ['TP/FP/TN/FN at t = 0.50', AB_cells(S.before) + '  ->  ' + AB_cells(S.after) +
+        (AB_sameCells(S.before, S.after) ? '  (bit-identical)' : '  (MOVED - report a bug)')],
+      ['accuracy at t = 0.50', S.before.acc.toFixed(6) + ' -> ' + S.after.acc.toFixed(6)],
+      ['same t = ' + thr.toFixed(2) + ' after scaling',
+        AB_cells(bT) + '  ->  ' + AB_cells(aT) +
+        (AB_sameCells(bT, aT) ? '  (identical here)' : '  (DIFFERENT - the matrix moved)')],
+      ["rescaled t' = sigmoid(logit(t)/T*) = " + tPrime.toFixed(4),
+        AB_cells(bT) + '  ->  ' + AB_cells(aP) +
+        (AB_sameCells(bT, aP) ? '  (bit-identical, always)' : '  (MISMATCH - report a bug)')]
     ]);
   } else {
     plotSeries(AB_metrics(S.rows, 1, 0.5), AB_tok('--prob'));
     c.font = AB_font(true, 12);
     c.fillStyle = AB_tok('--ink-soft');
     c.fillText('press Fit T - the fit uses only its half of the rows', pad + 12, pad + 20);
-    AB_setReadout(S.fig, [['state', 'unscaled (T=1)']]);
+    AB_setReadout(S.fig, [['state', 'unscaled (T=1)'], ['threshold on show', thr.toFixed(2)]]);
   }
 });
 
 /* Lesson 0505 - proper scoring rules: Brier, Murphy decomposition, log loss. */
-let AB_flatCache = null;          // the accuracy-flatness scan is expensive; do it once
-function AB_flatScan(rows){
-  if (AB_flatCache) return AB_flatCache;
+const AB_flatCache = {};          // the accuracy-flatness scan is expensive; do it once per scorer
+function AB_flatScan(rows, key){
+  if (AB_flatCache[key]) return AB_flatCache[key];
   let nllMin = Infinity, tBest = 1, accMin = 1, accMax = 0;
   for (let T = 0.05; T < 6; T += 0.05){
     const m = AB_metrics(rows, T, 0.5);
@@ -620,8 +658,8 @@ function AB_flatScan(rows){
     if (m.acc < accMin) accMin = m.acc;
     if (m.acc > accMax) accMax = m.acc;
   }
-  AB_flatCache = { accMin, accMax, tBest };
-  return AB_flatCache;
+  AB_flatCache[key] = { accMin, accMax, tBest };
+  return AB_flatCache[key];
 }
 function AB_constantRows(rows){
   const pi = rows.reduce((a, r) => a + r.y, 0) / rows.length;
@@ -631,6 +669,7 @@ function AB_constantRows(rows){
 AB_reg('ab-scores', {
   input(S){
     const v = AB_role(S.fig, 'scorer').value;
+    S.key = v;
     S.rows = v === 'constant' ? AB_constantRows(AB_DATA.pop)
            : v === 'scaled'   ? AB_DATA.pop.map(r => ({ g: r.g, y: r.y,
                logit: r.logit / 0.69 }))
@@ -638,7 +677,7 @@ AB_reg('ab-scores', {
     S.render(S);
   },
   click(S){ S.render(S); },
-  init(S){ S.rows = AB_DATA.pop; }
+  init(S){ S.rows = AB_DATA.pop; S.key = 'model'; }
 }, function (S){
   const cv = S.fig.querySelector('canvas'), c = AB_setup(cv);
   const w = cv.width, h = cv.height, pad = 40;
@@ -675,7 +714,7 @@ AB_reg('ab-scores', {
   c.fillStyle = AB_tok('--ink-soft');
   c.fillText('unc - res + rel = ' + check.toFixed(4) + '  (binning-approximate; matches to '
              + Math.abs(check - m.brier).toFixed(4) + ')', pad, y0 + barH * 2 + 52);
-  const flat = AB_flatScan(S.rows);
+  const flat = AB_flatScan(S.rows, S.key || 'model');
   c.font = AB_font(false, 11);
   c.fillStyle = AB_tok('--ink');
   c.fillText('log loss here: ' + m.nll.toFixed(4) + '   - lower is honest, and it is what fit-T minimises',
@@ -756,7 +795,8 @@ AB_reg('ab-ci', {
       acc: s => AB_metrics(s, 1, 0.5).acc,
       auc: s => AB_curves(s, 1).auc,
       ece: s => AB_metrics(s, 1, 0.5).ece,
-      ppvgap: s => { const g = AB_groupRates(s, 1, 0.5); return g[1].ppv - g[0].ppv; }
+      ppvgap: s => { const g = AB_groupRates(s, 1, 0.5); return g[1].ppv - g[0].ppv; },
+      tprgap: s => { const g = AB_groupRates(s, 1, 0.5); return g[1].tpr - g[0].tpr; }
     };
     const point = scoreFns[statName](AB_DATA.pop);
     const ci = AB_bootCI(AB_DATA.pop, B, scoreFns[statName], seedVal);
@@ -807,11 +847,15 @@ AB_reg('ab-ci', {
   c.fillText(lo.toFixed(3), pad, h - 8);
   c.fillText(hi.toFixed(3), w - pad - 34, h - 8);
   c.fillText(point.toFixed(4), Math.min(Math.max(X(point) - 20, pad), w - pad - 60), pad - 8);
+  const straddles = ci[0] <= 0 && ci[1] >= 0;
   AB_setReadout(S.fig, [
     ['statistic', statName],
     ['point estimate', point.toFixed(4)],
     ['95% CI (' + B + ' resamples)', ci[0].toFixed(4) + ' .. ' + ci[1].toFixed(4)],
-    ['width', (ci[1] - ci[0]).toFixed(4)]
+    ['width', (ci[1] - ci[0]).toFixed(4)],
+    ['contains zero?', straddles
+      ? 'yes - this set supports no claim about the sign'
+      : 'no - the sign survives resampling']
   ]);
 });
 
@@ -846,7 +890,7 @@ function AB_fillCard(S, m, cvx, g, Tinfo, cis){
   const head = $('ac-headline');
   if (head) head.innerHTML =
     '<div>accuracy ' + m.acc.toFixed(4) + (cis ? ' <i>CI ' + cis.acc[0].toFixed(3) + '..' + cis.acc[1].toFixed(3) + '</i>' : '') +
-    '; always-no baseline ' + ((m.tn + m.fn) / m.n).toFixed(4) + '</div>' +
+    '; always-no baseline ' + ((m.tn + m.fp) / m.n).toFixed(4) + '</div>' +
     '<div>AUC ' + cvx.auc.toFixed(4) + (cis ? ' <i>CI ' + cis.auc[0].toFixed(3) + '..' + cis.auc[1].toFixed(3) + '</i>' : '') +
     '; average precision ' + cvx.ap.toFixed(4) + '</div>';
   const cal = $('ac-calib');
@@ -860,7 +904,10 @@ function AB_fillCard(S, m, cvx, g, Tinfo, cis){
       '<div>Verdict: ' + verdict + '.' +
       (Tinfo && Tinfo.T ? ' After temperature scaling (T*=' + Tinfo.T.toFixed(2) +
         ', fitted on ' + Tinfo.nFit + ' held-out rows): ECE ' + Tinfo.afterECE.toFixed(4) +
-        ', accuracy bit-identical (' + Tinfo.beforeAcc.toFixed(4) + ').'
+        '. Scaling is monotone, so ranking is untouched (AUC identical) and the decision at' +
+        ' t = 0.50 is bit-identical (accuracy ' + Tinfo.acc50.toFixed(4) + ' before and after).' +
+        ' At the declared t = ' + m.threshold.toFixed(2) + ' the same confusion matrix sits at' +
+        " t' = " + Tinfo.tPrime.toFixed(4) + ' on the rescaled scores.'
         : ' No rescaling applied.') + '</div>';
   }
   const pol = $('ac-policy');
@@ -899,6 +946,7 @@ AB_reg('ab-card', {
     }
   },
   click(S, role){
+    S.error = null;
     try {
       if (role === 'dataset'){
         const v = AB_role(S.fig, 'dataset').value;
@@ -913,10 +961,12 @@ AB_reg('ab-card', {
       if (role === 'fit'){
         const sp = AB_split(S.rows, 0.5);
         const T = AB_fitT(sp.fit);
+        const thrNow = +AB_role(S.fig, 'thr').value;
         S.Tinfo = {
-          T, nFit: sp.fit.length,
-          afterECE: AB_metrics(sp.test, T, +AB_role(S.fig, 'thr').value).ece,
-          beforeAcc: AB_metrics(sp.test, 1, +AB_role(S.fig, 'thr').value).acc
+          T, nFit: sp.fit.length, test: sp.test,
+          afterECE: AB_metrics(sp.test, T, thrNow).ece,
+          acc50: AB_metrics(sp.test, 1, 0.5).acc,
+          tPrime: AB_sig(AB_logit(thrNow) / T)
         };
       }
       if (role === 'cis'){
@@ -985,10 +1035,11 @@ AB_reg('ab-card', {
       c.beginPath(); c.arc(grx + conf * gw, pad + gh - obs * gh, 3.5, 0, 7); c.fill();
     });
   }
-  rel(m, AB_tok('--prob'));
-  if (S.Tinfo){
-    const sp = AB_split(S.rows, 0.5);
-    rel(AB_metrics(sp.test, S.Tinfo.T, thr), AB_tok('--ok'));
+  if (S.Tinfo && S.Tinfo.test){
+    rel(AB_metrics(S.Tinfo.test, 1, thr), AB_tok('--prob'));
+    rel(AB_metrics(S.Tinfo.test, S.Tinfo.T, thr), AB_tok('--ok'));
+  } else {
+    rel(m, AB_tok('--prob'));
   }
   AB_fillCard(S, m, cvx, g, S.Tinfo, S.cis);
   AB_setReadout(S.fig, [
