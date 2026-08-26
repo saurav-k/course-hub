@@ -51,6 +51,48 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0109-week-2-problems.html"
         }
       ]
+    },
+    {
+      "n": "W3",
+      "title": "Week 3: Maximum likelihood - three instruments",
+      "lessons": [
+        {
+          "title": "The method that found a hidden chamber",
+          "href": "lessons/0200-the-method-that-found-a-hidden-chamber.html"
+        },
+        {
+          "title": "Every angular bin is a Poisson count",
+          "href": "lessons/0201-counting-muons.html"
+        },
+        {
+          "title": "The likelihood function grades every slider setting",
+          "href": "lessons/0202-the-likelihood-function.html"
+        },
+        {
+          "title": "Why the log keeps the peak and saves your floats",
+          "href": "lessons/0203-why-the-log.html"
+        },
+        {
+          "title": "When algebra finds the peak",
+          "href": "lessons/0204-when-algebra-finds-the-peak.html"
+        },
+        {
+          "title": "When only a computer will do, write the optimiser yourself",
+          "href": "lessons/0205-when-only-a-computer-will-do.html"
+        },
+        {
+          "title": "How wrong can the answer be",
+          "href": "lessons/0206-how-wrong-can-the-answer-be.html"
+        },
+        {
+          "title": "Where MLE breaks: zero failures is not a zero rate",
+          "href": "lessons/0207-where-mle-breaks.html"
+        },
+        {
+          "title": "Week 3 problem set",
+          "href": "lessons/0208-week-3-problems.html"
+        }
+      ]
     }
   ],
   "extras": []
