@@ -25,14 +25,24 @@ so a refresh chases only what changed. For this course:
   records where it came from. The 126-key starter list it replaced was the frame
   slice's placeholder and is gone.
 - The service cells were filled from the four verified per-cloud inventories of
-  that same round. Each cloud was inventoried, audited twice independently, then
-  reconciled onto the shared vocabulary:
-  - AWS: verified 2026-08-26, 183 service rows, 35 declared absences
-  - Azure: verified 2026-08-26, 157 service rows, 52 declared absences
-  - Google Cloud: verified 2026-08-26, 178 service rows, 36 declared absences
-  - OCI: verified 2026-08-26, 136 service rows, 67 declared absences
-- Every one of the 764 cells resolves: 574 carry at least one service, 190 carry
-  a declared absence with its reason, and none is unfilled.
+  that same round. Each cloud was inventoried, audited twice independently,
+  reconciled onto the shared vocabulary, then repaired: a later pass found 67
+  entries filed as absences that were real products, promoted them to rows with
+  vendor links, and replaced three dead OCI documentation links.
+  - AWS: verified 2026-08-26, 198 service rows, 20 declared gaps
+  - Azure: verified 2026-08-26, 184 service rows, 25 declared gaps
+  - Google Cloud: verified 2026-08-26, 187 service rows, 27 declared gaps
+  - OCI: verified 2026-08-26, 152 service rows, 51 declared gaps
+- Every one of the 764 cells resolves, and none is unfilled: 641 carry at least
+  one service, 721 services in all; 21 say the cloud has the capability inside a
+  service listed on another row, and link that row; 102 are genuine absences,
+  each with the reason the audit recorded.
+- Which 21 of the 123 gaps are cross-references rather than absences is not read
+  out of their prose - five of them name no row at all, and five gaps that do
+  name one are genuine absences pointing at the nearest neighbour. The list is
+  the one the data repair pass enumerated, which rests in turn on the
+  reconciliation's finding that thirteen capabilities are sold as a product by
+  exactly one of the four clouds and built into a larger service on the rest.
 
 ## Refreshing the matrix
 
@@ -44,10 +54,13 @@ last round fails the pull request rather than the reader.
 
 ## Gaps
 
-- 63 of the 190 declared absences say in their own reason that the cloud does have
-  a peer capability which this snapshot did not inventory as its own row. The
-  widget still labels them "no equivalent", which reads as stronger than the
-  reason states. Resolving that needs a decision about the cell states, not a data
-  edit, so it is recorded here rather than patched.
+- One row is a content question the research directory has raised and not
+  settled: OCI's `bulk-transfer-appliance` links a blog post that no longer
+  answers, and Oracle appears to have folded the offline Data Transfer Appliance
+  into Roving Edge. Repointing the link would point it at a different product, so
+  the row stands as the audit left it until the service itself is re-read.
+- OCI's `online-transfer` absence gives Storage Gateway as one of the ways to
+  copy data online, and Storage Gateway is retired. The absence it declares is
+  still correct; only that detail is stale.
 - Every documentation URL in `matrix.js` carries the read date of its cloud's
   inventory above. No URL has a read date of its own.
