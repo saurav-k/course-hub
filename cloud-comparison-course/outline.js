@@ -43,6 +43,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "04",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "Analytics: one pipeline, four cuts",
+          "href": "lessons/0401-analytics-four-clouds.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Networking, delivery and edge",
       "lessons": [
