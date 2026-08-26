@@ -52,6 +52,40 @@ lost at the next refresh. Re-record the read dates above in the same pass, and r
 `python3 scripts/validate_site.py --vendor-links` so a link that rotted since the
 last round fails the pull request rather than the reader.
 
+## Module 07 - governance, tenancy and telemetry
+
+The four lessons of this module rest on the same verified round as the matrix
+(2026-08-26) and cite the vendor pages that round recorded. Every vendor link on
+the four pages was checked to resolve on 2026-08-26.
+
+Two kinds of link on these pages sit outside the four documentation roots above,
+and both are the source the verified round itself used:
+
+- **Certification blueprints.** Domain names and weights are quoted from the
+  verified round's exam sections, which read the vendors' own guides: the AWS
+  Solutions Architect Professional guide, the Azure architect skills-measured
+  page, the Google Cloud professional architect certification page, and Oracle's
+  MyLearn exam-topics page. Oracle publishes its blueprint on
+  `mylearn.oracle.com` rather than under `docs.oracle.com`, so that is the link
+  the page carries.
+- **The OCI landing zone**, which Oracle publishes as a Terraform repository on
+  GitHub rather than as a documentation page. `matrix.js` links the same place.
+
+Exam blueprints rot faster than anything else in this course: a vendor may
+re-cut its domains without renaming the exam. Re-read those four pages on every
+refresh, and treat a weight with no matching sentence on the vendor page as
+stale rather than as a typo.
+
+### Gaps found while writing this module
+
+- **Google Cloud folder nesting depth.** The verified round flagged its own
+  figure as not re-read against the current Resource Manager quota, so lesson 70
+  states the other three depths and says plainly that this one is left out.
+- **OCI Monitoring metric retention.** No retention figure for the OCI metric
+  store appears in the verified round, so the retention figure on lesson 72
+  carries three clouds and marks the fourth as not recorded rather than
+  guessing it.
+
 ## Gaps
 
 - One row is a content question the research directory has raised and not
