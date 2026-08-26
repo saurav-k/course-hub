@@ -204,7 +204,6 @@ Nine traps in that design system, all found on the published site:
   the probe a fallback - `var(--l-stat, #333)` - so the next missing token is loud. Note the `@media
   print` block already greys these tokens for ordinary markup; a canvas cannot use that, because the
   bitmap is painted before the print stylesheet applies, which is why the `beforeprint` redraw exists.
-
 - **Some chart classes are modifiers that colour nothing on their own.** `.ref` sets a dash pattern
   and a width but no stroke, because it is meant to ride on an `s-*` class that already carries the
   colour - `class="s-signal ref"`, not `class="ref"`. Written alone it computes to `stroke: none`
