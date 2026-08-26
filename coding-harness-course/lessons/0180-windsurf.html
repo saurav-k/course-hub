@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Windsurf - the human trajectory as context - Coding Harness Engineering</title>
+<meta name="description" content="Windsurf feeds the agent a compressed stream of everything you do between prompts, then spends three generations of retrieval engineering keeping that feed under a few seconds.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deep Dives &middot; Lesson 18</div>
+  <h1>Windsurf makes your actions between prompts a context channel the model reads continuously</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Covered from official documentation - closed source.
+    &middot; <a href="https://docs.devin.ai/desktop/cascade/cascade">Cascade documentation</a>
+    &middot; <a href="https://devin.ai/blog/windsurf-launch">launch post</a>
+  </p>
+
+  <div class="card callout key"><span class="tag">Explore it yourself</span>
+    Closed source: there is no repository to clone and no commit SHA to pin - this page pins to the vendor's own documentation and launch posts instead.
+    Read, in order: <a href="https://docs.devin.ai/desktop/cascade/cascade">the Cascade overview</a>, <a href="https://docs.devin.ai/desktop/cascade/hooks">Cascade Hooks</a> (its transcript sample is the best public window into the loop), <a href="https://docs.devin.ai/desktop/context-awareness/fast-context">Fast Context</a>, <a href="https://docs.devin.ai/desktop/cascade/memories">Memories &amp; Rules</a>, and <a href="https://devin.ai/blog/supercomplete-launch">the Supercomplete post</a>.
+    Community: the <a href="https://windsurf.com/changelog">changelog</a> and the docs' Discord.
+  </div>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Most harnesses assemble context when you submit a task. Windsurf's Cascade also reads a <b>compressed stream of your actions between tasks</b> - which is why typing just "Continue" works.</li>
+      <li>That channel was expensive to feed, so the same company trained <b>retrieval models that search in parallel</b>, served them on the fastest inference hardware available, and measured their reward against context pollution.</li>
+      <li>The passive half of the same bet is <b>Supercomplete</b>: predict your next intent as a cursor-independent diff.</li>
+      <li>Closed source changes what this page can prove. Everything here comes from <b>vendor documentation and engineering posts</b>, and the honest gaps are marked, not smoothed.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  G["What came before&lt;br/&gt;the generic turn - context&lt;br/&gt;assembled when you submit"] --> W["THIS PAGE&lt;br/&gt;a third channel - your actions&lt;br/&gt;written between prompts"]
+  W --> N["What it enables&lt;br/&gt;type just Continue - and retrieval&lt;br/&gt;budged to stay under a few seconds"]
+  D["Deep dive six of fifteen&lt;br/&gt;one fixed skeleton each"] -.- W
+    </div>
+    <figcaption>Where this sits: lesson 00 drew a loop whose context is assembled at submission time; this harness is the cast member that never stopped listening.
+    <b>If you remember one thing: the product decision came first - collaboration and autonomy at once - and the infrastructure, down to custom-trained search models, exists to keep it affordable.</b></figcaption>
+  </figure>
+
+  <h2 id="identity">Identity</h2>
+  <p>The Windsurf Editor shipped generally available on November 13, 2024, built by Codeium (Exafunction), a company that had spent years selling code-context systems to enterprises before packaging its own editor (<a href="https://devin.ai/blog/windsurf-launch">launch post</a>).
+  It is a fork of VS Code - your extensions and settings import directly - and it is closed: proprietary license, no public repository, no commit to pin.
+  On July 14, 2025, Cognition, makers of the Devin agent, acquired the company; the announcement cites "hundreds of thousands of daily active users" and folds Windsurf's IP into Cognition's (<a href="https://devin.ai/blog/windsurfs-next-chapter">Next Chapter</a>).
+  Documentation now lives at docs.devin.ai and the product ships as Devin Desktop, with the Windsurf brand retained; the changelog's current release at fetch time was v3.8.20 (<a href="https://docs.devin.ai/desktop/changelog">changelog</a>).</p>
+  <p>One structural fact colors every section below: there are now <em>two</em> local agents.
+  Legacy <b>Cascade</b>, the subject of this page, remains fully supported - but new sessions default to the <b>Devin Local agent</b>, a newer harness shared with the Devin CLI (<a href="https://docs.devin.ai/desktop/devin-local">Devin Local docs</a>).
+  Where the two differ materially, this page says which one it is describing.</p>
+
+  <h2 id="loop">The loop</h2>
+  <p>Cascade's turn follows the generic shape from lesson 00, with three harness-specific mechanisms bolted on: a hard tool-call ceiling per prompt, shell commands wrapped in veto-capable hooks, and a checkpoint written per user message so any step can be reverted (<a href="https://docs.devin.ai/desktop/cascade/cascade">Cascade overview</a>).
+  A background <b>planning agent</b> runs alongside the model you picked, continuously refining a long-term plan - a Todo list - while the main model takes short-term actions against it.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant Y as You
+    participant P as Panel
+    participant H as Hook gate
+    participant M as Model gateway
+    participant T as Tools
+    Y->>P: prompt - further messages queue
+    P->>H: pre_user_prompt JSON on stdin
+    H-->>P: exit 0 proceed - exit 2 blocks
+    P->>M: trajectory + always-on rules + mentions
+    M-->>P: tool calls - ceiling 20 per prompt
+    P->>T: dispatch each action behind its pre-hook
+    T-->>P: results append to the trajectory
+    P->>M: iterate while calls remain
+    M-->>P: final reply carrying no tool calls
+    P-->>Y: diff cards - revert arrow per message
+    </div>
+    <figcaption>One Cascade turn. The twenty-call ceiling stops the trajectory unless Auto-Continue is set, and each continue bills as a fresh prompt - the loop's stop condition is partly a billing decision.
+    <b>Denial is deterministic software, not model judgment: any hook script exiting 2 vetoes the action before it happens.</b></figcaption>
+  </figure>
+
+  <p>  The best public evidence for this shape is accidental: the <code>post_cascade_response_with_transcript</code> hook writes the whole conversation to a JSONL file at <code>~/.windsurf/transcripts/{trajectory_id}.jsonl</code>, and the documentation shows the step types - <code>user_input</code> (carrying the rules that were applied), <code>planner_response</code>, and <code>code_action</code> with a path and new content (<a href="https://docs.devin.ai/desktop/cascade/hooks">Hooks</a>).</p>
+  <p><b>How an edit travels:</b> officially documented as diff cards you approve per message, followed by an automatic lint-fix pass over generated code that is free of charge (<a href="https://docs.devin.ai/desktop/cascade/cascade">Cascade overview</a>) and a <code>pre_write_code</code> hook that can veto the write first.
+  Contrast the two cast members that made the edit problem famous: Gemini CLI treats a failed match as its own bug and repairs it through a fallback cascade ending in a second model call (<a href="https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/tools/edit.ts">edit.ts</a>), while Codex CLI never guesses - the model emits a patch document parsed by grammar (<a href="https://github.com/openai/codex/blob/main/codex-rs/core/src/tools/handlers/apply_patch_spec.rs">apply_patch_spec.rs</a>).
+  What Cascade does when an edit fails to apply is <em>not publicly documented</em>.</p>
+
+  <h2 id="context">Context assembly</h2>
+  <p>The window fills in a stable order, and the last slot before history is the one nobody else has.</p>
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  A["1 - base system prompt"] --> B["2 - always-on rules and root AGENTS.md"]
+  B --> C["3 - one-line blurbs of model_decision rules"]
+  C --> D["4 - skill names and descriptions"]
+  D --> E["5 - deterministic mentions"]
+  E --> F["6 - retrieved snippets"]
+  F --> G["7 - your action trajectory"]
+  G --> H["8 - summarized older turns"]
+    </div>
+    <figcaption>Slot five is guaranteed context: anything you @-mention enters verbatim, including functions and classes resolved through AST parsers, your terminal contents, the git diff, even previous conversations - though those arrive as summaries, deliberately not full transcripts (<a href="https://docs.devin.ai/desktop/chat/overview">Chat overview</a>).
+    <b>Slot seven is the page's subject: a channel written continuously by your editor, not assembled at submission time.</b></figcaption>
+  </figure>
+  <p>The persistent layers around the prompt are file conventions you can read on disk.
+  Rules live in <code>.devin/rules/*.md</code> (legacy <code>.windsurf/rules/</code> still honored) with frontmatter choosing an activation mode: <code>always_on</code> rides in slot two every turn, <code>model_decision</code> contributes only its description until fetched, <code>glob</code> activates on matching files, <code>manual</code> waits for an @-mention - capped at 6,000 characters globally and 12,000 per workspace file (<a href="https://docs.devin.ai/desktop/cascade/memories">Memories &amp; Rules</a>).
+  Root <code>AGENTS.md</code> is always-on; a subdirectory copy scopes itself to that directory automatically (<a href="https://docs.devin.ai/desktop/cascade/agents-md">AGENTS.md</a>).
+  Skills follow the cross-agent SKILL.md contract and practice progressive disclosure: only name and description ship until invoked (<a href="https://docs.devin.ai/desktop/cascade/skills">Skills</a>).
+  Memories are the odd layer out - auto-generated during conversation, stored locally under <code>~/.codeium/windsurf/memories/</code>, retrieved on relevance, and explicitly unsupported by the newer Devin Local agent, which prefers you migrate them to skills (<a href="https://docs.devin.ai/desktop/devin-local">Devin Local docs</a>).</p>
+  <p>Retrieval draws on an embeddings index of the workspace - snippets go to a remote embedding service, but nothing is stored server-side; enterprises can instead index remote repositories on isolated single-tenant servers, keeping only embeddings (<a href="https://docs.devin.ai/desktop/context-awareness/overview">Context Awareness</a>, <a href="https://docs.devin.ai/desktop/context-awareness/remote-indexing">Remote Indexing</a>).
+  Ignore files bound what the index may see and what the agent may touch: anything in <code>.gitignore</code> is both unindexed and non-editable, extended by <code>.codeiumignore</code>/<code>.devinignore</code> patterns (<a href="https://docs.devin.ai/desktop/context-awareness/windsurf-ignore">Ignore docs</a>).</p>
+
+  <h2 id="trust">Trust posture</h2>
+  <p>Terminal commands sit behind four user-selectable auto-execution levels - Disabled, Allowlist Only, Auto (the model judges risk, premium models only), and Turbo (everything runs except the denylist) - with administrators able to cap the maximum level org-wide (<a href="https://docs.devin.ai/desktop/terminal">Terminal docs</a>).
+  File edits are gated differently: they always render as approvable cards, and the veto points are the hooks.
+  Twelve lifecycle events fire around the loop - <code>pre_read_code</code>, <code>pre_write_code</code>, <code>pre_run_command</code>, <code>pre_mcp_tool_use</code>, <code>post_setup_worktree</code>, and their siblings - and any pre-hook exiting 2 blocks the action and feeds its stderr back to the model (<a href="https://docs.devin.ai/desktop/cascade/hooks">Hooks</a>).</p>
+  <table>
+    <thead><tr><th>Gate</th><th>Who decides</th><th>Named failure mode</th></tr></thead>
+    <tbody>
+      <tr><td>Cascade Turbo</td><td>a denylist you maintain</td><td>one stale denyline away from running anything</td></tr>
+      <tr><td>Cascade Auto</td><td>the model's own risk judgment</td><td>judgment is the thing being billed per prompt</td></tr>
+      <tr><td>Hooks</td><td>deterministic scripts, exit codes</td><td>silent skip on platform-mismatched config</td></tr>
+      <tr><td>Devin Local sandbox</td><td>OS-enforced path and network rules</td><td>relative-path build breakage outside scope</td></tr>
+    </tbody>
+  </table>
+  <p>The contrast the trust module draws holds here: Codex CLI enforces first and asks second, failing closed inside a kernel sandbox (<a href="https://github.com/openai/codex">openai/codex</a>); Claude Code interposes a second classifier model judging each action against a maintained policy (<a href="https://code.claude.com/docs/en/how-claude-code-works">How Claude Code works</a>).
+  Cascade's native posture is ask-first with configurable escape hatches, and the successor agent hardens it into explicit Deny/Ask/Allow rules plus OS-level filesystem and network sandboxing (<a href="https://docs.devin.ai/desktop/devin-local">Devin Local docs</a>).</p>
+
+  <h2 id="extensions">Extension surface</h2>
+  <p>MCP arrived early and deep: stdio, Streamable HTTP and SSE transports, OAuth per transport, a curated marketplace with one-click deeplinks (<code>windsurf://windsurf-mcp-registry?serverName=...</code>), and a hard budget of 100 tools across everything exposed to the model (<a href="https://docs.devin.ai/desktop/cascade/mcp">MCP docs</a>).
+  Around it sit the file-convention extension families this course standardizes on - skills, rules, workflows-as-slash-commands with System-over-Workspace-over-Global precedence, and the twelve-event hooks schema - plus two shapes fewer harnesses offer.
+  <b>Arena mode</b> runs the same prompt through several models in parallel, each in its own git worktree, and converges on the one you prefer; battle groups hide which models ran until after you choose (<a href="https://docs.devin.ai/desktop/cascade/arena">Arena docs</a>).
+  And the editor hosts foreign agents outright: anything speaking the Agent Client Protocol - Claude Code, Codex CLI, Gemini CLI - registers in <code>~/.windsurf/acp/registry.json</code> and appears beside Cascade in the agent picker (<a href="https://docs.devin.ai/desktop/acp">ACP docs</a>).</p>
+
+  <h2 id="models">Model behavior</h2>
+  <p>The model adapter fronts every major family - Claude, GPT, Gemini, Grok, DeepSeek and others - alongside an in-house SWE line, publishing per-model credit multipliers and cache prices in the user-facing table (<a href="https://docs.devin.ai/desktop/models">Models docs</a>).
+  The default pick is <b>Adaptive</b>, a router that chooses the model per request and accounts for prompt-caching continuity when it routes (<a href="https://docs.devin.ai/desktop/adaptive">Adaptive docs</a>).
+  Free-tier users are pinned to SWE-1.6; the flagship SWE-1.7 ships Max and Medium reasoning variants, with a Lightning edition served on Cerebras hardware for latency.</p>
+  <p>The affinity story is concrete rather than folkloric: retrieval does not run on a rented frontier model at all.
+  Cognition trained <b>swe-grep</b> and <b>swe-grep-mini</b> with reinforcement learning specifically to issue up to eight parallel tool calls per turn over at most four turns; serving mini on Cerebras reaches over 2,800 tokens per second (<a href="https://cognition.ai/blog/swe-grep">SWE-grep post</a>).</p>
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 230" role="img" aria-label="Horizontal bar chart of serving speed in tokens per second: swe-grep-mini at about 2800, swe-grep at about 650, and Haiku 4.5 at about 140.">
+      <line class="axis" x1="175" y1="16" x2="175" y2="206"/>
+      <rect class="m-stat" x="176" y="30"  width="380" height="36"/>
+      <rect class="m-stat" x="176" y="95"  width="88"  height="36"/>
+      <rect class="m-stat" x="176" y="160" width="19"  height="36"/>
+      <text class="lbl-sm" x="167" y="52"  text-anchor="end">swe-grep-mini</text>
+      <text class="lbl-sm" x="167" y="117" text-anchor="end">swe-grep</text>
+      <text class="lbl-sm" x="167" y="182" text-anchor="end">Haiku 4.5</text>
+      <text class="lbl-sm" x="564" y="52"  text-anchor="start">2800</text>
+      <text class="lbl-sm" x="272" y="117" text-anchor="start">650</text>
+      <text class="lbl-sm" x="203" y="182" text-anchor="start">140</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>serving speed, tokens per second, as reported by Cognition</span></div>
+    <figcaption>Serving speeds from the SWE-grep post: mini at <span class="keynum">over 2,800</span> tokens per second, full swe-grep at over <span class="keynum">650</span>, versus Haiku 4.5 at <span class="keynum">140</span>, the second-fastest model they evaluated.
+    <b>The speed edge is roughly twentyfold, and it was bought with training and hardware co-design - not with a cleverer prompt.</b></figcaption>
+  </figure>
+  <p>The reward design encodes a philosophy worth stealing: scores weight precision over recall because <b>context pollution hurts more than missing context</b> - the main agent is usually a couple of searches away from anything left unfetched (<a href="https://cognition.ai/blog/swe-grep">SWE-grep post</a>).</p>
+
+  <h2 id="distinctive">The distinctive mechanism</h2>
+  <p>The launch post named the thesis <b>AI Flow</b>: copilots collaborate but stay shallow, agents act but lose the thread, and Windsurf wanted both - which requires the AI to hold "real time understanding of human actions," kept in sync with "checkpointing, information compression" so the stream stays affordable (<a href="https://devin.ai/blog/windsurf-launch">launch post</a>).
+  That third channel is why the documentation's most characteristic user gesture is typing literally "Continue": the agent watched you work meanwhile (<a href="https://docs.devin.ai/desktop/cascade/cascade">Cascade overview</a>).
+  The founding bet even predates the agent - the original Riptide was described as an LLM-based search tool ripping through millions of lines in seconds, claiming three times embedding accuracy - and the lineage runs forward through the M-Query embedding era to today's trained retrieval subagent.</p>
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant M as Main model
+    participant F as Fast Context
+    participant S as swe-grep mini
+    participant R as Repo files
+    M->>F: query needs code context
+    F->>S: turn 1 opens the search
+    S->>R: up to 8 parallel greps globs reads
+    R-->>S: results
+    S->>R: turns 2 and 3 fan out again
+    R-->>S: results
+    S-->>F: relevant files and line ranges
+    F-->>M: clean focused context in seconds
+    </div>
+    <figcaption>Fast Context, triggered automatically when a query needs code search: a subagent with its own model, its own tiny toolset, and a four-turn budget.
+    <b>Delegating retrieval keeps pollution out of the main window - the subagent's failures cost seconds, not the parent's context.</b></figcaption>
+  </figure>
+  <p>The passive face of the same thesis is <b>Supercomplete</b>, which predicts "the next intent, not just the next text": diffs of insertions, deletions and edits surfaced wherever they belong, independent of your cursor, accepted with the same Tab.
+  Its enabling machinery is the clearest engineering detail in the whole story - a purpose-built asynchronous algorithm compresses what the user is doing into a trajectory representation in ten milliseconds or less, because <code>git status</code> and friends are too slow and exclude non-git users; speculative decoding exploits the prior that most code stays unchanged; and the model was fine-tuned to emit diffs rather than parrot existing lines (<a href="https://devin.ai/blog/supercomplete-launch">Supercomplete post</a>).
+  Among the fifteen cast members, none else treats your between-prompt behavior as a maintained input channel with its own latency budget: Cursor trains on acceptance signals and Copilot renders tools inside its prompt tree, but neither keeps listening between prompts.</p>
+
+  <div class="callout warn">
+    Evidence limit: this harness is closed source, so every claim above rests on vendor documentation and posts fetched on August 25, 2026, not on readable code.
+    Two behaviors this page refuses to assert: what Cascade does internally when an edit fails to apply, and any per-model prompt-format differences - both unpublished.
+    The leaked internal prompts circulating publicly were deliberately not used as evidence; their provenance fails this course's bar.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Per the documented loop, what does Cascade send in order to change an existing file?</div>
+      <button class="q-opt">A unified diff computed against the current file</button>
+      <button class="q-opt">A search-and-replace pair matched exactly once</button>
+      <button class="q-opt">A whole-file rewrite replacing all contents on disk</button>
+      <button class="q-opt">An approved diff rendered as a per-message card</button>
+      <div class="q-fb">The documented surface is an approvable diff card, backed by a veto-capable pre-write hook and a lint pass after. Option one describes patch-dialect harnesses such as Codex CLI, option two describes Gemini CLI's replace tool, and option three describes new-file creation rather than edits.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why did Cognition train swe-grep rather than reuse a frontier model for retrieval?</div>
+      <button class="q-opt">Frontier models refuse to batch multiple tool calls together</button>
+      <button class="q-opt">Serial searching dominates latency and pollutes the context</button>
+      <button class="q-opt">Embedding indexes cannot return file names with line ranges</button>
+      <button class="q-opt">The main model needed its window reserved for writing diffs</button>
+      <div class="q-fb">Their measurements showed over sixty percent of a first turn spent retrieving, plus quality damage from irrelevant material entering the window - so they trained a fast parallel specialist. Option one is false, since the post says frontier models improved at batching. Option three misstates embeddings, and option four invents a reservation policy.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Windsurf leaves its state where you can read it. If Devin Desktop or Windsurf is installed on your machine, list <code>~/.codeium/windsurf/</code> and <code>~/.windsurf/transcripts/</code>; if not, read the <a href="https://docs.devin.ai/desktop/cascade/hooks">Hooks documentation</a> and the <a href="https://docs.devin.ai/desktop/devin-desktop-faq">on-disk layout FAQ</a> instead.</p>
+      <p><b>Find</b>: one artifact proving process identity (binaries), one proving persistent context (memories or global rules), and one proving the loop's storage format (a transcript JSONL) - then say which of the three would survive a crash mid-session and why.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The transcript directory is capped at 100 files pruned oldest-first, and memories are workspace-scoped - neither fact means "ephemeral."</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Identify the binaries.</b> <code>~/.codeium/windsurf/bin/</code> holds the launcher CLIs - process identity, rewritten on update, not session state.</li>
+        <li><b>Identify the memory.</b> <code>~/.codeium/windsurf/memories/</code> stores auto-generated memories and <code>global_rules.md</code> - durable context that outlives any session.</li>
+        <li><b>Identify the loop's trail.</b> Transcript files named by trajectory id record each step as JSON - already-flushed entries survive a crash; the cap prunes old ones later.</li>
+        <li><b>Decide.</b> Memory and flushed transcript lines persist; only unflushed in-flight state is lost.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Three artifacts from three different layers means you found real boundaries; three files from one directory usually means you found the transcript store alone and labeled it thrice.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the trajectory idea still feels abstract, ask it to compare what you would have to type in a plain chat agent versus Cascade after an hour of manual refactoring - then ask which parts of that typed context a ten-millisecond trajectory representation would have captured anyway.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Cognition's engineering post on the retrieval models behind Fast Context - the training objective, the parallel-tool-call ablations, and the serving numbers quoted on this page: <a href="https://cognition.ai/blog/swe-grep">Introducing SWE-grep and SWE-grep-mini</a>. Read it after this page and notice how much of the harness design follows from one measurement.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 18 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
