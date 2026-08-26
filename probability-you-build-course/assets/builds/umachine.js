@@ -20,6 +20,7 @@
     var outX = fig.querySelector('[data-out="x"]');
     var outMean = fig.querySelector('[data-out="mean"]');
     var outLam = fig.querySelector('[data-out="lam"]');
+    var outEMean = fig.querySelector('[data-out="emean"]');
 
     function render() {
       var seed = Math.max(0, Math.floor(+seedInput.value || 0)) >>> 0;
@@ -107,6 +108,7 @@
       outLam.textContent = lam;
       outU.textContent = pybGarden.fmt(u, 3);
       outX.textContent = pybGarden.fmt(xq, 3);
+      if (outEMean) outEMean.textContent = pybGarden.fmt(1 / lam, 3);
       outMean.textContent = pybGarden.fmt(sum / nRings, 3);
     }
 
