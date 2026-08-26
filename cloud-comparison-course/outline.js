@@ -29,6 +29,28 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "Networking, delivery and edge",
+      "lessons": [
+        {
+          "title": "The private network",
+          "href": "lessons/0500-the-private-network.html"
+        },
+        {
+          "title": "Load balancing and the edge",
+          "href": "lessons/0501-load-balancing-and-the-edge.html"
+        },
+        {
+          "title": "DNS and domains",
+          "href": "lessons/0502-dns-and-domains.html"
+        },
+        {
+          "title": "Hybrid connectivity",
+          "href": "lessons/0503-hybrid-connectivity.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Identity and access",
       "lessons": [
