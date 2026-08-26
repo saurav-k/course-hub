@@ -920,6 +920,18 @@ AB_reg('ab-ci', {
   });
   c.strokeStyle = AB_tok('--ok');
   c.beginPath(); c.moveTo(X(point), pad); c.lineTo(X(point), pad + gh); c.stroke();
+  /* Mark zero whenever it is on the axis: for a gap statistic, whether the cloud
+     of resamples crosses this line is the entire question. */
+  if (lo <= 0 && hi >= 0){
+    c.save();
+    c.setLineDash([3, 3]);
+    c.strokeStyle = AB_tok('--ink');
+    c.beginPath(); c.moveTo(X(0), pad - 6); c.lineTo(X(0), pad + gh + 14); c.stroke();
+    c.restore();
+    c.font = AB_font(true, 11);
+    c.fillStyle = AB_tok('--ink');
+    c.fillText('zero', X(0) - 12, pad - 10);
+  }
   c.fillStyle = AB_tok('--ink');
   c.font = AB_font(true, 11);
   c.fillText(lo.toFixed(3), pad, h - 8);
