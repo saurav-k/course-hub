@@ -40,9 +40,7 @@
       var n = Math.min(2500, Math.max(100, Math.floor(+nInput.value || 900)));
       var rng = pybGarden.makeRng(seed);
       var W = canvas.width, H = canvas.height;
-      var ink = pybGarden.tokenHex('--ink');
       var line = pybGarden.tokenHex('--line');
-      var faint = pybGarden.tokenHex('--ink-faint');
       var barCol = pybGarden.tokenHex('--accent-2');
 
       ctx.fillStyle = pybGarden.tokenHex('--surface');
@@ -110,7 +108,6 @@
         ctx.fillRect(px0 + 4, hy1 - (b2 + 1) * ((hy1 - hy0t) / nb),
                      bwid, Math.max(1, (hy1 - hy0t) / nb - 1));
       }
-      void ink; void faint;
 
       outRho.textContent = pybGarden.fmt(rho, 2);
       outCorr.textContent = pybGarden.fmt(sampleRho, 2);
