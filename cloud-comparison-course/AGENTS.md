@@ -31,8 +31,12 @@ In this order: [`MISSION.md`](MISSION.md), [`NOTES.md`](NOTES.md),
 - **`matrix.js` is the only home of capability keys**, and the validator gates it:
   row set, domains, cell states and link shape all fail the pull request when they
   drift. See `BUILDER-SPEC.md`.
-- **Unfilled and absent are different states.** Never merge them, in data or in
-  styling. See `NOTES.md`.
+- **Four cell states, none of them interchangeable.** Never merge two, in data or
+  in styling. The pair that bites is `absent` against `elsewhere`: both arrive as
+  a `gaps` entry in the same inventory, and only `absent` lets a reader conclude
+  the cloud cannot do the thing, so **NO EQUIVALENT belongs to `absent` alone**.
+  Which gaps are which is a list the research directory holds; the gap prose does
+  not separate them. See `NOTES.md`.
 - **Everything here is evergreen.** No dates, countdowns or study schedules on any
   page; dates live only in `RESOURCES.md`.
 
