@@ -17,6 +17,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Holding a fleet at a size",
           "href": "lessons/0201-holding-a-fleet-at-a-size.html"
+        },
+        {
+          "title": "How much of the cluster you run",
+          "href": "lessons/0202-how-much-of-the-cluster-you-run.html"
         }
       ]
     }
