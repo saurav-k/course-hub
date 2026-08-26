@@ -351,6 +351,32 @@ AB_reg('ab-baserate', {
     c.font = AB_font(true, 12);
     c.fillText('no flags at all: every row released', pad, fy + barH / 2 + 4);
   }
+  /* Second strip: the SAME two counts stretched to full width. The strip above
+     shows how much of the population gets flagged, which at 2% prevalence makes
+     the true/false split a few unreadable pixels; this one shows what a flag is
+     worth, which is precision drawn rather than quoted. */
+  const fy2 = fy + barH + 34;
+  c.font = AB_font(false, 12);
+  c.fillStyle = AB_tok('--ink');
+  c.fillText('what one flag is worth (same counts, stretched to full width)', pad, fy2 - 6);
+  if (m.tp + m.fp > 0){
+    const tpw2 = bw * (m.tp / (m.tp + m.fp));
+    c.fillStyle = AB_tok('--ok');   c.fillRect(pad, fy2, tpw2, barH);
+    c.fillStyle = AB_tok('--warn'); c.fillRect(pad + tpw2, fy2, bw - tpw2, barH);
+    c.strokeStyle = AB_tok('--line-strong'); c.strokeRect(pad, fy2, bw, barH);
+    c.font = AB_font(true, 12);
+    c.fillStyle = AB_tok('--ink');
+    const pTxt = 'precision ' + AB_fmt(m.prec);
+    if (tpw2 > c.measureText(pTxt).width + 12) c.fillText(pTxt, pad + 6, fy2 + barH / 2 + 4);
+    else c.fillText(pTxt, pad + tpw2 + 6, fy2 + barH / 2 + 4);
+  } else {
+    c.font = AB_font(true, 12);
+    c.fillStyle = AB_tok('--ink-soft');
+    c.fillText('undefined - nothing was flagged', pad, fy2 + barH / 2 + 4);
+  }
+  c.font = AB_font(false, 11);
+  c.fillStyle = AB_tok('--ok');   c.fillText('green: true flags', pad, fy2 + barH + 20);
+  c.fillStyle = AB_tok('--warn'); c.fillText('red: false flags', pad + 120, fy2 + barH + 20);
   AB_frame(c, w, h, pad, null, null);
   AB_setReadout(S.fig, [
     ['model accuracy', m.acc.toFixed(4)],
@@ -394,10 +420,17 @@ AB_reg('ab-matrix', {
   c.font = AB_font(false, 11);
   c.fillStyle = AB_tok('--ink-soft');
   c.fillText('predicted NO', gx, gy - 26); c.fillText('predicted YES', gx + cell + gap, gy - 26);
-  c.save(); c.translate(gx - 14, gy + cell + 10); c.rotate(-Math.PI / 2);
-  c.fillText('actually YES', 0, 0); c.restore();
-  c.save(); c.translate(gx - 14, gy + cell - cell / 2 + 10); c.rotate(-Math.PI / 2);
-  c.fillText('actually NO', 0, 0); c.restore();
+  /* One rotated label per ROW, each centred on the row it names: the top row is
+     TN/FP (actually NO) and the bottom is FN/TP (actually YES). */
+  const rowLabel = (text, cy) => {
+    c.save();
+    c.translate(gx - 14, cy + c.measureText(text).width / 2);
+    c.rotate(-Math.PI / 2);
+    c.fillText(text, 0, 0);
+    c.restore();
+  };
+  rowLabel('actually NO', gy + cell / 2);
+  rowLabel('actually YES', gy + cell + gap + cell / 2);
   c.font = AB_font(false, 12);
   c.fillStyle = AB_tok('--ink');
   c.fillText('threshold t = ' + thr.toFixed(2), gx + cell * 2 + gap + 24, gy + 14);
@@ -475,6 +508,21 @@ AB_reg('ab-curves', {
   c.fillStyle = AB_tok('--ink');
   c.fillText('precision-recall', pad + pw / 2 - 46, pad - 10);
   c.fillText('ROC', pad * 2 + pw + pw / 2 - 12, pad - 10);
+  /* Axis names: a curve nobody can read the axes of teaches the wrong lesson. */
+  c.font = AB_font(true, 10);
+  c.fillStyle = AB_tok('--ink-faint');
+  const axis = (x0, xlab, ylab) => {
+    c.fillText(xlab, x0 + pw / 2 - c.measureText(xlab).width / 2, pad + ph + 16);
+    c.save();
+    c.translate(x0 - 8, pad + ph / 2 + c.measureText(ylab).width / 2);
+    c.rotate(-Math.PI / 2);
+    c.fillText(ylab, 0, 0);
+    c.restore();
+  };
+  axis(pad, 'recall', 'precision');
+  axis(pad * 2 + pw, 'false-positive rate', 'true-positive rate');
+  c.font = AB_font(false, 12);
+  c.fillStyle = AB_tok('--ink');
   c.font = AB_font(true, 11);
   c.fillStyle = AB_tok('--ink-soft');
   c.fillText('t=' + thr.toFixed(2), pad + Math.min(pw - 40, rec * pw + 6), pad + ph - prec * ph - 8);
