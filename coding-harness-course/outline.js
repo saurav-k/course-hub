@@ -113,6 +113,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0180-windsurf.html"
         },
         {
+          "title": "Google Antigravity - artifacts as the review surface",
+          "href": "lessons/0190-antigravity.html"
+        },
+        {
           "title": "Cline - plan and act as two programs",
           "href": "lessons/0200-cline.html"
         },
@@ -149,16 +153,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "Capstone - build a minimal harness",
           "href": "lessons/0270-build-a-harness.html"
-        }
-      ]
-    },
-    {
-      "n": "06",
-      "title": "Deep Dives - the cast of fifteen",
-      "lessons": [
-        {
-          "title": "Google Antigravity - artifacts as the review surface",
-          "href": "lessons/0190-antigravity.html"
         }
       ]
     }
