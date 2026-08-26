@@ -55,6 +55,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Skills, subagents, hooks and modes",
           "href": "lessons/0080-customization-primitives.html"
+        },
+        {
+          "title": "Code mode - tool calls as generated programs",
+          "href": "lessons/0090-code-mode.html"
         }
       ]
     },
@@ -73,6 +77,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Cursor - the harness that trains its own models",
           "href": "lessons/0150-cursor-trains-own-models.html"
+        },
+        {
+          "title": "GitHub Copilot Chat - prompts as a component tree",
+          "href": "lessons/0160-copilot-chat.html"
         },
         {
           "title": "Gemini CLI - the self-healing edit pipeline",
