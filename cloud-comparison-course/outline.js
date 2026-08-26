@@ -35,6 +35,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Storage: the menu is the same, the failure domain is not",
           "href": "lessons/0301-storage-four-clouds.html"
+        },
+        {
+          "title": "Databases: pick by packaging, not by engine",
+          "href": "lessons/0302-databases-four-clouds.html"
         }
       ]
     },
