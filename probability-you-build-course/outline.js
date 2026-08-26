@@ -187,6 +187,48 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "W5",
+      "title": "Week 5: Neural networks - the Glass Network",
+      "lessons": [
+        {
+          "title": "The neuron you already met",
+          "href": "lessons/0400-the-neuron-you-already-met.html"
+        },
+        {
+          "title": "Why one line is not enough",
+          "href": "lessons/0401-why-one-line-is-not-enough.html"
+        },
+        {
+          "title": "Stacking neurons into a network",
+          "href": "lessons/0402-stacking-neurons-into-a-network.html"
+        },
+        {
+          "title": "Open the hood: forward pass and activations",
+          "href": "lessons/0403-open-the-hood-forward-pass-and-activations.html"
+        },
+        {
+          "title": "Backpropagation, slowly, then yours",
+          "href": "lessons/0404-backpropagation-slowly-then-yours.html"
+        },
+        {
+          "title": "Softmax: one distribution over many classes",
+          "href": "lessons/0405-softmax-one-distribution-over-many-classes.html"
+        },
+        {
+          "title": "Temperature: shaping a distribution",
+          "href": "lessons/0406-temperature-shaping-a-distribution.html"
+        },
+        {
+          "title": "From glass network to large model, honestly",
+          "href": "lessons/0407-from-glass-network-to-large-model-honestly.html"
+        },
+        {
+          "title": "Week 5 problems",
+          "href": "lessons/0408-week-5-problems.html"
+        }
+      ]
+    },
+    {
       "n": "CAP",
       "title": "Capstone: Beyond PAI - the final project",
       "lessons": [

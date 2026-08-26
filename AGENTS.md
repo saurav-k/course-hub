@@ -153,7 +153,7 @@ completeness, cell states, widget binding - and `--vendor-links` extends it with
 every vendor link. The widget contract is in the widget reference's "The capability matrix"
 section; an unfilled cell and a declared absence are different states and must never look alike.
 
-Eight traps in that design system, all found on the published site:
+Nine traps in that design system, all found on the published site:
 
 - **Theme tokens are declared four times** (`:root`, the `prefers-color-scheme: dark` block, and
   the two explicit-choice selectors, because the toggle must beat the OS). A token added to
@@ -194,6 +194,16 @@ Eight traps in that design system, all found on the published site:
   raw Mermaid text. `hub.js` draws an ink-on-paper copy of every diagram while the browser is idle
   and swaps it in synchronously on `beforeprint`. Anything that changes how diagrams are rendered
   has to keep that copy correct too.
+- **Not every screen token has an `--l-` paper twin, and a missing one is silent.** A canvas that
+  redraws for print by swapping the `--` prefix for `--l-` works for `--ink`, `--surface`, `--gold`
+  and `--accent`, and fails for the chart tokens: `hub.css` defines no `--l-stat`, `--l-alarm`,
+  `--l-prob`, `--l-signal` or `--l-noise`. An undefined custom property is invalid at computed-value
+  time, and for `color` that means `inherit`, so the probe hands back the surrounding text colour and
+  every series prints in one hue with no error anywhere. Map chart tokens onto paper twins that
+  exist (`--l-accent-2`, `--l-warn`, `--l-ink-soft`) rather than onto a name pattern, and always give
+  the probe a fallback - `var(--l-stat, #333)` - so the next missing token is loud. Note the `@media
+  print` block already greys these tokens for ordinary markup; a canvas cannot use that, because the
+  bitmap is painted before the print stylesheet applies, which is why the `beforeprint` redraw exists.
 - **Some chart classes are modifiers that colour nothing on their own.** `.ref` sets a dash pattern
   and a width but no stroke, because it is meant to ride on an `s-*` class that already carries the
   colour - `class="s-signal ref"`, not `class="ref"`. Written alone it computes to `stroke: none`
