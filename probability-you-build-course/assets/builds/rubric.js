@@ -68,7 +68,14 @@
 
     var state = { correctness: 2, communication: 2, honesty: 1, craft: 2 };
 
-    function el(role) { return figure.querySelector('[data-role="' + role + '"]'); }
+    var controls = figure.querySelector('.build-controls');
+    var readout = figure.querySelector('.build-readout');
+
+    //the slider and its readout cell share a role name, so each lookup has to be
+    //scoped: an unscoped query returns the input for all four axes and the readout
+    //cells never update.
+    function control(role) { return controls.querySelector('[data-role="' + role + '"]'); }
+    function cell(role) { return readout.querySelector('[data-role="' + role + '"]'); }
 
     function colors(printSafe) {
       if (printSafe) return PRINT;
@@ -155,12 +162,12 @@
 
     function updateReadout(result) {
       for (var i = 0; i < PYBRubric.AXES.length; i++) {
-        var cell = el(PYBRubric.AXES[i].key);
-        if (cell) cell.textContent = String(state[PYBRubric.AXES[i].key]) + ' / 3';
+        var out = cell(PYBRubric.AXES[i].key);
+        if (out) out.textContent = String(state[PYBRubric.AXES[i].key]) + ' / 3';
       }
-      var tot = el('total');
+      var tot = cell('total');
       if (tot) tot.textContent = String(result.total) + ' / 12';
-      var verd = el('verdict');
+      var verd = cell('verdict');
       if (verd) {
         verd.textContent = result.passes
           ? 'portfolio-ready bar met'
@@ -171,7 +178,7 @@
     }
 
     ['correctness', 'communication', 'honesty', 'craft'].forEach(function (key) {
-      var input = el(key);
+      var input = control(key);
       if (!input) return;
       input.value = String(state[key]);
       input.addEventListener('input', function () {
