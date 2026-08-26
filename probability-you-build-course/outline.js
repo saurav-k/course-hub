@@ -185,6 +185,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0308-problems-week-4.html"
         }
       ]
+    },
+    {
+      "n": "CAP",
+      "title": "Capstone: Beyond PAI - the final project",
+      "lessons": [
+        {
+          "title": "Beyond PAI: the final project - the brief",
+          "href": "lessons/0600-beyond-pai-the-final-project.html"
+        },
+        {
+          "title": "Eight projects worth doing",
+          "href": "lessons/0601-eight-projects-worth-doing.html"
+        },
+        {
+          "title": "The rubric: four axes",
+          "href": "lessons/0602-the-rubric-four-axes.html"
+        },
+        {
+          "title": "Publishing the work",
+          "href": "lessons/0603-publishing-the-work.html"
+        },
+        {
+          "title": "How projects fail",
+          "href": "lessons/0604-how-projects-fail.html"
+        }
+      ]
     }
   ],
   "extras": []
