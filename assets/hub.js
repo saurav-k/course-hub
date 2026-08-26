@@ -906,6 +906,200 @@
   }
 
   /* ============================================================
+     THE CAPABILITY MATRIX
+     One row per capability key, one column per cloud, rendered from
+     window.CLOUD_CAPABILITY_MATRIX (the data file beside the comparison
+     course's index page). The author writes only the frame:
+
+       <figure class="cmatrix"> ... <figcaption>...</figcaption></figure>
+
+     and this builds the legend, the area filter, the search box and the
+     rows inside it. Everything is plain DOM painted from CSS tokens, so a
+     mode or palette change needs no re-render here - unlike Mermaid, whose
+     colours are baked into the SVG at render time.
+
+     Three cell states, which must never look alike (see widgets.md):
+       unfilled - nobody has written it yet; dashed and quiet
+       absent   - a declared finding, with a reason; marked and loud
+       service  - one or more services, each linking vendor documentation
+     ============================================================ */
+  function wireMatrix() {
+    var frame = document.querySelector('figure.cmatrix');
+    if (!frame) return;
+    var caption = frame.querySelector('figcaption');
+    var data = window.CLOUD_CAPABILITY_MATRIX;
+
+    function fail(message) {
+      var note = el('p', 'cmx-error', message);
+      if (caption) frame.insertBefore(note, caption); else frame.appendChild(note);
+    }
+
+    if (!data || !Array.isArray(data.clouds) || !Array.isArray(data.domains) || !Array.isArray(data.rows)) {
+      fail('The capability matrix data failed to load. This is a broken page, not an empty matrix.');
+      return;
+    }
+
+    var clouds = data.clouds;
+    var domainName = {};
+    data.domains.forEach(function (d) { domainName[d.slug] = d.name; });
+
+    /* ---------- legend ---------- */
+    var legend = el('div', 'cmx-legend');
+    [
+      ['cmx-lg-service', 'Filled', 'a service answering the capability'],
+      ['cmx-lg-absent', 'No equivalent', 'a declared finding, with a reason'],
+      ['cmx-lg-unfilled', 'Not filled in yet', 'awaiting verified research']
+    ].forEach(function (item) {
+      var chip = el('span', 'cmx-lg');
+      chip.appendChild(el('i', item[0]));
+      chip.appendChild(el('span', null, item[1] + ' - ' + item[2]));
+      legend.appendChild(chip);
+    });
+    frame.insertBefore(legend, caption);
+
+    /* ---------- controls ---------- */
+    var controls = el('div', 'cmx-controls');
+
+    var areaLabel = el('label', 'cmx-control');
+    areaLabel.appendChild(el('span', null, 'Area'));
+    var select = el('select', 'cmx-area');
+    select.name = 'cmx-area';
+    select.setAttribute('aria-label', 'Filter the capability matrix by area');
+    var allOpt = el('option', null, 'All areas (' + data.rows.length + ')');
+    allOpt.value = 'all';
+    select.appendChild(allOpt);
+    data.domains.forEach(function (d) {
+      var n = data.rows.filter(function (r) { return r.domain === d.slug; }).length;
+      var opt = el('option', null, d.name + ' (' + n + ')');
+      opt.value = d.slug;
+      select.appendChild(opt);
+    });
+    areaLabel.appendChild(select);
+    controls.appendChild(areaLabel);
+
+    var searchLabel = el('label', 'cmx-control');
+    searchLabel.appendChild(el('span', null, 'Search'));
+    var search = el('input', 'cmx-search');
+    search.type = 'search';
+    search.name = 'cmx-search';
+    search.placeholder = 'service or capability name';
+    search.setAttribute('aria-label', 'Search the capability matrix by service or capability name');
+    searchLabel.appendChild(search);
+    controls.appendChild(searchLabel);
+
+    var count = el('span', 'cmx-count');
+    count.setAttribute('aria-live', 'polite');
+    controls.appendChild(count);
+    frame.insertBefore(controls, caption);
+
+    /* ---------- rows ---------- */
+    var table = el('div', 'cmx-table');
+    table.setAttribute('role', 'table');
+    table.setAttribute('aria-label', 'Cloud capability matrix');
+
+    var headRow = el('div', 'cmx-row cmx-headrow');
+    headRow.setAttribute('role', 'row');
+    headRow.appendChild(el('div', 'cmx-cap', 'Capability'));
+    clouds.forEach(function (c) {
+      var h = el('div', 'cmx-colhead', c.short);
+      h.setAttribute('role', 'columnheader');
+      h.title = c.name;
+      headRow.appendChild(h);
+    });
+    table.appendChild(headRow);
+
+    var bodyRows = [];
+    data.rows.forEach(function (row) {
+      var tr = el('div', 'cmx-row');
+      tr.setAttribute('role', 'row');
+      tr.dataset.domain = row.domain;
+
+      var cap = el('div', 'cmx-cap');
+      cap.setAttribute('role', 'rowheader');
+      cap.appendChild(el('b', null, row.title || row.key));
+      cap.appendChild(el('code', 'cmx-key', row.key));
+      tr.appendChild(cap);
+
+      var haystack = ((row.title || '') + ' ' + row.key + ' ' + (domainName[row.domain] || '')).toLowerCase();
+
+      clouds.forEach(function (c) {
+        var cellData = (row.cells || {})[c.key];
+        var td = el('div', 'cmx-cell');
+        td.setAttribute('role', 'cell');
+        td.dataset.label = c.short;
+        td.dataset.cloud = c.key;
+
+        if (!cellData || typeof cellData !== 'object') {
+          td.classList.add('cmx-unfilled');
+          td.appendChild(el('span', 'cmx-unfilled-tag', 'Not filled in yet'));
+          td.title = 'Nobody has filled this cell in yet.';
+        } else if (cellData.state === 'unfilled') {
+          td.classList.add('cmx-unfilled');
+          td.appendChild(el('span', 'cmx-unfilled-tag', 'Not filled in yet'));
+          td.title = 'Nobody has filled this cell in yet.';
+        } else if (cellData.state === 'absent') {
+          td.classList.add('cmx-absent');
+          td.appendChild(el('span', 'cmx-absent-tag', 'No equivalent'));
+          if (cellData.reason) td.appendChild(el('span', 'cmx-reason', cellData.reason));
+          haystack += ' no equivalent';
+        } else if (cellData.state === 'service' && Array.isArray(cellData.services)) {
+          td.classList.add('cmx-service');
+          cellData.services.forEach(function (s) {
+            var svc = el('div', 'cmx-svc');
+            if (s.doc_url) {
+              var link = el('a', null, s.short_name || s.name || c.short);
+              link.href = s.doc_url;
+              link.title = (s.name || s.short_name || '') + ' - open in ' + c.name + ' documentation';
+              svc.appendChild(link);
+              if (s.name && s.short_name && s.name !== s.short_name) {
+                svc.appendChild(el('span', 'cmx-fullname', s.name));
+              }
+            } else {
+              svc.appendChild(el('b', null, s.short_name || s.name || ''));
+            }
+            if (s.one_line) svc.appendChild(el('span', 'cmx-oneline', s.one_line));
+            td.appendChild(svc);
+            haystack += ' ' + ((s.name || '') + ' ' + (s.short_name || '')).toLowerCase();
+          });
+        } else {
+          // An unknown shape is rendered as unfilled-looking but titled honestly,
+          // and validate_site.py fails the pull request that produced it.
+          td.classList.add('cmx-broken');
+          td.appendChild(el('span', 'cmx-unfilled-tag', 'Broken cell'));
+          td.title = 'This cell is neither a service, nor an absence with a reason, nor unfilled.';
+        }
+
+        tr.dataset.haystack = haystack;
+        tr.appendChild(td);
+      });
+      bodyRows.push(tr);
+      table.appendChild(tr);
+    });
+
+    var emptyNote = el('div', 'cmx-empty', 'Nothing matches that filter.');
+    emptyNote.hidden = true;
+    table.appendChild(emptyNote);
+    frame.insertBefore(table, caption);
+
+    /* ---------- filtering ---------- */
+    var state = { area: 'all', q: '' };
+    function apply() {
+      var shown = 0;
+      bodyRows.forEach(function (tr) {
+        var hit = (state.area === 'all' || tr.dataset.domain === state.area) &&
+                  (!state.q || tr.dataset.haystack.indexOf(state.q) !== -1);
+        tr.hidden = !hit;
+        if (hit) shown += 1;
+      });
+      count.textContent = shown + ' of ' + bodyRows.length + ' capabilities';
+      emptyNote.hidden = shown !== 0;
+    }
+    select.addEventListener('change', function () { state.area = select.value; apply(); });
+    search.addEventListener('input', function () { state.q = search.value.trim().toLowerCase(); apply(); });
+    apply();
+  }
+
+  /* ============================================================
      3. WIRE PHASE
      ============================================================ */
   function start() {
@@ -919,6 +1113,7 @@
     mountTopbar(hasRail);
     wireQuizzes();
     wireCopyButtons();
+    wireMatrix();
     whenFontsReady(renderMermaid);
     syncSettings();
     settleDiagrams();     // code blocks and formulas are ready before Mermaid is

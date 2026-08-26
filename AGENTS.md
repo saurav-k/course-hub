@@ -142,7 +142,16 @@ palette the reader picked. **A new course needs a line in that block**; without 
 to the plain palette accent. The rotated value reaches the page as `--course-accent` and its 14%
 tint as `--course-soft`, and only the chrome uses them - the wordmark, the two progress bars, the
 rail's current-lesson chip, a course-map section number and a card's hover border. Verify a new
-hue against every palette surface in both modes before you ship it.
+hue against every palette surface in both modes before you ship it. Pick the offset on the circle,
+not just on the offset grid: -175 and +175 differ by only 10 degrees of actual hue, so a full
+offset list can collide once it wraps past 180.
+
+The Cloud Architecture category adds one data-driven widget to the shared system: the capability
+matrix (`figure.cmatrix`), rendered by `hub.js` from `cloud-comparison-course/matrix.js`, which is
+the single committed home of the capability taxonomy. `validate_site.py` gates that file - row
+completeness, cell states, widget binding - and `--vendor-links` extends it with a live fetch of
+every vendor link. The widget contract is in the widget reference's "The capability matrix"
+section; an unfilled cell and a declared absence are different states and must never look alike.
 
 Eight traps in that design system, all found on the published site:
 
