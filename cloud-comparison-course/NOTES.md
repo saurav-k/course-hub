@@ -15,12 +15,19 @@ its rows from the taxonomy; no page may invent a capability name that is not a k
 in `matrix.js`. When research mints a new key, it enters `matrix.js` first, with its
 domain, and lessons follow.
 
-## The three cell states are load-bearing
+## The four cell states are load-bearing
 
-Unfilled ("not written yet"), absent (a declared finding, with a reason), and filled
-(a service, linking vendor documentation) must never look alike or mean alike. The
-widget styles them differently on purpose; an edit that makes two states look similar
-is a bug even if it looks tidier.
+Unfilled ("not written yet"), absent (this cloud ships no equivalent, with the reason),
+elsewhere (this cloud has the capability, inside a service listed on another row) and
+filled (a service, linking vendor documentation) must never look alike or mean alike.
+The widget styles them differently on purpose; an edit that makes two states look
+similar is a bug even if it looks tidier.
+
+Absent and elsewhere are the pair to guard. They both arrive as a `gaps` entry in the
+same inventory and they make opposite claims, so a cell must never imply a cloud cannot
+do something it demonstrably can: **NO EQUIVALENT is reserved for absent.** They are
+told apart by the bar style, the hue and the tag word at once, because the hue alone
+disappears in print and the tag alone is too quiet to read down a column of 191 rows.
 
 ## Evergreen discipline
 
