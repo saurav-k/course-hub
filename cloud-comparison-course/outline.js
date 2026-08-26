@@ -29,6 +29,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Storage and data",
+      "lessons": [
+        {
+          "title": "Storage: the menu is the same, the failure domain is not",
+          "href": "lessons/0301-storage-four-clouds.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Networking, delivery and edge",
       "lessons": [
