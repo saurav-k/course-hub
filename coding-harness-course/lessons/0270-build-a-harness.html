@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capstone - build a minimal harness - Coding Harness Engineering</title>
+<meta name="description" content="A real coding harness is four components - loop, one tool, one memory file, one permission gate - in about three hundred lines. Build them, then compare your choices against all sixteen subjects of this course.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">HARNESS ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Capstone &middot; Lesson 27</div>
+  <h1>Build the smallest harness that deserves the name, then meet who you reinvented</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">12 min</span>
+    Every component below exists in production form in a harness you can read -
+    start from <a href="https://github.com/earendil-works/pi/blob/fe37e9f9b5fb2e7bd9ff504e678f08d115375230/packages/agent/src/agent-loop.ts">Pi's <code>agent-loop.ts</code></a>.
+    &middot; <a href="https://code.claude.com/docs/en/agent-sdk/agent-loop">the loop, documented</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A harness is <b>four decisions</b>: a loop, one tool, one memory file, one permission gate. Everything else in today's products is elaboration on those.</li>
+      <li>You will write all four in <b>about three hundred lines</b> of TypeScript against one HTTP API - no framework, no SDK.</li>
+      <li>The closing <b>sixteen-row matrix</b> shows every subject of this course answering the same four questions differently, with evidence linked.</li>
+      <li>Your defaults land you closest to <b>Pi</b>; change exactly one default at a time and you reinvent Codex CLI, Claude Code, or Windsurf in turn.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  G["The seven-layer map&lt;br/&gt;from lesson 0000"] --> T["THIS PAGE&lt;br/&gt;keep four layers - loop tool memory gate&lt;br/&gt;delete the rest and ship"]
+  T --> N["What it enables&lt;br/&gt;read any production harness&lt;br/&gt;as a diff against yours"]
+  W["The sixteen-subject matrix&lt;br/&gt;every team same four questions"] -.- T
+    </div>
+    <figcaption>Where this sits: the course opened with seven layers; the capstone keeps the four a harness cannot lack and proves the point by building them.
+    <b>If your three-hundred-line version behaves recognizably like a commercial agent, the wrapper belief is dead for good.</b></figcaption>
+  </figure>
+
+  <h2 id="four">The four components</h2>
+  <p>Here is the whole thing. It speaks the Anthropic Messages dialect directly over <code>fetch</code>, runs one tool, reads one
+  memory file, gates execution with three regexes, and stops when the model stops calling tools. Omitted on purpose:
+  streaming, retries, output truncation edges, and any second tool - none of them change the architecture.</p>
+
+  <div class="code-cap">harness.ts &middot; runnable TypeScript, Node 20+, standard library only</div>
+  <pre><code>import { readFileSync, existsSync } from "node:fs";
+import { execSync } from "node:child_process";
+import { createInterface } from "node:readline/promises";
+
+const MODEL = process.env.MODEL ?? "claude-sonnet-4-5";
+const KEY   = process.env.ANTHROPIC_API_KEY ?? "";
+
+const toolResult = (id: string, out: string) =&gt;
+  ({ type: "tool_result", tool_use_id: id, content: out });
+
+const GATE = [                                    // component 4 - last match wins
+  { pattern: /^(git status|ls\b|cat .+)/, action: "allow" },
+  { pattern: /\b(rm|sudo|curl)\b/,        action: "deny"  },
+];                                                // anything else asks
+
+async function ask(cmd: string) {
+  process.stdout.write(`run \`${cmd}\`? [y/N] `);
+  return (await createInterface({ input: process.stdin }).question("")) === "y";
+}
+
+function loadMemory() {                           // component 3 - AGENTS.md walk
+  let d = process.cwd(), memo = "";
+  while (d !== "/" &amp;&amp; !memo) {
+    const p = `${d}/AGENTS.md`;
+    if (existsSync(p)) memo = readFileSync(p, "utf8");
+    d = d.slice(0, d.lastIndexOf("/")) || "/";
+  }
+  return memo;
+}
+
+async function main() {                           // component 1 - the loop
+  const messages = [{ role: "user",
+    content: `${loadMemory()}\n\nTask: ${process.argv[2]}` }];
+  for (let step = 0; step &lt; 20; step++) {         // component 1 - the leash
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": KEY, "content-type": "application/json",
+                 "anthropic-version": "2023-06-01" },
+      body: JSON.stringify({
+        model: MODEL, max_tokens: 4096,
+        system: `You are a coding agent. cwd: ${process.cwd()}`,
+        tools: [{ name: "bash",                   // component 2 - one tool
+          description: "Run a shell command in the project directory.",
+          input_schema: { type: "object",
+            properties: { command: { type: "string" } },
+            required: ["command"] } }],
+        messages }) });
+    const reply: any = await res.json();
+    messages.push({ role: "assistant", content: reply.content });
+    const calls = reply.content.filter((b: any) =&gt; b.type === "tool_use");
+    if (!calls.length) {                          // the stop condition
+      console.log(reply.content.find((b: any) =&gt; b.type === "text")?.text);
+      return;
+    }
+    const results = [];
+    for (const c of calls) {
+      const cmd: string = c.input.command;
+      const hit = [...GATE].reverse().find(r =&gt; r.pattern.test(cmd));
+      if (hit?.action === "deny")
+        results.push(toolResult(c.id, "denied by policy"));
+      else if (!hit &amp;&amp; !(await ask(cmd)))
+        results.push(toolResult(c.id, "the user declined"));
+      else
+        try {
+          const out = execSync(cmd, { encoding: "utf8", timeout: 30000 });
+          results.push(toolResult(c.id, out.slice(0, 2000)));
+        } catch (e: any) { results.push(toolResult(c.id, String(e.stdout ?? e))); }
+    }
+    messages.push({ role: "user", content: results });
+  }
+}
+main();</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+    participant Y as You
+    participant L as the for loop
+    participant G as GATE regexes
+    participant B as bash child
+    participant M as Messages API
+    Y->>L: argv task plus AGENTS.md prepended
+    loop step under 20
+        L->>M: system plus tools plus messages
+        M-->>L: text or tool_use bash command
+        alt no tool_use in reply
+            L-->>Y: print text and return
+        else tool_use present
+            L->>G: test command against rules
+            alt deny
+                G-->>L: denied by policy as tool_result
+            else no rule matched
+                G->>Y: prompt y slash N
+            else allow or approved
+                G->>B: execSync timeout 30s
+                B-->>L: stdout truncated to 2000 chars
+            end
+            L->>M: results appended as user turn
+        end
+    end
+    </div>
+    <figcaption>The turn cycle of your own harness. Denial and decline travel back through the same channel as output - the model learns the policy from its results, exactly as production gates teach theirs.
+    <b>Twenty iterations is the only lie of omission: every real harness replaces this constant with a policy, and the matrix below shows how differently they choose.</b></figcaption>
+  </figure>
+
+  <h2 id="gate-state">What the gate really is</h2>
+  <p>Your three regexes implement the smallest complete trust posture. It is worth seeing why three states suffice, because
+  every production gate in this course is an elaboration of this shape rather than a departure from it:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+    [*] --> classify: a tool_use arrives
+    classify --> allow: an allow rule matched
+    classify --> deny: a deny rule matched
+    classify --> ask: nothing matched
+    ask --> allow: the human approves
+    ask --> deny: declined
+    allow --> executed
+    deny --> refused
+    executed --> [*]: result travels back to the model
+    refused --> [*]: reason travels back instead
+    </div>
+    <figcaption>The gate as a state machine. Ask exists for exactly the cases you could not anticipate when writing rules, which is why allow-first harnesses still keep it.
+    <b>The question that separates production postures is not whether these states exist - it is who answers ask: you, a sandbox verdict, or a classifier model.</b></figcaption>
+  </figure>
+
+  <h2 id="matrix">The same four questions, sixteen answers</h2>
+  <p>Every subject of this course answers your four components. Where the subject is open source, the link lands on the file
+  that proves the claim at the commit this course read; closed subjects link official documentation. Read your own harness
+  row by row: wherever a cell differs from yours, that difference is a designed trade-off, not progress.</p>
+
+  <table>
+    <thead><tr><th>Subject</th><th>The loop</th><th>The edit</th><th>Memory files</th><th>The gate</th></tr></thead>
+    <tbody>
+      <tr><td><a href="https://github.com/Aider-AI/aider/blob/5dc9490bb35f9729ef2c95d00a19ccd30c26339c/aider/coders/base_coder.py">Aider</a></td><td><code>run_one</code> reflection loop, no tools</td><td>SEARCH/REPLACE blocks, 3 retries with did-you-mean</td><td>none loaded automatically - manual <code>/read</code></td><td>consent prompts per file and command, no sandbox</td></tr>
+      <tr><td><a href="https://github.com/Google-Antigravity/antigravity-sdk-python">Antigravity</a></td><td>closed core behind a WebSocket; SDK events only</td><td>exact search-and-replace; recovery undocumented</td><td>GEMINI.md plus <code>.agents/rules/*.md</code> capped 12k chars</td><td><a href="https://antigravity.google/docs/permissions">Deny &gt; Ask &gt; Allow engine</a>, optional nsjail sandbox</td></tr>
+      <tr><td><a href="https://code.claude.com/docs/en/how-claude-code-works">Claude Code</a></td><td>documented cycle, binary closed</td><td>literal old/new strings, unique match or re-read</td><td><a href="https://code.claude.com/docs/en/memory">CLAUDE.md tiers concatenated</a>, lazy subdir loads</td><td><a href="https://code.claude.com/docs/en/permission-modes">modes plus rules</a>, Seatbelt/bubblewrap, classifier auto mode</td></tr>
+      <tr><td><a href="https://github.com/cline/cline/blob/491b30b806fdb8c93513f821f2b87d63a61542f5/sdk/packages/agents/src/agent-runtime.ts">Cline</a></td><td><code>AgentRuntime.execute</code></td><td><code>editor</code> old_text/new_text, errors feed retries; gpt models swapped to patch</td><td>AGENTS.md plus .clinerules paths, per-file toggles</td><td>one approval callback, category toggles, no OS sandbox</td></tr>
+      <tr><td><a href="https://github.com/openai/codex/blob/7c6eb0eef113ddc16ae5b207ac9add364b489798/codex-rs/core/src/session/turn.rs">Codex CLI</a></td><td><code>run_turn</code></td><td><code>apply_patch</code> grammar, 4-stage rematch then model-visible error</td><td>AGENTS.md walked root-down under 32 KiB</td><td>sandbox fails closed first, approvals amend policy persistently</td></tr>
+      <tr><td><a href="https://github.com/microsoft/vscode-copilot-chat/blob/5863f5a7088958050792b5dccbe8b46c6e13eccc/src/extension/intents/node/toolCallingLoop.ts">Copilot Chat</a></td><td><code>_runLoop</code>, literally <code>while&nbsp;(true)</code></td><td>V4A-style patch healed off-model by a fast endpoint</td><td>.github/copilot-instructions.md plus *.instructions.md</td><td>per-tool confirmation messages, isolation delegated to VS Code</td></tr>
+      <tr><td><a href="https://cursor.com/docs/agent/security/run-modes">Cursor</a></td><td>closed; hook events reveal the shape</td><td>old_string/new_string pairs; failure path undocumented</td><td>.cursor/rules mdc tiers plus AGENTS.md</td><td>run modes, allowlists, classifier, Seatbelt/Landlock sandbox</td></tr>
+      <tr><td><a href="https://github.com/google-gemini/gemini-cli/blob/812f7a2bcf20b6e80e2e50c3c8fa8e26567bc1e8/packages/core/src/core/client.ts">Gemini CLI</a></td><td><code>processTurn</code>, plus a next-speaker check</td><td>cascade of 4 matchers ending in an LLM repair call</td><td>GEMINI.md hierarchy, filename configurable to AGENTS.md</td><td>TOML policy engine, yolo mode, four sandbox backends</td></tr>
+      <tr><td><a href="https://github.com/block/goose/blob/7a678c1c8b3b5134a13b7a0252a06a4ee668fdad/crates/goose/src/agents/agent.rs">Goose</a></td><td><code>reply_internal</code>, ceiling 1000 turns</td><td>exact-once string_replace with numbered preview hint</td><td>.goosehints plus AGENTS.md, git-root downward</td><td>four modes, five inspectors merged, no OS sandbox</td></tr>
+      <tr><td><a href="https://github.com/MoonshotAI/kimi-cli/blob/cbc15c076d17f70fec9f89c90c0502e68657f505/src/kimi_cli/soul/kimisoul.py">Kimi CLI</a></td><td><code>_agent_loop</code>, 1000 steps per turn</td><td>plain first-occurrence replace, not-found error, no uniqueness guard</td><td>AGENTS.md only, deepest wins, 32 KiB budget</td><td>approval gate only - the prompt states there is no sandbox</td></tr>
+      <tr><td><a href="https://github.com/anomalyco/opencode/blob/69aaa22793bcbe0b016ad9cfad22616906766df0/packages/opencode/src/session/prompt.ts">opencode</a></td><td><code>runLoop</code>, steps unlimited unless declared</td><td>nine-stage replacer cascade, failure thrown back to the model</td><td>global then nearest of AGENTS.md, CLAUDE.md, CONTEXT.md</td><td>wildcard rules last-wins, default ask, no OS sandbox</td></tr>
+      <tr><td><a href="https://github.com/earendil-works/pi/blob/fe37e9f9b5fb2e7bd9ff504e678f08d115375230/packages/agent/src/agent-loop.ts">Pi</a></td><td><code>runAgentLoop</code>, no ceiling knob at all</td><td>multi-block exact replace, fuzzy normalize fallback, throws to model</td><td>AGENTS.override.md &gt; AGENTS.md &gt; CLAUDE.md per ancestor</td><td>none by design - trust gate on project files, containerize yourself</td></tr>
+      <tr><td><a href="https://github.com/kunchenguid/pi-launcher/blob/564fa162bfadb1009c80c8e40a2f9dfe4e5d1a50/src/pi-launcher.c">pi-launcher</a></td><td>none - it launches Pi via one constant-path exec</td><td>not applicable</td><td>not applicable</td><td>a Developer ID signature, explicitly not a sandbox</td></tr>
+      <tr><td><a href="https://github.com/RooCodeInc/Roo-Code/blob/b867ec9145750d0ae1ff7f02d35406e9bf2a0b16/src/core/task/Task.ts">Roo Code</a></td><td><code>initiateTaskLoop</code> over an explicit stack</td><td>SEARCH/REPLACE with Levenshtein window scan, similarity reported in errors</td><td>rules directories then AGENTS.md, gated by a setting</td><td>per-category auto-approve flags, spend caps, repetition detector</td></tr>
+      <tr><td><a href="https://docs.devin.ai/desktop/devin-local">Windsurf</a></td><td>docs only - iterate until no tool calls, ceiling 20 per prompt</td><td>instruction plus sketch, final diff generated off-model</td><td>global_rules.md plus AGENTS.md, trigger-typed rules</td><td>terminal levels up to Turbo, hooks can veto pre-execution</td></tr>
+      <tr><td><a href="https://models.dev">models.dev</a></td><td colspan="4">the sixteenth subject is not a harness but the catalog underneath several: limits, costs, and adapter names that harnesses such as opencode compile into behavior</td></tr>
+    </tbody>
+  </table>
+
+  <p>Find your own four answers in the grid and the design space organizes itself around you. Your harness is <b>Pi plus a gate</b> -
+  Pi ships your loop, your memory walk, and your exact-replace tool, minus the regexes. Swap the ask state for an OS sandbox
+  that enforces before prompting and you have rebuilt <b>Codex CLI's</b> posture. Replace the human answering ask with a
+  classifier model consulting a security policy and you have <b>Claude Code's</b> auto mode. Move the edit off-model - send intent,
+  generate the diff elsewhere - and you have <b>Windsurf</b>. None of those teams had information you lack; they priced the same
+  trade-offs differently.</p>
+
+  <h2 id="principles">What this demonstrates</h2>
+  <p>Three of the design principles lesson 0010 distills are visible in something this small. First, <b>everything serves the
+  loop</b>: the gate, the memory walk, and the tool schema exist only because the iteration needs deciding, and the moment the
+  reply carries no tool calls, all three go idle together. Second, <b>defaults are the product</b>: the twenty-step leash, the
+  2,000-character truncation, the y-default prompt - each silently defines what kind of agent this is, exactly as Goose's
+  1,000-turn ceiling and Pi's missing knob do at scale. Third, <b>absence is architecture</b>: this harness has no subagents, no
+  MCP, no compaction, and works anyway, which is the honest measure of how much a harness must have - and why Pi's author
+  shipped that emptiness on purpose.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which single change converts your minimal harness into something shaped like Codex CLI?</div>
+      <button class="q-opt">Replace the ask state with an OS sandbox that enforces first, asks second</button>
+      <button class="q-opt">Add a second model call asking which speaker talks next after a reply</button>
+      <button class="q-opt">Swap bash for a patch-grammar edit tool parsed against a grammar file</button>
+      <button class="q-opt">Raise the step ceiling from twenty to a config value with no bound</button>
+      <div class="q-fb">Codex CLI's defining posture is enforce-then-ask: the sandbox fails closed, and approval amends persisted policy. The next-speaker check belongs to Gemini CLI, the patch tool alone changes the edit format but not the trust posture, and an unbounded ceiling is Pi's choice - none of those move the gate.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your loop's stop condition fires. What did the model's reply look like?</div>
+      <button class="q-opt">It contained a tool_use block whose command matched a deny rule</button>
+      <button class="q-opt">It hit the twenty-step leash and returned mid-plan with work pending</button>
+      <button class="q-opt">It streamed reasoning tokens with no accompanying text block</button>
+      <button class="q-opt">It carried no tool_use block, so there was nothing left to dispatch</button>
+      <div class="q-fb">The loop breaks exactly when the filtered list of tool_use blocks is empty - the model addressing you directly is the finish line. A denied call still produces a result that feeds another iteration, the ceiling aborts rather than completes the turn, and bare reasoning is just part of a reply that may still carry calls.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>Add a second tool to the harness: <code>edit_file</code>, taking <code>path</code>, <code>old</code>, and <code>new</code>.
+      It must refuse to touch a file whose content does not contain <code>old</code> exactly once, and on failure return the same
+      style of hint Goose gives: the nearest matching region of the file so the model can retry with better anchors.</p>
+      <p><b>Find</b>: proof the refusal path teaches rather than stalls - run the harness against a file, prompt a deliberate
+      mismatched edit, and show the second attempt succeeding after your hint reached the model.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Count occurrences with <code>split(old).length - 1</code>; zero or many means refuse. For the hint, slide a window of
+      <code>old.split("\n").length</code> lines over the file scoring rough similarity, and return the best-scoring region verbatim.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Gate the happy path.</b> Exactly one occurrence: splice in <code>new</code>, write the file, return a unified-diff rendering of the change so the transcript records what happened.</li>
+        <li><b>Build the hint.</b> On zero or multiple matches, score each window of the file against <code>old</code> by shared line count, and return the top region prefixed with "did you mean this anchor".</li>
+        <li><b>Wire it as a tool result.</b> Refusals and hints both travel as <code>tool_result</code> content, never as exceptions - the model must be able to read the failure.</li>
+        <li><b>Prove the loop closes.</b> A mismatched first attempt followed by a corrected second attempt in the same session is the deliverable: the error channel did the teaching.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If your second attempt needed you to re-explain the edit, the hint was decoration; the test is that the model self-corrects from your refusal text alone - the standard Aider, Gemini CLI, and opencode all meet in production form.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the matrix feels like trivia, ask it the comparative question: for one row at a time, what did that team see that your three hundred lines does not, and what did it cost them? If the gate state machine landed, ask it to place each of the four postures from lesson 0050 on the diagram - who answers the ask state, and with what authority.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The production-quality version of the loop you just wrote, small enough to read in one sitting:
+  <a href="https://github.com/earendil-works/pi/blob/fe37e9f9b5fb2e7bd9ff504e678f08d115375230/packages/agent/src/agent-loop.ts">Pi's <code>agent-loop.ts</code></a>.
+  Diff it mentally against yours - steering queues, truncated-reply handling, and stop reasons are the three gaps you will find.</p>
+
+  <div class="pager">
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Coding Harness Engineering &middot; Lesson 27 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
