@@ -5,6 +5,17 @@
 window.COURSE_OUTLINE = {
   "key": "cloud-comparison",
   "title": "Comparing the Four Clouds",
-  "sections": [],
+  "sections": [
+    {
+      "n": "02",
+      "title": "Compute: placement, scaling, containers",
+      "lessons": [
+        {
+          "title": "Where a workload physically lands",
+          "href": "lessons/0200-where-a-workload-lands.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };
