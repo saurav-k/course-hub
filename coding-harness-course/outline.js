@@ -17,6 +17,16 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "02",
+      "title": "The Loop",
+      "lessons": [
+        {
+          "title": "Context engineering - what actually fills the window",
+          "href": "lessons/0030-context-engineering.html"
+        }
+      ]
+    },
+    {
       "n": "03",
       "title": "Trust",
       "lessons": [
@@ -27,12 +37,34 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "04",
+      "title": "Extending",
+      "lessons": [
+        {
+          "title": "Skills, subagents, hooks and modes",
+          "href": "lessons/0080-customization-primitives.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Deep Dives - the cast of fifteen",
       "lessons": [
         {
+          "title": "Aider - the repo map and the pre-agentic lineage",
+          "href": "lessons/0120-aider.html"
+        },
+        {
           "title": "OpenAI Codex CLI - enforce first, ask second",
           "href": "lessons/0140-codex-cli.html"
+        },
+        {
+          "title": "Windsurf - the human trajectory as context",
+          "href": "lessons/0180-windsurf.html"
+        },
+        {
+          "title": "Roo Code - the mode system",
+          "href": "lessons/0210-roo-code.html"
         }
       ]
     }
