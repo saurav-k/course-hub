@@ -499,7 +499,7 @@
 
       var c = colors();
       var ctx = ctx2d(fig.querySelector('canvas'), W, H);
-      var padL = 56, padB = 30, padT = 20;
+      var padL = 56, padB = 30, padT = 48;
       // P bars live on 0..1; cost bars are anchored to one frontier call,
       // so the reader sees the escalation premium against a known quantity.
       var groups = [
@@ -519,12 +519,10 @@
         ctx.fillRect(x0 + 3, Y0() - Yh(g.sv), bw, Yh(g.sv));
         ctx.fillStyle = c.accent;
         ctx.textAlign = 'center';
-        ctx.fillText(g.fa, x0 - bw / 2 - 3, Y0() - Yh(g.av) - 6);
+        ctx.fillText('analytic ' + g.fa, x0 - bw / 2 - 3, 18);
         ctx.fillStyle = c.accent2;
-        ctx.fillText(g.fs, x0 + bw / 2 + 3, Y0() - Yh(g.sv) - 6);
+        ctx.fillText('simulated ' + g.fs, x0 + bw / 2 + 3, 34);
         ctx.fillStyle = c.soft;
-        ctx.fillText('analytic', x0 - bw / 2 - 3, Y0() + 12);
-        ctx.fillText('simulated', x0 + bw / 2 + 3, Y0() + 12);
         ctx.fillText(g.label, x0, H - 10);
       });
       ctx.strokeStyle = c.grid;
@@ -648,7 +646,7 @@
 
       var c = colors();
       var ctx = ctx2d(fig.querySelector('canvas'), W, H);
-      var padL = 48, padB = 34, padT = 22, base = H - padB;
+      var padL = 48, padB = 34, padT = 48, base = H - padB;
       var groups = [
         { label: 'nano x' + N + ' any-correct', prom: anyPromised, simv: simAny.p },
         { label: 'nano x' + N + ' majority', prom: majPromised, simv: simMaj.p }
@@ -667,9 +665,9 @@
         ctx.textAlign = 'center';
         ctx.fillText(g.label, x0, H - 10);
         ctx.fillStyle = c.accent;
-        ctx.fillText('promised ' + fmt(g.prom), x0 - bw / 2 - 3, base - g.prom * (base - padT) - 6);
+        ctx.fillText('promised ' + fmt(g.prom), x0 - bw / 2 - 3, 18);
         ctx.fillStyle = c.warn;
-        ctx.fillText('with clumping ' + fmt(g.simv), x0 + bw / 2 + 3, base - g.simv * (base - padT) - 6);
+        ctx.fillText('with clumping ' + fmt(g.simv), x0 + bw / 2 + 3, 34);
       });
       // the hard-prompt ceiling 1 - c
       if (clump > 0) {
