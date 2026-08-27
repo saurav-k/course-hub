@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Classes, lifecycle and archive - Inside Google Cloud</title>
+<meta name="description" content="A Cloud Storage class is a price shape with a minimum storage duration attached, so moving cold data down the tiers only pays when the data stays there.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0401</div>
+  <h1>A storage class is a price shape with a minimum duration attached</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Capability <code>archive-storage</code>. Sourced from
+    <a href="https://cloud.google.com/storage/docs/storage-classes">Google's storage classes documentation</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Four classes - <b>Standard, Nearline, Coldline and Archive</b> - live inside <b>one bucket API</b>, so moving between them changes the bill and not the code.</li>
+      <li>Each class trades a lower storage rate for a higher access cost, and each carries a <b>minimum storage duration</b>. That duration is what turns the trade into a bet.</li>
+      <li><b>Archive</b> is the coldest, meant for data kept for a year or more, and the minimum duration is what makes it the wrong home for anything that might be deleted early.</li>
+      <li><b>Lifecycle rules</b> move objects on rules you write. <b>Autoclass</b> moves them on observed access instead, which is the answer when you do not know the access pattern.</li>
+      <li><b>Bucket Lock and object retention</b> put immutability in the platform rather than in the application, which is what a compliance requirement actually asks for.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous page&lt;br/&gt;the bucket and its&lt;br/&gt;creation-time choices"] --> T["THIS PAGE&lt;br/&gt;what an object costs&lt;br/&gt;as it gets older"]
+  T --> N["What it enables&lt;br/&gt;a retention design that&lt;br/&gt;survives an audit and&lt;br/&gt;a finance review"]
+  W["Module 04&lt;br/&gt;Storage"] -.- T
+    </div>
+    <figcaption>Where this sits. The bucket page fixed where the data lives. This page is about what happens to it over time, which is where most of the money in an object store actually is.
+    <b>Storage cost is dominated by data nobody looks at, so the class policy is usually a larger lever than any decision about the hot path.</b></figcaption>
+  </figure>
+
+  <h2>1. The trade, in one picture</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Schematic showing that as a storage class gets colder the storage rate falls while the access cost and the minimum storage duration rise, across Standard, Nearline, Coldline and Archive.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <polyline class="s-stat thick" points="140,80 290,140 440,185 560,215"/>
+      <polyline class="s-alarm thick" points="140,220 290,180 440,130 560,70"/>
+      <circle class="m-stat" cx="140" cy="80" r="5"/>
+      <circle class="m-stat" cx="290" cy="140" r="5"/>
+      <circle class="m-stat" cx="440" cy="185" r="5"/>
+      <circle class="m-stat" cx="560" cy="215" r="5"/>
+      <circle class="m-alarm" cx="140" cy="220" r="5"/>
+      <circle class="m-alarm" cx="290" cy="180" r="5"/>
+      <circle class="m-alarm" cx="440" cy="130" r="5"/>
+      <circle class="m-alarm" cx="560" cy="70" r="5"/>
+      <text class="ttl" x="70" y="26">Schematic: the two curves that cross</text>
+      <text class="lbl-sm" x="140" y="268" text-anchor="middle">Standard</text>
+      <text class="lbl-sm" x="290" y="268" text-anchor="middle">Nearline</text>
+      <text class="lbl-sm" x="440" y="268" text-anchor="middle">Coldline</text>
+      <text class="lbl-sm" x="560" y="268" text-anchor="middle">Archive</text>
+      <text class="lbl-sm" x="82" y="56">cost</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>cost of keeping the data</span><span><i class="sw-alarm"></i>cost of reading it, and the minimum duration</span></div>
+    <figcaption>Schematic, not measured: it shows the shape of the trade rather than any published price, which is on <a href="https://cloud.google.com/storage/docs/storage-classes">Google's storage classes page</a>. Colder classes cost less to hold and more to touch, and their minimum storage durations grow the same way.
+    <b>The crossing point is what a class decision is really about - the colder class only wins when the data is both large and genuinely untouched for longer than its minimum duration.</b></figcaption>
+  </figure>
+
+  <p>The minimum storage duration is the part that turns this from a rate comparison into a commitment. Data placed in a colder class and deleted before its duration elapses is charged as though it had stayed, so an aggressive lifecycle policy over data that turns out to be short-lived costs more than leaving it alone. <a href="https://cloud.google.com/storage/docs/storage-classes">The storage classes page</a> carries the durations and the access-cost trade for each class, and it is the page a policy should be written against.</p>
+
+  <p><b>Archive</b> is the extreme end of both curves: the lowest storage rate, and a class intended for data retained for a year or more. Nothing about it changes the interface - it is a class inside the same bucket and the same API - which is exactly what makes it easy to apply carelessly.</p>
+
+  <h2>2. Two ways to move an object between classes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Do you know the access pattern?"] --> Y["Yes - it is predictable"]
+  Q --> N["No - or it varies by object"]
+  Y --> LR["Lifecycle rules&lt;br/&gt;you write the conditions&lt;br/&gt;and the platform applies them"]
+  N --> AC["Autoclass&lt;br/&gt;the bucket moves objects&lt;br/&gt;on observed access"]
+  LR --> R1["Cheapest when the rule&lt;br/&gt;matches reality"]
+  AC --> R2["Safer when it does not"]
+    </div>
+    <figcaption>The two mechanisms and the question that separates them. A lifecycle rule encodes a prediction about access. Autoclass observes access instead, and charges for the service of not needing the prediction.
+    <b>Write a lifecycle rule when you can defend the prediction, and use Autoclass when the honest answer is that nobody knows how this data will be read.</b></figcaption>
+  </figure>
+
+  <p>The failure this framing prevents is the confident lifecycle rule. A rule that moves everything to a colder class after thirty days is easy to write and is a bet that nothing will be read afterwards. When it is wrong the cost appears twice - once in retrieval charges, and once in the early-deletion charge if anything is removed before its minimum duration is up.</p>
+
+  <h2>3. Retention that the platform enforces</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Retained: a retention setting is applied
+  Retained --> Adjusted: the setting is changed while it is unlocked
+  Adjusted --> Retained: still changeable
+  Retained --> Locked: Bucket Lock is applied
+  Locked --> Enforced: the platform now enforces the retention
+  Enforced --> [*]
+    </div>
+    <figcaption>Retention before and after locking. Until it is locked, retention is a setting somebody with the right permission can change. Locking is what moves the guarantee from a policy into the platform.
+    <b>An auditor is not asking whether the data is retained - they are asking whether anyone could shorten the retention, and that is the question the lock answers.</b></figcaption>
+  </figure>
+
+  <p>Cloud Storage provides object retention and <b>Bucket Lock</b> as its immutability mechanisms, and they are the platform's answer for a write-once requirement. That matters as a piece of estate-level vocabulary too: Google Cloud has <b>no managed ledger product</b> of the append-only, cryptographically verifiable kind, and this immutability pair is the nearest thing the research behind this course records, together with a transactional database for history that must be queried rather than merely kept.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Three different requirements get called "keep this data" and they want three different mechanisms. <b>Do not lose it by accident</b> is soft delete and versioning. <b>Keep it cheaply because we might need it</b> is a colder class with a lifecycle or Autoclass policy. <b>Prove that nobody could have removed it</b> is retention with a lock. Reaching for the second when the requirement was the third produces a design that is cheap and fails the audit.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A lifecycle rule moves objects to a colder class after a month, and many are deleted soon afterwards. What happens?</div>
+      <button class="q-opt">Nothing unusual - deletion simply stops the storage charges early</button>
+      <button class="q-opt">Early deletion is charged as though the minimum duration had passed</button>
+      <button class="q-opt">The objects are moved back automatically before they are deleted</button>
+      <button class="q-opt">The deletion is refused until the minimum storage duration elapses</button>
+      <div class="q-fb">Colder classes carry a minimum storage duration, and deleting inside it is charged as though the data had stayed. The first option describes what a rate-only comparison would predict. The third invents an automatic reversal. The fourth turns a billing rule into an access control, which retention locking does and storage classes do not.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A team cannot predict how their data will be read, and access varies object by object. What fits?</div>
+      <button class="q-opt">A lifecycle rule tuned to the average age at last access</button>
+      <button class="q-opt">The Archive class, since unpredictable data is rarely read</button>
+      <button class="q-opt">Standard for everything, since any policy would be a guess</button>
+      <button class="q-opt">Autoclass, which moves objects on observed access instead</button>
+      <div class="q-fb">Autoclass exists exactly for the case where the access pattern is unknown or varies. The first option builds a rule on an average that hides the variance. The second is the expensive mistake, since unpredictable is not the same as unread. The third is defensible and gives up the saving entirely.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A regulator asks for evidence that records could not have been deleted early. What satisfies that?</div>
+      <button class="q-opt">Soft delete, which retains deleted objects for a configured window</button>
+      <button class="q-opt">Object versioning, which keeps earlier versions of every object</button>
+      <button class="q-opt">Retention with Bucket Lock, so the platform enforces the period</button>
+      <button class="q-opt">A lifecycle rule that never moves the objects out of their class</button>
+      <div class="q-fb">Locking moves retention from a setting into a platform guarantee, which is what "could not have been deleted" means. The first two are recovery mechanisms and both leave the retention itself changeable. The fourth confuses a class policy with a deletion control entirely.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A finance system writes two kinds of object into one bucket: daily transaction records that regulation says must be kept for seven years and must be provably unalterable, and interim working files that are read heavily for a week and then never again, though sometimes they are deleted after a fortnight.</p>
+      <p><b>Design</b> the class and retention policy for each kind, and <b>name</b> the mistake that a single policy across the bucket would produce.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Handle the two kinds separately from the start. For each one, ask which of the three "keep this data" requirements it actually is.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Classify the transaction records.</b> Seven years and provably unalterable is the retention-with-lock requirement, not a cost requirement. Apply retention and lock it, so nobody with any permission can shorten the period.</li>
+        <li><b>Choose their class.</b> Seven years of untouched data is squarely inside Archive's intended use, and its minimum storage duration is irrelevant because the data is not going anywhere.</li>
+        <li><b>Classify the working files.</b> Heavy reads for a week means Standard while they are hot. The complication is the fortnight deletions: moving them to a colder class after a week can trigger the early-deletion charge on whatever is removed at day fourteen.</li>
+        <li><b>Name the single-policy mistake.</b> One rule across the bucket either archives the working files, which pays early-deletion charges on the ones deleted at a fortnight and retrieval charges on any that are read again, or it leaves the transaction records in Standard, which pays years of hot storage and, worse, leaves them without a lock. Both halves of the bucket lose.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should have used a different mechanism for each kind, and only one of them should involve a lock. If a single lifecycle rule covered both, check the deletion pattern of the working files against the minimum storage duration - that mismatch is the whole trap.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If a class decision is in dispute, ask an agent for the current minimum storage duration and access cost of each class and then do the arithmetic on your own volume. The classes page carries both numbers, and a policy argued without them is an argument about intuitions.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/storage/docs/storage-classes">The storage classes page</a> is the one to keep open while writing a policy: it holds the minimum storage durations and the access-cost trade for each class, which are the two numbers every lifecycle decision turns on and the two most likely to have moved since any course was written.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0400-cloud-storage-the-bucket.html"><span class="dir">&larr; Previous</span><span class="ttl">Cloud Storage and the bucket</span></a>
+    <a class="nxt" href="0402-block-storage.html"><span class="dir">Next &rarr;</span><span class="ttl">Block storage on Compute Engine</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0401 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

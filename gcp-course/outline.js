@@ -75,6 +75,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0304-choosing-a-runtime.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "Cloud Storage and the bucket",
+          "href": "lessons/0400-cloud-storage-the-bucket.html"
+        },
+        {
+          "title": "Classes, lifecycle and archive",
+          "href": "lessons/0401-classes-lifecycle-and-archive.html"
+        },
+        {
+          "title": "Block storage on Compute Engine",
+          "href": "lessons/0402-block-storage.html"
+        },
+        {
+          "title": "Shared filesystems",
+          "href": "lessons/0403-shared-filesystems.html"
+        },
+        {
+          "title": "Where the storage menu stops",
+          "href": "lessons/0404-where-the-storage-menu-stops.html"
+        }
+      ]
     }
   ],
   "extras": []

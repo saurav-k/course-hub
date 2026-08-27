@@ -40,6 +40,16 @@ renumbered.
 | 0303 | Functions and app runtimes | `functions-faas`, `paas-web-runtime`, `static-site-hosting` |
 | 0304 | Choosing a runtime | runtime placement across the five |
 
+**Module 04 - Storage**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0400 | Cloud Storage and the bucket | `object-storage`, `object-storage-highperf` |
+| 0401 | Classes, lifecycle and archive | `archive-storage` |
+| 0402 | Block storage on Compute Engine | `block-storage` |
+| 0403 | Shared filesystems | `file-storage` |
+| 0404 | Where the storage menu stops | `hybrid-storage-gateway`, `object-storage-tables`, `bulk-transfer-appliance`, `online-transfer` |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -74,8 +84,10 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **Modules 05 to 14 above**, none started. Each module owns its own hundred of the
+  `MMxx` sequence, so a later contributor takes the next free number inside its module
+  rather than appending to the end of the course; nothing already published is
+  renumbered or renamed.
 - **Reference: glossary of GCP terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
 

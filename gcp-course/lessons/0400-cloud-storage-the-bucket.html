@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cloud Storage and the bucket - Inside Google Cloud</title>
+<meta name="description" content="A Cloud Storage bucket takes a name from one namespace shared by every Google Cloud customer, and its location, access mode and namespace mode are all decided at creation.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0400</div>
+  <h1>A bucket names itself out of one namespace shared by every customer</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Capabilities <code>object-storage</code> and <code>object-storage-highperf</code>. Sourced from
+    <a href="https://cloud.google.com/storage/docs/introduction">Google's Cloud Storage introduction</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Bucket names are globally unique across all of Google Cloud</b>, so the name you want is competing with every other customer's, not only with your own organisation's.</li>
+      <li>The object model is buckets, objects, <b>folders</b> and <b>managed folders</b>, with a <b>hierarchical namespace</b> mode for workloads that behave like a filesystem.</li>
+      <li><b>Uniform bucket-level access</b> is how access is expressed at the bucket rather than object by object, and the bucket also speaks an <b>S3-compatible</b> interface.</li>
+      <li><b>Soft delete is on by default with a seven-day window</b>, which is a real safety net and also a real cost you did not ask for.</li>
+      <li>A single object tops out at <b>5 TiB</b>, and a <b>Rapid</b> zonal class exists for high-performance co-located workloads - in preview, so check its stage before designing on it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Module 03&lt;br/&gt;runtimes, from a cluster&lt;br/&gt;to a folder of files"] --> T["THIS PAGE&lt;br/&gt;where the bytes&lt;br/&gt;actually live"]
+  T --> N["What it enables&lt;br/&gt;classes and archive,&lt;br/&gt;then block and file&lt;br/&gt;storage beside them"]
+  W["Module 04&lt;br/&gt;Storage"] -.- T
+    </div>
+    <figcaption>Where this sits. Every runtime in the previous module is stateless by itself, so this module is where its state goes, and the object store is the default answer on this platform.
+    <b>Almost every later module reads or writes a bucket, so the properties chosen here are inherited by analytics, backup and machine learning designs alike.</b></figcaption>
+  </figure>
+
+  <h2>1. One namespace for everybody</h2>
+
+  <p>Bucket names live in a single namespace spanning all of Google Cloud. That has two consequences worth internalising before the first bucket is created. Obvious names are gone, so a naming convention that includes something specific to your organisation is not a nicety. And a bucket name is a public fact: choosing one that encodes a customer name or an unreleased project publishes that word into a namespace anybody can probe.</p>
+
+  <h2>2. What is inside a bucket</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  B["Bucket&lt;br/&gt;globally unique name&lt;br/&gt;location and default class&lt;br/&gt;set at creation"] --> O["Objects&lt;br/&gt;up to 5 TiB each"]
+  B --> F["Folders&lt;br/&gt;a path convention,&lt;br/&gt;or real structure under&lt;br/&gt;hierarchical namespace"]
+  B --> MF["Managed folders&lt;br/&gt;a place to attach&lt;br/&gt;access control below&lt;br/&gt;the bucket"]
+  B -.- UB["Uniform bucket-level access&lt;br/&gt;access decided at the bucket"]
+  B -.- S3["S3-compatible interface&lt;br/&gt;for tools that speak it"]
+    </div>
+    <figcaption>The bucket and what hangs off it. Folders and managed folders are different objects: one organises, and the other is a place access control can attach without going object by object.
+    <b>Hierarchical namespace turns folder-like naming into real structure, which matters for lake and analytics workloads whose access patterns assume a filesystem rather than a flat key space.</b></figcaption>
+  </figure>
+
+  <p>The 5 TiB ceiling on a single object is worth holding as a design fact rather than a trivia item. Any pipeline that produces one growing artefact - a database dump, a media master, a model checkpoint set written as one file - eventually meets it, and the fix is a chunking decision that is much cheaper to make before the data exists.</p>
+
+  <h2>3. The default that quietly protects you</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Live: the object is written
+  Live --> SoftDeleted: deleted, but retained for seven days by default
+  SoftDeleted --> Live: restored within the window
+  SoftDeleted --> Gone: the window expires
+  Gone --> [*]
+    </div>
+    <figcaption>Soft delete, which is on by default with a seven-day retention window. A deletion is a state change rather than an erasure, so an accidental delete is recoverable for a week without anyone having configured anything.
+    <b>The same default means deleted data keeps costing money for seven days, so a workload that writes and deletes at high volume is paying for a safety net it may not need.</b></figcaption>
+  </figure>
+
+  <p>That is the honest shape of the feature: a strong default for the common case and a surprise on the bill for the uncommon one. A short-lived scratch bucket used by a pipeline that churns objects is exactly the case where the default deserves a second look.</p>
+
+  <h2>4. Where a bucket sits, and what a second copy costs</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as A writer
+  participant R1 as First region
+  participant R2 as Second region
+  A->>R1: write an object
+  R1-->>A: the write is acknowledged
+  R1->>R2: replicate asynchronously
+  Note over R1,R2: turbo replication narrows this window&lt;br/&gt;to a recovery point of about fifteen minutes
+  R2-->>R1: the second copy exists
+    </div>
+    <figcaption>A dual-region bucket and the gap that defines its recovery point. Replication happens after the write is acknowledged, so there is always a window in which the second region does not yet hold the newest objects, and turbo replication is what narrows that window rather than removing it.
+    <b>A recovery point of about fifteen minutes is a promise about the size of the gap, not a claim that there is none - so a design that cannot lose fifteen minutes of writes needs something other than bucket replication.</b></figcaption>
+  </figure>
+
+  <p>The location and the default storage class are both fixed at bucket creation, which makes bucket creation a design decision rather than a setup step. <a href="https://cloud.google.com/storage/docs/availability-durability">Google's availability and durability page</a> is the reference for what each location shape promises, and it is the page to read when a requirement is stated as a number.</p>
+
+  <div class="callout warn">
+  A newer zonal class exists: <a href="https://cloud.google.com/storage/docs/rapid/rapid-bucket">Rapid storage</a>, a high-performance object class with hierarchical namespace and streaming appends, meant for analytics and machine-learning work co-located with the data. The research behind this course recorded it as <b>preview</b> and explicitly flagged that its stage should be re-checked before it is taught as settled. Read it as a direction the product is moving in rather than as something to design a production system around today.</div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Five properties of a bucket are chosen at creation and are awkward or impossible to change afterwards: <b>the name</b>, <b>the location</b>, <b>the default storage class</b>, <b>whether the namespace is hierarchical</b>, and <b>whether access is uniform at the bucket level</b>. That is why bucket creation deserves a review and a two-minute conversation, and why a bucket created by a script during a demonstration tends to become a permanent fixture with the wrong properties.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A bucket creation fails because the name is taken, although your organisation has no such bucket. Why?</div>
+      <button class="q-opt">Bucket names are unique within a region across all customers</button>
+      <button class="q-opt">Bucket names are reserved by the billing account for a period</button>
+      <button class="q-opt">Bucket names are unique across the whole of Google Cloud</button>
+      <button class="q-opt">Bucket names are unique within a folder of the resource tree</button>
+      <div class="q-fb">The namespace is global across all of Google Cloud, so someone else holds the name. The first option narrows a global namespace to a regional one, which is the most plausible wrong answer. The second and fourth attach the namespace to billing or to the hierarchy, neither of which scopes it.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A pipeline writes and deletes many temporary objects, and its storage bill is higher than the data it holds. What is worth checking?</div>
+      <button class="q-opt">Soft delete, which retains deleted objects for seven days by default</button>
+      <button class="q-opt">Object versioning, which is switched on for every bucket by default</button>
+      <button class="q-opt">The default storage class, which cannot be changed after creation</button>
+      <button class="q-opt">The bucket location, which bills replication into a second region</button>
+      <div class="q-fb">Soft delete is on by default with a seven-day window, so deleted objects keep costing for a week - exactly this symptom. The second names a real feature and gets its default wrong. The third is true about the default class and does not explain a bill larger than the live data. The fourth applies only to a dual-region bucket.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A requirement says no more than a few minutes of writes may be lost if a region fails. Does a dual-region bucket satisfy it?</div>
+      <button class="q-opt">Yes, because replication is synchronous once turbo is enabled</button>
+      <button class="q-opt">Yes, because the write is not acknowledged until both copies</button>
+      <button class="q-opt">No, because a bucket cannot be replicated across two regions</button>
+      <button class="q-opt">No, because turbo replication is a recovery point near fifteen minutes</button>
+      <div class="q-fb">Replication happens after acknowledgement, and turbo replication narrows the window to a recovery point of roughly fifteen minutes rather than removing it. The first two claim a synchronous write path the documentation does not. The third denies a capability that plainly exists, which is the failure mode this course works hardest to avoid.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A team is about to create the bucket that will hold a product's uploaded media for the next several years. Someone runs a command with a short obvious name, in the default location, and moves on.</p>
+      <p><b>List</b> the properties that decision just fixed, and <b>say</b> for each one what going back would actually involve.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>There are five, and every one of them is set at creation. For each, ask whether the fix is a setting, a copy, or a new name that other systems already reference.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The name.</b> Fixed, and taken from a namespace everyone shares. Changing it means a new bucket and updating every reference anything has stored - including references in other people's systems if the bucket was ever shared.</li>
+        <li><b>The location.</b> Fixed at creation, so moving means copying the data to a new bucket in the right place and cutting over. For years of media that is a transfer project rather than a setting.</li>
+        <li><b>The default storage class.</b> Fixed at creation. Existing objects can be managed by lifecycle rules, but the bucket's default follows the bucket.</li>
+        <li><b>The namespace mode and the access mode.</b> Whether the namespace is hierarchical and whether access is uniform at the bucket level are both creation-time choices, and both change how every consumer addresses and is authorised against the data. Retrofitting either is a migration with an audit attached.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Every item on your list should have a remedy that is a copy or a migration, and none of them should be a checkbox. If any came out as a simple setting change, check it against the creation-time list - the reason bucket creation deserves a review is that none of the five is cheap afterwards.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the creation-time properties are hard to remember, ask an agent to produce the command that creates a bucket with all five stated explicitly. Writing them down once, even at defaults, is what turns them from invisible into decisions.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/storage/docs/introduction">The Cloud Storage introduction</a> carries the object model, the namespace modes, the access modes and the interoperability surface in one place. Read it beside <a href="https://cloud.google.com/storage/quotas">the quotas and limits page</a>, which is where the object-size ceiling and the other hard numbers live and where they will change if they ever do.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0304-choosing-a-runtime.html"><span class="dir">&larr; Previous</span><span class="ttl">Choosing a runtime</span></a>
+    <a class="nxt" href="0401-classes-lifecycle-and-archive.html"><span class="dir">Next &rarr;</span><span class="ttl">Classes, lifecycle and archive</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0400 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
