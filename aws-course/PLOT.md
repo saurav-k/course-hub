@@ -104,6 +104,15 @@ is wrong and it gets fixed before anything new is added.
 | 1103 | Posture and org-wide enforcement | working |
 | 1104 | Three decisions above the network | working |
 
+### Module 12 - Delivery and integration
+
+| Lesson | Title | Rung |
+| 1200 | Describing infrastructure | working |
+| 1201 | The pipeline | working |
+| 1202 | Shipping change gradually | working |
+| 1203 | Queues, topics and buses | working |
+| 1204 | Workflows and API surfaces | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -142,7 +151,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 12 to 14 above**, none started. New numbers go at the end of the
+- **Modules 13 and 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

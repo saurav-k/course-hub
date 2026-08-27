@@ -287,6 +287,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1104-three-decisions-above-the-network.html"
         }
       ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Describing infrastructure",
+          "href": "lessons/1200-describing-infrastructure.html"
+        },
+        {
+          "title": "The pipeline",
+          "href": "lessons/1201-the-pipeline.html"
+        },
+        {
+          "title": "Shipping change gradually",
+          "href": "lessons/1202-shipping-change-gradually.html"
+        },
+        {
+          "title": "Queues, topics and buses",
+          "href": "lessons/1203-queues-topics-and-buses.html"
+        },
+        {
+          "title": "Workflows and API surfaces",
+          "href": "lessons/1204-workflows-and-api-surfaces.html"
+        }
+      ]
     }
   ],
   "extras": []

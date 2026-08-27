@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The pipeline - Inside AWS</title>
+<meta name="description" content="A pipeline carries one artefact across account boundaries without carrying a credential, and the connection to a source host is what removes the stored secret.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Delivery and integration &middot; Lesson 1201</div>
+  <h1>A pipeline moves one artefact across accounts and no credentials at all</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>cicd-pipeline</code> and <code>artifact-registry</code>.
+    &middot; <a href="https://docs.aws.amazon.com/codepipeline/latest/userguide/welcome-introducing.html">AWS CodePipeline</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>AWS's own reference sequence is short: <b>version control, orchestration, build, deploy, monitor</b> - four services and the telemetry of module 10.</li>
+      <li><b>CodeConnections</b> attaches a pipeline to GitHub, GitLab or Bitbucket <b>without storing a secret</b>, which is what lets a third-party source host slot in cleanly.</li>
+      <li><b>CodeBuild</b> runs a buildspec and produces artefacts; <b>CodeDeploy</b> rolls them out; the orchestrator's job is to sequence, gate and promote.</li>
+      <li>The production pattern is <b>an account per environment</b>, with the pipeline assuming a role into each - so promotion crosses an account line rather than a folder.</li>
+      <li>What it costs: a package registry caches upstream packages, and <b>a build still depends on upstream availability</b> unless versions are pinned - and its build tokens expire in twelve hours by default.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1200&lt;br/&gt;templates that describe&lt;br/&gt;the infrastructure"] --> T["THIS PAGE&lt;br/&gt;what runs them, and how&lt;br/&gt;an artefact reaches production"]
+  T --> A["Shipping gradually&lt;br/&gt;lesson 1202"]
+  T --> B["Decoupling the pieces&lt;br/&gt;lesson 1203"]
+  W["Module 12&lt;br/&gt;delivery and integration"] -.- T
+    </div>
+    <figcaption>Where this sits. A template on a laptop is not a delivery mechanism. This page is the machinery that applies it repeatedly, with the same result, from a place that is auditable and that nobody has to hold credentials for.
+    <b>The account-per-environment pattern of module 09 is what makes a pipeline interesting: promotion is a cross-account operation, not a directory change.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: the canonical path</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  S["Version control&lt;br/&gt;the native repository, or GitHub,&lt;br/&gt;GitLab or Bitbucket"] --> C["A connection&lt;br/&gt;no stored secret"]
+  C --> O["CodePipeline&lt;br/&gt;stages, gates and promotion"]
+  O --> B["CodeBuild&lt;br/&gt;a buildspec - compile, test, package"]
+  B --> R["Artefacts, and packages in a registry"]
+  R --> D["CodeDeploy&lt;br/&gt;roll it out"]
+  D --> M["Monitor - the alarms of lesson 1003"]
+  M --> O
+    </div>
+    <figcaption>The reference sequence, with the connection drawn as its own step because that is where a credential would otherwise live. The loop back from monitoring is not decoration: alarm state is what an automatic rollback in the next lesson reads.
+    <b>Third-party version control does not force a third-party pipeline, and a third-party pipeline does not force third-party deployment - each stage is chosen separately.</b></figcaption>
+  </figure>
+
+  <h2>2. Promotion across an account line</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Built once, in the tooling account" as B
+  state "Deployed to the development account" as D
+  state "Deployed to the test account" as T
+  state "Waiting for a human approval" as A
+  state "Deployed to the production account" as P
+  [*] --> B
+  B --> D: the pipeline assumes a role there
+  D --> T: automated tests pass
+  T --> A
+  A --> P: approved
+  A --> T: rejected - fix and rebuild
+    </div>
+    <figcaption>One artefact, several accounts, and a role assumption at every boundary. Building once and promoting the same artefact is what makes the test result meaningful - a rebuild per environment tests something slightly different each time.
+    <b>Every arrow here crosses an account wall, which is why the pipeline's own permissions are among the most carefully written in the estate.</b></figcaption>
+  </figure>
+
+  <p>Two mechanisms scale this pattern. <b>StackSets</b> from lesson 1200 deploy one template across many accounts at once, and <b>CDK Pipelines</b> arrange stages into waves that deploy in parallel where the dependency graph allows. The account factory of lesson 0902 is what supplies the accounts these pipelines deploy into.</p>
+
+  <h2>3. The registry, and the dependency it does not remove</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant B as A build
+  participant D as The package domain
+  participant U as A public repository
+  B->>D: request a package, with a token valid for twelve hours by default
+  D->>D: already cached - serve it
+  D->>U: not cached - fetch it upstream, then cache
+  U-->>D: the package
+  D-->>B: the package
+  Note over D,U: a cache miss on a day the upstream is unavailable is still a failed build
+    </div>
+    <figcaption>What a managed package registry does and does not buy. Upstream packages cache into the domain, private packages are hosted alongside them, and container images live in the registry of lesson 0302 rather than here (<a href="https://aws.amazon.com/codeartifact/">CodeArtifact</a>).
+    <b>Caching is not vendoring: pin versions, so that every build asks for something the domain has already seen.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  The native source-control service has a <b>status history worth knowing</b>: it was closed to new customers and later reopened. Any material that says it is unavailable, or that assumes it is the default, may be describing a different point in that history - check the service's own document history before designing around either claim.</div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A pipeline's real product is not automation, it is <b>a single path to production that leaves a record and holds no secrets</b>. Judge a delivery design by two questions: how many credentials exist anywhere in it, and how many ways there are to change production. The good answers are zero and one.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does a pipeline read from a third-party source host without a stored token?</div>
+      <button class="q-opt">A token is stored in the secret manager and rotated</button>
+      <button class="q-opt">The build role is federated into the source host</button>
+      <button class="q-opt">A connection resource holds the authorisation instead</button>
+      <button class="q-opt">The repository is mirrored into a native repository</button>
+      <div class="q-fb">A connection is the mechanism, and it exists precisely so no secret is stored. Storing and rotating a token is what the connection replaces, no role is federated into the source host, and mirroring would be an additional moving part rather than the supported path.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why build once and promote the same artefact rather than rebuilding per environment?</div>
+      <button class="q-opt">Because a rebuild tests something slightly different each time</button>
+      <button class="q-opt">Because build minutes are charged separately per account</button>
+      <button class="q-opt">Because artefacts cannot be copied between two accounts</button>
+      <button class="q-opt">Because the deployment service requires a single artefact</button>
+      <div class="q-fb">Rebuilding produces a different artefact, so the tests that passed were not run against what reaches production. Cost is a minor consideration, artefacts can be shared across accounts, and the deployment service does not impose this.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A build fails when a public repository is unavailable, despite a caching package registry. Why?</div>
+      <button class="q-opt">Cached packages expire when their tokens do</button>
+      <button class="q-opt">The requested version had never been cached</button>
+      <button class="q-opt">Caching applies to private packages only</button>
+      <button class="q-opt">The registry revalidates upstream on each request</button>
+      <div class="q-fb">A cache holds what it has already fetched, so an unpinned build asking for a version the domain has never seen still reaches upstream. Tokens govern build authentication rather than cache lifetime, upstream caching is exactly what the registry does for public packages, and it does not revalidate every request.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A team deploys by running a script from a laptop, using a long-lived access key, against a single account that holds development and production side by side. Their source is on GitHub. Builds occasionally fail because a public package repository is unreachable, and twice a change intended for development reached production.</p>
+      <p><b>Design the delivery path</b>, naming what fixes each of the four problems, and say which fix is the one that makes the others meaningful.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Four problems: a credential, a boundary, an unreliable dependency, and a lack of a single path. One of them has to be fixed first or the others cannot be expressed.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The access key - remove it with a pipeline.</b> The pipeline runs with a role rather than a key, and nobody needs deployment permissions on a laptop at all. Attach the GitHub source through a connection so the source side stores no secret either.</li>
+        <li><b>Development beside production - separate accounts.</b> This is the fix that makes the rest meaningful: while both environments share an account, no permission boundary can prevent a development change reaching production, and no approval gate is more than a convention.</li>
+        <li><b>The accidental production deployments - one path with a gate.</b> With separate accounts, promotion into production is a stage that assumes a role there, behind a manual approval. There is then exactly one way to change production, and it leaves a record.</li>
+        <li><b>The flaky builds - a package domain and pinned versions.</b> Route builds through a managed registry so upstream packages are cached, and pin versions so every build asks for something already seen. Caching alone would not have fixed it, because an unpinned version can always be one the domain has never fetched.</li>
+        <li><b>Say which fix is foundational.</b> The account split. Every other improvement - the role, the gate, the single path - is expressible only once development and production are different accounts, which is the module 09 argument arriving in a delivery context.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your design should contain zero stored credentials and exactly one route to production. If the account split appeared last in your answer, reconsider what an approval gate means when both environments share one set of permissions.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1202-shipping-change-gradually.html">Shipping change gradually</a></b> takes the last stage of this pipeline and slows it down deliberately.</li>
+    <li>Lesson 0302 covered <a href="0302-the-registry-that-feeds-them.html">the container registry</a> that holds images rather than packages.</li>
+    <li>Lesson 0900 covered <a href="0900-shaping-the-tree.html">the account layout</a> that makes promotion a cross-account operation.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the single-path idea sounds obvious, ask an agent to enumerate every way production could currently be changed in one real estate, including the ones nobody would admit to.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/codepipeline/latest/userguide/welcome-introducing.html">Introducing CodePipeline</a> sets out the stage-and-action model that everything else on this page hangs off, and it is the shortest route to seeing where approvals and cross-account roles actually attach.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1200-describing-infrastructure.html"><span class="dir">&larr; Previous</span><span class="ttl">Describing infrastructure</span></a>
+    <a class="nxt" href="1202-shipping-change-gradually.html"><span class="dir">Next &rarr;</span><span class="ttl">Shipping change gradually</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1201 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
