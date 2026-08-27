@@ -189,6 +189,34 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/azure-vmware/introduction>
 - <https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/connectivity-to-other-providers-oci>
 
+**Module 08 - Identity and access**
+
+- <https://learn.microsoft.com/en-us/entra/fundamentals/whatis>
+- <https://learn.microsoft.com/en-us/entra/identity/enterprise-apps/what-is-application-management>
+- <https://learn.microsoft.com/en-us/entra/identity/domain-services/overview>
+- <https://learn.microsoft.com/en-us/entra/external-id/customers/overview-customers-ciam>
+- <https://learn.microsoft.com/en-us/entra/external-id/customers/concept-authentication-methods-customers>
+- <https://learn.microsoft.com/en-us/azure/active-directory-b2c/faq>
+- <https://learn.microsoft.com/en-us/azure/role-based-access-control/overview>
+- <https://learn.microsoft.com/en-us/azure/role-based-access-control/role-definitions>
+- <https://learn.microsoft.com/en-us/azure/role-based-access-control/deny-assignments>
+- <https://learn.microsoft.com/en-us/entra/identity/conditional-access/overview>
+- <https://learn.microsoft.com/en-us/entra/identity/authentication/concept-mfa-howitworks>
+- <https://learn.microsoft.com/en-us/entra/id-governance/privileged-identity-management/pim-configure>
+- <https://learn.microsoft.com/en-us/entra/id-governance/identity-governance-overview>
+- <https://learn.microsoft.com/en-us/entra/identity/devices/howto-vm-sign-in-azure-ad-linux>
+- <https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview>
+- <https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation>
+- <https://learn.microsoft.com/en-us/entra/workload-id/workload-identities-overview>
+- <https://learn.microsoft.com/en-us/azure/lighthouse/concepts/cross-tenant-management-experience>
+- <https://learn.microsoft.com/en-us/entra/identity-platform/configurable-token-lifetimes>
+- <https://learn.microsoft.com/en-us/entra/agent-id/what-is-microsoft-entra-agent-id>
+- <https://learn.microsoft.com/en-us/azure/key-vault/general/overview>
+- <https://learn.microsoft.com/en-us/azure/key-vault/managed-hsm/>
+- <https://learn.microsoft.com/en-us/azure/security/fundamentals/encryption-atrest>
+- <https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-driver>
+- <https://learn.microsoft.com/en-us/azure/app-service/configure-ssl-certificate>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
@@ -255,6 +283,13 @@ them was filled from memory.
 - **The smallest permitted subnet size.** The inventory records the five-address
   reservation and no minimum prefix length, so lesson 0700's chart shows the
   arithmetic for several sizes and asserts no floor.
+- **Which services stop serving immediately when a customer-managed key is
+  withdrawn, and which continue briefly.** The inventory records that the semantics
+  differ per service and says to verify each one, so lesson 0804 teaches the lever
+  and names no service-by-service behaviour.
+- **Named licence tier boundaries beyond P1, P2 and workload-identities premium.**
+  The inventory records those three gates and no price or feature matrix, so lesson
+  0802 names the gates and quotes nothing else.
 - **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
   links one and no lesson spine carries a Glossary entry.
 

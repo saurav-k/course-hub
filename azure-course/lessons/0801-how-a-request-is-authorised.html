@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a request is authorised - Inside Azure</title>
+<meta name="description" content="Azure role-based access control is purely additive for customers: a deny assignment short-circuits everything, assignments union, NotActions subtract inside one definition, and conditions decide last.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Identity and access &middot; Lesson 0801</div>
+  <h1>Authorisation is additive, and the only subtraction belongs to the platform</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>identity-workforce</code>, rows <code>iam-roles</code> and <code>iam-policy-language</code>, with the recorded absence <code>permission-boundary</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/role-based-access-control/overview">Azure RBAC</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>deny assignment short-circuits everything</b>. If one matches, the request is blocked before any role assignment is considered - and <b>customers cannot create them</b>.</li>
+      <li>Role assignments are <b>purely additive</b>. Overlapping assignments union their permissions, and no assignment ever takes a permission away from another.</li>
+      <li>Subtraction exists only <b>inside one role definition</b>: effective permissions are Actions minus NotActions, and the same for the data plane.</li>
+      <li>An assignment may carry <b>conditions</b>, and those are evaluated after the permission is found rather than before.</li>
+      <li>Azure has <b>no permission-boundary object</b>. Three narrower tools come close, and each of them is narrower in a different way.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The principal and the tenant&lt;br/&gt;lesson 0800"] --> T["THIS PAGE&lt;br/&gt;what the platform does&lt;br/&gt;when that principal asks"]
+  T --> A["What is demanded at sign-in&lt;br/&gt;lesson 0802"]
+  T --> B["Guardrails expressed as policy&lt;br/&gt;module 09"]
+  W["Module 08&lt;br/&gt;identity and access"] -.- T
+    </div>
+    <figcaption>Where this sits. Lesson 0100 said every request goes through one control plane and that the control plane authorises before it acts. This page is that authorisation, in order, and it is the page module 09 builds its guardrails on top of.
+    <b>The order matters more than the vocabulary: two of the five steps can only ever say no, and knowing which two is what makes a design predictable.</b></figcaption>
+  </figure>
+
+  <h2>The waterfall</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  TOK["A token, carrying the principal&lt;br/&gt;and its transitive group memberships"] --> ARM["The control plane gathers every role assignment&lt;br/&gt;and every deny assignment for the target"]
+  ARM --> DA{"Does a deny&lt;br/&gt;assignment match"}
+  DA -->|"yes"| NO1["Blocked immediately&lt;br/&gt;- no role assignment is consulted"]
+  DA -->|"no"| UN["Union every applicable role assignment&lt;br/&gt;- overlapping assignments never subtract"]
+  UN --> EF["Compute effective permissions inside each definition&lt;br/&gt;Actions minus NotActions, through wildcards"]
+  EF --> COV{"Is the requested&lt;br/&gt;action covered"}
+  COV -->|"no"| NO2["Denied"]
+  COV -->|"yes"| CO{"Does the assignment&lt;br/&gt;carry conditions"}
+  CO -->|"conditions fail"| NO3["Denied"]
+  CO -->|"none, or they pass"| YES["Allowed"]
+    </div>
+    <figcaption>The documented sequence, compressed. Two properties do all the work. The first is that <b>the deny check comes before anything additive</b>, so it cannot be out-voted. The second is that the union step has no negative form: a second assignment can only ever grant more.
+    <b>If you want a principal to lose a permission on Azure, you remove an assignment - there is no rule you can add that takes one away.</b></figcaption>
+  </figure>
+
+  <div class="math">
+    effective = (Actions &minus; NotActions), and separately (DataActions &minus; NotDataActions)
+    <span class="gloss">Read as: within one role definition, the permissions that actually apply are those listed in <i>Actions</i> with any listed in <i>NotActions</i> removed. The control plane and the data plane are computed the same way and kept separate, and every list is matched through wildcards.</span>
+  </div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Subtraction is <b>inside a definition, not across assignments</b>. A NotAction narrows the role it belongs to and says nothing about any other role the principal holds. So a principal assigned a narrowed role and a broad role has the broad role's permissions, and the narrowing achieved nothing at all - which is the most common way a carefully written custom role turns out to do nothing.</div>
+
+  <h2>The subtraction the platform keeps for itself</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant O as An Owner
+  participant ARM as The control plane
+  participant DA as A deny assignment
+  participant R as The resource
+  Note over DA: created by Azure itself - today mainly by a deployment stack&#39;s deny settings
+  O->>ARM: delete the resource
+  ARM->>DA: is there a matching deny assignment
+  DA-->>ARM: yes - write and delete are denied here
+  ARM-->>O: blocked
+  Note over O,R: being an Owner does not help - the deny check happens first
+    </div>
+    <figcaption>What a deny assignment feels like from the inside. They are <b>not customer-creatable</b>: Azure creates them, and today the main way one appears is a deployment stack configured to deny write and delete on what it manages. Their properties are worth knowing because they explain the exceptions - a deny can be set not to apply to child scopes, can exclude named principals, and can be expressed against everyone in the directory.
+    <b>This is the only mechanism on Azure that stops an Owner, which is why deployment stacks are the tool module 12 reaches for when a resource must survive its own administrators.</b></figcaption>
+  </figure>
+
+  <h2>What a role definition is, and where custom ones bite</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  RD["A role definition&lt;br/&gt;a set of permissions, in JSON"] --> A1["Actions and NotActions&lt;br/&gt;the control plane"]
+  RD --> A2["DataActions and NotDataActions&lt;br/&gt;the data plane"]
+  RD --> AS["Assignable scopes&lt;br/&gt;where this definition may be used"]
+  RA["An assignment"] --> P["a principal"]
+  RA --> RD
+  RA --> SC["a scope on the ladder from lesson 0101"]
+  AS --> TRAP1["Move a subscription out from under the management group&lt;br/&gt;that defines a custom role and the move fails"]
+  A2 --> TRAP2["A custom role carrying DataActions&lt;br/&gt;cannot be assigned at management-group scope"]
+    </div>
+    <figcaption>An assignment is three things - a principal, a definition and a scope - and the definition carries its own list of scopes it may be used in. That list is what turns a custom role into an obstacle later: it binds the definition to a place in the hierarchy, so moving a subscription out from under that place is refused rather than silently broken.
+    <b>Custom roles are cheap to write and expensive to relocate, so decide where a definition lives before deciding what it contains.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  <b>There is no permission-boundary object on Azure</b> - nothing that constrains what grants an administrator may make. Three tools come close and each falls short differently: <b>platform-created deny assignments</b> stop actions but you cannot author them; the <b>DenyAction</b> policy effect blocks specific operations but is a policy rather than a limit on delegation; and <b>NotActions</b> narrow one definition and nothing else. A design that assumes a boundary exists will build on one of the three and discover the gap at the wrong moment.</div>
+
+  <h2>Two systems that answer after this one</h2>
+
+  <p>Azure Policy evaluates <b>independently of role-based access control</b>, so a fully authorised create or update is still refused if the resulting resource breaks a rule, and the <b>DenyAction</b> effect blocks operations such as deletion regardless of what the caller was granted. Resource locks sit outside role-based access control as well. Ordering those subsystems after the waterfall above is a <b>teaching sequence rather than a documented one</b>: the steps inside the waterfall are documented platform behaviour, and the arrangement of the surrounding systems is this course's way of sequencing the material. Module 09 takes policy properly.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A principal holds a broad role and a custom role whose NotActions exclude deletion. Can it delete?</div>
+      <button class="q-opt">No, because a NotAction in any held role removes that permission</button>
+      <button class="q-opt">No, because the more specific of the two definitions takes effect</button>
+      <button class="q-opt">Only after the conditions on the broad assignment are evaluated</button>
+      <button class="q-opt">Yes, because NotActions narrow one definition and nothing else</button>
+      <div class="q-fb">Subtraction is internal to a definition, so the broad role still grants deletion and the union includes it. The first two options both treat NotActions as if they acted across assignments, which is exactly the misconception. The third is a real step, but conditions refine an assignment rather than reintroducing subtraction.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which statement about deny assignments is correct?</div>
+      <button class="q-opt">They are authored by administrators to constrain other administrators</button>
+      <button class="q-opt">They are created by Azure, and they block before assignments are read</button>
+      <button class="q-opt">They are evaluated last, so an Owner assignment overrides them</button>
+      <button class="q-opt">They are role definitions whose Actions list is inverted by the platform</button>
+      <div class="q-fb">They are platform-created and short-circuit the evaluation. The first option describes the permission boundary Azure does not have. The third inverts the order that gives them their power. The fourth confuses them with a role definition, which they are not.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A subscription cannot be moved out from under a management group. What is a documented cause?</div>
+      <button class="q-opt">A deny assignment on the subscription blocks every management operation</button>
+      <button class="q-opt">A policy assignment at the target scope refuses subscriptions of that type</button>
+      <button class="q-opt">A custom role definition's assignable scopes point at the current parent</button>
+      <button class="q-opt">A resource lock on a resource group inside it prevents the whole move</button>
+      <div class="q-fb">A custom role's assignable scopes bind it to a place in the tree, and moving out from under that place breaks the path and errors. The other three describe real mechanisms that block other things - none of them is the documented cause of this specific failure.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A platform team is asked to guarantee three things. Subscription owners must not be able to delete a set of shared networking resources. A team of contractors must be able to do everything an Owner can except assign roles. And a delegated administrator must be prevented from granting anybody more access than the administrator holds themselves. The team proposes a custom role with NotActions for the second, and says the first and third are "the same problem".</p>
+      <p><b>Assess it</b>: work each requirement through the waterfall, say which are achievable and how, and say plainly which one is not.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For each requirement, ask which step of the waterfall would have to do the work. Two of them need a step that can say no; one of them needs a step that does not exist.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Work the first requirement.</b> Stopping an Owner needs the deny check, because everything after it is additive and an Owner's assignment already covers deletion. Deny assignments are not customer-creatable, so the achievable route is a mechanism that causes Azure to create one - a deployment stack with deny settings on the managed resources.</li>
+        <li><b>Work the second requirement.</b> A custom role with Actions covering the Owner surface and NotActions excluding role assignment does express this, and it works <b>only</b> if the contractors hold no other assignment. Any second assignment unions in and can restore what the NotActions removed.</li>
+        <li><b>State the condition the proposal missed.</b> So the second requirement is achievable, but as a statement about the contractors' <b>whole</b> set of assignments rather than about the custom role. That is an operational commitment, not a definition.</li>
+        <li><b>Work the third requirement.</b> Limiting what grants an administrator may make is a permission boundary, and Azure has no such object. Deny assignments cannot be authored, DenyAction blocks named operations rather than constraining delegation, and NotActions narrow one definition. None of the three is a boundary.</li>
+        <li><b>Correct the team's claim.</b> The first and third are not the same problem. The first is about actions on resources and is reachable through a platform-created deny. The third is about the power to grant, and there is nothing on the platform that expresses it.</li>
+        <li><b>Say what to do about the third.</b> Since it cannot be enforced by the authorisation system, it moves to a different control: who holds User Access Administrator at all, how that is granted, and detection of new assignments through the control-plane record that module 10 covers.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one of the three should be impossible as stated, and your answer to the second should include a condition about other assignments. If the custom role alone was declared sufficient, the additive union step was skipped.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0802-what-is-demanded-at-sign-in.html">what is demanded at sign-in</a></b> moves one step earlier, to the conditions a principal must meet before it holds a usable token at all.</li>
+    <li><b>Lesson 0101</b> is where the scope ladder was built, and an assignment's scope is a rung on exactly that ladder.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If additive-only still feels like a restriction rather than a design, ask an agent to describe what an estate would need to reason about if assignments could subtract from one another. The answer is why the platform chose this, and why the deny mechanism is kept out of customers' hands.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/role-based-access-control/overview">Azure RBAC overview</a> and then <a href="https://learn.microsoft.com/en-us/azure/role-based-access-control/deny-assignments">deny assignments</a>. The second is short and is the page that explains why the first is safe to be purely additive.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. The ordering of policy and locks relative to the waterfall is labelled in the prose as a teaching sequence rather than documented behaviour.</p>
+
+  <div class="pager">
+    <a href="0800-one-tenant-three-populations.html"><span class="dir">&larr; Previous</span><span class="ttl">One tenant, three populations</span></a>
+    <a class="nxt" href="0802-what-is-demanded-at-sign-in.html"><span class="dir">Next &rarr;</span><span class="ttl">What is demanded at sign-in</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0801 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

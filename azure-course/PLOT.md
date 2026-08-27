@@ -66,9 +66,18 @@ is wrong and it gets fixed before anything new is added.
 | 0704 | The edge |
 | 0705 | Paths in from outside |
 
+**Module 08 - Identity and access**
+
+| Lesson | Title |
+| 0800 | One tenant, three populations |
+| 0801 | How a request is authorised |
+| 0802 | What is demanded at sign-in |
+| 0803 | Machine identity without secrets |
+| 0804 | Keys, secrets and certificates |
+
 ## Planned, in order
 
-Modules 08 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Modules 09 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -102,7 +111,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 08 to 14**, none started. New numbers go at the end of the
+- **Modules 09 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a

@@ -175,6 +175,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0705-paths-in-from-outside.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "One tenant, three populations",
+          "href": "lessons/0800-one-tenant-three-populations.html"
+        },
+        {
+          "title": "How a request is authorised",
+          "href": "lessons/0801-how-a-request-is-authorised.html"
+        },
+        {
+          "title": "What is demanded at sign-in",
+          "href": "lessons/0802-what-is-demanded-at-sign-in.html"
+        },
+        {
+          "title": "Machine identity without secrets",
+          "href": "lessons/0803-machine-identity-without-secrets.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-secrets-and-certificates.html"
+        }
+      ]
     }
   ],
   "extras": []
