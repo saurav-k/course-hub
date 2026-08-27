@@ -49,6 +49,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0203-holding-a-fleet-at-a-size.html"
         }
       ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "Azure Kubernetes Service",
+          "href": "lessons/0300-azure-kubernetes-service.html"
+        },
+        {
+          "title": "What AKS adds around the cluster",
+          "href": "lessons/0301-what-aks-adds-around-the-cluster.html"
+        },
+        {
+          "title": "Serverless containers and the registry",
+          "href": "lessons/0302-serverless-containers-and-the-registry.html"
+        },
+        {
+          "title": "Azure Functions",
+          "href": "lessons/0303-azure-functions.html"
+        },
+        {
+          "title": "App Service and Static Web Apps",
+          "href": "lessons/0304-app-service-and-static-web-apps.html"
+        }
+      ]
     }
   ],
   "extras": []

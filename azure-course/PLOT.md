@@ -22,6 +22,15 @@ is wrong and it gets fixed before anything new is added.
 | 0202 | Images and the gallery |
 | 0203 | Holding a fleet at a size |
 
+**Module 03 - Containers and serverless**
+
+| Lesson | Title |
+| 0300 | Azure Kubernetes Service |
+| 0301 | What AKS adds around the cluster |
+| 0302 | Serverless containers and the registry |
+| 0303 | Azure Functions |
+| 0304 | App Service and Static Web Apps |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
