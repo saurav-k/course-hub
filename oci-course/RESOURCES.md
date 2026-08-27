@@ -129,6 +129,27 @@ from and the date it was read.
 - [Oracle Analytics Cloud](https://docs.oracle.com/en/cloud/paas/analytics-cloud/index.html) - semantic models, dashboards, self-service visualisation and natural-language questions, connected natively to the Autonomous Lakehouse.
 - [Dashboards service](https://docs.oracle.com/en-us/iaas/Content/Dashboards/home.htm) - console-native widgets for metrics, logs and custom HTML, recorded as distinct from the business intelligence product.
 
+### Module 07 - Networking and delivery
+
+- [VCNs and subnets](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/VCNs.htm) - the regional network, its address ranges, IPv6, and the regional against availability-domain subnet shapes.
+- [Security rules](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/securityrules.htm) - security lists at the subnet, network security groups at the network card, the stateful and stateless choice per rule, and a group named as a source.
+- [Route tables](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/managingroutetables.htm) - the rule targets, including a private address for appliance insertion.
+- [NAT gateway](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/NATgateway.htm) - outbound-only access, the twenty thousand concurrent connections per destination address and port, and the restriction on peered and on-premises networks.
+- [Service gateway](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/servicegateway.htm) - one per network, same region only, and the mutually exclusive scope labels.
+- [Local VCN peering](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/localVCNpeering.htm) - one gateway per peer and the non-overlapping address requirement.
+- [Dynamic Routing Gateway](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/managingDRGs.htm) - the regional hub, its attachment types and the route table per attachment.
+- [Transit routing](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/transitrouting.htm) - hub and spoke scenarios and firewall insertion on the path.
+- [Site-to-Site VPN](https://www.oracle.com/cloud/networking/site-to-site-vpn/) - two tunnels per connection, termination on the routing gateway, and no hourly or per-byte fee. Vendor product page rather than documentation.
+- [FastConnect overview](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/fastconnectoverview.htm) - the cross-connect port sizes, partner virtual circuits, port-hour billing and link-layer encryption.
+- [Oracle Interconnect for Azure](https://docs.oracle.com/en-us/iaas/Content/multicloud/interconnect-azure.htm) - the paired-region requirement and the pairing with the other provider's own circuit.
+- [Network Load Balancer](https://docs.oracle.com/en-us/iaas/Content/NetworkLoadBalancer/home.htm) - layer-four passthrough, client address preservation, and availability across fault domains.
+- [Flexible Load Balancer](https://docs.oracle.com/en-us/iaas/Content/Balance/home.htm) - the proxy, certificate offload, path routing, the bandwidth range and the firewall attachment point.
+- [Traffic Management overview](https://docs.oracle.com/en-us/iaas/Content/TrafficManagement/Concepts/overview.htm) - DNS steering only, public zones only, and the pairing with Health Checks.
+- [Traffic Management steering policies](https://docs.oracle.com/en-us/iaas/Content/TrafficManagement/Concepts/trafficmanagementapi.htm) - the six policy kinds and the filter, health, ordering and limit pipeline.
+- [OCI DNS](https://docs.oracle.com/en-us/iaas/Content/DNS/home.htm) - anycast authoritative service for public zones, DNSSEC, and delegation rather than registration.
+- [Private DNS](https://docs.oracle.com/en-us/iaas/Content/DNS/Tasks/privatedns.htm) - private zones, custom resolvers, listeners and forwarders to on-premises name servers.
+- [DDoS protection on the OCI edge](https://docs.oracle.com/en/solutions/learn-ddos-prevention-oci/understand-ddos-layers-and-oracle-ddos-protection1.html) - always-on volumetric protection for public endpoints at no charge.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

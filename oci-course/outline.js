@@ -153,6 +153,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0604-reading-the-answers-back.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "The VCN, the subnet, and the two places a rule lives",
+          "href": "lessons/0700-the-vcn-and-two-places-a-rule-lives.html"
+        },
+        {
+          "title": "Six gateways, and what a route table may point at",
+          "href": "lessons/0701-six-gateways-and-the-route-table.html"
+        },
+        {
+          "title": "The routing gateway is the hub, and peering is the spoke",
+          "href": "lessons/0702-the-routing-gateway-is-the-hub.html"
+        },
+        {
+          "title": "Two load balancers, and the front door that is not a proxy",
+          "href": "lessons/0703-two-load-balancers-and-the-edge.html"
+        },
+        {
+          "title": "DNS at the edge and inside the network",
+          "href": "lessons/0704-dns-at-the-edge-and-inside.html"
+        }
+      ]
     }
   ],
   "extras": []

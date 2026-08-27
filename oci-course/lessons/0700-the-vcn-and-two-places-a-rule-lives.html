@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The VCN, the subnet, and the two places a rule lives - Inside OCI</title>
+<meta name="description" content="A Virtual Cloud Network is regional, its subnets are regional or tied to one availability domain, and every packet is judged by rules that can be written at the subnet and at the network card.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0700</div>
+  <h1>A packet is judged by rules written in two places, and the subnet choice is made once</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>networking-core</code>, matrix rows <code>virtual-network</code>, <code>subnet</code> and <code>stateful-packet-filter</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>Virtual Cloud Network</b> is regional, carries configurable address ranges and supports IPv6. Overlapping ranges between peered networks are forbidden, which makes address planning a design step rather than a formality.</li>
+      <li>A <b>subnet is regional or tied to one availability domain</b>, and regional is the recommended shape. Regional subnets are required for API Gateway and for load balancer high availability.</li>
+      <li>Rules live in <b>two places</b>: security lists on the subnet and network security groups on the individual network card.</li>
+      <li>A rule is <b>stateful or stateless per rule</b>, and a stateless rule needs a matching rule in the other direction or the reply never returns.</li>
+      <li>A network security group can <b>name another group</b> as its source or destination, so a tiered design never hard-codes an address.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Everything so far runs&lt;br/&gt;somewhere and stores something"] --> T["THIS PAGE&lt;br/&gt;the network, the subnet&lt;br/&gt;and where rules attach"]
+  T --> N1["The gateways, and what&lt;br/&gt;a route table may point at"]
+  T --> N2["The routing gateway as hub,&lt;br/&gt;and peering as spoke"]
+  W["Networking and delivery&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. Six modules have produced things that run and things that hold state. This one is how any of them reach each other, and it starts with the container everything sits inside.
+    <b>Two decisions on this page are made once and inherited by everything placed inside them: the address plan and the subnet's availability shape.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: three nested things, two rule sets</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  V["Virtual Cloud Network&lt;br/&gt;regional, your address ranges"] --> S["Subnet&lt;br/&gt;regional or one availability domain"]
+  S --> N["Virtual network card&lt;br/&gt;attached to one instance"]
+  S -.- SL["Security list&lt;br/&gt;rules written at the subnet"]
+  N -.- NSG["Network security group&lt;br/&gt;rules written at the card&lt;br/&gt;up to five groups per card"]
+    </div>
+    <figcaption>The network contains subnets, subnets contain network cards, and each of the lower two levels has its own place to write rules. Both sets are attached to the same card at the same time.
+    <b>When a packet is blocked and you cannot find the rule, the reason is almost always that it was written at the other level.</b></figcaption>
+  </figure>
+
+  <p>The <a href="https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/VCNs.htm">VCN documentation</a> carries the regional scope, the address ranges and the subnet shapes. The <a href="https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/securityrules.htm">security rules page</a> carries both rule sets, and the network security group is the one worth learning properly because it is the one that can name another group.</p>
+
+  <h2>The mechanism: the subnet shape is chosen at creation</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Choosing: create a subnet
+  Choosing --> Regional: regional subnet, the recommended shape
+  Choosing --> ADSpecific: availability-domain-specific subnet
+  Regional --> [*]: works with API Gateway and load balancer high availability
+  ADSpecific --> [*]: an older shape that still exists
+  note right of ADSpecific
+    old templates copied from
+    old examples still produce
+    this shape by accident
+  end note
+    </div>
+    <figcaption>Both shapes exist and only one of them is the recommendation. The trap is not that the older shape is broken, it is that it silently rules out the regional endpoints a design will want later.
+    <b>A load balancer that cannot be made highly available, or an API Gateway that refuses to deploy, is usually a subnet decision made months earlier by copied code.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Read a network security group as <b>a label rather than a place</b>. Membership of a group is what a rule refers to, so "the web tier may reach the database tier" is written once and stays true as instances come and go. A security list is genuinely about a place, and the two are worth keeping in separate jobs for exactly that reason.</div>
+
+  <h2>The mechanism: stateless rules come in pairs</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant R as The rule set
+  participant S as Server
+  C->>R: request arrives
+  R->>S: a stateful ingress rule allows it
+  S-->>C: the reply returns with no second rule needed
+  Note over R,S: with a stateless rule instead
+  C->>R: request arrives
+  R->>S: the stateless ingress rule allows it
+  S-->>R: the reply is a new decision
+  Note over R,C: without a matching egress rule the reply is dropped
+    </div>
+    <figcaption>A stateful rule remembers the connection and lets the reply back. A stateless rule does not, so each direction has to be allowed on its own.
+    <b>The failure this produces looks like a server that never answers rather than like a blocked packet, which is why it costs so much more time than it should.</b></figcaption>
+  </figure>
+
+  <p>Stateful and stateless is chosen <a href="https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/securityrules.htm">per rule rather than per rule set</a>, so one subnet can hold both kinds. A network card can also have its source and destination address check disabled, which is what turns an ordinary instance into a firewall or routing appliance, a pattern module 11 returns to.</p>
+
+  <div class="callout warn">
+  Because both rule sets apply to the same network card at once, confirm on the vendor page above how the two combine before relying on one of them to constrain the other. The safe design habit is to give each set one job - the security list for the subnet-wide baseline, groups for the relationships between tiers - so that no packet's fate depends on remembering which set wins.</div>
+
+  <h2>The trade-off: address planning is permanent in a way rules are not</h2>
+
+  <p>Rules can be rewritten in seconds. An address range cannot, because peering two networks requires that their ranges do not overlap, and by the time a merger or an acquisition puts two networks in the same room the ranges were chosen years earlier by people who were not thinking about each other.</p>
+
+  <p>The counterweight is that the recommendation is cheap to follow at the start: pick regional subnets, leave room in the address plan, and keep tier relationships in groups rather than in address ranges. None of the three costs anything on day one, and all three are expensive to retrofit.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Where can a rule that affects one instance's traffic be written?</div>
+      <button class="q-opt">Only in the security list attached to its own subnet</button>
+      <button class="q-opt">Only in a network security group holding its card</button>
+      <button class="q-opt">In the subnet security list or in a group, or in both</button>
+      <button class="q-opt">In the route table attached to the instance directly</button>
+      <div class="q-fb">Both rule sets apply to the same card, which is why a search for a missing rule has two places to look. The first and second each name one of the two and deny the other. The fourth confuses routing with filtering, and a route table attaches to a subnet rather than to an instance.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A stateless ingress rule allows a request. What else does the reply need?</div>
+      <button class="q-opt">A matching egress rule allowing the reply back out</button>
+      <button class="q-opt">A second ingress rule allowing the same port again</button>
+      <button class="q-opt">Nothing further, since replies are always permitted</button>
+      <button class="q-opt">A route table entry naming the client's address range</button>
+      <div class="q-fb">Stateless means each direction is decided separately, so the reply needs its own egress rule. The second doubles up on the direction that already works. The third describes stateful behaviour. The fourth is a routing answer to a filtering question.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does a design prefer regional subnets over the availability-domain shape?</div>
+      <button class="q-opt">They allow a wider range of addresses to be assigned</button>
+      <button class="q-opt">They are required for API Gateway and balancer resilience</button>
+      <button class="q-opt">They permit overlapping ranges between peered networks</button>
+      <button class="q-opt">They apply security list rules at the card, not the subnet</button>
+      <div class="q-fb">The regional shape is the recommendation and it is what the regional endpoints require. The first invents an addressing benefit. The third contradicts the rule that peered ranges may not overlap. The fourth describes network security groups, which are a separate mechanism entirely.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A three-tier application has web instances, application instances and a database. The web tier must accept traffic from a load balancer, the application tier only from the web tier, and the database only from the application tier. Instances are replaced regularly by an instance pool, so their addresses change. A network engineer proposes writing all of it as subnet security lists using address ranges.</p>
+      <p><b>Redesign</b> it using the mechanism this page describes, say what each rule set is doing in your version, and name what breaks in the original proposal when the pool replaces an instance.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask what each rule is really about. Two of the three relationships are about which tier the sender belongs to, not about where it happens to be. Then remember what a network security group is allowed to name as its source.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Make a group per tier.</b> Three network security groups, one for web, one for application, one for database, and each instance's card joins the group for its tier.</li>
+        <li><b>Write the relationships between groups.</b> The application group allows ingress from the web group, and the database group allows ingress from the application group. Neither rule mentions an address.</li>
+        <li><b>Leave the subnet baseline in the security list.</b> Anything true of every card in the subnet regardless of tier stays there, which keeps the two rule sets doing different jobs.</li>
+        <li><b>Say what broke in the original.</b> Address ranges are a statement about place, and the pool replaces instances with new addresses. Every replacement either widens the range until it means nothing or breaks a rule nobody edited.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your rules should contain zero instance addresses and exactly two tier-to-tier statements. If a rule still names an address range for the application tier, ask what happens to it the next time the pool scales.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent which subnets in a tenancy are tied to one availability domain rather than regional. Every one of them is a future argument about load balancer resilience, and the list is usually shorter and older than anyone expects.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/securityrules.htm">Security Rules</a>. It is the page that holds both rule sets, the stateful and stateless choice, and the group-as-source behaviour, and it is worth reading once in full rather than in the fragments a search returns.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0604-reading-the-answers-back.html"><span class="dir">&larr; Previous</span><span class="ttl">Reading the answers back, and the two kinds of dashboard</span></a>
+    <a class="nxt" href="0701-six-gateways-and-the-route-table.html"><span class="dir">Next &rarr;</span><span class="ttl">Six gateways, and what a route table may point at</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 0700 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

@@ -68,6 +68,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0603 | The managed pipeline layer, and what it orchestrates |
 | 0604 | Reading the answers back, and the two kinds of dashboard |
 
+**Module 07 - Networking and delivery**
+
+| Lesson | Title |
+| 0700 | The VCN, the subnet, and the two places a rule lives |
+| 0701 | Six gateways, and what a route table may point at |
+| 0702 | The routing gateway is the hub, and peering is the spoke |
+| 0703 | Two load balancers, and the front door that is not a proxy |
+| 0704 | DNS at the edge and inside the network |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
