@@ -294,6 +294,12 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/azure-app-configuration/overview>
 - <https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-overview>
 
+Two entries in module 12 are labelled third party at the point of use, because
+they are not vendor-published: the in-code infrastructure ecosystems, and the
+community characterisation of how far a provider lags a new API version. The Azure
+Service Operator is Microsoft-published open source rather than a managed service,
+and lesson 1200 says so.
+
 **Module 13 - AI and ML**
 
 - <https://learn.microsoft.com/en-us/azure/ai-foundry/openai/overview>
@@ -303,12 +309,6 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/machine-learning/overview-what-is-azure-machine-learning>
 - <https://learn.microsoft.com/en-us/azure/ai-services/>
 - <https://learn.microsoft.com/en-us/azure/ai-services/agents/overview>
-
-Two entries in this module are labelled third party at the point of use, because
-they are not vendor-published: the in-code infrastructure ecosystems, and the
-community characterisation of how far a provider lags a new API version. The Azure
-Service Operator is Microsoft-published open source rather than a managed service,
-and lesson 1200 says so.
 
 ## Gaps
 
