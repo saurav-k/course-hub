@@ -77,6 +77,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0703 | Two load balancers, and the front door that is not a proxy |
 | 0704 | DNS at the edge and inside the network |
 
+**Module 08 - Identity and access**
+
+| Lesson | Title |
+| 0800 | Who acts: identity domains, groups, and the missing role |
+| 0801 | The policy language, and the deny that is a one-way door |
+| 0802 | How a machine proves who it is |
+| 0803 | Crossing a boundary without assuming a role |
+| 0804 | Keys, secrets and certificates |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

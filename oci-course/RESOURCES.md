@@ -150,6 +150,24 @@ from and the date it was read.
 - [Private DNS](https://docs.oracle.com/en-us/iaas/Content/DNS/Tasks/privatedns.htm) - private zones, custom resolvers, listeners and forwarders to on-premises name servers.
 - [DDoS protection on the OCI edge](https://docs.oracle.com/en/solutions/learn-ddos-prevention-oci/understand-ddos-layers-and-oracle-ddos-protection1.html) - always-on volumetric protection for public endpoints at no charge.
 
+### Module 08 - Identity and access
+
+- [Identity domains overview](https://docs.oracle.com/en-us/iaas/Content/Identity/getstarted/identity-domains.htm) - users, groups, dynamic groups, the domain as a container, and identity resources mastered in the home region.
+- [Federating with identity providers](https://docs.oracle.com/en-us/iaas/Content/Identity/Concepts/federation.htm) - SAML federation for console and API sign-in, SCIM provisioning and group mappings.
+- [Adaptive Security and sign-on policies](https://docs.oracle.com/en-us/iaas/Content/Identity/adaptivesecurity/overview.htm) - allow, deny or step up per sign-in, driven by group, network, client and a risk score, scoped per domain.
+- [Policy syntax](https://docs.oracle.com/en-us/iaas/Content/Identity/Concepts/policysyntax.htm) - the statement shape, the inspect, read, use and manage ladder, and the condition variables.
+- [Deny policies](https://docs.oracle.com/en-us/iaas/Content/Identity/policysyntax/denypolicies.htm) - the opt-in tenancy-wide feature, its permanence, deny-first precedence, subtractive verbs, the three forms and the narrow exemption.
+- [Deny policy known issues](https://docs.oracle.com/en-us/iaas/Content/Identity/known-issues/known-issues-deny-policies.htm) - tag-based delay on first enablement, console deletions, and unenforced dynamic group conditions.
+- [Service limits](https://docs.oracle.com/en-us/iaas/Content/General/Concepts/servicelimits.htm) - one hundred policy objects per tenancy, fifty statements per object, and the five hundred statements per compartment hierarchy that cannot be increased.
+- [Calling services from an instance](https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm) - instance principals, the dynamic group match, short-lived session tokens, the inherited-privileges caveat and the irrevocable compartment inspection permission.
+- [Granting workloads access to resources](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm) - pod-level workload identity on enhanced clusters and the node-level fallback on basic ones.
+- [Cross-tenancy policies](https://docs.oracle.com/en-us/iaas/Content/Identity/policieshow/iam-cross-domain.htm) - define, endorse and admit, the second define on the destination side, and the location clause naming your own tenancy.
+- [Vault key management](https://docs.oracle.com/en-us/iaas/Content/KeyManagement/Concepts/keyoverview.htm) - master keys, envelope encryption, software and hardware protection, and the virtual against private vault split.
+- [Dedicated Key Management](https://docs.oracle.com/en-us/iaas/Content/KeyManagement/Tasks/dedicated_kms.htm) - customer-administered hardware partitions, the three-partition minimum and direct access.
+- [Importing key material](https://docs.oracle.com/en-us/iaas/Content/KeyManagement/Tasks/importingkeys.htm) - wrapping with a public wrapping key from the vault, and rotation with new material.
+- [Secret Management](https://docs.oracle.com/en-us/iaas/Content/secret-management/overview.htm) - versioned secrets, rotation schedules, retrieval bundles and the free allowance.
+- [Certificates](https://docs.oracle.com/en-us/iaas/Content/certificates/home.htm) - the managed internal authority with automatic renewal, imported certificates, and the gateway bundle limit.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

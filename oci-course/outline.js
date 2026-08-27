@@ -179,6 +179,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0704-dns-at-the-edge-and-inside.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "Who acts: identity domains, groups, and the missing role",
+          "href": "lessons/0800-who-acts-domains-groups-and-no-roles.html"
+        },
+        {
+          "title": "The policy language, and the deny that is a one-way door",
+          "href": "lessons/0801-the-policy-language-and-the-deny-door.html"
+        },
+        {
+          "title": "How a machine proves who it is",
+          "href": "lessons/0802-how-a-machine-proves-who-it-is.html"
+        },
+        {
+          "title": "Crossing a boundary without assuming a role",
+          "href": "lessons/0803-crossing-a-boundary-without-a-role.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-secrets-and-certificates.html"
+        }
+      ]
     }
   ],
   "extras": []
