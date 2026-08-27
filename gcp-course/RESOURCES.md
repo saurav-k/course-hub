@@ -136,6 +136,26 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [Cloud DNS](https://cloud.google.com/dns/docs/overview),
   [DNS routing policies](https://cloud.google.com/dns/docs/routing-policies-overview),
   [Cloud Domains](https://cloud.google.com/domains/docs/overview).
+- **Module 08.** [IAM overview](https://cloud.google.com/iam/docs/overview),
+  [policy types](https://cloud.google.com/iam/docs/policy-types),
+  [roles overview](https://cloud.google.com/iam/docs/roles-overview),
+  [Principal Access Boundary policies](https://cloud.google.com/iam/docs/principal-access-boundary-policies),
+  [Privileged Access Manager](https://cloud.google.com/iam/docs/pam-overview),
+  [VPC Service Controls](https://cloud.google.com/vpc-service-controls/docs/overview),
+  [service accounts](https://cloud.google.com/iam/docs/service-account-overview),
+  [Workload Identity Federation](https://cloud.google.com/iam/docs/workload-identity-federation),
+  [short-lived credentials](https://cloud.google.com/iam/docs/create-short-lived-credentials-direct),
+  [Workforce Identity Federation](https://cloud.google.com/iam/docs/workforce-identity-federation),
+  [Cloud Identity](https://cloud.google.com/identity),
+  [Managed Service for Microsoft AD](https://cloud.google.com/managed-microsoft-ad/docs/overview),
+  [OS Login](https://cloud.google.com/compute/docs/oslogin),
+  [Identity Platform](https://cloud.google.com/identity-platform/docs),
+  [Cloud KMS](https://cloud.google.com/kms/docs/key-management-service),
+  [Cloud HSM](https://cloud.google.com/kms/docs/hsm),
+  [Cloud EKM](https://cloud.google.com/kms/docs/ekm),
+  [Secret Manager](https://cloud.google.com/secret-manager/docs/overview),
+  [Certificate Manager](https://cloud.google.com/certificate-manager/docs/overview),
+  [Certificate Authority Service](https://cloud.google.com/certificate-authority-service/docs).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -173,3 +193,6 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
 - **Cloud Domains retirement.** The registrar service is recorded as retiring with the
   migration mechanics and dates unverified. Named in lesson 0705, which asserts nothing
   about them.
+- **Downscoped access tokens.** The inventory records credential access boundaries with
+  the current API surface flagged for confirmation. Named in lesson 0802; nothing about
+  their shape is stated.

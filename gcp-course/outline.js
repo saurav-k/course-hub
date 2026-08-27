@@ -183,6 +183,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0705-the-edge.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "The IAM evaluation chain",
+          "href": "lessons/0800-the-evaluation-chain.html"
+        },
+        {
+          "title": "Boundaries and privileged access",
+          "href": "lessons/0801-boundaries-and-privileged-access.html"
+        },
+        {
+          "title": "Machine identity without keys",
+          "href": "lessons/0802-machine-identity.html"
+        },
+        {
+          "title": "Two kinds of human, two directories",
+          "href": "lessons/0803-two-kinds-of-human.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-and-secrets.html"
+        }
+      ]
     }
   ],
   "extras": []

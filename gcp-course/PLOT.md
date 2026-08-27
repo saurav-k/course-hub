@@ -90,6 +90,19 @@ splitting them further would have produced pages with two ideas each.
 | 0704 | Reaching the ground | `site-to-site-vpn`, `dedicated-interconnect`, `partner-interconnect`, `cross-cloud-interconnect`, `sdwan-integration`, `on-prem-extension`, `vmware-stack-hosting`, `client-vpn`, `metro-edge-locations` |
 | 0705 | The edge, and one anycast front door | `l7-load-balancer`, `l4-load-balancer`, `global-front-door`, `cdn`, `media-cdn`, `ddos-protection`, `authoritative-dns`, `private-dns`, `dns-routing-policies`, `domain-registrar`, `gateway-load-balancer` |
 
+**Module 08 - Identity and access**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0800 | The IAM evaluation chain | `iam-principals`, `iam-roles`, `iam-policy-language` |
+| 0801 | Boundaries and privileged access | `permission-boundary`, `privileged-access` |
+| 0802 | Machine identity without keys | `workload-identity`, `workload-identity-federation`, `cross-account-assumption`, `short-lived-credentials`, `agent-identity` |
+| 0803 | Two kinds of human, two directories | `workforce-directory`, `workforce-sso`, `managed-directory`, `os-login`, `ciam-user-directory`, `ciam-social-federation`, `ciam-mfa` |
+| 0804 | Keys, secrets and certificates | `key-management`, `hsm`, `byok-hyok`, `secrets-store`, `certificate-manager`, `certificate-authority` |
+
+`conditional-access` and `identity-provider-audit-log` are named in lesson 0803 as
+capabilities delivered elsewhere, and taught in modules 11 and 10 respectively.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -124,7 +137,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 08 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 09 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.
