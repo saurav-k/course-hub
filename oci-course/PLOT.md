@@ -4,10 +4,25 @@ The reading order below is the true order. The course map (`index.html`) and thi
 file are two views of one sequence and have to agree; when they disagree one of them
 is wrong and it gets fixed before anything new is added.
 
+## How a lesson is numbered, permanently
+
+`lessons/MMxx-*.html`, where `MM` is the module number in the table below and `xx`
+is that module's own two-digit sequence. Module 01 owns 0100 to 0199, module 02
+owns 0200 to 0299, and so on. Modules are written by different contributors at
+different times, so one running sequence across the whole course would collide the
+moment two of them add a lesson. The eyebrow, the card `.ln` and the footer carry
+the four-digit number unchanged: dropping the padding would render 0200 as
+"Lesson 200". Nothing already published is renumbered.
+
 ## Written, in order
 
-Nothing yet. `oci-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+**Module 01 - The lay of the land**
+
+| Lesson | Title |
+| 0100 | Regions, availability domains and fault domains |
+| 0101 | Realms, subscriptions and where OCI runs |
+| 0102 | The tenancy, the compartment and the organization above them |
+| 0103 | The platform map, and the names that mislead |
 
 ## Planned, in order
 

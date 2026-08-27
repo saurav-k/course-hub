@@ -5,6 +5,29 @@
 window.COURSE_OUTLINE = {
   "key": "oci",
   "title": "Inside OCI",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "Regions, availability domains and fault domains",
+          "href": "lessons/0100-regions-availability-fault-domains.html"
+        },
+        {
+          "title": "Realms, subscriptions and where OCI runs",
+          "href": "lessons/0101-realms-and-where-oci-runs.html"
+        },
+        {
+          "title": "The tenancy, the compartment and the organization above them",
+          "href": "lessons/0102-tenancy-compartments-and-the-organization.html"
+        },
+        {
+          "title": "The platform map, and the names that mislead",
+          "href": "lessons/0103-the-platform-map.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

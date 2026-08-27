@@ -27,6 +27,10 @@ In this order: [`MISSION.md`](MISSION.md), [`NOTES.md`](NOTES.md),
   `BUILDER-SPEC.md`.
 - **Everything here is evergreen.** No dates, countdowns or study schedules on any
   page; dates live only in `RESOURCES.md`.
+- **A lesson number names its module.** `lessons/MMxx-*.html`, `MM` from the module
+  table in [`PLOT.md`](PLOT.md), which is authoritative. The four-digit number is
+  carried unchanged into the eyebrow, the card `.ln` and the footer. `PLOT.md`
+  carries the reasoning.
 
 ## Out of scope here
 
