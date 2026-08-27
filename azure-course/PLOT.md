@@ -47,9 +47,18 @@ is wrong and it gets fixed before anything new is added.
 | 0502 | Cosmos DB: the request unit and the partition key |
 | 0503 | The specialised stores |
 
+**Module 06 - Analytics**
+
+| Lesson | Title |
+| 0600 | The analytics fork |
+| 0601 | The lake and the engines that read it |
+| 0602 | Pipelines and the runtime that reaches your data |
+| 0603 | Streams and the units that carry them |
+| 0604 | Who reads the result |
+
 ## Planned, in order
 
-Modules 06 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Modules 07 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -83,7 +92,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 06 to 14**, none started. New numbers go at the end of the
+- **Modules 07 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a

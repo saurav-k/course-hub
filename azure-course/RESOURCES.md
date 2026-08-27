@@ -145,6 +145,20 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/sql/relational-databases/graphs/sql-graph-overview>
 - <https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview>
 
+**Module 06 - Analytics**
+
+- <https://learn.microsoft.com/en-us/fabric/data-warehouse/>
+- <https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-introduction>
+- <https://learn.microsoft.com/en-us/azure/synapse-analytics/sql/on-demand-workspace-overview>
+- <https://learn.microsoft.com/en-us/azure/databricks/>
+- <https://learn.microsoft.com/en-us/azure/data-factory/>
+- <https://learn.microsoft.com/en-us/azure/event-hubs/>
+- <https://learn.microsoft.com/en-us/azure/stream-analytics/>
+- <https://learn.microsoft.com/en-us/azure/search/>
+- <https://learn.microsoft.com/en-us/power-bi/fundamentals/desktop-what-is-desktop>
+- <https://learn.microsoft.com/en-us/purview/purview>
+- <https://learn.microsoft.com/en-us/azure/confidential-computing/confidential-clean-rooms>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
@@ -184,6 +198,21 @@ them was filled from memory.
   inventory names the partition key as the core design decision without describing
   the division mechanism, so lesson 0502 argues from access patterns rather than from
   a partition-throughput rule.
+- **What a columnar file layout lets a query skip.** The inventory records which
+  formats the serverless engine reads and that it bills by data processed, and says
+  nothing about format internals. Lesson 0601 argues the cost case from those two
+  facts and labels the format reasoning as general rather than Azure-specific inside
+  the worked solution itself.
+- **Named window types in the streaming query language.** The inventory records that
+  windowing exists and names no window kinds, so lesson 0603 draws what a window is
+  and names none. Its chart says in its own caption that it illustrates the idea
+  rather than measuring a workload.
+- **Throughput figures for a throughput unit or a processing unit.** The inventory
+  records the two purchasing units and no capacities, so lesson 0603 teaches the unit
+  model without a number in it.
+- **Current naming of the Purview governance experiences.** The inventory records
+  that classic portal capabilities are converging into the Unified Catalog and says
+  to check the product page, so lesson 0604 names the Unified Catalog and links it.
 - **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
   links one and no lesson spine carries a Glossary entry.
 

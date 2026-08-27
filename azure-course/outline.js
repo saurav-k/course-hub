@@ -119,6 +119,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0503-the-specialised-stores.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "The analytics fork",
+          "href": "lessons/0600-the-analytics-fork.html"
+        },
+        {
+          "title": "The lake and the engines that read it",
+          "href": "lessons/0601-the-lake-and-the-engines-that-read-it.html"
+        },
+        {
+          "title": "Pipelines and the runtime that reaches your data",
+          "href": "lessons/0602-pipelines-and-the-runtime-that-reaches-your-data.html"
+        },
+        {
+          "title": "Streams and the units that carry them",
+          "href": "lessons/0603-streams-and-the-units-that-carry-them.html"
+        },
+        {
+          "title": "Who reads the result",
+          "href": "lessons/0604-who-reads-the-result.html"
+        }
+      ]
     }
   ],
   "extras": []
