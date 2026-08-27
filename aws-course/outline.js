@@ -131,6 +131,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0504-the-purpose-built-stores.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "The lake is three layers",
+          "href": "lessons/0600-the-lake-is-three-layers.html"
+        },
+        {
+          "title": "Three ways to read the lake",
+          "href": "lessons/0601-three-ways-to-read-the-lake.html"
+        },
+        {
+          "title": "The warehouse beside the lake",
+          "href": "lessons/0602-the-warehouse-beside-the-lake.html"
+        },
+        {
+          "title": "Two ways to run a Spark job",
+          "href": "lessons/0603-two-ways-to-run-a-spark-job.html"
+        },
+        {
+          "title": "Ingest, deliver, process",
+          "href": "lessons/0604-ingest-deliver-process.html"
+        }
+      ]
     }
   ],
   "extras": []

@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The warehouse beside the lake - Inside AWS</title>
+<meta name="description" content="Redshift separates storage from compute, sells that compute as nodes or as processing units with a sixty-second minimum, and reaches outside its own storage through Spectrum and zero-ETL.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Analytics &middot; Lesson 0602</div>
+  <h1>The warehouse keeps its own storage and still reads yours</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability key <code>data-warehouse</code>.
+    &middot; <a href="https://aws.amazon.com/redshift/">Amazon Redshift</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Redshift Managed Storage separates storage from compute</b>, so a warehouse grows in two directions independently and neither growth forces the other.</li>
+      <li>Compute is bought in one of two shapes: <b>provisioned nodes</b> - the RA3 family and the Graviton RG family - or <b>Serverless</b>, sized in Redshift Processing Units.</li>
+      <li>Serverless capacity ranges from a base of <b>4 to 1,024 RPUs</b>, billed <b>per second with a sixty-second minimum</b>, which makes very short bursts more expensive per unit of work than they look.</li>
+      <li><b>Concurrency scaling</b> adds temporary capacity when queries queue, so the shape of the day matters as much as the size of the data.</li>
+      <li>Two doors lead outside its own storage: <b>Spectrum</b> reads lake tables in S3, and <b>zero-ETL integrations</b> pull from operational databases without a pipeline - within the same Region and inside published quotas.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0601&lt;br/&gt;engines that read the&lt;br/&gt;lake and own nothing"] --> T["THIS PAGE&lt;br/&gt;the engine that owns&lt;br/&gt;storage and reads the lake too"]
+  T --> A["Filling both&lt;br/&gt;lessons 0603 and 0604"]
+  T --> B["Networking the estate&lt;br/&gt;module 07"]
+  W["Module 06&lt;br/&gt;analytics"] -.- T
+    </div>
+    <figcaption>Where this sits. Athena had no storage of its own and no capacity to size. Redshift has both, which is what buys it consistent performance on repeated queries and what makes its sizing decisions real.
+    <b>A warehouse is not a faster Athena. It is the engine you choose when the same shapes of query run every day and it is worth keeping the data laid out for them.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: one storage layer, two ways to buy compute</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  MS["Redshift Managed Storage&lt;br/&gt;grows on its own, priced on its own"] --> P["Provisioned cluster&lt;br/&gt;RA3 or Graviton RG nodes"]
+  MS --> S["Redshift Serverless&lt;br/&gt;a base capacity in RPUs"]
+  P --> CS["Concurrency scaling&lt;br/&gt;temporary capacity when queries queue"]
+  S --> CS
+  P --> Q["The same SQL, either way"]
+  S --> Q
+    </div>
+    <figcaption>Storage below, two compute shapes above, and one behaviour common to both. Separating the two is what lets a warehouse hold years of history without paying for the compute that would once have come attached to it (<a href="https://aws.amazon.com/redshift/pricing/">Redshift pricing</a>).
+    <b>The choice between nodes and processing units is a question about the shape of the day, not about the size of the data.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what a sixty-second minimum does</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing actual query duration with billed duration under Redshift Serverless per-second billing with a sixty-second minimum: an eight-second query is billed as sixty seconds, a forty-five-second query is billed as sixty seconds, and a three-hundred-second query is billed as three hundred seconds">
+      <text class="ttl" x="20" y="24">Per-second billing, sixty-second minimum</text>
+      <line class="axis" x1="180" y1="46" x2="180" y2="250"/>
+      <rect class="m-stat"  x="180" y="56"  width="10"  height="18"/>
+      <rect class="m-alarm" x="180" y="78"  width="72"  height="18"/>
+      <rect class="m-stat"  x="180" y="118" width="54"  height="18"/>
+      <rect class="m-alarm" x="180" y="140" width="72"  height="18"/>
+      <rect class="m-stat"  x="180" y="180" width="360" height="18"/>
+      <rect class="m-alarm" x="180" y="202" width="360" height="18"/>
+      <text class="lbl-sm" x="172" y="70"  text-anchor="end">8 s query</text>
+      <text class="lbl-sm" x="172" y="132" text-anchor="end">45 s query</text>
+      <text class="lbl-sm" x="172" y="194" text-anchor="end">5 min query</text>
+      <text class="lbl-b" x="262" y="92">billed 60 s - seven and a half times the work</text>
+      <text class="lbl-b" x="262" y="154">billed 60 s</text>
+      <text class="lbl-b lbl-on" x="530" y="216" text-anchor="end">billed exactly</text>
+      <text class="lbl-sm" x="20" y="278">the minimum applies per billed period as published in the Redshift pricing reference</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>time actually spent</span><span><i class="sw-alarm"></i>time billed</span></div>
+    <figcaption>Per-second billing sounds like paying for exactly what you use, and above a minute it is. Below a minute the floor dominates, which is why a stream of very short serverless queries is the pattern that surprises a first Redshift bill.
+    <b>Batch the small queries or keep them on a read path with no minimum - the floor punishes frequency, not size.</b></figcaption>
+  </figure>
+
+  <p>The other half of the capacity story is the peak rather than the floor. A Serverless base runs from <b>4 to 1,024 RPUs</b>, and <b>concurrency scaling</b> adds temporary capacity to either shape when queries begin to queue, so a warehouse can be sized for the median day rather than for the worst hour of the month.</p>
+
+  <h2>3. The two doors out of its own storage</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Aurora or RDS
+  participant R as Redshift
+  participant C as Glue Data Catalog
+  participant S as S3 lake
+  A->>R: zero-ETL integration - changes arrive with no pipeline to run
+  Note over A,R: same Region, and inside the published integration quotas
+  R->>C: resolve an external table
+  C-->>R: location, schema, partitions
+  R->>S: Spectrum reads the objects in place
+  S-->>R: bytes
+  R-->>R: join warehouse tables to lake tables in one query
+    </div>
+    <figcaption>Redshift reaches out in two directions. <b>Zero-ETL</b> keeps operational data current in the warehouse without a pipeline to build or operate, subject to a same-Region requirement and documented quotas (<a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/zero-etl.html">zero-ETL integrations</a>). <b>Spectrum</b> reads lake tables through the same Glue Data Catalog lesson 0600 built.
+    <b>One query can join a table the warehouse owns to a table it merely knows about, which is the whole argument for a warehouse next to a lake rather than instead of one.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  The lake-versus-warehouse question is usually asked as if one had to win. On AWS the useful question is narrower: <b>which tables are worth laying out for the queries you already know, and which are better left where they fell</b>. Spectrum exists so that answering it wrongly is recoverable.</div>
+
+  <div class="callout warn">
+  Zero-ETL is not a general replication service. It carries a <b>same-Region requirement</b> and published quotas, so a design that assumed cross-Region replication into a warehouse has to name a different mechanism. Check the quota page for the integration you intend to use before the design depends on it.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A Redshift Serverless bill is far higher than the total query time suggests. What explains it best?</div>
+      <button class="q-opt">Managed Storage is billed with the compute together</button>
+      <button class="q-opt">Concurrency scaling ran and doubled every charge</button>
+      <button class="q-opt">Many queries are shorter than the sixty-second minimum</button>
+      <button class="q-opt">The base capacity was set below the four RPU floor</button>
+      <div class="q-fb">Per-second billing carries a sixty-second minimum, so short queries are billed for a full minute each and frequency drives the bill. Storage is priced separately from compute by design, concurrency scaling adds capacity when queries queue rather than doubling every charge, and 4 RPUs is the bottom of the range rather than something you can go under.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A query must join a warehouse table to two years of raw events sitting in S3. What makes that possible?</div>
+      <button class="q-opt">Spectrum, reading lake tables through the catalogue</button>
+      <button class="q-opt">Zero-ETL, which replicates the S3 objects inward</button>
+      <button class="q-opt">Managed Storage, which mounts the bucket directly</button>
+      <button class="q-opt">Concurrency scaling, which adds nodes for the scan</button>
+      <div class="q-fb">Spectrum resolves external tables through the Glue Data Catalog and reads the objects in place, so one query spans both. Zero-ETL brings changes from operational databases rather than from S3, Managed Storage is the warehouse's own storage layer, and concurrency scaling adds capacity without changing what the query can reach.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which requirement rules out a zero-ETL integration as designed?</div>
+      <button class="q-opt">The source is an Aurora cluster in the same account</button>
+      <button class="q-opt">The source database sits in a different Region</button>
+      <button class="q-opt">The warehouse runs Serverless rather than nodes</button>
+      <button class="q-opt">The target tables are also read by Spectrum</button>
+      <div class="q-fb">Zero-ETL carries a same-Region requirement, so a cross-Region source needs a different mechanism. A same-account Aurora source is the ordinary case, the compute shape of the warehouse is not what the integration depends on, and Spectrum reading other tables is unrelated.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A warehouse serves two workloads. Overnight, forty reporting jobs each run for six to twelve minutes. During the day, an internal tool issues roughly 3,000 small lookups, each taking about four seconds, spread across eight working hours. The team is on Redshift Serverless and the daytime cost is four times the overnight cost, which nobody expected.</p>
+      <p><b>Work out where the daytime cost comes from</b>, and propose two changes: one that keeps the tool on Redshift, and one that moves it off.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Convert both workloads into billed seconds rather than elapsed seconds, and apply the minimum to each billed period separately. The gap between the two numbers is the whole answer.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Count the overnight work.</b> Forty jobs averaging nine minutes is 40 &times; 540 = 21,600 seconds. Every one is far above the minimum, so billed seconds equal actual seconds: about 21,600.</li>
+        <li><b>Count the daytime work as run.</b> 3,000 lookups at four seconds is 12,000 seconds of actual work - roughly half the overnight total, which is why the bill was a surprise.</li>
+        <li><b>Count the daytime work as billed.</b> If each lookup is its own billed period, the sixty-second minimum applies to each: 3,000 &times; 60 = 180,000 seconds. That is more than eight times the overnight figure, and it explains a daytime cost several times larger despite less real work.</li>
+        <li><b>Keep it on Redshift - stop paying the floor per lookup.</b> Batch the lookups so that many are answered within one billed period rather than each starting its own, and keep the endpoint warm through the working day rather than letting it idle between calls. The aim is to make the number of billed periods look like the number of hours, not the number of lookups.</li>
+        <li><b>Move it off - put the lookups on a path with no minimum.</b> Small, frequent, key-shaped reads are not warehouse work. Lesson 0601's index path or module 05's key-value store both answer this shape without a per-query floor, and the warehouse goes back to doing the overnight aggregation it is good at.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your billed daytime figure should be about fifteen times your actual daytime figure, because sixty divided by four is fifteen. If the two came out close together, you applied the minimum to the day rather than to each billed period.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0603-two-ways-to-run-a-spark-job.html">Two ways to run a Spark job</a></b> turns to how the tables on this page get filled in the first place.</li>
+    <li>Lesson 0601 covered <a href="0601-three-ways-to-read-the-lake.html">the read path with no capacity to size</a>, which is where the small lookups in the practice problem belong.</li>
+    <li>Lesson 0401 covered <a href="0401-the-bucket-types.html">the bucket that maintains Iceberg tables</a>, one of the lake-side table formats a warehouse can read.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the minimum still feels like a rounding detail, ask an agent to count how many separate queries one real dashboard issues per page load, and multiply by sixty seconds.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://aws.amazon.com/redshift/pricing/">Amazon Redshift pricing</a> is where the compute shapes, the processing-unit model, the minimum and the storage rate are stated together, which is the only place the two-directional growth of a warehouse becomes concrete.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. The billed-seconds arithmetic is derived here from stated assumptions rather than quoted.</p>
+
+  <div class="pager">
+    <a href="0601-three-ways-to-read-the-lake.html"><span class="dir">&larr; Previous</span><span class="ttl">Three ways to read the lake</span></a>
+    <a class="nxt" href="0603-two-ways-to-run-a-spark-job.html"><span class="dir">Next &rarr;</span><span class="ttl">Two ways to run a Spark job</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0602 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

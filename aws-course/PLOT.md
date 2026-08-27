@@ -50,6 +50,15 @@ is wrong and it gets fixed before anything new is added.
 | 0503 | Two in-memory services | working |
 | 0504 | The purpose-built stores | working |
 
+### Module 06 - Analytics
+
+| Lesson | Title | Rung |
+| 0600 | The lake is three layers | working |
+| 0601 | Three ways to read the lake | working |
+| 0602 | The warehouse beside the lake | working |
+| 0603 | Two ways to run a Spark job | working |
+| 0604 | Ingest, deliver, process | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -88,7 +97,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 06 to 14 above**, none started. New numbers go at the end of the
+- **Modules 07 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
