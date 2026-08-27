@@ -14,6 +14,15 @@ is wrong and it gets fixed before anything new is added.
 | 0102 | The platform map | foundation |
 | 0103 | Names that mislead | foundation |
 
+### Module 02 - Compute
+
+| Lesson | Title | Rung |
+| 0200 | The instance and the catalogue | working |
+| 0201 | The image and the template | working |
+| 0202 | Where the instance lands | working |
+| 0203 | Holding a fleet at a size | working |
+| 0204 | Buying the same machine for less | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

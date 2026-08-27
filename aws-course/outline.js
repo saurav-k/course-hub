@@ -27,6 +27,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0103-names-that-mislead.html"
         }
       ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The instance and the catalogue",
+          "href": "lessons/0200-the-instance-and-the-catalogue.html"
+        },
+        {
+          "title": "The image and the template",
+          "href": "lessons/0201-the-image-and-the-template.html"
+        },
+        {
+          "title": "Where the instance lands",
+          "href": "lessons/0202-where-the-instance-lands.html"
+        },
+        {
+          "title": "Holding a fleet at a size",
+          "href": "lessons/0203-holding-a-fleet-at-a-size.html"
+        },
+        {
+          "title": "Buying the same machine for less",
+          "href": "lessons/0204-buying-the-same-machine-for-less.html"
+        }
+      ]
     }
   ],
   "extras": []
