@@ -175,7 +175,21 @@ because the product it names is now part of the agent platform and shares its na
 `agent-identity` is a recorded absence stated in lesson 0802 and restated in lesson 1303
 where it decides a design.
 
-## Planned, in order
+**Module 14 - Resilience and migration**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 1400 | Three things called backup | `backup-service`, `dr-orchestration` |
+| 1401 | Replication and the recovery point | `cross-region-replication` |
+| 1402 | Moving workloads in | `migration-service` |
+| 1403 | Judging the design | `well-architected-framework`, `resilience-assessment` |
+
+`region-az-model` belongs to this module's domain in the shared taxonomy and was taught in
+lesson 0100, because every later module needed it first. Lesson 1403 closes the course on
+the `resilience-assessment` row, which is the most carefully qualified absence in the whole
+inventory and therefore the best final example of how to read one.
+
+## Planned, in order - all delivered
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -209,11 +223,11 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Module 14 above**, none started. Each module owns its own hundred of the
-  `MMxx` sequence, so a later contributor takes the next free number inside its module
-  rather than appending to the end of the course; nothing already published is
-  renumbered or renamed.
-- **Reference: glossary of GCP terms**, linked from every lesson foot once the
-  first lessons exist. Not written yet.
+- **Nothing is reserved.** All fourteen modules are written. A later contributor adding a
+  lesson takes the next free number inside its module rather than appending to the end of
+  the course; nothing already published is renumbered or renamed.
+- **Reference: glossary of GCP terms**, linked from every lesson foot. Still not written,
+  and now the largest outstanding piece of work on the course: fourteen modules of platform
+  vocabulary exist with no single page defining it.
 
 No module opens for writing until its topics are covered by verified research.

@@ -331,6 +331,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1303-agents-and-the-names.html"
         }
       ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Three things called backup",
+          "href": "lessons/1400-three-things-called-backup.html"
+        },
+        {
+          "title": "Replication and the recovery point",
+          "href": "lessons/1401-replication-and-recovery-points.html"
+        },
+        {
+          "title": "Moving workloads in",
+          "href": "lessons/1402-moving-workloads-in.html"
+        },
+        {
+          "title": "Judging the design",
+          "href": "lessons/1403-judging-the-design.html"
+        }
+      ]
     }
   ],
   "extras": []

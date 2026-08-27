@@ -228,6 +228,10 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [RAG Engine](https://cloud.google.com/vertex-ai/generative-ai/docs/rag-engine/rag-overview),
   [the enterprise search product](https://cloud.google.com/generative-ai-app-builder/docs/introduction),
   [the agent platform](https://cloud.google.com/agentspace/docs/overview).
+- **Module 14.** [Backup and DR Service](https://cloud.google.com/backup-disaster-recovery/docs/concepts/backup-dr),
+  [availability and durability](https://cloud.google.com/storage/docs/availability-durability),
+  [Migrate to Virtual Machines](https://cloud.google.com/migrate/compute-engine/docs/overview),
+  [the Well-Architected Framework](https://cloud.google.com/architecture/framework).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -299,3 +303,9 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
   confirm.
 - **Notebook surface naming.** The inventory records the certification guide and the product
   documentation using different wording. Lesson 1301 asserts no name for it.
+- **Recovery points other than turbo replication.** The inventory records one figure for
+  this area - roughly fifteen minutes for a dual-region bucket with turbo replication. No
+  other window is printed; lesson 1401 marks the rest of the axis qualitatively and points
+  at each mechanism's own documentation.
+- **Live region count.** The inventory notes a scale of more than forty regions with an
+  instruction to re-check. No count is printed anywhere, consistent with lesson 0100.
