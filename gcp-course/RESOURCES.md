@@ -107,6 +107,35 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [BigQuery data clean rooms](https://cloud.google.com/bigquery/docs/data-clean-rooms),
   [Looker](https://cloud.google.com/looker/docs),
   [Looker Studio](https://cloud.google.com/looker-studio).
+- **Module 07.** [VPC networks](https://cloud.google.com/vpc/docs/vpc),
+  [subnets](https://cloud.google.com/vpc/docs/subnets),
+  [multiple network interfaces](https://cloud.google.com/compute/docs/instances/create-instance-multiple-nics),
+  [routes](https://cloud.google.com/vpc/docs/routes),
+  [Cloud Router](https://cloud.google.com/network-connectivity/docs/router/concepts/overview),
+  [Cloud NAT](https://cloud.google.com/nat/docs/overview),
+  [firewall rules](https://cloud.google.com/firewall/docs/firewalls),
+  [network service tiers](https://cloud.google.com/network-tiers/docs/overview),
+  [Private Google Access](https://cloud.google.com/vpc/docs/private-google-access-hybrid),
+  [Private Services Access](https://cloud.google.com/vpc/docs/private-services-access),
+  [Private Service Connect](https://cloud.google.com/vpc/docs/private-service-connect),
+  [VPC Network Peering](https://cloud.google.com/vpc/docs/vpc-peering),
+  [Shared VPC](https://cloud.google.com/vpc/docs/shared-vpc),
+  [Network Connectivity Center](https://cloud.google.com/network-connectivity/docs/network-connectivity-center/concepts/overview),
+  [router appliance spokes](https://cloud.google.com/network-connectivity/docs/network-connectivity-center/concepts/ra-overview),
+  [HA VPN](https://cloud.google.com/network-connectivity/docs/vpn/concepts/overview),
+  [VPN quotas](https://cloud.google.com/network-connectivity/docs/vpn/quotas),
+  [Dedicated Interconnect](https://cloud.google.com/network-connectivity/docs/interconnect/concepts/dedicated-overview),
+  [Partner Interconnect](https://cloud.google.com/network-connectivity/docs/interconnect/concepts/partner-overview),
+  [Cross-Cloud Interconnect](https://cloud.google.com/network-connectivity/docs/interconnect/concepts/cci-overview),
+  [Google Distributed Cloud](https://cloud.google.com/distributed-cloud),
+  [VMware Engine](https://cloud.google.com/vmware-engine/docs/overview),
+  [load balancing](https://cloud.google.com/load-balancing/docs/load-balancing-overview),
+  [Cloud CDN](https://cloud.google.com/cdn/docs/overview),
+  [Media CDN](https://cloud.google.com/media-cdn/docs/overview),
+  [Cloud Armor](https://cloud.google.com/armor/docs/cloud-armor-overview),
+  [Cloud DNS](https://cloud.google.com/dns/docs/overview),
+  [DNS routing policies](https://cloud.google.com/dns/docs/routing-policies-overview),
+  [Cloud Domains](https://cloud.google.com/domains/docs/overview).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -136,3 +165,11 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
   read-pool autoscaling as preview. Named in lesson 0500; neither is stated as settled.
 - **Database Center stage.** Recorded as preview with an explicit instruction to verify
   the stage before teaching it. Named in lesson 0504.
+- **Network interface limits per machine type.** The inventory flags the limits table as
+  needing a re-check; no figure is printed. Named in lesson 0700.
+- **Interconnect SLA percentages per topology.** Recorded as still open, to be read from the
+  live vendor pages. No percentage is printed. Named in lesson 0704. The HA VPN 99.99%
+  figure is separate and was verified.
+- **Cloud Domains retirement.** The registrar service is recorded as retiring with the
+  migration mechanics and dates unverified. Named in lesson 0705, which asserts nothing
+  about them.

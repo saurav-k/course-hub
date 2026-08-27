@@ -75,6 +75,21 @@ teaches it in module 13 beside the agent platform and the retrieval pipeline it 
 with. `workflow-orchestration` carries two products: Cloud Composer is taught here as the
 data-pipeline orchestrator, and Workflows in module 12 as the lighter service orchestrator.
 
+**Module 07 - Networking and delivery**
+
+Six lessons rather than the usual four or five: this module carries four capability
+domains - core networking, load balancing and edge, DNS, and hybrid connectivity - and
+splitting them further would have produced pages with two ideas each.
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0700 | Subnets and the address plan | `virtual-network`, `subnet`, `network-interface`, `ip-address-management` |
+| 0701 | Routing, egress and the firewall | `route-table`, `bgp-dynamic-routing`, `nat-gateway`, `stateful-packet-filter` |
+| 0702 | Three private paths to a managed service | `private-google-access`, `private-services-access`, `private-endpoint` |
+| 0703 | Joining networks | `network-peering`, `shared-vpc`, `transit-hub`, `network-manager` |
+| 0704 | Reaching the ground | `site-to-site-vpn`, `dedicated-interconnect`, `partner-interconnect`, `cross-cloud-interconnect`, `sdwan-integration`, `on-prem-extension`, `vmware-stack-hosting`, `client-vpn`, `metro-edge-locations` |
+| 0705 | The edge, and one anycast front door | `l7-load-balancer`, `l4-load-balancer`, `global-front-door`, `cdn`, `media-cdn`, `ddos-protection`, `authoritative-dns`, `private-dns`, `dns-routing-policies`, `domain-registrar`, `gateway-load-balancer` |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -109,7 +124,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 07 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 08 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.

@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Routing, egress and the firewall - Inside Google Cloud</title>
+<meta name="description" content="There is no route table object and no firewall appliance in the path. Routing is a property of the network and filtering is enforced at every interface, which changes where a design puts its controls.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0701</div>
+  <h1>Nothing sits in the path - routing and filtering are properties of the fabric</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Capabilities <code>route-table</code>, <code>bgp-dynamic-routing</code>, <code>nat-gateway</code> and <code>stateful-packet-filter</code>. Sourced from
+    <a href="https://cloud.google.com/vpc/docs/routes">Routes</a>,
+    <a href="https://cloud.google.com/firewall/docs/firewalls">VPC firewall rules</a> and
+    <a href="https://cloud.google.com/nat/docs/overview">Cloud NAT</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>There is <b>no route table object</b>. Routing is VPC-wide, made of system routes, custom static routes with <b>priorities</b>, and dynamic routes learned by <b>Cloud Router</b> over BGP.</li>
+      <li>A custom route is aimed at particular machines with <b>network tags</b> rather than by attaching a table to a subnet.</li>
+      <li>The firewall is <b>enforced at every instance interface</b>, so there is no appliance in the path and no choke point. Rules target <b>network tags, secure tags or service accounts</b>, not only addresses.</li>
+      <li>The implied rules are <b>allow all egress and deny all ingress</b> until something overrides them, and priority decides between a matching allow and a matching deny.</li>
+      <li><b>Cloud NAT</b> gives private machines outbound internet with no inbound exposure, and its <b>port reservation arithmetic</b> is where designs fail.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous page&lt;br/&gt;the subnet and&lt;br/&gt;the addresses&lt;br/&gt;inside it"] --> T["THIS PAGE&lt;br/&gt;how a packet is&lt;br/&gt;routed, filtered&lt;br/&gt;and sent outbound"]
+  T --> N["What it enables&lt;br/&gt;private paths to&lt;br/&gt;managed services,&lt;br/&gt;and joining networks"]
+  W["Module 07&lt;br/&gt;Networking"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page built the address space. This page is what happens to a packet inside it, and the surprise is how little of the answer is an object you can point at.
+    <b>Engineers arriving from an appliance-shaped network look for the box that routes and the box that filters, and on this platform neither box exists.</b></figcaption>
+  </figure>
+
+  <h2>1. Three sources of routes, and no table</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["Routing, VPC-wide"] --> SY["System-generated routes&lt;br/&gt;the subnets themselves"]
+  R --> ST["Custom static routes&lt;br/&gt;with priorities, aimed at&lt;br/&gt;machines by network tag"]
+  R --> DY["Dynamic routes&lt;br/&gt;learned by Cloud Router&lt;br/&gt;over BGP"]
+  DY --> VP["from VPN tunnels"]
+  DY --> IC["from Interconnect VLAN attachments"]
+    </div>
+    <figcaption>Where a route comes from. There is no per-subnet table to attach, so the question "which routes apply here" is answered by the network plus the tags on the machine rather than by an association.
+    <b><a href="https://cloud.google.com/network-connectivity/docs/router/concepts/overview">Cloud Router</a> is the piece worth remembering by name - it is the BGP speaker, and both hybrid paths in lesson 0703 require one.</b></figcaption>
+  </figure>
+
+  <h2>2. A firewall with no place to stand</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as Sender
+  participant F as The fabric at the receiving interface
+  participant R as Receiver
+  S->>F: a packet arrives for the receiver
+  F->>F: match rules by tag, secure tag or service account
+  F->>F: highest priority match decides allow or deny
+  F-->>R: delivered, if a rule allowed it
+  Note over F: With no rule, implied ingress deny applies and egress is allowed
+    </div>
+    <figcaption>Enforcement happens at the interface of every instance, in the virtual network fabric. Nothing is routed through a filtering device, which is why there is no bottleneck to size and no failover pair to operate.
+    <b>The consequence is that a rule cannot be bypassed by taking a different path, because there is no path that avoids the enforcement point.</b></figcaption>
+  </figure>
+
+  <p>Targeting is the part that changes designs. A rule can name a <b>service account</b> or a <b>secure tag</b> rather than an address range, so a policy can say "the payments service may reach the payments database" and stay true when either side is rebuilt with new addresses. Hierarchical firewall policies push rules down from the organisation and folder, which is how a guardrail written once applies below it. Google sells this as the standard tier of <a href="https://cloud.google.com/firewall/docs/firewalls">Cloud NGFW</a>.</p>
+
+  <div class="callout warn">
+    Secure tags are the nearest thing here to routing by intent, and the verified inventory records the difference carefully: they let a rule reference resource tags instead of addresses, and they <b>do not constrain the path independently of the underlying network</b> the way an intent-based policy would. Read them as identity-shaped filtering, not as a separate control plane over the path.
+  </div>
+
+  <h2>3. Getting out, and the arithmetic that bites</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 270" role="img" aria-label="A schematic with the number of private machines on the horizontal axis. A rising line shows ports demanded, growing with machine count times ports reserved per machine. A flat line shows ports supplied by the NAT addresses. The two cross at a point after which translations begin to fail.">
+      <line class="axis" x1="70" y1="220" x2="610" y2="220"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="220"/>
+      <rect class="f-alarm" x="370" y="40" width="240" height="180"/>
+      <polyline class="s-stat thick" points="72,218 560,52"/>
+      <polyline class="s-signal thick" points="72,118 610,118"/>
+      <circle class="m-alarm" cx="370" cy="118" r="7"/>
+      <text class="ttl" x="70" y="26">Schematic: why Cloud NAT runs out</text>
+      <text class="lbl-sm" x="340" y="252" text-anchor="middle">number of private machines behind the gateway</text>
+      <text class="lbl-sm" x="82" y="58">ports</text>
+      <text class="lbl-sm t-stat" x="430" y="86">demanded - machines times ports reserved each</text>
+      <text class="lbl-sm t-signal" x="120" y="110">supplied by the NAT addresses</text>
+      <text class="lbl-sm t-alarm" x="490" y="180" text-anchor="middle">translations start to fail here</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>ports demanded</span><span><i class="sw-signal"></i>ports supplied</span><span><i class="sw-alarm"></i>the exhausted region</span></div>
+    <figcaption>Schematic, not measured: the two lines show the shape of the reservation model rather than any configured value. Ports are reserved per machine, so demand grows with the fleet while supply is fixed by the addresses assigned to the gateway.
+    <b>The failure is not gradual congestion - it is a machine that cannot open a connection at all, appearing when the fleet crosses a line nobody was watching.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/nat/docs/overview">Cloud NAT</a> is regional and managed, and it gives private machines and serverless workloads outbound internet with no inbound exposure. Two levers matter: the reservation arithmetic above, and <b>manual endpoints</b>, which pin the addresses traffic leaves from - the thing a partner's allow-list needs.</p>
+
+  <p>The other egress decision is the <b>network service tier</b>. Premium rides Google's own backbone and is the default; Standard uses ordinary internet transit. The <a href="https://cloud.google.com/network-tiers/docs/overview">tiers documentation</a> is the reference, and the choice is a latency-against-cost decision rather than a functional one.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Stop looking for the box. <b>Routing</b> is a property of the network plus the tags on a machine. <b>Filtering</b> is a property of every interface. <b>Egress</b> is a regional service with an arithmetic budget. Designs that go wrong here usually do so by trying to recreate a choke point - and a choke point you build yourself is a bottleneck the platform was not going to give you.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How is a custom static route aimed at only some machines in a VPC?</div>
+      <button class="q-opt">By network tag, since routes are VPC-wide and tables are not used</button>
+      <button class="q-opt">By attaching a route table to the subnet those machines sit in</button>
+      <button class="q-opt">By service account, the same targeting the firewall rules use</button>
+      <button class="q-opt">By zone, since a route applies to one zone of the region only</button>
+      <div class="q-fb">Routing is VPC-wide and per-machine targeting comes from network tags. The second imports a route-table model this platform does not have. The third is real targeting for firewall rules but not for routes. The fourth invents a scope that routing does not carry.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What follows from the firewall being enforced at every instance interface?</div>
+      <button class="q-opt">Rules are evaluated once per subnet, so priorities rarely conflict</button>
+      <button class="q-opt">Throughput is capped by the appliance pair that fronts the network</button>
+      <button class="q-opt">There is no path around it, and no choke point to size or fail over</button>
+      <button class="q-opt">Ingress is allowed by default, since no device is there to deny it</button>
+      <div class="q-fb">Distributed enforcement removes both the bypass and the bottleneck. The first misstates where evaluation happens. The second describes the appliance model this design replaces. The fourth reverses the implied rules - ingress is denied and egress allowed.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A growing fleet of private machines starts failing to open outbound connections. What is the likely cause?</div>
+      <button class="q-opt">The implied egress rule was overridden by a higher-priority deny</button>
+      <button class="q-opt">Cloud Router stopped advertising the default route to the machines</button>
+      <button class="q-opt">The subnet's primary range filled, so new machines have no address</button>
+      <button class="q-opt">Cloud NAT port reservation, with demand past what the addresses give</button>
+      <div class="q-fb">Ports are reserved per machine against a supply fixed by the gateway's addresses, so growth crosses a line. The first and second are real failures that would not correlate with fleet size in this way. The third would stop machines being created rather than stop existing ones connecting.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A regional service runs on private machines with no external addresses. It calls one partner API on the public internet, and the partner requires the calls to arrive from a fixed, small set of source addresses. The team plans to grow the fleet from 200 machines to 900 over a year.</p>
+      <p><b>Design</b> the egress, <b>show</b> the arithmetic that decides whether it survives the growth, and <b>state</b> the two facts you would have to look up rather than assume.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Two separate requirements: getting out at all, and being recognised on arrival. The arithmetic is a product against a supply, and you are being asked to write it as an inequality rather than to know the numbers.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Give the fleet a way out.</b> Cloud NAT, regional, in front of the private machines. No machine gains an external address, so no inbound exposure is created by solving the outbound problem.</li>
+        <li><b>Satisfy the partner.</b> Manual endpoints on the gateway pin the addresses traffic leaves from, which is what makes an allow-list on the partner's side stable. Letting the platform choose addresses would break the allow-list the first time they changed.</li>
+        <li><b>Write the arithmetic.</b> Let <i>p</i> be the ports reserved per machine and <i>n</i> the number of machines. Demand is <i>n</i> &times; <i>p</i>. Supply is the number of addresses assigned to the gateway multiplied by the usable ports each provides. The design survives while supply is at least demand, so at 900 machines the requirement is supply &ge; 900<i>p</i> - four and a half times the 200-machine requirement of 200<i>p</i>.</li>
+        <li><b>Name what to look up.</b> The ports reserved per machine as currently configured, and the usable ports each address provides, both on the <a href="https://cloud.google.com/nat/docs/overview">Cloud NAT documentation</a>. Neither is assumed here, because a printed number would be the part of this answer that rots.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your inequality should scale linearly in the machine count, so a fleet growing four and a half times needs its supply to grow by the same factor unless the per-machine reservation is reduced. If your answer gave the machines external addresses to reach the partner, note that it also gave the internet a way to reach them.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If an outbound failure is intermittent and correlates with load, ask an agent for the machine count behind the gateway and the ports reserved per machine, and multiply. A product that has crept past the supply is the answer, and no amount of firewall reading will find it.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/firewall/docs/firewalls">The firewall documentation</a> covers distributed enforcement, targeting by tag and service account, priority and the implied rules, and it is the page a security design is written against. <a href="https://cloud.google.com/nat/docs/overview">Cloud NAT</a> carries the reservation model and the manual endpoint behaviour.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0700-subnets-and-addresses.html"><span class="dir">&larr; Previous</span><span class="ttl">Subnets and the address plan</span></a>
+    <a class="nxt" href="0702-three-private-paths.html"><span class="dir">Next &rarr;</span><span class="ttl">Three private paths to a managed service</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0701 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

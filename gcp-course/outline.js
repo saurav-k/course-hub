@@ -153,6 +153,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0604-governing-and-reading-the-data.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "Subnets and the address plan",
+          "href": "lessons/0700-subnets-and-addresses.html"
+        },
+        {
+          "title": "Routing, egress and the firewall",
+          "href": "lessons/0701-routing-egress-and-the-firewall.html"
+        },
+        {
+          "title": "Three private paths to a managed service",
+          "href": "lessons/0702-three-private-paths.html"
+        },
+        {
+          "title": "Joining networks",
+          "href": "lessons/0703-joining-networks.html"
+        },
+        {
+          "title": "Reaching the ground",
+          "href": "lessons/0704-reaching-the-ground.html"
+        },
+        {
+          "title": "The edge, and one anycast front door",
+          "href": "lessons/0705-the-edge.html"
+        }
+      ]
     }
   ],
   "extras": []
