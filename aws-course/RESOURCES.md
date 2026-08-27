@@ -17,11 +17,25 @@ use.
 The course records what it rests on with the date it was read, so a refresh chases
 only what changed:
 
-- Verified per-cloud inventory for AWS: not yet complete. Lessons are written
-  only from material whose verification is recorded here first.
-- When verification lands, its read date and scope are recorded beside this line.
+- Verified per-cloud inventory for AWS: complete, snapshot 2026-08-26. Every vendor
+  page cited by a lesson was fetched and read on that date by the research pass that
+  produced the inventory, and each claim traces to a specific page rather than to a
+  summary of one. The inventory survived an independent audit, a second audit on a
+  different model, a corrections pass and a reconciliation before any lesson was written.
+- Scope of that snapshot: 183 service rows across all 24 capability domains, 437 vendor
+  sources. Lessons are written only from it.
+- Counts that move - regions, Availability Zones, edge locations, Kubernetes versions in
+  support - are stated as they read at the snapshot and always carry the vendor page as
+  the live authority.
 
 ## Gaps
 
-- No vendor page had been fetched at the time this shell was created, so no specific
-  documentation URL carries a read date yet.
+Topics deliberately left unwritten because the verified inventory does not cover them
+at the depth a lesson needs:
+
+- **EC2 placement group strategies in detail.** The inventory records that cluster,
+  partition and spread strategies exist and that Dedicated Hosts cannot be used inside
+  a placement group, but not the per-strategy restrictions. Lesson 0202 teaches the
+  three strategies by name and points at the vendor page for the detail.
+- **List prices anywhere.** Cost *shape* is taught and prices are linked, per
+  `MISSION.md`.

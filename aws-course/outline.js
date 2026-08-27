@@ -5,6 +5,29 @@
 window.COURSE_OUTLINE = {
   "key": "aws",
   "title": "Inside AWS",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "Regions, zones and the edge",
+          "href": "lessons/0100-regions-zones-and-the-edge.html"
+        },
+        {
+          "title": "The account is the boundary",
+          "href": "lessons/0101-the-account-is-the-boundary.html"
+        },
+        {
+          "title": "The platform map",
+          "href": "lessons/0102-the-platform-map.html"
+        },
+        {
+          "title": "Names that mislead",
+          "href": "lessons/0103-names-that-mislead.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

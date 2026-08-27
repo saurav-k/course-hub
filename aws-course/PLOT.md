@@ -6,14 +6,23 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing yet. `aws-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+### Module 01 - The lay of the land
+
+| Lesson | Title | Rung |
+| 0100 | Regions, zones and the edge | foundation |
+| 0101 | The account is the boundary | foundation |
+| 0102 | The platform map | foundation |
+| 0103 | Names that mislead | foundation |
 
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
 and watched, how change ships, and finally how it survives failure.
+
+Lesson numbers are `MMxx`: the two-digit module number, then a two-digit sequence
+inside it. Module 01 is `0100` upward, Module 02 is `0200` upward, and so on. Lesson
+numbers are public URLs, so nothing published is ever renumbered.
 
 | # | Module | Covers |
 | 01 | The lay of the land | regions and availability, the account hierarchy, and the platform map |
@@ -43,7 +52,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
+- **Modules 05 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
