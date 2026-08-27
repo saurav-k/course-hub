@@ -261,6 +261,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1004-being-told.html"
         }
       ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "The perimeter and the proxy",
+          "href": "lessons/1100-the-perimeter-and-the-proxy.html"
+        },
+        {
+          "title": "Stopping a request at the edge and in the fabric",
+          "href": "lessons/1101-stopping-a-request.html"
+        },
+        {
+          "title": "Threat detection and posture",
+          "href": "lessons/1102-findings.html"
+        },
+        {
+          "title": "Scanning what you build, classifying what you hold",
+          "href": "lessons/1103-scanning-and-classifying.html"
+        }
+      ]
     }
   ],
   "extras": []

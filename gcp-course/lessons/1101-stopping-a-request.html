@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Stopping a request at the edge and in the fabric - Inside Google Cloud</title>
+<meta name="description" content="Three places can stop a request and each sees something the others cannot: the edge policy on the load balancer, the abuse score on the sign-in, and the firewall enforced at every interface.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Security services &middot; Lesson 1101</div>
+  <h1>Three places can stop a request, and each sees something the others cannot</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Capabilities <code>waf</code>, <code>recaptcha-enterprise</code>, <code>cloud-firewall</code> and <code>packet-mirroring</code>. Sourced from
+    <a href="https://cloud.google.com/armor/docs/cloud-armor-overview">Cloud Armor</a> and
+    <a href="https://cloud.google.com/firewall/docs/firewall-policies">Cloud NGFW</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Cloud Armor</b> attaches security policies to the load balancer from lesson 0705. It carries <b>managed rule sets</b> for the common injection and scanning attacks, plus <b>custom rules written in CEL</b>.</li>
+      <li>Two Armor features change designs rather than settings: <b>preview mode</b>, which evaluates a rule without enforcing it, and <b>rate limiting</b> through throttle and ban rules.</li>
+      <li><b>reCAPTCHA Enterprise</b> is a different kind of judgement: it <b>scores</b> a sign-in or checkout for fraud and abuse rather than matching a request against a rule, and it integrates with the edge policy.</li>
+      <li><b>Cloud NGFW</b> is the firewall family from lesson 0701. The standard tier is the classic rules and policies; <b>NGFW Enterprise adds threat inspection, including of TLS traffic</b>.</li>
+      <li><b>Packet Mirroring</b> is not an enforcement point at all. It clones traffic to an out-of-band collector, and it is <b>a capture tap rather than a log stream</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous page&lt;br/&gt;the perimeter around&lt;br/&gt;the data and the&lt;br/&gt;proxy at the door"] --> T["THIS PAGE&lt;br/&gt;stopping a request&lt;br/&gt;in flight, at three&lt;br/&gt;different depths"]
+  T --> N["What it enables&lt;br/&gt;the findings that&lt;br/&gt;tell you what got&lt;br/&gt;through anyway"]
+  W["Module 11&lt;br/&gt;Security services"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page judged who and from where. This page judges the request itself, and the three answers sit at three different points in the path from lesson 0705.
+    <b>The depth at which a control sits decides what it can possibly know, so choosing between these is a question about information rather than about strength.</b></figcaption>
+  </figure>
+
+  <h2>1. Three depths, three kinds of knowledge</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as A request
+  participant E as Cloud Armor at the edge
+  participant R as reCAPTCHA Enterprise
+  participant F as The firewall at the interface
+  participant B as A backend
+  U->>E: arrives at the nearest point of presence
+  E->>E: managed rules, custom CEL rules, rate limits
+  E-->>U: denied here, before any region is involved
+  U->>R: a sign-in or checkout is scored for abuse
+  R-->>U: the score feeds the edge policy decision
+  U->>F: reaches the fabric in front of the workload
+  F->>F: allow or deny by tag, secure tag or service account
+  F-->>B: delivered, if all three permitted it
+    </div>
+    <figcaption>One request passing three judgements. The edge sees the request's shape and its rate; the abuse score sees behaviour across sessions; the firewall sees identity and the network path and nothing about the request content.
+    <b>Each control is blind to what the others can see, which is why "we have a firewall" is never an answer to an application-layer attack and "we have a web firewall" is never an answer to lateral movement.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/armor/docs/cloud-armor-overview">Cloud Armor</a>'s managed rule sets cover the common families - injection, cross-site scripting, file inclusion, remote code execution and scanners - and custom rules are written in the same expression language used elsewhere on the platform. Its always-on protection at layers three and four was introduced in lesson 0705; this page is the configurable half.</p>
+
+  <h2>2. Preview mode, and why every rule should start there</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Preview: the rule is added in preview mode
+  Preview --> Preview: matches are logged and nothing is blocked
+  Preview --> Tuned: false positives are found and the rule is narrowed
+  Tuned --> Preview: observe again
+  Tuned --> Enforcing: the rule is switched to enforce
+  Enforcing --> [*]
+  note right of Preview
+    The traffic that would have been
+    blocked is real traffic you can read
+  end note
+    </div>
+    <figcaption>The tuning loop preview mode makes possible. A managed rule set written for the whole internet will always match some legitimate requests to your particular application, and preview is where you find out which.
+    <b>This is the same shape as the perimeter's dry run and organisation policy's dry run - three different products, one habit, and the habit is what separates a security rollout from an outage.</b></figcaption>
+  </figure>
+
+  <p><b>Rate limiting</b> is the other lever, expressed as throttle and ban rules on the same policies. It is worth naming separately because it addresses a different attack: not a malformed request but too many well-formed ones.</p>
+
+  <h2>3. Scoring, which is not matching</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  RQ["A sign-in or a checkout"] --> RC["reCAPTCHA Enterprise&lt;br/&gt;scores it for fraud and abuse"]
+  RC --> S["A score, not a verdict"]
+  S --> APP["Your application decides&lt;br/&gt;what a low score means"]
+  S --> EDGE["The edge policy can act on it"]
+  RL["A Cloud Armor rule"] --> V["A match, and a verdict"]
+    </div>
+    <figcaption><a href="https://cloud.google.com/security/products/recaptcha">reCAPTCHA Enterprise</a> beside a rule, drawn by what each one returns. A rule matches and decides; a score describes and leaves the decision to you.
+    <b>That difference is the whole design question - a score has to be paired with a threshold and a consequence, and an estate that collects scores and never acts on them has bought a metric rather than a control.</b></figcaption>
+  </figure>
+
+  <h2>4. Inspecting deeper, and looking without stopping</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  NG["Cloud NGFW"] --> ST["Standard tier&lt;br/&gt;the rules and hierarchical policies&lt;br/&gt;from lesson 0701"]
+  NG --> EN["NGFW Enterprise&lt;br/&gt;threat inspection,&lt;br/&gt;including TLS traffic"]
+  PM["Packet Mirroring&lt;br/&gt;clones traffic to a collector"] --> OOB["Out of band -&lt;br/&gt;it stops nothing&lt;br/&gt;and logs nothing"]
+    </div>
+    <figcaption>The two remaining pieces, and they belong in different categories. <a href="https://cloud.google.com/firewall/docs/firewall-policies">NGFW Enterprise</a> is enforcement that inspects content, and <a href="https://cloud.google.com/vpc/docs/packet-mirroring">Packet Mirroring</a> is a capture tap that feeds a detection or forensics system you run.
+    <b>Lesson 1002 promised this: when a requirement says capture the traffic, this is the feature - it is not a log stream, so nothing about it appears in Cloud Logging.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Place a control by asking what it can see. <b>The shape and rate of a request</b> is the edge. <b>Behaviour across sessions</b> is the abuse score. <b>Who is talking to whom</b> is the firewall. <b>What is inside the payload</b> is threat inspection, and <b>a copy for something else to analyse</b> is the mirror. A requirement that names an attack rather than a product usually answers itself once you ask which of the five could have seen it.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why should a managed Cloud Armor rule set be added in preview mode first?</div>
+      <button class="q-opt">Because managed rules cannot be enforced until they have been observed</button>
+      <button class="q-opt">Because preview mode is required before rate limiting can be configured</button>
+      <button class="q-opt">Because rules are billed only once they are moved out of preview mode</button>
+      <button class="q-opt">Because a general rule set will match some of your legitimate traffic</button>
+      <div class="q-fb">Rules written for the whole internet always catch something particular to your application, and preview is where you find it without an outage. The first invents a requirement. The second and third invent a dependency and a billing rule that the inventory does not record.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does reCAPTCHA Enterprise return, and what follows from that?</div>
+      <button class="q-opt">A score, so a threshold and a consequence still have to be chosen</button>
+      <button class="q-opt">A verdict, so the request is allowed or denied without further work</button>
+      <button class="q-opt">A rule match, which the edge policy then converts into a decision</button>
+      <button class="q-opt">A log entry, which a detection system consumes out of Cloud Logging</button>
+      <div class="q-fb">It scores rather than decides, so the design is incomplete until a threshold and an action are chosen. The second and third describe what a rule does. The fourth turns a control into telemetry.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A team wants a copy of traffic for a third-party detection appliance. What provides it?</div>
+      <button class="q-opt">VPC Flow Logs, whose records can be routed to the appliance by sink</button>
+      <button class="q-opt">NGFW Enterprise, which forwards inspected traffic to the collector</button>
+      <button class="q-opt">Packet Mirroring, which clones traffic to an out-of-band collector</button>
+      <button class="q-opt">Cloud Armor, whose preview mode mirrors matched requests onward</button>
+      <div class="q-fb">Packet Mirroring is the capture tap and it is not a log stream. The first offers sampled, interpolated records with no payload. The second inspects in the path rather than cloning out of it. The fourth confuses preview mode with mirroring.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A retail site reports three problems in one week. Automated scripts are creating thousands of fake accounts. A scanner is probing the application for injection flaws. And an internal service is being reached by a workload that should have no business calling it.</p>
+      <p><b>Place</b> each problem at the control that can actually see it, <b>say</b> what the first control returns and what the team must add, and <b>state</b> how you would deploy the second one safely.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Three problems, three depths. One control returns something that is not a decision, and one should never be switched straight to enforcing.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The fake accounts.</b> reCAPTCHA Enterprise on the sign-up flow. This is behaviour across sessions rather than a malformed request, so no rule at the edge would match it and no firewall would see anything unusual.</li>
+        <li><b>Say what it returns.</b> A score. The team must choose a threshold and a consequence - challenge, refuse, or flag for review - because the product describes and does not decide. Collecting scores and acting on none of them changes nothing.</li>
+        <li><b>The scanner.</b> Cloud Armor managed rules at the edge, which cover the injection and scanner families, backed by rate limiting through throttle or ban rules so that the probing itself is expensive.</li>
+        <li><b>Deploy it safely.</b> In preview mode. Observe what the rules match on real traffic, narrow the ones that catch legitimate requests, then switch to enforcing - the same habit as the perimeter dry run on the previous page.</li>
+        <li><b>The unexpected internal caller.</b> The firewall, and the useful part is the targeting from lesson 0701: write the rule against the calling service account or a secure tag rather than an address, so it stays true when either side is rebuilt.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your three answers should sit at three different depths, and the account-creation one should not be a rule. If the internal-caller problem was solved at the edge, note that the traffic never passes the edge at all.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Given an attack description, ask an agent which of the five controls on this page could have observed it. Usually only one could, and that answer selects the product before any feature comparison starts.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/armor/docs/cloud-armor-overview">The Cloud Armor overview</a> covers the managed rule sets, custom rules, preview mode and rate limiting, and it is the page an edge policy is written from. <a href="https://cloud.google.com/firewall/docs/firewall-policies">Cloud NGFW</a> covers the tiers, and <a href="https://cloud.google.com/vpc/docs/packet-mirroring">Packet Mirroring</a> the capture tap.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="1100-the-perimeter-and-the-proxy.html"><span class="dir">&larr; Previous</span><span class="ttl">The perimeter and the proxy</span></a>
+    <a class="nxt" href="1102-findings.html"><span class="dir">Next &rarr;</span><span class="ttl">Threat detection and posture</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 1101 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

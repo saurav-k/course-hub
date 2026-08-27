@@ -190,6 +190,18 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [Cloud Profiler](https://cloud.google.com/profiler/docs/about-profiler),
   [Network Intelligence Center](https://cloud.google.com/network-intelligence-center),
   [Personalized Service Health](https://cloud.google.com/service-health/docs/overview).
+- **Module 11.** [VPC Service Controls](https://cloud.google.com/vpc-service-controls/docs/overview),
+  [Identity-Aware Proxy](https://cloud.google.com/iap/docs/concepts-overview),
+  [Cloud Armor](https://cloud.google.com/armor/docs/cloud-armor-overview),
+  [reCAPTCHA Enterprise](https://cloud.google.com/security/products/recaptcha),
+  [Cloud NGFW policies](https://cloud.google.com/firewall/docs/firewall-policies),
+  [Packet Mirroring](https://cloud.google.com/vpc/docs/packet-mirroring),
+  [Security Command Center threats](https://cloud.google.com/security-command-center/docs/overview-threats),
+  [security posture service](https://docs.cloud.google.com/security-command-center/docs/security-posture-overview),
+  [Artifact Analysis](https://cloud.google.com/artifact-analysis/docs/),
+  [Web Security Scanner](https://cloud.google.com/security-command-center/docs/how-to-use-web-security-scanner),
+  [Sensitive Data Protection](https://cloud.google.com/sensitive-data-protection/docs),
+  [Model Armor](https://cloud.google.com/security-command-center/docs/model-armor-overview).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -243,3 +255,7 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
 - **Infrastructure Manager Terraform drift detection.** Claimed during research, could not
   be verified, and removed rather than softened. Nothing in this course rests on it;
   lesson 0902 says so explicitly.
+- **Model Armor stage.** Recorded as preview with an instruction to confirm the stage
+  before teaching it as settled. Named in lesson 1103, which asserts no availability.
+- **Cloud IDS retirement.** Recorded as retiring. Lesson 1102 says so and prints no date,
+  because dates belong only in this file.

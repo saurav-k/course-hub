@@ -133,6 +133,19 @@ taxonomy and is taught here, because the Log Router cannot be separated from the
 store it decides storage for. `identity-provider-audit-log` is a recorded absence named
 in lesson 0803 and reaching Cloud Logging as Admin Activity records.
 
+**Module 11 - Security services**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 1100 | The perimeter and the proxy | `service-perimeter`, `zero-trust-app-access`, `bastion`, `conditional-access` |
+| 1101 | Stopping a request at the edge and in the fabric | `waf`, `recaptcha-enterprise`, `cloud-firewall`, `packet-mirroring` |
+| 1102 | Threat detection and posture | `threat-detection`, `posture-management`, `security-investigation-graph` |
+| 1103 | Scanning what you build, classifying what you hold | `vulnerability-scanning`, `data-classification`, `ai-safety-guardrails`, `verified-permissions` |
+
+Four lessons rather than five: the standard firewall tier is taught in lesson 0701 where a
+packet is followed, and `zero-trust-routing` is stated there as the same absence, so this
+module carries only what those pages left.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -167,7 +180,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 11 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 12 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.
