@@ -209,6 +209,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0804-keys-secrets-and-certificates.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "Shaping the tree",
+          "href": "lessons/0900-shaping-the-tree.html"
+        },
+        {
+          "title": "Two ceilings that grant nothing",
+          "href": "lessons/0901-two-ceilings-that-grant-nothing.html"
+        },
+        {
+          "title": "The landing zone and the catalogue",
+          "href": "lessons/0902-the-landing-zone-and-the-catalogue.html"
+        },
+        {
+          "title": "Quotas, tags and what you own",
+          "href": "lessons/0903-quotas-tags-and-what-you-own.html"
+        },
+        {
+          "title": "The cost model",
+          "href": "lessons/0904-the-cost-model.html"
+        }
+      ]
     }
   ],
   "extras": []

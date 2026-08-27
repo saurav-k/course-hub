@@ -77,6 +77,15 @@ is wrong and it gets fixed before anything new is added.
 | 0803 | Neither your staff nor your customers | working |
 | 0804 | Keys, secrets and certificates | working |
 
+### Module 09 - Governance, tenancy and cost
+
+| Lesson | Title | Rung |
+| 0900 | Shaping the tree | working |
+| 0901 | Two ceilings that grant nothing | working |
+| 0902 | The landing zone and the catalogue | working |
+| 0903 | Quotas, tags and what you own | working |
+| 0904 | The cost model | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -115,7 +124,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 09 to 14 above**, none started. New numbers go at the end of the
+- **Modules 10 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

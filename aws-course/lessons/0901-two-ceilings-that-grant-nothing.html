@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two ceilings that grant nothing - Inside AWS</title>
+<meta name="description" content="Service control policies cap what your principals may do; resource control policies cap what may be done to your resources by anyone - and the difference decides which callers a guardrail can stop.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Governance, tenancy and cost &middot; Lesson 0901</div>
+  <h1>One guardrail caps your callers, the other caps everyone else's</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability key <code>org-guardrail-policy</code>.
+    &middot; <a href="https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_scp.html">Service control policies</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Neither policy grants anything.</b> Both are ceilings: they can only remove from what identity policies already allow.</li>
+      <li>A <b>service control policy</b> caps what principals <i>your organisation manages</i> may do - including each member account's root user.</li>
+      <li>A <b>resource control policy</b> caps what may be done <i>to your resources</i> regardless of who is calling, <b>including principals outside your organisation</b>. That is the gap SCPs cannot cover.</li>
+      <li>Both skip the same two things: the <b>management account</b> and <b>service-linked roles</b>. Resource control policies also skip AWS-managed KMS keys.</li>
+      <li>What it costs: <b>ten SCPs of 10,240 characters</b> and <b>five RCPs of 5,120 characters</b> per entity, and a non-detachable full-access default sits in both sets.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0900&lt;br/&gt;the tree these policies&lt;br/&gt;attach to"] --> T["THIS PAGE&lt;br/&gt;the two ceilings&lt;br/&gt;that inherit down it"]
+  T --> A["The landing zone&lt;br/&gt;that applies them, lesson 0902"]
+  T --> B["Detecting what slipped through&lt;br/&gt;lesson 0903"]
+  W["Module 09&lt;br/&gt;governance, tenancy and cost"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page drew a tree whose whole purpose is inheritance. This page is what inherits: two policy types that sit above every identity policy in every account below them.
+    <b>A guardrail is the only control in AWS that an account administrator cannot remove from inside their own account.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two sides of one request</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["A request to act on a resource"] --> S["Service control policy&lt;br/&gt;caps the CALLER&lt;br/&gt;- only callers you manage"]
+  R --> C["Resource control policy&lt;br/&gt;caps the RESOURCE&lt;br/&gt;- whoever the caller is"]
+  S --> I["Identity policies, unchanged&lt;br/&gt;- a ceiling never grants"]
+  C --> I
+  I --> D["Allowed only if everything&lt;br/&gt;below the ceilings allows it"]
+    </div>
+    <figcaption>The two guardrails, drawn by which end of the request they hold. The asymmetry is the point: a service control policy constrains only principals your organisation manages, which its own documentation states plainly with a worked example, while a resource control policy applies to your resources no matter whose principal is asking (<a href="https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_rcps.html">resource control policies</a>).
+    <b>Inheritance is strict: an account receives only what every organisational unit above it allows, so a ceiling written near the root is felt everywhere below.</b></figcaption>
+  </figure>
+
+  <h2>2. The gap only one of them closes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant X as A principal in someone else's account
+  participant SCP as Your service control policies
+  participant RCP as Your resource control policies
+  participant B as Your bucket
+  X->>B: request to read an object
+  B->>SCP: does this apply
+  SCP-->>B: no - the caller is not managed by this organisation
+  B->>RCP: does this apply
+  RCP-->>B: yes - it caps what may be done to this resource
+  RCP-->>X: denied, because the caller is outside the organisation
+    </div>
+    <figcaption>Why both exist. An organisation that has written careful service control policies has said nothing at all about an outsider calling in, because that caller is not one of its principals. Resource control policies close that gap across roughly forty service prefixes, including S3, SQS, KMS, STS, Secrets Manager and DynamoDB.
+    <b>If your data-perimeter requirement is about who may reach your data, the service control policy is the wrong instrument no matter how well it is written.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Both policy types skip <b>service-linked roles</b>, and the resource control policy documentation says so in as many words: they do not affect the effective permissions of any service-linked role, and a service-linked role's trust policy is unaffected too. Both also skip the <b>management account</b>, and resource control policies additionally skip <b>AWS-managed KMS keys</b>. A guardrail that appears not to be working is very often meeting one of these four exclusions.</div>
+
+  <h2>3. The budget you are actually writing into</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of guardrail policy budget per entity: one service control policy holds 10,240 characters and ten may be attached for 102,400 in total, while one resource control policy holds 5,120 characters and five may be attached for 25,600 in total">
+      <text class="ttl" x="20" y="24">Characters of guardrail available on one entity</text>
+      <line class="axis" x1="230" y1="46" x2="230" y2="250"/>
+      <rect class="m-signal" x="230" y="60"  width="40"  height="26"/>
+      <rect class="m-stat"   x="230" y="110" width="400" height="26"/>
+      <rect class="m-prob"   x="230" y="160" width="20"  height="26"/>
+      <rect class="m-alarm"  x="230" y="210" width="100" height="26"/>
+      <text class="lbl-sm" x="222" y="79"  text-anchor="end">one SCP</text>
+      <text class="lbl-sm" x="222" y="129" text-anchor="end">ten SCPs, the maximum</text>
+      <text class="lbl-sm" x="222" y="179" text-anchor="end">one RCP</text>
+      <text class="lbl-sm" x="222" y="229" text-anchor="end">five RCPs, the maximum</text>
+      <text class="lbl-b" x="280" y="79">10,240</text>
+      <text class="lbl-b lbl-on" x="620" y="129" text-anchor="end">102,400</text>
+      <text class="lbl-b" x="260" y="179">5,120</text>
+      <text class="lbl-b" x="340" y="229">25,600</text>
+      <text class="lbl-sm" x="20" y="278">per-policy sizes and attachment counts as published - the totals are their product</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>one caller-side policy</span><span><i class="sw-stat"></i>all caller-side policies</span><span><i class="sw-prob"></i>one resource-side policy</span><span><i class="sw-alarm"></i>all resource-side policies</span></div>
+    <figcaption>Guardrails are written in a finite space, and the resource side has about a quarter of the room the caller side has. A non-detachable full-access policy already occupies a slot in each set, so the usable count is one lower than the headline in both cases (<a href="https://docs.aws.amazon.com/organizations/latest/userguide/orgs_reference_limits.html">Organizations quotas</a>).
+    <b>Long lists of denied Regions or denied services consume this budget quickly, which is why guardrails are written as broad conditions rather than as enumerations.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Stop reading these as "org-level IAM". They are <b>two ceilings over two different populations</b>: one over the people and machines you employ, one over anybody in the world who points at your resources. Most data-perimeter requirements need both, and writing only the first is the most common way an organisation believes it has a perimeter that it does not have.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A partner's role in another organisation reads one of your buckets. Which guardrail can stop it?</div>
+      <button class="q-opt">A service control policy denying the read action</button>
+      <button class="q-opt">A resource control policy on the resource side</button>
+      <button class="q-opt">Either, since both apply to any incoming caller</button>
+      <button class="q-opt">Neither, as guardrails never affect cross-account</button>
+      <div class="q-fb">Service control policies apply only to principals the organisation manages, so an outside caller is untouched by them. Resource control policies cap what may be done to your resources whoever is asking, which is exactly this case, so the last two answers are both wrong in opposite directions.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A guardrail denying an action appears to have no effect on one identity. What should you check first?</div>
+      <button class="q-opt">Whether the identity policy contains an explicit allow</button>
+      <button class="q-opt">Whether the policy exceeded its character limit on save</button>
+      <button class="q-opt">Whether it is a service-linked role, which both types skip</button>
+      <button class="q-opt">Whether the resource is in the same Region as the caller</button>
+      <div class="q-fb">Both guardrail types skip service-linked roles, which is one of the documented exclusions and the usual explanation. An identity allow cannot override a ceiling, an over-length policy fails to save rather than applying silently, and Region has no bearing on whether a guardrail applies.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What happens to permissions in an account whose parent unit's guardrail omits a service?</div>
+      <button class="q-opt">The service is unavailable there, since ceilings intersect</button>
+      <button class="q-opt">The service is available if the account's own policy allows</button>
+      <button class="q-opt">The service is available until the guardrail is re-applied</button>
+      <button class="q-opt">The service is available to the account's root user only</button>
+      <div class="q-fb">An account receives only what every unit above it allows, so an omission at a parent removes the service below. Identity policies cannot exceed the ceiling, inheritance is continuous rather than applied once, and the root user of a member account is explicitly covered by service control policies.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A security team is asked to guarantee three things across the organisation: nobody inside the company may disable logging, no company data in S3 may be read by a principal outside the organisation, and workloads must not be created outside two approved Regions. They plan to write all three as service control policies attached to the root.</p>
+      <p><b>Review the plan</b>, say which of the three that instrument cannot deliver, and name two exclusions that could still leave a hole in the parts it can.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For each requirement, ask whose principal is being constrained. One of the three is about callers you do not employ, which decides the instrument immediately.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Disabling logging - a service control policy, correctly.</b> The population being constrained is the company's own principals, which is precisely the caller-side ceiling. Note that this also covers each member account's root user, which is the part that makes it a real guarantee rather than an administrative convention.</li>
+        <li><b>Region restriction - a service control policy, correctly.</b> Again the constrained population is your own principals. Write it as a condition on the requested Region rather than by enumerating services, or the character budget will run out long before the policy is complete.</li>
+        <li><b>Outside readers of S3 - not a service control policy.</b> An outside principal is not managed by your organisation, so the caller-side ceiling says nothing about them. This requirement needs a resource control policy, and S3 is one of the roughly forty service prefixes covered.</li>
+        <li><b>Name the first exclusion.</b> The management account. Neither ceiling applies to it, so all three guarantees are false inside it - which is a second reason nothing should run there.</li>
+        <li><b>Name the second exclusion.</b> Service-linked roles. Both policy types skip them, so a service acting through one is outside the guarantee. Add that AWS-managed KMS keys are outside resource control policies too, which matters if any part of the data-perimeter argument rests on key access.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one of the three requirements should change instrument, and your exclusions should be about who the policy does not reach rather than about how it is written. If you proposed denying the outside partner by naming their account in a service control policy, re-read which principals that policy type governs.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0902-the-landing-zone-and-the-catalogue.html">The landing zone and the catalogue</a></b> is where these policies stop being hand-written and become controls applied to an organisational unit.</li>
+    <li>Lesson 0800 covered <a href="0800-the-gates-an-access-decision-passes.html">where these two ceilings sit</a> in the evaluation of a request.</li>
+    <li>Lesson 0802 covered <a href="0802-trusting-an-identity-from-outside.html">the condition keys</a> that express the same perimeter idea inside a resource policy.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two feel interchangeable, ask an agent to take one real guardrail and say whether it would stop a principal in an account you do not own.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/organizations/latest/userguide/orgs_manage_policies_rcps.html">Resource control policies</a> is the newer of the two pages and the one worth reading closely, because its exclusion list is where a data-perimeter design either holds or quietly does not.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. The character totals in the chart are the published per-policy size multiplied by the published attachment count.</p>
+
+  <div class="pager">
+    <a href="0900-shaping-the-tree.html"><span class="dir">&larr; Previous</span><span class="ttl">Shaping the tree</span></a>
+    <a class="nxt" href="0902-the-landing-zone-and-the-catalogue.html"><span class="dir">Next &rarr;</span><span class="ttl">The landing zone and the catalogue</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0901 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
