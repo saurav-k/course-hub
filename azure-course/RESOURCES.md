@@ -217,6 +217,22 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-driver>
 - <https://learn.microsoft.com/en-us/azure/app-service/configure-ssl-certificate>
 
+**Module 09 - Governance, tenancy and cost**
+
+- <https://learn.microsoft.com/en-us/azure/governance/policy/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/policy/concepts/policy-as-code>
+- <https://learn.microsoft.com/en-us/azure/governance/policy/samples/>
+- <https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/>
+- <https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/landing-zone/design-area/subscription-vending>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/managed-applications/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/resource-graph/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/resource-graph/how-to/get-resource-changes>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/tag-resources>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/azure-subscription-service-limits>
+- <https://learn.microsoft.com/en-us/azure/cost-management-billing/understand/>
+- <https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/save-compute-costs-reservations>
+- <https://learn.microsoft.com/en-us/azure/advisor/advisor-overview>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
@@ -290,6 +306,13 @@ them was filled from memory.
 - **Named licence tier boundaries beyond P1, P2 and workload-identities premium.**
   The inventory records those three gates and no price or feature matrix, so lesson
   0802 names the gates and quotes nothing else.
+- **What the amortized and actual cost views each do to an up-front commitment.**
+  The inventory names both views and defines neither, so lesson 0904 says the two
+  exist and that the choice changes a month's reported figure, and restates no
+  definition.
+- **Which cost features are unavailable at management-group scope.** The inventory
+  records that some are, under the Microsoft Customer Agreement, without listing
+  them. Lesson 0904 says to check the supported scopes rather than naming any.
 - **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
   links one and no lesson spine carries a Glossary entry.
 

@@ -201,6 +201,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0804-keys-secrets-and-certificates.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "Policy is the guardrail engine",
+          "href": "lessons/0900-policy-is-the-guardrail-engine.html"
+        },
+        {
+          "title": "Policy as code and the effect ramp",
+          "href": "lessons/0901-policy-as-code-and-the-effect-ramp.html"
+        },
+        {
+          "title": "Landing zones and subscription vending",
+          "href": "lessons/0902-landing-zones-and-subscription-vending.html"
+        },
+        {
+          "title": "Knowing what you have",
+          "href": "lessons/0903-knowing-what-you-have.html"
+        },
+        {
+          "title": "Paying for it",
+          "href": "lessons/0904-paying-for-it.html"
+        }
+      ]
     }
   ],
   "extras": []
