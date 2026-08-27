@@ -8,9 +8,10 @@ a future refresh cheap. This file is the one place in the course where dates bel
 - **Google Cloud documentation** - <https://cloud.google.com/docs>. The vendor's own reference for every
   user-facing behaviour this course describes.
 
-Two sibling roots are the same vendor and count as canon: <https://firebase.google.com>
-for Firebase products, and <https://services.google.com> for the certification guides
-the vendor publishes as PDFs. Anything outside those three roots is third-party and is
+Three sibling roots are the same vendor and count as canon: <https://firebase.google.com>
+for Firebase products, <https://services.google.com> for the certification guides
+the vendor publishes as PDFs, and <https://docs.cloud.google.com>, which now serves some
+current documentation pages that have no equivalent under the main root. Anything outside those four roots is third-party and is
 labelled as such at the point of use.
 
 Every technical claim in a lesson links a page under one of them.
@@ -156,6 +157,17 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [Secret Manager](https://cloud.google.com/secret-manager/docs/overview),
   [Certificate Manager](https://cloud.google.com/certificate-manager/docs/overview),
   [Certificate Authority Service](https://cloud.google.com/certificate-authority-service/docs).
+- **Module 09.** [Assured Workloads](https://cloud.google.com/assured-workloads/docs/overview),
+  [Service Catalog](https://cloud.google.com/service-catalog/docs/overview),
+  [tags and labels](https://cloud.google.com/resource-manager/docs/tags/tags-overview),
+  [quotas](https://cloud.google.com/docs/quotas/view-manage),
+  [Cloud Asset Inventory](https://cloud.google.com/asset-inventory/docs/overview),
+  [custom organisation policy constraints](https://cloud.google.com/resource-manager/docs/organization-policy/creating-managing-custom-constraints),
+  [Security Command Center](https://cloud.google.com/security-command-center/docs/security-command-center-overview),
+  [security posture service](https://docs.cloud.google.com/security-command-center/docs/security-posture-overview),
+  [billing export](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables),
+  [committed use discounts](https://cloud.google.com/docs/cuds),
+  [Recommender](https://cloud.google.com/recommender/docs/overview).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -196,3 +208,9 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
 - **Downscoped access tokens.** The inventory records credential access boundaries with
   the current API surface flagged for confirmation. Named in lesson 0802; nothing about
   their shape is stated.
+- **Detailed billing export cadence.** The inventory records the detailed export as
+  updating more often than the daily standard export and hedges the exact figure. No
+  cadence is printed. Named in lesson 0903.
+- **Infrastructure Manager Terraform drift detection.** Claimed during research, could not
+  be verified, and removed rather than softened. Nothing in this course rests on it;
+  lesson 0902 says so explicitly.

@@ -209,6 +209,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0804-keys-and-secrets.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "The landing zone",
+          "href": "lessons/0900-the-landing-zone.html"
+        },
+        {
+          "title": "Labels, tags and quotas",
+          "href": "lessons/0901-labels-tags-and-quotas.html"
+        },
+        {
+          "title": "Seeing and proving the estate",
+          "href": "lessons/0902-seeing-the-estate.html"
+        },
+        {
+          "title": "The bill, and where its detail lives",
+          "href": "lessons/0903-the-bill.html"
+        },
+        {
+          "title": "Paying less on purpose",
+          "href": "lessons/0904-paying-less-on-purpose.html"
+        }
+      ]
     }
   ],
   "extras": []

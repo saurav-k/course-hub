@@ -103,6 +103,21 @@ splitting them further would have produced pages with two ideas each.
 `conditional-access` and `identity-provider-audit-log` are named in lesson 0803 as
 capabilities delivered elsewhere, and taught in modules 11 and 10 respectively.
 
+**Module 09 - Governance, tenancy and cost**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0900 | The landing zone | `landing-zone`, `service-catalog`, `cross-account-resource-sharing` |
+| 0901 | Labels, tags and quotas | `resource-tagging`, `resource-tags-governance`, `quota-management` |
+| 0902 | Seeing and proving the estate | `resource-graph-query`, `policy-as-code`, `config-drift-assessment`, `compliance-pack` |
+| 0903 | The bill, and where its detail lives | `cost-management` |
+| 0904 | Paying less on purpose | `commitment-discounts`, `cost-advisory` |
+
+`org-hierarchy` and `org-guardrail-policy` belong to this module's subject and were taught
+in lessons 0101 and 0102, so module 09 builds on them rather than repeating them. Security
+Command Center appears here on its compliance and drift face, and in module 11 on its
+threat and posture face - one product, two audiences.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -137,7 +152,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 09 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 10 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.
