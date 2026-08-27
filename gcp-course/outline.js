@@ -49,6 +49,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0203-managed-instance-groups.html"
         }
       ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "How much of the GKE cluster you run",
+          "href": "lessons/0300-gke-how-much-of-the-cluster-you-run.html"
+        },
+        {
+          "title": "Beyond one cluster",
+          "href": "lessons/0301-beyond-one-cluster.html"
+        },
+        {
+          "title": "Cloud Run, a container with a URL",
+          "href": "lessons/0302-cloud-run-a-container-with-a-url.html"
+        },
+        {
+          "title": "Functions and app runtimes",
+          "href": "lessons/0303-functions-and-app-runtimes.html"
+        },
+        {
+          "title": "Choosing a runtime",
+          "href": "lessons/0304-choosing-a-runtime.html"
+        }
+      ]
     }
   ],
   "extras": []

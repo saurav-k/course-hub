@@ -30,6 +30,16 @@ renumbered.
 | 0202 | Five levers on the same machine | `gpu-compute`, `dedicated-hosts`, `confidential-compute`, `bare-metal`, `spot-capacity` |
 | 0203 | Managed instance groups and Batch | `autoscaling-group`, `batch-compute` |
 
+**Module 03 - Containers and serverless**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0300 | How much of the GKE cluster you run | `managed-kubernetes`, `kubernetes-node-autoscaler` |
+| 0301 | Beyond one cluster | `kubernetes-fleet-management`, `service-mesh`, `kubernetes-backup` |
+| 0302 | Cloud Run, a container with a URL | `serverless-containers`, `container-orchestrator-nonk8s` |
+| 0303 | Functions and app runtimes | `functions-faas`, `paas-web-runtime`, `static-site-hosting` |
+| 0304 | Choosing a runtime | runtime placement across the five |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
