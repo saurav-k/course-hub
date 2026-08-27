@@ -9,7 +9,8 @@ This file adds only what is true of this course and nowhere else.
 
 The deep OCI course of the Cloud Architecture category: one platform walked end
 to end as a connected design, from its account hierarchy (compartments in a tenancy) to the
-services built on it. A shell at present; `PLOT.md` holds the fourteen-module plan.
+services built on it. All fourteen modules of the plan in `PLOT.md` are written; that
+file remains authoritative for the module numbering and the reading order.
 
 ## Read before you write
 
