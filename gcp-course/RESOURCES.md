@@ -221,6 +221,13 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   The one third-party source the course links is the
   [Terraform google provider registry](https://registry.terraform.io/providers/hashicorp/google/latest/docs),
   labelled as third-party at the point of use in lesson 1200.
+- **Module 13.** [Vertex AI generative models](https://cloud.google.com/vertex-ai/generative-ai/docs/learn/overview),
+  [Document AI](https://cloud.google.com/document-ai/docs/overview),
+  [Vertex AI platform introduction](https://cloud.google.com/vertex-ai/docs/start/introduction-unified-platform),
+  [Vector Search](https://cloud.google.com/vertex-ai/docs/vector-search/overview),
+  [RAG Engine](https://cloud.google.com/vertex-ai/generative-ai/docs/rag-engine/rag-overview),
+  [the enterprise search product](https://cloud.google.com/generative-ai-app-builder/docs/introduction),
+  [the agent platform](https://cloud.google.com/agentspace/docs/overview).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -285,3 +292,10 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
   Enterprise naming and says to verify the current product page. Named in lesson 1200.
 - **Cloud Source Repositories retirement and Deployment Manager turndown.** Both recorded
   with dates. The lessons state the retirement and print no date.
+- **Agent platform stage and branding.** Recorded as preview and as a naming hotspot, with
+  a previous product page and its first replacement URL both gone. Lesson 1303 names no
+  product name as settled and teaches the mechanism instead.
+- **RAG Engine stage.** Recorded as preview. Named in lesson 1302 with an instruction to
+  confirm.
+- **Notebook surface naming.** The inventory records the certification guide and the product
+  documentation using different wording. Lesson 1301 asserts no name for it.

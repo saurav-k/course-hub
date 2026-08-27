@@ -161,6 +161,20 @@ pointed at from lesson 1200 rather than repeated. `artifact-registry` is taught 
 03, and Binary Authorization has no key of its own in the shared taxonomy and is taught in
 lesson 1201 as the admission gate the pipeline hangs on.
 
+**Module 13 - AI and ML**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 1300 | Models you did not train | `managed-model-api`, `speech-vision-document-ai` |
+| 1301 | Training your own | `model-training-platform` |
+| 1302 | Vectors and retrieval | `vector-store`, `managed-rag-pipeline`, `managed-search` |
+| 1303 | Agents, and the names that keep moving | `agent-platform` |
+
+`managed-search` belongs to the analytics domain in the shared taxonomy and is taught here,
+because the product it names is now part of the agent platform and shares its naming churn.
+`agent-identity` is a recorded absence stated in lesson 0802 and restated in lesson 1303
+where it decides a design.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -195,7 +209,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 13 and 14 above**, none started. Each module owns its own hundred of the
+- **Module 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.

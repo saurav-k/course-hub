@@ -309,6 +309,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1204-apis-at-the-front.html"
         }
       ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "Models you did not train",
+          "href": "lessons/1300-models-you-did-not-train.html"
+        },
+        {
+          "title": "Training your own",
+          "href": "lessons/1301-training-your-own.html"
+        },
+        {
+          "title": "Vectors and retrieval",
+          "href": "lessons/1302-vectors-and-retrieval.html"
+        },
+        {
+          "title": "Agents, and the names that keep moving",
+          "href": "lessons/1303-agents-and-the-names.html"
+        }
+      ]
     }
   ],
   "extras": []
