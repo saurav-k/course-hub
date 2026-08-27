@@ -275,6 +275,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1103-reaching-a-private-host.html"
         }
       ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Terraform is the native language, and the stack is where it runs",
+          "href": "lessons/1200-terraform-is-the-native-language.html"
+        },
+        {
+          "title": "The pipeline, and the two progressive strategies",
+          "href": "lessons/1201-the-pipeline-and-two-strategies.html"
+        },
+        {
+          "title": "Five messaging services, and how to tell them apart",
+          "href": "lessons/1202-five-messaging-services.html"
+        },
+        {
+          "title": "The gateway in front, and the integration platform beside it",
+          "href": "lessons/1203-the-gateway-and-the-integration-platform.html"
+        },
+        {
+          "title": "Keeping the fleet configured after it is deployed",
+          "href": "lessons/1204-keeping-the-fleet-configured.html"
+        }
+      ]
     }
   ],
   "extras": []

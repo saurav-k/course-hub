@@ -217,6 +217,21 @@ from and the date it was read.
 - [Bastion](https://docs.oracle.com/en-us/iaas/Content/Bastion/Concepts/bastionoverview.htm) - time-boxed brokered sessions into private subnets, the maximum session lifetime and the client address allowlist, and the documented position that no native remote-access VPN is offered.
 - [Traffic mirroring](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/vtap.htm) - copying from a card, subnet or balancer to a collector fleet behind a network load balancer, with capture filters.
 
+### Module 12 - Delivery and integration
+
+- [Resource Manager](https://docs.oracle.com/en-us/iaas/Content/ResourceManager/Concepts/resourcemanager.htm) - Terraform as a managed service, stack sources including a compartment scan, the job types, server-side state locking, apply rollback and private endpoints.
+- [Terraform OCI provider](https://registry.terraform.io/providers/oracle/oci/latest/docs) - the provider used standalone or inside the managed service, and the in-code path that drives it. Third-party registry page carrying the vendor's own provider.
+- [Deployment pipelines](https://docs.oracle.com/en-us/iaas/Content/devops/using/deployment_pipelines.htm) - managed and mirrored repositories, build runners, deployment targets, approval gates and validation stages.
+- [Blue-green deployment on Kubernetes](https://docs.oracle.com/en-us/iaas/Content/devops/using/bgoke_deploy.htm) - the namespace swap, the ingress shift and the ingress controller precondition.
+- [Canary deployment on Kubernetes](https://docs.oracle.com/en-us/iaas/Content/devops/using/canaryoke_deploy.htm) - weighted traffic shifting in stages.
+- [Artifact Registry](https://docs.oracle.com/en-us/iaas/Content/artifacts/home.htm) - the store for generic artefacts, beside the container registry for images.
+- [Queue](https://docs.oracle.com/en-us/iaas/Content/queue/overview.htm) - serverless queues, two protocols, at-least-once delivery, best-effort ordering and message persistence until deletion or expiry.
+- [Notifications](https://docs.oracle.com/en-us/iaas/Content/Notification/Concepts/notificationoverview.htm) - push-only fan-out to several destination kinds, subscription confirmation and the bounded retry window.
+- [Events](https://docs.oracle.com/en-us/iaas/Content/Events/Concepts/eventsoverview.htm) - rules matching structured service events, the standard event shape, and buckets that must be enabled to emit object events.
+- [API Gateway concepts](https://docs.oracle.com/en-us/iaas/Content/APIGateway/Concepts/apigatewayconcepts.htm) - regional deployment into regional subnets, backend types, usage plans per subscriber, and the function-backend body limit.
+- [Oracle Integration](https://docs.oracle.com/en-us/iaas/application-integration/) - adapters, recipes, and the larger edition's process automation and business-to-business exchange.
+- [OS Management Hub](https://docs.oracle.com/en-us/iaas/osmh/doc/home.htm) - fleet patching across this platform and beyond it, groups, lifecycle stages, versioned software sources and live kernel patching.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

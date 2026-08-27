@@ -111,6 +111,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 1102 | Finding what is wrong: posture, vulnerabilities and intelligence |
 | 1103 | Reaching a private host, and copying the traffic |
 
+**Module 12 - Delivery and integration**
+
+| Lesson | Title |
+| 1200 | Terraform is the native language, and the stack is where it runs |
+| 1201 | The pipeline, and the two progressive strategies |
+| 1202 | Five messaging services, and how to tell them apart |
+| 1203 | The gateway in front, and the integration platform beside it |
+| 1204 | Keeping the fleet configured after it is deployed |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
