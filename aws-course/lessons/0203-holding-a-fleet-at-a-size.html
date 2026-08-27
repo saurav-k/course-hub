@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holding a fleet at a size - Inside AWS</title>
+<meta name="description" content="An Auto Scaling group is the only EC2 construct that replaces unhealthy instances, and the three ways it decides a size - reactive, predictive and scheduled - behave differently enough that mixing them up is a real outage.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Compute &middot; Lesson 0203</div>
+  <h1>Only the Auto Scaling group replaces a failed instance - a fleet does not</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability keys <code>autoscaling-group</code> and <code>instance-template</code>.
+    &middot; <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/auto-scaling-groups.html">Auto Scaling groups</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An <b>Auto Scaling group</b> holds a fleet at a minimum, maximum and desired size, replaces members that fail a health check, and balances them across the zones you gave it.</li>
+      <li>It decides the desired size three different ways: <b>dynamic</b> policies react to a metric, <b>predictive</b> policies forecast from history, and <b>scheduled</b> actions change it at a stated time.</li>
+      <li><b>Cooldown applies only to simple scaling.</b> Target tracking, which is what AWS recommends, does not use it, and expecting it to is a common misreading of a fleet that seems too eager.</li>
+      <li><b>Instance refresh</b> is how a fleet moves onto a new launch-template version, one batch at a time, with a rollback if it goes wrong.</li>
+      <li>What it costs: <b>EC2 Fleet and Spot Fleet are not scaling groups.</b> They diversify launch pools and replace reclaimed capacity, and they do not health-check and replace failed instances.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0202&lt;br/&gt;one instance, placed"] --> T["THIS PAGE&lt;br/&gt;many of them, held at a size&lt;br/&gt;and rolled forward safely"]
+  T --> A["Reclaimable capacity&lt;br/&gt;inside a fleet, lesson 0204"]
+  T --> B["Container platforms that&lt;br/&gt;sit on these fleets, module 03"]
+  T --> C["Recovering from the loss&lt;br/&gt;of a whole zone"]
+  W["Module 02&lt;br/&gt;compute"] -.- T
+    </div>
+    <figcaption>Where this sits. Every earlier page in this module described one machine. This is the first construct that owns a group of them and keeps owning them, which is why it, rather than the instance, is what a resilient design actually references.
+    <b>Health-based replacement is the property that turns a set of instances into a service, and only one EC2 construct provides it.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a set point with a controller</h2>
+
+  <p>A scaling group is a thermostat. You give it a range and a target, and it acts to keep the fleet there: launching when the desired size rises, terminating when it falls, and replacing a member the moment a health check says that member is no longer serving. The interesting design work is in how the desired size is decided.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  D["Desired capacity&lt;br/&gt;the number the group acts on"] --> R["Dynamic scaling&lt;br/&gt;reacts to a metric now"]
+  D --> F["Predictive scaling&lt;br/&gt;forecasts from past load"]
+  D --> S["Scheduled actions&lt;br/&gt;change the number at a stated time"]
+  R --> R1["Target tracking&lt;br/&gt;hold a metric at a value&lt;br/&gt;- the recommended default"]
+  R --> R2["Step and simple scaling&lt;br/&gt;- only simple scaling&lt;br/&gt;uses a cooldown"]
+  F --> F1["Needs load history&lt;br/&gt;before it forecasts anything"]
+  F --> F2["Forecast only, or&lt;br/&gt;forecast and scale"]
+    </div>
+    <figcaption>Three ways in, one number out. <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-scaling-cooldowns.html">Cooldown</a> is a property of simple scaling alone. <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/predictive-scaling-policy-overview.html">Predictive scaling</a> needs a day of load history before it produces a forecast at all, and it can be left in a mode that forecasts without acting, which is how you evaluate it safely.
+    <b>Reactive scaling always arrives after the load - predictive scaling is how a fleet is already the right size when a known daily peak begins.</b></figcaption>
+  </figure>
+
+  <p>When launching is slow, a <a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/ec2-auto-scaling-warm-pools.html">warm pool</a> keeps pre-initialised instances stopped beside the group so a scale-out event starts them instead of building them. It is the answer to a long boot, not to a slow decision.</p>
+
+  <h2>2. The mechanism: rolling a fleet forward</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant T as Launch template
+  participant G as Auto Scaling group
+  participant B as A batch of instances
+  participant H as Health checks
+  T-&gt;&gt;G: a new version exists
+  G-&gt;&gt;B: replace one batch of members, not the whole fleet
+  B-&gt;&gt;H: new instances report in
+  H--&gt;&gt;G: healthy - continue to the next batch
+  H--&gt;&gt;G: unhealthy - roll the whole refresh back
+    </div>
+    <figcaption><a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/asg-instance-refresh.html">Instance refresh</a> is the deployment primitive for EC2 fleets. It rolls members onto a new launch-template version a batch at a time, and it can roll the whole refresh back to the previous version rather than leaving a half-migrated fleet.
+    <b>This is why lesson 0201 insisted on launch templates - the rollback target is a template version, so a fleet that references anything else has nothing to roll back to.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A scaling group is not primarily a cost-saving device. Most estates get more value from the <b>replacement</b> behaviour than from the elasticity: a group with a minimum, a maximum and a desired size all set to three is a perfectly good design, and it is the cheapest way to make "three healthy instances" a thing the platform maintains rather than a thing a human notices.</div>
+
+  <h2>3. What it costs: the construct that looks the same and is not</h2>
+
+  <p><a href="https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/ec2-fleet.html">EC2 Fleet and Spot Fleet</a> launch thousands of instances in one request across several types, zones and purchase options, and they replace reclaimed capacity. They look like a scaling group and they are not one: they do not health-check members and replace the ones that fail. A design that needs steady-state replacement pairs a fleet with a scaling group rather than choosing between them.</p>
+
+  <div class="callout warn">
+  This is the failure that reads as a mystery in an incident review. Instances in a fleet stop serving, nothing replaces them, and the fleet still reports the capacity it was asked for, because from its point of view the instances exist. Ask of any EC2 construct one question - does it health-check and replace? - and only the Auto Scaling group answers yes.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A target tracking policy is scaling more often than expected, and someone suggests raising the cooldown. What is wrong with that?</div>
+      <button class="q-opt">Cooldown applies only to simple scaling policies</button>
+      <button class="q-opt">Cooldown applies only when scaling inwards</button>
+      <button class="q-opt">Cooldown applies only to scheduled scaling actions</button>
+      <button class="q-opt">Cooldown applies only above the desired capacity</button>
+      <div class="q-fb">Cooldown is a property of simple scaling and does not govern target tracking, so raising it changes nothing and the real cause stays unfound. The three wrong options each invent a plausible-sounding scope, which is how this misreading survives review meetings.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Instances launched by a Spot Fleet stop serving traffic but are still running. What replaces them?</div>
+      <button class="q-opt">The fleet, once its own health check has failed</button>
+      <button class="q-opt">The launch template, at its next version bump</button>
+      <button class="q-opt">The load balancer, by launching a replacement</button>
+      <button class="q-opt">Nothing, unless a scaling group also owns them</button>
+      <div class="q-fb">Fleets diversify launch pools and replace reclaimed capacity, and they do not health-check and replace failed members, so nothing acts. A launch template is a specification and launches nothing itself. A load balancer removes an unhealthy target from rotation but never creates capacity.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A fleet must be at full size before a predictable morning peak rather than after it. Which policy shape fits?</div>
+      <button class="q-opt">Target tracking, with a lower metric target set</button>
+      <button class="q-opt">Simple scaling, with the cooldown shortened</button>
+      <button class="q-opt">Predictive scaling, forecasting from past load</button>
+      <button class="q-opt">Instance refresh, run before the peak begins</button>
+      <div class="q-fb">Predictive scaling forecasts from load history and raises capacity ahead of a recurring pattern, which is exactly the stated requirement. Both reactive options still act after load arrives, however they are tuned. Instance refresh replaces members with a new template version and does not change the size at all.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A service runs on ten instances. Load is flat all week except for a sharp, reliable peak every weekday morning. Each instance takes about six minutes to boot and warm its cache. The platform team also ships a new hardened image every week and wants fleets to pick it up without downtime.</p>
+      <p><b>Specify the group</b>: which scaling policies you would attach and why, what you would do about the six-minute boot, and how the weekly image reaches the fleet safely.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Separate three problems: deciding the number, making the number arrive fast enough, and changing what each member is. Each has its own mechanism on this page.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Reactive policy as the floor.</b> Attach a target tracking policy so the fleet responds to anything the forecast did not see. Do not attach a cooldown expectation to it - cooldown governs simple scaling only.</li>
+        <li><b>Predictive policy for the known peak.</b> The morning peak is reliable and recurring, which is the case predictive scaling exists for. It needs load history before it forecasts, and it can be left forecasting without acting while you compare its forecast against what actually happened.</li>
+        <li><b>Warm pool for the six-minute boot.</b> Reactive scaling that decides in one minute and delivers in seven is still seven minutes late. A warm pool keeps pre-initialised instances stopped beside the group so a scale-out starts them rather than building them.</li>
+        <li><b>Instance refresh for the weekly image.</b> The image lands in a new launch-template version, and instance refresh rolls members onto it a batch at a time, and rolls the whole refresh back to the previous version if a batch does not come up healthy.</li>
+        <li><b>Check the quota underneath it all.</b> The maximum size multiplied by the vCPUs per instance has to fit inside the family quota for this account and region, or the group stops growing before it reaches its maximum and says nothing.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should use three different mechanisms for three different problems, and the six-minute boot should be solved by pre-warming rather than by tuning a policy. If your answer solved the slow boot by scaling earlier, you have made the fleet permanently larger rather than faster.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0204-buying-the-same-machine-for-less.html">Buying the same machine for less</a></b> closes the module with the purchase options a fleet can mix, and with the interruption contract that comes with the cheapest one.</li>
+    <li>A four-cloud view of scaling constructs is in <a href="../../cloud-comparison-course/lessons/0201-holding-a-fleet-at-a-size.html">Comparing the Four Clouds</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the policy types still blur together, ask an agent to draw one day of load for your own service and mark, on the same line, when a reactive policy would have acted and when a predictive one would have. The gap between the two marks is the whole argument.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/autoscaling/ec2/userguide/asg-instance-refresh.html">Instance refresh</a> is the page worth reading in full, because it is where scaling stops being about capacity and starts being about deployment, and because its rollback behaviour is what makes a weekly image rotation survivable.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0202-where-the-instance-lands.html"><span class="dir">&larr; Previous</span><span class="ttl">Where the instance lands</span></a>
+    <a class="nxt" href="0204-buying-the-same-machine-for-less.html"><span class="dir">Next &rarr;</span><span class="ttl">Buying the same machine for less</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0203 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

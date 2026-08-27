@@ -5,6 +5,107 @@
 window.COURSE_OUTLINE = {
   "key": "aws",
   "title": "Inside AWS",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "Regions, zones and the edge",
+          "href": "lessons/0100-regions-zones-and-the-edge.html"
+        },
+        {
+          "title": "The account is the boundary",
+          "href": "lessons/0101-the-account-is-the-boundary.html"
+        },
+        {
+          "title": "The platform map",
+          "href": "lessons/0102-the-platform-map.html"
+        },
+        {
+          "title": "Names that mislead",
+          "href": "lessons/0103-names-that-mislead.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The instance and the catalogue",
+          "href": "lessons/0200-the-instance-and-the-catalogue.html"
+        },
+        {
+          "title": "The image and the template",
+          "href": "lessons/0201-the-image-and-the-template.html"
+        },
+        {
+          "title": "Where the instance lands",
+          "href": "lessons/0202-where-the-instance-lands.html"
+        },
+        {
+          "title": "Holding a fleet at a size",
+          "href": "lessons/0203-holding-a-fleet-at-a-size.html"
+        },
+        {
+          "title": "Buying the same machine for less",
+          "href": "lessons/0204-buying-the-same-machine-for-less.html"
+        }
+      ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "Two orchestrators, one platform",
+          "href": "lessons/0300-two-orchestrators-one-platform.html"
+        },
+        {
+          "title": "Fargate is a capacity mode",
+          "href": "lessons/0301-fargate-is-a-capacity-mode.html"
+        },
+        {
+          "title": "The registry that feeds them",
+          "href": "lessons/0302-the-registry-that-feeds-them.html"
+        },
+        {
+          "title": "Lambda and the function boundary",
+          "href": "lessons/0303-lambda-and-the-function-boundary.html"
+        },
+        {
+          "title": "Above the container",
+          "href": "lessons/0304-above-the-container.html"
+        }
+      ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "The object store and its classes",
+          "href": "lessons/0400-the-object-store-and-its-classes.html"
+        },
+        {
+          "title": "The bucket types",
+          "href": "lessons/0401-the-bucket-types.html"
+        },
+        {
+          "title": "Block storage, bound to a zone",
+          "href": "lessons/0402-block-storage-bound-to-a-zone.html"
+        },
+        {
+          "title": "Shared file systems",
+          "href": "lessons/0403-shared-file-systems.html"
+        },
+        {
+          "title": "Cold data and getting data in",
+          "href": "lessons/0404-cold-data-and-getting-data-in.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

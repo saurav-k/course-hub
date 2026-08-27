@@ -6,14 +6,50 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing yet. `aws-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+### Module 01 - The lay of the land
+
+| Lesson | Title | Rung |
+| 0100 | Regions, zones and the edge | foundation |
+| 0101 | The account is the boundary | foundation |
+| 0102 | The platform map | foundation |
+| 0103 | Names that mislead | foundation |
+
+### Module 02 - Compute
+
+| Lesson | Title | Rung |
+| 0200 | The instance and the catalogue | working |
+| 0201 | The image and the template | working |
+| 0202 | Where the instance lands | working |
+| 0203 | Holding a fleet at a size | working |
+| 0204 | Buying the same machine for less | working |
+
+### Module 03 - Containers and serverless
+
+| Lesson | Title | Rung |
+| 0300 | Two orchestrators, one platform | working |
+| 0301 | Fargate is a capacity mode | working |
+| 0302 | The registry that feeds them | working |
+| 0303 | Lambda and the function boundary | working |
+| 0304 | Above the container | working |
+
+### Module 04 - Storage
+
+| Lesson | Title | Rung |
+| 0400 | The object store and its classes | working |
+| 0401 | The bucket types | working |
+| 0402 | Block storage, bound to a zone | working |
+| 0403 | Shared file systems | working |
+| 0404 | Cold data and getting data in | working |
 
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
 and watched, how change ships, and finally how it survives failure.
+
+Lesson numbers are `MMxx`: the two-digit module number, then a two-digit sequence
+inside it. Module 01 is `0100` upward, Module 02 is `0200` upward, and so on. Lesson
+numbers are public URLs, so nothing published is ever renumbered.
 
 | # | Module | Covers |
 | 01 | The lay of the land | regions and availability, the account hierarchy, and the platform map |
@@ -43,7 +79,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
+- **Modules 05 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
