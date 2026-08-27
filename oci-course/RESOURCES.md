@@ -94,6 +94,26 @@ from and the date it was read.
 - [Data Transfer Appliance](https://blogs.oracle.com/cloud-infrastructure/post/introducing-oracle-cloud-infrastructure-data-transfer-appliance) - the 150 TB appliance, free shipping, the NFS dataset mount and the tamper-evident seals. Vendor blog rather than documentation.
 - [Service Change Announcements](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) - the deprecation of the older File Storage encryption-key policy shape.
 
+### Module 05 - Databases
+
+- [Oracle Cloud Infrastructure Database Service](https://docs.oracle.com/en-us/iaas/Content/Database/home.htm) - the customer-managed rung: Base Database and Exadata Database Service, VM and bare metal DB systems, Exadata Cloud@Customer, Data Guard and Real Application Clusters.
+- [Autonomous AI Database billing summary](https://docs.oracle.com/en-us/iaas/autonomous-database-serverless/doc/autonomous-database-billing-overview.html) - the four workload types, the ECPU model, and the shared against dedicated deployment split.
+- [Use auto scaling](https://docs.oracle.com/en-us/iaas/autonomous-database-serverless/doc/autonomous-auto-scale.html) - compute autoscaling on by default at three times the provisioned ECPU count, storage autoscaling off by default.
+- [Security and authentication in Autonomous Database](https://docs.oracle.com/en/cloud/paas/autonomous-database/serverless/adbsb/gs-security-and-authentation-autonomous-database.html) - database clients authenticating with IAM tokens instead of passwords.
+- [MySQL HeatWave](https://docs.oracle.com/en-us/iaas/mysql-database/home.htm) - managed MySQL Enterprise Edition with the in-memory accelerator, transactions and analytics without an extract step, read replicas and a standby.
+- [OCI Database with PostgreSQL](https://docs.oracle.com/en-us/iaas/Content/postgresql/home.htm) - managed community PostgreSQL with a pluggable engine and monitor.
+- [OCI Cache](https://docs.oracle.com/en-us/iaas/Content/ocicache/home.htm) - Valkey and Redis version 7 compatible clusters, sharded and non-sharded topologies.
+- [OCI Cache product page](https://www.oracle.com/cloud/cache/) - the two gigabyte to five hundred gigabyte range, the five-node ceiling, the Valkey 8.1 engine, the JSON module and vector search. Vendor product page rather than documentation.
+- [NoSQL Database Cloud](https://docs.oracle.com/en/cloud/paas/nosql-cloud/) - serverless key-value tables, on-demand and provisioned capacity, global active tables.
+- [Globally Distributed Autonomous Database](https://docs.oracle.com/en/cloud/paas/globally-distributed-autonomous-database/user/overview-distributed-adb1.html) - shared-nothing sharding, shards added online with rebalancing, and data residency as the headline case.
+- [Property graphs in Autonomous Database](https://docs.oracle.com/en/cloud/paas/autonomous-database/serverless/adbsb/graph-autonomous-database.html) - Graph Studio, PGQL and notebooks inside the database rather than as a separate service.
+- [Oracle Blockchain Platform](https://docs.oracle.com/en/cloud/paas/blockchain-cloud/index.html) - the managed Hyperledger Fabric network for multi-party ledgers.
+- [Database Migration](https://docs.oracle.com/en-us/iaas/Content/database-migration/home.htm) - assessment, schema conversion guidance, and the online and offline paths for Oracle and non-Oracle sources.
+- [Offline migration](https://docs.oracle.com/en-us/iaas/database-migration/doc/offline-migration.html) - the Data Pump path, against the GoldenGate path used online.
+- [OCI GoldenGate](https://docs.oracle.com/en/cloud/paas/goldengate-service/index.html) - managed real-time change data capture across heterogeneous databases and into big-data targets.
+- [Database Management](https://docs.oracle.com/en-us/iaas/database-management/home.htm) - the fleet console covering Autonomous, Base, Exadata and external databases through a management agent.
+- [Service Change Announcements](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) - the end of life of the Classic GoldenGate Cloud Service, which shares a name with the current one.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

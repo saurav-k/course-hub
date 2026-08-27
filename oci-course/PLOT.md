@@ -50,6 +50,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0403 | File Storage: the mount target is the thing with a location |
 | 0404 | Moving bytes in, out and duplicated |
 
+**Module 05 - Databases**
+
+| Lesson | Title |
+| 0500 | The database ladder, and where the managed line falls |
+| 0501 | Autonomous Database and the two autoscale switches |
+| 0502 | The open-source engines, and the cache that came back |
+| 0503 | When one relational database is the wrong shape |
+| 0504 | Getting data in, keeping it in sync, and seeing the fleet |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

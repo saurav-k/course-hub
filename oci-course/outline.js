@@ -101,6 +101,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0404-moving-bytes-in-out-and-duplicated.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "The database ladder, and where the managed line falls",
+          "href": "lessons/0500-the-database-ladder.html"
+        },
+        {
+          "title": "Autonomous Database and the two autoscale switches",
+          "href": "lessons/0501-autonomous-and-the-two-switches.html"
+        },
+        {
+          "title": "The open-source engines, and the cache that came back",
+          "href": "lessons/0502-the-open-engines-and-the-cache.html"
+        },
+        {
+          "title": "When one relational database is the wrong shape",
+          "href": "lessons/0503-when-one-database-is-the-wrong-shape.html"
+        },
+        {
+          "title": "Getting data in, keeping it in sync, and seeing the fleet",
+          "href": "lessons/0504-getting-data-in-and-keeping-it-in-sync.html"
+        }
+      ]
     }
   ],
   "extras": []
