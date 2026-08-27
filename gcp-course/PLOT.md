@@ -146,6 +146,21 @@ Four lessons rather than five: the standard firewall tier is taught in lesson 07
 packet is followed, and `zero-trust-routing` is stated there as the same absence, so this
 module carries only what those pages left.
 
+**Module 12 - Delivery and integration**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 1200 | Infrastructure as code here | `native-iac-template`, `terraform-provider`, `iac-in-code-sdk`, `kubernetes-config-management` |
+| 1201 | The pipeline, and the gate in it | `cicd-pipeline`, `progressive-delivery` |
+| 1202 | Four shapes of message | `pub-sub`, `message-queue`, `event-bus`, `realtime-messaging`, `mqtt-broker` |
+| 1203 | Orchestration and scheduling | `workflow-orchestration`, `scheduler-jobs`, `managed-integration` |
+| 1204 | APIs at the front | `api-gateway`, `api-management-enterprise`, `graphql-api` |
+
+`config-management` is taught in lesson 0301 as the fleet's reconciliation loop and is
+pointed at from lesson 1200 rather than repeated. `artifact-registry` is taught in module
+03, and Binary Authorization has no key of its own in the shared taxonomy and is taught in
+lesson 1201 as the admission gate the pipeline hangs on.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -180,7 +195,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 12 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 13 and 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.

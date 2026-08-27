@@ -283,6 +283,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1103-scanning-and-classifying.html"
         }
       ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Infrastructure as code here",
+          "href": "lessons/1200-infrastructure-as-code.html"
+        },
+        {
+          "title": "The pipeline, and the gate in it",
+          "href": "lessons/1201-the-pipeline.html"
+        },
+        {
+          "title": "Four shapes of message",
+          "href": "lessons/1202-four-shapes-of-message.html"
+        },
+        {
+          "title": "Orchestration and scheduling",
+          "href": "lessons/1203-orchestration-and-scheduling.html"
+        },
+        {
+          "title": "APIs at the front",
+          "href": "lessons/1204-apis-at-the-front.html"
+        }
+      ]
     }
   ],
   "extras": []

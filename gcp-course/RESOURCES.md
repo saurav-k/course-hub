@@ -202,6 +202,25 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [Web Security Scanner](https://cloud.google.com/security-command-center/docs/how-to-use-web-security-scanner),
   [Sensitive Data Protection](https://cloud.google.com/sensitive-data-protection/docs),
   [Model Armor](https://cloud.google.com/security-command-center/docs/model-armor-overview).
+- **Module 12.** [Infrastructure Manager](https://cloud.google.com/infrastructure-manager/docs/overview),
+  [Deployment Manager deprecations](https://cloud.google.com/deployment-manager/docs/deprecations),
+  [Config Connector](https://cloud.google.com/config-connector/docs/overview),
+  [Cloud Build](https://cloud.google.com/build/docs/overview),
+  [Cloud Deploy](https://cloud.google.com/deploy/docs/overview),
+  [Binary Authorization](https://cloud.google.com/binary-authorization/docs/overview),
+  [Cloud Source Repositories](https://cloud.google.com/source-repositories/docs),
+  [Pub/Sub](https://cloud.google.com/pubsub/docs/overview),
+  [Cloud Tasks](https://cloud.google.com/tasks/docs),
+  [Eventarc](https://cloud.google.com/eventarc/docs/overview),
+  [Firebase Realtime Database](https://firebase.google.com/docs/database),
+  [Workflows](https://cloud.google.com/workflows/docs/overview),
+  [Cloud Scheduler](https://cloud.google.com/scheduler/docs),
+  [Application Integration](https://cloud.google.com/application-integration/docs/overview),
+  [API Gateway](https://cloud.google.com/api-gateway/docs/about-api-gateway),
+  [Apigee](https://cloud.google.com/apigee/docs/api-platform/get-started/what-apigee).
+  The one third-party source the course links is the
+  [Terraform google provider registry](https://registry.terraform.io/providers/hashicorp/google/latest/docs),
+  labelled as third-party at the point of use in lesson 1200.
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -259,3 +278,10 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
   before teaching it as settled. Named in lesson 1103, which asserts no availability.
 - **Cloud IDS retirement.** Recorded as retiring. Lesson 1102 says so and prints no date,
   because dates belong only in this file.
+- **Infrastructure Manager drift detection.** Already recorded above as removed during the
+  corrections pass. Lesson 1200 repeats that plainly, because the inventory's own one-line
+  summary of the product still mentions it and a future author will meet the same conflict.
+- **Config Sync packaging.** The inventory notes the product has moved under the GKE
+  Enterprise naming and says to verify the current product page. Named in lesson 1200.
+- **Cloud Source Repositories retirement and Deployment Manager turndown.** Both recorded
+  with dates. The lessons state the retirement and print no date.
