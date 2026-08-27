@@ -49,6 +49,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0203-capacity-you-give-back.html"
         }
       ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "OKE: the cluster kind you pick once",
+          "href": "lessons/0300-oke-the-cluster-kind.html"
+        },
+        {
+          "title": "Containers that live only as long as the work",
+          "href": "lessons/0301-containers-that-live-as-long-as-the-work.html"
+        },
+        {
+          "title": "Container Registry: where every runtime gets its image",
+          "href": "lessons/0302-ocir-where-the-image-comes-from.html"
+        },
+        {
+          "title": "Functions: the two timeouts that decide the design",
+          "href": "lessons/0303-functions-and-the-two-timeouts.html"
+        },
+        {
+          "title": "Where OCI sells a pattern instead of a runtime",
+          "href": "lessons/0304-a-pattern-instead-of-a-runtime.html"
+        }
+      ]
     }
   ],
   "extras": []

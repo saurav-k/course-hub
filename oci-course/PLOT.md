@@ -32,6 +32,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0202 | From one instance to a fleet |
 | 0203 | Capacity you can be asked to give back |
 
+**Module 03 - Containers and serverless**
+
+| Lesson | Title |
+| 0300 | OKE: the cluster kind you pick once |
+| 0301 | Containers that live only as long as the work |
+| 0302 | Container Registry: where every runtime gets its image |
+| 0303 | Functions: the two timeouts that decide the design |
+| 0304 | Where OCI sells a pattern instead of a runtime |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

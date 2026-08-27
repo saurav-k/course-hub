@@ -62,6 +62,24 @@ from and the date it was read.
 - [Preemptible capacity for Kubernetes worker nodes](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengusingpreemptiblecapacity.htm) - cordon and drain before reclaim.
 - [Capacity reservations](https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/reserve-capacity.htm) - holding capacity before launch.
 
+### Module 03 - Containers and serverless
+
+- [Enhanced and basic clusters](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengcomparingenhancedwithbasicclusters_topic.htm) - the feature matrix, the console and API defaults, the one-way upgrade and its precondition, and the agreement against the objective.
+- [Granting workloads access to OCI resources](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm) - workload identity scoped to a Kubernetes service account.
+- [Preemptible capacity for worker nodes](https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contengusingpreemptiblecapacity.htm) - cordon and drain before reclaim.
+- [Container Instances](https://docs.oracle.com/en-us/iaas/Content/container-instances/home.htm) - serverless containers, per-second billing, the sixty-container cap and Vault-backed pull credentials.
+- [OCI Batch](https://docs.oracle.com/en-us/iaas/Content/oci-batch/home.htm) - managed batch orchestration that provisions compute and tears it down.
+- [Container Registry overview](https://docs.oracle.com/en-us/iaas/Content/Registry/Concepts/registryoverview.htm) - registry specification compliance, Helm and multi-architecture support, private access by service gateway, and the regional defaults.
+- [Artifact Registry](https://docs.oracle.com/en-us/iaas/Content/artifacts/home.htm) - the store for everything that is not a container.
+- [Vulnerability Scanning service](https://www.oracle.com/security/cloud-security/vulnerability-scanning-service/) - image scanning on push, alongside host scans. Vendor product page rather than documentation.
+- [Service gateway](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/servicegateway.htm) - one per virtual cloud network, same region only, mutually exclusive service labels.
+- [Overview of Functions](https://docs.oracle.com/en-us/iaas/Content/Functions/Concepts/functionsoverview.htm) - the Fn Project base, the supported languages and the resource-principal model.
+- [Changing default memory and timeout settings](https://docs.oracle.com/en-us/iaas/Content/Functions/Tasks/functionscustomizing.htm) - the six-rung memory ladder, the synchronous default and maximum, and the detached range.
+- [Exporting function log files](https://docs.oracle.com/en-us/iaas/Content/Functions/Tasks/functionsexportingfunctionlogfiles.htm) - invocation logging is off until enabled per application.
+- [Visual Builder](https://docs.oracle.com/en-us/iaas/visual-builder/index.html) - the low-code application hosting row.
+- [Static site hosting behind API Gateway](https://docs.oracle.com/en/learn/oci-api-gateway-web-hosting/index.html) - the documented composition for a bucket with a custom domain.
+- [Service Mesh](https://docs.oracle.com/en-us/iaas/Content/service-mesh/overview.htm) - the end-of-life notice naming open-source Istio as the replacement.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover
