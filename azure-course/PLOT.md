@@ -31,6 +31,14 @@ is wrong and it gets fixed before anything new is added.
 | 0303 | Azure Functions |
 | 0304 | App Service and Static Web Apps |
 
+**Module 04 - Storage**
+
+| Lesson | Title |
+| 0400 | The storage account and Blob Storage |
+| 0401 | Tiers, lifecycle and archive |
+| 0402 | Managed disks and Elastic SAN |
+| 0403 | Shared file systems and bulk transfer |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

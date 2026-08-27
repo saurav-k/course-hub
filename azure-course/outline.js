@@ -75,6 +75,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0304-app-service-and-static-web-apps.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "The storage account and Blob Storage",
+          "href": "lessons/0400-the-storage-account-and-blob-storage.html"
+        },
+        {
+          "title": "Tiers, lifecycle and archive",
+          "href": "lessons/0401-tiers-lifecycle-and-archive.html"
+        },
+        {
+          "title": "Managed disks and Elastic SAN",
+          "href": "lessons/0402-managed-disks-and-elastic-san.html"
+        },
+        {
+          "title": "Shared file systems and bulk transfer",
+          "href": "lessons/0403-shared-file-systems-and-bulk-transfer.html"
+        }
+      ]
     }
   ],
   "extras": []
