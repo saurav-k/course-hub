@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Alerts, health and the blind spots - Inside Azure</title>
+<meta name="description" content="An alert is only as good as the stream beneath it, health has two separate feeds that answer different questions, and several questions an estate will ask have no stream at all.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1004</div>
+  <h1>An alert is only as good as the stream beneath it, and some questions have no stream</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>observability</code>, rows <code>alerting</code>, <code>service-health-dashboard</code> and <code>network-diagnostics</code>, with <code>network-flow-log</code> and <code>dns-query-log</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-overview">Azure Monitor alerts</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Alerts come in four families - <b>metric, log search, control-plane, and health</b> - and all of them route through <b>action groups</b>.</li>
+      <li>The <b>common alert schema</b> standardises the payload, which is what makes one ticketing or webhook integration serve every alert type.</li>
+      <li><b>Service Health and Resource Health answer different questions</b>: one is the platform event, the other is this resource's own state.</li>
+      <li><b>Virtual network flow logs</b> carry the allow-or-deny outcome and which rule decided it - but not traffic at a private endpoint, and not several platform families.</li>
+      <li>Some questions have <b>no stream at all</b>. There is no per-query log for public DNS zones and no per-translation record for outbound address translation, so visibility has to be designed onto the path.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Every stream this module&lt;br/&gt;has collected - lessons 1000 to 1003"] --> T["THIS PAGE&lt;br/&gt;turning them into pages and tickets,&lt;br/&gt;and naming what is missing"]
+  T --> A["Detection and posture&lt;br/&gt;module 11"]
+  T --> B["Recovery objectives measured&lt;br/&gt;against them - module 14"]
+  W["Module 10&lt;br/&gt;observability and audit"] -.- T
+    </div>
+    <figcaption>Where this sits. Collecting telemetry is not observability until somebody is told about something. This page closes the module with the notification layer, and then deliberately ends on the gaps - because a design that does not know what is missing will promise coverage it cannot deliver.
+    <b>The most useful thing an architect can carry from this module is the list of questions Azure cannot answer without something being put on the path first.</b></figcaption>
+  </figure>
+
+  <h2>Four alert families, one routing layer</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  M["Metric alerts&lt;br/&gt;including dynamic thresholds"] --> AG["Action groups"]
+  L["Log-search alerts&lt;br/&gt;a query over the workspace"] --> AG
+  C["Control-plane alerts&lt;br/&gt;on operations recorded in the Activity Log"] --> AG
+  H["Health alerts&lt;br/&gt;service and resource health events"] --> AG
+  PR["Prometheus rule groups&lt;br/&gt;alerting on the separate metric store"] --> AG
+  AG --> OUT["Email, paging, webhooks, ticketing systems"]
+  AG --> SCH["The common alert schema&lt;br/&gt;one payload shape for every family"]
+  AG --> APR["Alert processing rules&lt;br/&gt;suppress or mask at scale&lt;br/&gt;- for a maintenance window, say"]
+    </div>
+    <figcaption>Five producers and one routing layer. Two features on the right are what make this operable at estate scale: the <b>common alert schema</b> means an integration written once accepts every family, and <b>alert processing rules</b> suppress at scale rather than requiring every alert to be muted individually during planned work.
+    <b>Dynamic thresholds are worth knowing about specifically: they remove the need to pick a static number for a metric whose normal level changes with the day of the week.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  <b>Service Health and Resource Health are not two views of one thing.</b> <a href="https://learn.microsoft.com/en-us/azure/service-health/overview">Service Health</a> is a subscription-scoped feed of platform events - issues, planned maintenance and advisories - and it names which of your resources are affected. Resource Health reports one resource's own state. So "is it me or is it Azure" is answered by looking at both, and the unauthenticated public status page is a third, coarser view that knows nothing about your resources.</div>
+
+  <h2>Investigating a network path, in order</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant E as An engineer
+  participant NW as Network Watcher
+  participant CFG as The configuration
+  participant WIRE as The running path
+  E->>NW: IP flow verify - would this packet be allowed
+  NW->>CFG: evaluate the rules that apply
+  CFG-->>E: allowed or denied, and by which rule
+  E->>NW: next hop - where would it actually go
+  NW->>CFG: read the effective routes
+  CFG-->>E: the next hop, which may be None
+  E->>NW: effective security rules - the merged view for this interface
+  E->>NW: connection troubleshoot, or a packet capture
+  NW->>WIRE: test the path as it is running
+  WIRE-->>E: reachability, latency and the packets themselves
+    </div>
+    <figcaption>The diagnostic suite, in the order that answers a question fastest: the configuration questions first because they are instant, and the live tests afterwards because they take time and touch the running system. <b>Connection monitor</b> is the continuous form - repeated reachability and latency probing between endpoints, testing the running path rather than the configuration. The suite is enabled per region.
+    <b>Three of these four read configuration and one reads the wire, and knowing which is which stops an investigation proving that a path should work while it does not.</b></figcaption>
+  </figure>
+
+  <p>Flow records are the other half. <b>Virtual network flow logs</b> collect layer-four tuples at network scope every minute into append-only blobs, recording which security rule allowed or denied a flow, the flow state, byte and packet counts, and encryption status. There is a monthly free allowance per subscription and per-gigabyte charging beyond it. <b>Traffic Analytics</b> layers geography, security and topology enrichment on top, priced per gigabyte processed with no free tier - and it <b>aggregates identical flows</b>, so it trades raw tuple fidelity for a smaller, more readable dataset.</p>
+
+  <h2>The blind spots, named</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Questions an estate asks"] --> B1["Who resolved this name&lt;br/&gt;- no per-query log for public zones"]
+  Q --> B2["Which outbound translation was this&lt;br/&gt;- outbound address translation emits metrics only"]
+  Q --> B3["Which rule denied this packet&lt;br/&gt;- no per-rule verdict log&lt;br/&gt;the outcome is in the flow record instead"]
+  Q --> B4["What reached this private endpoint&lt;br/&gt;- not recorded there, capture at the source"]
+  B1 --> F1["Put a firewall DNS proxy or the private resolver&lt;br/&gt;on the resolution path and log there"]
+  B2 --> F2["Infer pressure from connection metrics"]
+  B3 --> F3["Read the flow records"]
+  B4 --> F4["Capture at the source interface"]
+    </div>
+    <figcaption>Four questions with no direct answer, and what to do about each. The first is the one that changes an architecture: <b>public DNS zones have no per-query logging</b>, so query visibility is a design decision made when the resolution path is laid out, not a setting enabled afterwards. Several platform families also produce no flow records at all, and traffic taking a fast path around a gateway bypasses collection.
+    <b>Each of these is a place where an audit will find an absence and conclude something happened - so name them in the design rather than discovering them during an incident.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two figures in this area are honestly unknown to this course. The <b>aggregation interval used by traffic analytics</b>, and the delay between a Prometheus scrape and the data being queryable, are not stated on the pages the research behind this course read. They are recorded as open items rather than guessed, and a design that depends on either should measure it rather than take a number from a course page.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">An estate must be able to answer which name a workload resolved. What does the design need?</div>
+      <button class="q-opt">Query logging enabled on the public zone hosting the name</button>
+      <button class="q-opt">A firewall DNS proxy or the private resolver on the resolution path</button>
+      <button class="q-opt">A diagnostic setting on the resolver, routing the query category</button>
+      <button class="q-opt">Flow records, which carry the resolved name alongside the tuple</button>
+      <div class="q-fb">There is no per-query log for public zones, so something that logs has to be on the path. The first asks for a capability that does not exist. The third is close but assumes a resolver is already there - putting it there is the design decision. The fourth attributes name resolution to a layer-four flow record.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What is the difference between Service Health and Resource Health?</div>
+      <button class="q-opt">One covers production resources and the other covers every resource</button>
+      <button class="q-opt">One is a paid feed and the other is included with the subscription</button>
+      <button class="q-opt">One reports incidents and the other reports planned maintenance events</button>
+      <button class="q-opt">One reports platform events affecting you, the other one resource's state</button>
+      <div class="q-fb">Platform events against a single resource's own state is the split. The first and second invent scope and pricing distinctions. The third splits incidents from maintenance, which both appear in the same platform feed.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Traffic analytics shows no record of a flow that definitely happened. What is a documented reason?</div>
+      <button class="q-opt">The flow was allowed, and only denied flows are recorded in the enrichment</button>
+      <button class="q-opt">The subscription's monthly free allowance was exhausted, so collection stopped</button>
+      <button class="q-opt">The traffic went to a private endpoint, where it is not recorded at all</button>
+      <button class="q-opt">The flow lasted under a minute, and collection happens once each minute</button>
+      <div class="q-fb">Traffic at a private endpoint produces no record there - the documented advice is to capture at the source. The first is false: the records carry the allow-or-deny outcome. The second confuses a free allowance with a hard stop. The fourth misreads the collection interval as a minimum flow duration.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A security review asks an estate to prove four things after the fact: that a workload only ever reached approved external names; that no unapproved source reached a database behind a private endpoint; that a particular firewall rule denied a specific connection; and that an outage last month was Azure's rather than the application's. The estate has flow logs and traffic analytics enabled, and nothing else beyond the defaults.</p>
+      <p><b>Answer the review</b>: for each of the four, say whether the evidence exists, what would produce it, and which one requires a change to the architecture rather than to a setting.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For each question, name the stream that would carry the answer before asking whether it is enabled. Two of the four have no direct stream, and only one of those is fixed by putting something new on a path.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Approved external names.</b> This is name resolution, and public zones have no per-query log. Flow records carry addresses rather than names, so they cannot answer it either. Nothing existing produces this evidence.</li>
+        <li><b>Fix it - and note what kind of fix it is.</b> A firewall DNS proxy or the private resolver has to sit on the resolution path, and logging happens there. That is an <b>architecture change</b>: traffic must be made to traverse something that can see the query.</li>
+        <li><b>Sources reaching the private endpoint.</b> Traffic at a private endpoint is not recorded at the endpoint, so the flow logs the estate already has will show nothing there and that absence proves nothing.</li>
+        <li><b>Fix it.</b> Capture at the <b>source</b> interfaces, where flow records do exist. This is a configuration change rather than an architecture one, because the sources are already inside networks that can produce records.</li>
+        <li><b>The firewall rule denial.</b> This one is answerable. Security groups produce no per-rule verdict log, but the flow record carries the allow-or-deny outcome and which rule decided it, and the managed firewall has its own rule logs. The evidence exists in what is already enabled.</li>
+        <li><b>Whose outage it was.</b> Answerable, and from a stream nobody had to configure: the platform health feed records issues affecting your subscription and names the resources involved, while the per-resource feed reports the resource's own state. Both should also be wired to an action group so the next one is noticed rather than reconstructed.</li>
+        <li><b>Note one caveat on the analytics.</b> Traffic analytics aggregates identical flows, so a question needing individual tuple fidelity should be answered from the raw records rather than from the enriched view.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly two of the four should be answerable today, and exactly one should require putting something new on a path. If the private-endpoint question looked answerable from existing flow logs, re-read where those records are not collected.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, module 11</b> takes these streams and builds detection on them, where the same blind spots become detection gaps.</li>
+    <li><b>Lesson 0701</b> is where the missing per-rule verdict log first appeared, and lesson 0703 is where private-endpoint traffic first went unrecorded.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the blind spots feel like trivia, ask an agent to write the evidence statement for each of the four practice questions as if for an auditor. Two of them come out as "we cannot show this", and that sentence is what a design is meant to prevent.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/network-watcher/vnet-flow-logs-overview">virtual network flow logs overview</a>, in particular its list of what is not captured. It is the densest statement of network telemetry limits on the platform, and every item on that list has ended somebody's investigation.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. Two timing figures the research could not verify are named as open rather than estimated.</p>
+
+  <div class="pager">
+    <a href="1003-instrumenting-what-the-platform-cannot-see.html"><span class="dir">&larr; Previous</span><span class="ttl">Instrumenting what the platform cannot see</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 1004 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

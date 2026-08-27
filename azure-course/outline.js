@@ -227,6 +227,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0904-paying-for-it.html"
         }
       ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Three planes and one routing primitive",
+          "href": "lessons/1000-three-planes-and-one-routing-primitive.html"
+        },
+        {
+          "title": "What is on by default",
+          "href": "lessons/1001-what-is-on-by-default.html"
+        },
+        {
+          "title": "What keeping it costs",
+          "href": "lessons/1002-what-keeping-it-costs.html"
+        },
+        {
+          "title": "Instrumenting what the platform cannot see",
+          "href": "lessons/1003-instrumenting-what-the-platform-cannot-see.html"
+        },
+        {
+          "title": "Alerts, health and the blind spots",
+          "href": "lessons/1004-alerts-health-and-the-blind-spots.html"
+        }
+      ]
     }
   ],
   "extras": []

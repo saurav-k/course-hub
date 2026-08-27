@@ -84,9 +84,18 @@ is wrong and it gets fixed before anything new is added.
 | 0903 | Knowing what you have |
 | 0904 | Paying for it |
 
+**Module 10 - Observability and audit**
+
+| Lesson | Title |
+| 1000 | Three planes and one routing primitive |
+| 1001 | What is on by default |
+| 1002 | What keeping it costs |
+| 1003 | Instrumenting what the platform cannot see |
+| 1004 | Alerts, health and the blind spots |
+
 ## Planned, in order
 
-Modules 10 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Modules 11 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -120,7 +129,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 10 to 14**, none started. New numbers go at the end of the
+- **Modules 11 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a

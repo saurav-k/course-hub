@@ -233,6 +233,36 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/cost-management-billing/reservations/save-compute-costs-reservations>
 - <https://learn.microsoft.com/en-us/azure/advisor/advisor-overview>
 
+**Module 10 - Observability and audit**
+
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/fundamentals/data-sources>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/diagnostic-settings>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/activity-log>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/resource-logs>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/data-platform-metrics>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/logs/log-analytics-workspace-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/logs/cost-logs>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/logs/data-retention-configure>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/logs/data-ingestion-time>
+- <https://learn.microsoft.com/en-us/entra/identity/monitoring-health/overview-monitoring-health>
+- <https://learn.microsoft.com/en-us/entra/identity/monitoring-health/reference-reports-data-retention>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/app/app-insights-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/app/availability-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/profiler/profiler-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/agents/azure-monitor-agent-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/vm/vminsights-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-metrics-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/visualize/workbooks-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/alerts/alerts-overview>
+- <https://learn.microsoft.com/en-us/azure/service-health/overview>
+- <https://learn.microsoft.com/en-us/azure/network-watcher/network-watcher-overview>
+- <https://learn.microsoft.com/en-us/azure/network-watcher/vnet-flow-logs-overview>
+- <https://learn.microsoft.com/en-us/azure/network-watcher/traffic-analytics>
+- <https://learn.microsoft.com/en-us/azure/firewall/monitor-firewall>
+- <https://learn.microsoft.com/en-us/azure/aks/monitor-aks>
+- <https://learn.microsoft.com/en-us/azure/application-gateway/application-gateway-diagnostics>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
@@ -313,6 +343,10 @@ them was filled from memory.
 - **Which cost features are unavailable at management-group scope.** The inventory
   records that some are, under the Microsoft Customer Agreement, without listing
   them. Lesson 0904 says to check the supported scopes rather than naming any.
+- **The aggregation interval used by traffic analytics**, and the delay between a
+  Prometheus scrape and the data being queryable. The research behind this course
+  records both as open items rather than guesses, and lesson 1004 says so on the page
+  rather than supplying a number.
 - **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
   links one and no lesson spine carries a Glossary entry.
 
