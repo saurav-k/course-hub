@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Every stream, and what each one silently misses - Inside OCI</title>
+<meta name="description" content="Fifteen documented telemetry streams on OCI, only three of them on by default, and each one has a documented blind spot that no error message will ever tell you about.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1002</div>
+  <h1>Most streams are off, and every one of them has a documented blind spot</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">12 min</span>
+    Capability area <code>audit-telemetry</code>, matrix rows <code>network-flow-log</code>, <code>load-balancer-access-log</code>, <code>data-plane-access-log</code>, <code>dns-query-log</code> and <code>service-specific-log</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Of the fifteen documented streams below, <b>three are on without being asked</b>, two are partly on, and the remaining ten are off until somebody enables them.</li>
+      <li>Every stream misses something on purpose, and the misses are <b>documented rather than discovered</b>. Flow logs never carry payloads. Gateway logs carry metadata, not bodies.</li>
+      <li>Two misses are unusual enough to name. <b>Private DNS query logs do not record an answer served from cache</b>, and <b>FastConnect has no log category at all</b>.</li>
+      <li>Load balancer logs admit to skipping records under stress, and say so with their own error entries.</li>
+      <li>So the design question is never "do we have logs". It is <b>which question do we need to answer, and which stream was enabled before the thing happened</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Metrics, MQL&lt;br/&gt;and alarms"] --> T["THIS PAGE&lt;br/&gt;every stream, its default&lt;br/&gt;state and its blind spot"]
+  T --> N1["Traces, synthetics&lt;br/&gt;and the agent"]
+  T --> N2["Getting telemetry out&lt;br/&gt;through Connector Hub"]
+  W["Observability and audit&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. The two pages before this one described the log store and the metric store. This page is the inventory of what actually flows into them, and it is the page to read before an incident rather than during one.
+    <b>Reading it is how you find out which questions your tenancy is currently unable to answer.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: almost nothing is on</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of the default state of fifteen documented telemetry streams: three on by default, two partly on, and ten off until enabled.">
+      <line class="axis" x1="120" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="120" y1="40" x2="120" y2="250"/>
+      <rect class="m-signal" x="160" y="60" width="60" height="190"/>
+      <rect class="m-prob" x="280" y="123" width="60" height="127"/>
+      <rect class="m-alarm" x="400" y="187" width="60" height="63"/>
+      <text class="ttl" x="120" y="26">Fifteen documented streams, by default state</text>
+      <text class="lbl-sm" x="190" y="52" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="310" y="115" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="430" y="179" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="190" y="270" text-anchor="middle">off until enabled</text>
+      <text class="lbl-sm" x="310" y="270" text-anchor="middle">on by default</text>
+      <text class="lbl-sm" x="430" y="270" text-anchor="middle">partly on</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>you must enable it</span><span><i class="sw-prob"></i>always there</span><span><i class="sw-alarm"></i>one part on, the rest opt-in</span></div>
+    <figcaption>Counted from the fifteen rows below: audit, service metrics and the private-circuit visibility are on; cluster logging and the event stream are partly on; the other ten are off. 10 + 3 + 2 = 15.
+    <b>Two thirds of the platform's telemetry is a decision somebody has to make in advance, which is why an estate's observability is mostly a record of what its first engineers happened to switch on.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: the streams, and their documented misses</h2>
+
+  <table>
+    <thead><tr><th>Stream</th><th>Default</th><th>What it does not carry</th></tr></thead>
+    <tbody>
+      <tr><td>Audit, control plane</td><td>always on</td><td>data-plane actions, packets, database internals</td></tr>
+      <tr><td>Network flow logs</td><td>off</td><td>packet payloads, traffic behind a service gateway</td></tr>
+      <tr><td>Load balancer access and error</td><td>off</td><td>records skipped under stress, admitted in its own entries</td></tr>
+      <tr><td>Object and file storage access</td><td>off</td><td>archive lifecycle moves, which arrive as events instead</td></tr>
+      <tr><td>Web firewall logs</td><td>off</td><td>nothing structural, but service-side retention is short</td></tr>
+      <tr><td>API gateway execution</td><td>off</td><td>full request and response bodies</td></tr>
+      <tr><td>Function invocations</td><td>off</td><td>cold-start internals</td></tr>
+      <tr><td>Cluster logs</td><td>partly on</td><td>pod output, until an agent is configured for it</td></tr>
+      <tr><td>Tunnel logs for the encrypted path</td><td>off</td><td>per-packet inspection</td></tr>
+      <tr><td>Private circuit visibility</td><td>on</td><td>everything: there is no log category, only metrics and audit</td></tr>
+      <tr><td>Private DNS resolver queries</td><td>off</td><td>answers served from cache, and public zones entirely</td></tr>
+      <tr><td>The event stream</td><td>partly on</td><td>history: it is a reaction stream, not an archive</td></tr>
+      <tr><td>Service metrics</td><td>on</td><td>anything finer than about a minute</td></tr>
+      <tr><td>Traces</td><td>off</td><td>components nobody instrumented</td></tr>
+      <tr><td>Database activity audit</td><td>off</td><td>targets that were never registered</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="mermaid">
+mindmap
+  root((Why a stream misses something))
+    By design, for volume
+      payloads are never captured
+      bodies are not kept
+      metrics are per minute
+    By design, for performance
+      cached DNS answers are not logged
+      flow logs sample
+    Because you did not ask
+      ten streams are off by default
+      pod output needs an agent
+    Because the category does not exist
+      no log category for the private circuit
+      no per-rule verdict from subnet rules
+    </div>
+    <figcaption>Four different reasons a question has no answer, and only one of them is fixable by changing a setting today. The rest have to be designed around.
+    <b>Telling the four apart is what turns "we have no logs for that" into either a configuration change or an architecture change.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: the undercount nobody expects</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as A client in the network
+  participant R as The private resolver
+  participant L as The log
+  C->>R: first lookup of a name
+  R->>L: recorded
+  C->>R: the same lookup, moments later
+  Note over C,R: answered from cache, before the entry expires
+  R--xL: nothing is recorded
+  Note over R,L: the count is low by the cache hit rate
+    </div>
+    <figcaption><a href="https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/private-dns-logging.htm">Private DNS query logging</a> documents that responses served from cache are not logged until the cached entry expires, and that it covers private zones inside a network rather than public ones.
+    <b>Any conclusion drawn from query counts is therefore a lower bound, and a name that looks unused may simply be cached everywhere.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Read a telemetry design as <b>a list of questions with an owner</b>, not as a list of logs to enable. For each question worth asking during an incident, name the stream that answers it and confirm that stream is on. Everything else is storage you are paying for.</div>
+
+  <div class="callout warn">
+  Four absences in this area are worth stating exactly, because each is easy to assume the other way. There is no stream recording the cloud operator's own staff access to your content. Identity domain events land in the ordinary audit stream rather than in a separate directory audit trail. There is no dedicated stream of authorisation denials: a refusal appears as an audit record with a failing response. And subnet rules and network security groups emit no per-rule verdict log, so flow logs carrying accepted and rejected traffic are what stands in.</div>
+
+  <h2>The trade-off: every stream you enable is a bill and a decision</h2>
+
+  <p>Enabling everything is not the safe default it appears to be. Ingestion is charged, high-volume streams are the most expensive and least often read, and a search across a store full of unread data is slower than one across a store full of chosen data.</p>
+
+  <p>The opposite failure is the one this page exists to prevent. A stream that was off when something happened cannot be turned on retrospectively, and no error message appears at the moment the gap is created. The middle path is to enable the streams that answer the questions your incident reviews actually ask, and to write that list down.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which visibility does the private circuit service provide?</div>
+      <button class="q-opt">A full access log of every connection it carries</button>
+      <button class="q-opt">A tunnel log, the same as the encrypted path uses</button>
+      <button class="q-opt">A per-rule verdict log for the traffic it delivers</button>
+      <button class="q-opt">Metrics and audit records, with no log category</button>
+      <div class="q-fb">There is no log category for it; visibility comes from metrics and from the audit trail of its lifecycle. The first and second attribute log streams to it that the reference does not list. The third describes a stream that does not exist anywhere on this platform.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A private DNS query count looks lower than expected. What is the likely reason?</div>
+      <button class="q-opt">Answers served from cache are not logged until expiry</button>
+      <button class="q-opt">The resolver samples queries at a configurable rate</button>
+      <button class="q-opt">Only queries that failed to resolve are ever recorded</button>
+      <button class="q-opt">Queries from outside the network are excluded from it</button>
+      <div class="q-fb">Cache hits are not logged, so counts are a lower bound. The second borrows sampling from flow logs, a different stream. The third invents a filter. The fourth is true of public zones and does not explain a low count inside the network.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Where does an authorisation denial appear?</div>
+      <button class="q-opt">In a dedicated stream of policy denials, on by default</button>
+      <button class="q-opt">In the flow logs, as rejected traffic to the endpoint</button>
+      <button class="q-opt">In the audit records, with the failing response code</button>
+      <button class="q-opt">Nowhere, since refused calls are not recorded at all</button>
+      <div class="q-fb">A refusal is an audit record carrying the failing response. The first names a stream this platform does not have. The second confuses an authorisation decision with a network one. The fourth is the absence error, and it would make every access investigation impossible.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>A public service is being designed. The team lists the questions they expect to ask during an incident: which client addresses hit the service, which requests the firewall blocked and why, which pod produced an error, whether a customer's file was downloaded, and whether the private circuit to the data centre was degraded.</p>
+      <p><b>Name</b> the stream for each question, mark which are off by default, and identify the one question whose answer will be incomplete however carefully it is configured.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Work down the table for each question in turn. Four of the five have a named stream. For the fifth, check the table row that says the category does not exist rather than assuming it must be somewhere.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Client addresses.</b> Load balancer access logs, off by default. Note the documented behaviour that records can be skipped under stress, so counts from this stream are approximate during exactly the busiest moments.</li>
+        <li><b>Blocked requests and the reason.</b> Web firewall logs, off by default, with short service-side retention and an option to deliver directly to a bucket for a longer keep.</li>
+        <li><b>The pod that produced an error.</b> Cluster logs. The control-plane part is on, but pod output needs an agent configured for it, so this is partly on and the part you want is the part that is not.</li>
+        <li><b>Whether a file was downloaded.</b> Object storage access logs, off by default and per bucket. If they were not on at the time, this question has no answer at all.</li>
+        <li><b>The private circuit.</b> This is the incomplete one. There is no log category for it, so the answer comes from metrics and from audit records of its lifecycle, and no per-connection detail exists to find.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Four of the five should be off or partly off by default, and exactly one should have no log stream at all. If every question had a stream you could enable, look again at the private circuit row.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent to list the questions your last three incident reviews actually asked, then check each one against this table. The mismatch between the streams enabled and the questions asked is usually total, and it is cheap to fix once it is written down.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Logging/Reference/service_log_reference.htm">the service log reference</a>. It is the index of every category the platform publishes, and the absence of a service from it is the fastest way to learn that a stream you assumed exists does not.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="1001-metrics-mql-and-the-alarm-reset.html"><span class="dir">&larr; Previous</span><span class="ttl">Metrics, the query language, and the alarm that resets</span></a>
+    <a class="nxt" href="1003-traces-synthetics-and-the-agent.html"><span class="dir">Next &rarr;</span><span class="ttl">Traces, synthetics and the agent</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 1002 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

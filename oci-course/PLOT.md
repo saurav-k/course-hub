@@ -94,6 +94,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0902 | Tagging is the cost model |
 | 0903 | Seeing and shaping the bill |
 
+**Module 10 - Observability and audit**
+
+| Lesson | Title |
+| 1000 | Three log families, one store, and the one that is always on |
+| 1001 | Metrics, the query language, and the alarm that resets |
+| 1002 | Every stream, and what each one silently misses |
+| 1003 | Traces, synthetics and the agent |
+| 1004 | Getting telemetry out, and where it can go |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

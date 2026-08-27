@@ -182,6 +182,28 @@ from and the date it was read.
 - [Universal Credits](https://www.oracle.com/cloud/universal-credits/) - an annual monetary commitment drawn down by any eligible service in any region, with unused credit forfeited at the end of the term. Vendor product page rather than documentation.
 - [Cloud Advisor](https://docs.oracle.com/en-us/iaas/Content/CloudAdvisor/Concepts/cloudadvisoroverview.htm) - recommendations across cost, performance, availability and security, each with an estimated saving and an apply action.
 
+### Module 10 - Observability and audit
+
+- [Logging overview](https://docs.oracle.com/en-us/iaas/Content/Logging/Concepts/loggingoverview.htm) - the audit, service and custom log families, log groups as scoped resources, and the search over all three.
+- [Audit overview](https://docs.oracle.com/en-us/iaas/Content/Audit/Concepts/auditoverview.htm) - automatic recording of calls to supported public endpoints, always on and at no charge.
+- [Setting the audit retention period](https://docs.oracle.com/en-us/iaas/Content/Audit/Tasks/settingretentionperiod.htm) - the fixed tenancy-wide retention of three hundred and sixty-five days.
+- [Listing audit log events](https://docs.oracle.com/en-us/iaas/Content/Audit/Tasks/listing-log-events.htm) - the statement that the listing operation is not intended for bulk export.
+- [Service log reference](https://docs.oracle.com/en-us/iaas/Content/Logging/Reference/service_log_reference.htm) - the index of every service log category the platform publishes.
+- [VCN flow logs](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/vcn-flow-logs.htm) - accepted and rejected traffic metadata, capture filters and sampling, and payloads never being captured.
+- [Load balancer logs](https://docs.oracle.com/en-us/iaas/Content/Balance/Tasks/create_log.htm) - one access and one error log per balancer, and the entries admitting that records can be skipped.
+- [Web application firewall logs](https://docs.oracle.com/en-us/iaas/Content/WAF/Tasks/logs.htm) - short service-side retention and optional direct delivery to a standard-tier bucket.
+- [Private DNS logging](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/private-dns-logging.htm) - per-query records, the exclusion of cache-served answers, and coverage of private zones only.
+- [Monitoring overview](https://docs.oracle.com/en-us/iaas/Content/Monitoring/Concepts/monitoringoverview.htm) - metric namespaces, the one-minute cadence, the query language and the alarm reset after a metric goes absent.
+- [Managing alarms](https://docs.oracle.com/en-us/iaas/Content/Monitoring/Tasks/managingalarms.htm) - threshold and absence alarms, the notification and stream destinations and their differing capacities, and the delay, repeat and suppression controls.
+- [Trace Explorer](https://docs.oracle.com/en-us/iaas/application-performance-monitoring/doc/use-trace-explorer.html) - open-standard span collection, browser to database views, and header propagation across function invocations.
+- [Application Performance Monitoring](https://docs.oracle.com/en-us/iaas/application-performance-monitoring/doc/application-performance-monitoring.html) - availability monitors of several kinds, from public, dedicated and on-premises vantage points.
+- [Health Checks](https://docs.oracle.com/en-us/iaas/Content/HealthChecks/Concepts/healthchecks.htm) - lightweight probes, the two interval classes and the per-account endpoint test limit.
+- [Network Path Analyzer](https://docs.oracle.com/en-us/iaas/Content/Network/Concepts/path_analyzer.htm) - configuration analysis rather than packet sending, and saved analyses that can be re-run.
+- [Management Agent](https://docs.oracle.com/en-us/iaas/management-agents/home.htm) - one collector with plug-ins, host metrics, logs and metric-endpoint scrapes, on this platform and off it.
+- [Console announcements](https://docs.oracle.com/en-us/iaas/Content/General/Concepts/announcements.htm) - the tenancy-scoped feed of service events and maintenance, filtered by service and region rather than by resource.
+- [Connector Hub](https://docs.oracle.com/en-us/iaas/Content/connector-hub/overview.htm) - the source and target matrix, the filter and function tasks, the batching settings and the automatic deactivation of a continuously failing connector.
+- [Dashboards](https://docs.oracle.com/en-us/iaas/Content/Dashboards/home.htm) - console-native widgets over metrics and logs, scoped per compartment.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

@@ -227,6 +227,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0903-seeing-and-shaping-the-bill.html"
         }
       ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Three log families, one store, and the one that is always on",
+          "href": "lessons/1000-three-log-families-one-store.html"
+        },
+        {
+          "title": "Metrics, the query language, and the alarm that resets",
+          "href": "lessons/1001-metrics-mql-and-the-alarm-reset.html"
+        },
+        {
+          "title": "Every stream, and what each one silently misses",
+          "href": "lessons/1002-every-stream-and-what-it-misses.html"
+        },
+        {
+          "title": "Traces, synthetics and the agent",
+          "href": "lessons/1003-traces-synthetics-and-the-agent.html"
+        },
+        {
+          "title": "Getting telemetry out, and where it can go",
+          "href": "lessons/1004-getting-telemetry-out.html"
+        }
+      ]
     }
   ],
   "extras": []

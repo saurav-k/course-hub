@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Metrics, the query language, and the alarm that resets - Inside OCI</title>
+<meta name="description" content="OCI metrics arrive about once a minute and are queried in MQL, alarms publish to notifications or to a stream, and an alarm whose metric disappears resets itself after a documented delay.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1001</div>
+  <h1>The destination you choose decides how many alarm messages survive a storm</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>observability</code>, matrix rows <code>metrics-store</code> and <code>alerting</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Service metrics arrive in <b>namespaces at roughly one-minute cadence</b>, and you can publish your own alongside them.</li>
+      <li>They are queried in <b>MQL</b>, a small language whose statements read like <code>CpuUtilization[1m].mean() &gt; 80</code>.</li>
+      <li>An <b>alarm is an MQL statement plus a destination</b>, and it can fire on a threshold or on a metric being absent.</li>
+      <li>The destinations differ enormously in capacity: a notification topic accepts about <b>sixty alarm messages per evaluation</b> while a stream accepts up to <b>one hundred thousand</b>.</li>
+      <li>When a metric stops arriving, the alarm <b>resets after about thirteen minutes</b>, which is a ten-minute internal window plus a three-minute default allowance.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The three log families&lt;br/&gt;and the one store"] --> T["THIS PAGE&lt;br/&gt;metrics, MQL&lt;br/&gt;and alarm behaviour"]
+  T --> N1["Every stream, and what&lt;br/&gt;each one misses"]
+  T --> N2["Traces, synthetics&lt;br/&gt;and the agent"]
+  W["Observability and audit&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. Logs answer what happened. Metrics answer how much and how often, and they are the only telemetry family on this platform with an alerting mechanism of its own.
+    <b>Every page after this one produces something you may want to alarm on, and this is where that alarm is written.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: a series, a query, a destination</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  S["Metric namespaces&lt;br/&gt;one point a minute&lt;br/&gt;plus your own"] --> Q["An MQL statement&lt;br/&gt;window, statistic, comparison"]
+  Q --> A["An alarm&lt;br/&gt;threshold or absence"]
+  A --> N["A notification topic"]
+  A --> ST["A stream"]
+  N -.- L1["about sixty messages&lt;br/&gt;per evaluation"]
+  ST -.- L2["up to one hundred thousand"]
+    </div>
+    <figcaption>The <a href="https://docs.oracle.com/en-us/iaas/Content/Monitoring/Concepts/monitoringoverview.htm">Monitoring service</a> holds the series and <a href="https://docs.oracle.com/en-us/iaas/Content/Monitoring/Tasks/managingalarms.htm">alarms</a> evaluate the query. The destination is a design decision rather than a delivery detail.
+    <b>An alarm whose query can match thousands of resources at once needs the larger destination, because the smaller one drops what it cannot carry.</b></figcaption>
+  </figure>
+
+  <div class="code-cap">MQL &middot; the shape of a monitoring query</div>
+  <pre><code>CpuUtilization[1m].mean() &gt; 80
+
+CpuUtilization[5m]{resourceDisplayName = "web-01"}.max() &gt; 90
+</code></pre>
+
+  <p>The metric name comes first, the window in square brackets, an optional filter on dimensions, then the statistic and the comparison. Custom series are published through the metrics posting operation, and a Grafana plugin reads the same store.</p>
+
+  <h2>The mechanism: the two destinations are not the same size</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart on a logarithmic scale of alarm message capacity per evaluation: about sixty for a notification topic, and up to one hundred thousand for a stream.">
+      <line class="axis" x1="90" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="90" y1="40" x2="90" y2="250"/>
+      <line class="grid" x1="90" y1="199" x2="610" y2="199"/>
+      <line class="grid" x1="90" y1="147" x2="610" y2="147"/>
+      <line class="grid" x1="90" y1="95" x2="610" y2="95"/>
+      <rect class="m-stat" x="160" y="199" width="110" height="51"/>
+      <rect class="m-signal" x="390" y="44" width="110" height="206"/>
+      <text class="ttl" x="90" y="26">Alarm messages accepted per evaluation, on a log scale</text>
+      <text class="lbl-sm" x="215" y="191" text-anchor="middle">about 60</text>
+      <text class="lbl-sm" x="445" y="36" text-anchor="middle">100,000</text>
+      <text class="lbl-sm" x="215" y="270" text-anchor="middle">a notification topic</text>
+      <text class="lbl-sm" x="445" y="270" text-anchor="middle">a stream</text>
+      <text class="lbl-sm" x="345" y="292" text-anchor="middle">the gap is more than three orders of magnitude</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>the human destination</span><span><i class="sw-signal"></i>the machine destination</span></div>
+    <figcaption>Drawn on a logarithmic scale because the two figures differ by more than a thousandfold. The smaller destination is the one people reach for first, because it is the one that sends an email.
+    <b>Route a high-cardinality alarm to the stream and let something downstream summarise it, because sixty messages arriving where thousands were generated is silent truncation of exactly the incident you wanted to hear about.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: what happens when the metric stops</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> OK: the metric is arriving and below the threshold
+  OK --> Firing: the threshold is crossed
+  Firing --> OK: the metric comes back below it
+  Firing --> Reset: the metric stops arriving altogether
+  Reset --> OK: it starts arriving again
+  note right of Reset
+    about thirteen minutes after the
+    last datapoint - a ten-minute
+    internal window plus a three-minute
+    default allowance
+  end note
+    </div>
+    <figcaption>An alarm whose metric disappears does not stay firing indefinitely. It resets after a documented delay, and that delay is the sum of two separate settings.
+    <b>An instance that dies while its alarm is firing therefore produces an alarm that clears itself, which reads exactly like recovery unless somebody knows this behaviour.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A threshold alarm answers "is this number too high". It cannot answer "is this thing still there", because a missing metric is not a high number. That second question needs an <b>absence alarm</b>, written deliberately, and it is the alarm most estates discover they never wrote.</div>
+
+  <div class="callout warn">
+  Alarms carry a trigger delay, a repeat-notification interval and suppression controls, and all three change how loud an incident is. They are also the settings most often left at their defaults and then blamed during a review. Decide the repeat interval for a page in the night deliberately, because the default was chosen for a general case and not for yours.</div>
+
+  <h2>The trade-off: one minute of resolution, and what it hides</h2>
+
+  <p>A one-minute cadence is enough for capacity questions, saturation questions and almost every alarm worth waking somebody for. It is not enough to see a burst that begins and ends inside a minute, and no setting on this service makes it finer.</p>
+
+  <p>Where sub-minute behaviour matters, the answer is a different family: traces from the next lesson show the individual request, and logs show the individual event. A design that tries to answer a per-request question from a per-minute series will keep finding an average that looks healthy.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">An alarm may match thousands of resources at once. Which destination fits?</div>
+      <button class="q-opt">A stream, which accepts up to a hundred thousand</button>
+      <button class="q-opt">A notification topic, which fans out to many people</button>
+      <button class="q-opt">Either one, since alarms are summarised before sending</button>
+      <button class="q-opt">Neither one, since alarms cap the resources they match</button>
+      <div class="q-fb">The stream is the destination sized for that volume. The second names the destination that accepts about sixty per evaluation. The third invents a summarisation step. The fourth invents a cap on matching.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An instance dies while its processor alarm is firing. What does the alarm do?</div>
+      <button class="q-opt">It keeps firing until somebody acknowledges the alarm</button>
+      <button class="q-opt">It fires a second alarm reporting the metric as absent</button>
+      <button class="q-opt">It resets about thirteen minutes after the last datapoint</button>
+      <button class="q-opt">It stays firing and marks the resource as unreachable</button>
+      <div class="q-fb">A missing metric resets the alarm after roughly thirteen minutes. The first assumes acknowledgement semantics the service does not have. The second would be helpful and is exactly what an absence alarm must be written to do. The fourth invents a state.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does the square bracket in an MQL statement carry?</div>
+      <button class="q-opt">The dimension filter narrowing which resources match</button>
+      <button class="q-opt">The window over which the statistic is computed</button>
+      <button class="q-opt">The threshold the statement is being compared against</button>
+      <button class="q-opt">The namespace the metric series is published under</button>
+      <div class="q-fb">The bracket holds the window. The first is the brace filter, the third follows the comparison operator, and the fourth is chosen when the metric is published. All three are real parts of the model, which is what makes them plausible.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A fleet of four hundred instances runs behind a load balancer. The team wants to be paged when processor use is sustained above eighty per cent, and to know when an instance stops reporting at all. They write one threshold alarm across the whole fleet, point it at a notification topic that emails the on-call engineer, and leave every other setting at its default.</p>
+      <p><b>Find</b> the three problems with that arrangement, and say what you would change for each.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Count how many messages one evaluation could generate and compare it with the destination's capacity. Then ask which of the team's two stated wishes the alarm they wrote actually covers. The third problem is in the phrase "left at their defaults".</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The destination is too small.</b> A fleet-wide event could match up to four hundred resources in one evaluation, against a notification capacity of about sixty. Route it to a stream and have something downstream summarise before it reaches a person.</li>
+        <li><b>The second wish is not covered.</b> A threshold alarm cannot see a missing metric, so an instance that stops reporting produces nothing. Add a separate absence alarm.</li>
+        <li><b>The first alarm will also lie.</b> If a firing instance dies, the alarm resets after about thirteen minutes and reads as recovery. The absence alarm is what turns that silence back into a signal.</li>
+        <li><b>The defaults.</b> The trigger delay, repeat interval and suppression were never chosen. Decide the repeat interval against how often the on-call engineer should be reminded, and use the trigger delay to keep a single noisy minute from paging anyone.</li>
+        <li><b>What the fixed design looks like.</b> Two alarms rather than one, a stream for the fleet-wide threshold, a notification for the summarised output, and three settings chosen on purpose.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should end with two alarms and two destinations. If it still has one alarm, ask what fires when an instance goes quiet.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent how many alarms in a tenancy fire on absence rather than on a threshold. In most estates the answer is zero, and that number is the difference between noticing a broken thing and noticing a busy one.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://docs.oracle.com/en-us/iaas/Content/Monitoring/Concepts/monitoringoverview.htm">Monitoring overview</a>. It carries the cadence, the query language and the reset behaviour, and the reset paragraph is the one worth reading twice.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="1000-three-log-families-one-store.html"><span class="dir">&larr; Previous</span><span class="ttl">Three log families, one store, and the one that is always on</span></a>
+    <a class="nxt" href="1002-every-stream-and-what-it-misses.html"><span class="dir">Next &rarr;</span><span class="ttl">Every stream, and what each one silently misses</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 1001 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
