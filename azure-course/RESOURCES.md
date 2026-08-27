@@ -25,8 +25,8 @@ only what changed:
   a corrections pass, a reconciliation against the shared capability taxonomy, and a
   repair pass. Every claim in it traces to a vendor page fetched and read during that
   work, and the corrections are recorded case by case with the page that confirmed each.
-- **Modules 01 to 04 were written only from that inventory.** No claim on any lesson
-  page originates anywhere else. Where the inventory did not cover something a lesson
+- **All fourteen modules were written only from that inventory.** No claim on any
+  lesson page originates anywhere else. Where the inventory did not cover something a lesson
   wanted to say, the lesson does not say it, and the omission is listed under `## Gaps`
   below rather than filled from memory.
 
@@ -309,6 +309,18 @@ and lesson 1200 says so.
 - <https://learn.microsoft.com/en-us/azure/machine-learning/overview-what-is-azure-machine-learning>
 - <https://learn.microsoft.com/en-us/azure/ai-services/>
 - <https://learn.microsoft.com/en-us/azure/ai-services/agents/overview>
+
+**Module 14 - Resilience and migration**
+
+- <https://learn.microsoft.com/en-us/azure/backup/backup-introduction-to-azure-backup>
+- <https://learn.microsoft.com/en-us/azure/storage/common/storage-redundancy>
+- <https://learn.microsoft.com/en-us/azure/site-recovery/site-recovery-overview>
+- <https://learn.microsoft.com/en-us/azure/chaos-studio/chaos-studio-overview>
+- <https://learn.microsoft.com/en-us/azure/resiliency/resiliency-overview>
+- <https://learn.microsoft.com/en-us/azure/well-architected/>
+- <https://learn.microsoft.com/en-us/azure/migrate/migrate-services-overview>
+- <https://learn.microsoft.com/en-us/azure/storage-mover/service-overview>
+- <https://learn.microsoft.com/en-us/azure/dms/>
 
 ## Gaps
 

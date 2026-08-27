@@ -117,9 +117,17 @@ is wrong and it gets fixed before anything new is added.
 | 1301 | Grounding and the pipeline that fills it |
 | 1302 | Training, tools and agents |
 
-## Planned, in order
+**Module 14 - Resilience and migration**
 
-Module 14 remains unwritten. The full fourteen-module plan is below, unchanged.
+| Lesson | Title |
+| 1400 | Backup and the two kinds of vault |
+| 1401 | Replication, failover and the objective nobody published |
+| 1402 | Proving it |
+| 1403 | Moving workloads in |
+
+## The plan, complete
+
+All fourteen modules are written. The full plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -153,8 +161,9 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Module 14**, not started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **Nothing further is reserved by module.** The fourteen-module plan is
+  complete. New numbers go at the end of the sequence; nothing already
+  published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a
   Glossary entry.

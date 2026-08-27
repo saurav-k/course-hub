@@ -319,6 +319,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1302-training-tools-and-agents.html"
         }
       ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Backup and the two kinds of vault",
+          "href": "lessons/1400-backup-and-the-two-kinds-of-vault.html"
+        },
+        {
+          "title": "Replication, failover and the objective nobody published",
+          "href": "lessons/1401-replication-failover-and-the-objective-nobody-published.html"
+        },
+        {
+          "title": "Proving it",
+          "href": "lessons/1402-proving-it.html"
+        },
+        {
+          "title": "Moving workloads in",
+          "href": "lessons/1403-moving-workloads-in.html"
+        }
+      ]
     }
   ],
   "extras": []
