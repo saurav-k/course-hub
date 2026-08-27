@@ -183,6 +183,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0704-the-front-door.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "The gates an access decision passes",
+          "href": "lessons/0800-the-gates-an-access-decision-passes.html"
+        },
+        {
+          "title": "Machines carry no passwords",
+          "href": "lessons/0801-machines-carry-no-passwords.html"
+        },
+        {
+          "title": "Trusting an identity from outside",
+          "href": "lessons/0802-trusting-an-identity-from-outside.html"
+        },
+        {
+          "title": "Neither your staff nor your customers",
+          "href": "lessons/0803-neither-your-staff-nor-your-customers.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-secrets-and-certificates.html"
+        }
+      ]
     }
   ],
   "extras": []

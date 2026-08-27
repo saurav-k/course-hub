@@ -68,6 +68,15 @@ is wrong and it gets fixed before anything new is added.
 | 0703 | From peering to a hub | working |
 | 0704 | The front door | working |
 
+### Module 08 - Identity and access
+
+| Lesson | Title | Rung |
+| 0800 | The gates an access decision passes | working |
+| 0801 | Machines carry no passwords | working |
+| 0802 | Trusting an identity from outside | working |
+| 0803 | Neither your staff nor your customers | working |
+| 0804 | Keys, secrets and certificates | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -106,7 +115,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 08 to 14 above**, none started. New numbers go at the end of the
+- **Modules 09 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

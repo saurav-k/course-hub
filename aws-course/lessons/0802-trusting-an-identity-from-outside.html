@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Trusting an identity from outside - Inside AWS</title>
+<meta name="description" content="A trust policy can name another account, an OIDC issuer, a SAML provider or your own certificate authority - and the word root inside one does not mean the root user.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Identity and access &middot; Lesson 0802</div>
+  <h1>A trust policy is the only door in, and one word in it is misread constantly</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>cross-account-assumption</code> and <code>workload-identity-federation</code>.
+    &middot; <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_create_for-user_externalid.html">External ID</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Four kinds of outsider assume a role the same way: <b>another account</b>, an <b>OIDC issuer</b> such as a CI system, a <b>SAML provider</b>, and your own <b>certificate authority</b> through IAM Roles Anywhere.</li>
+      <li><b>The word root in a trust policy principal does not mean the root user.</b> An account ARN ending in <code>:root</code> delegates to the entire account, and a bare account ID behaves identically.</li>
+      <li><b>External ID</b> defends against the confused deputy when one intermediary serves many customers. Its protection is <b>uniqueness, not secrecy</b>.</li>
+      <li>Where an AWS service acts on your behalf, the condition keys <code>aws:SourceArn</code>, <code>aws:SourceAccount</code> and <code>aws:PrincipalOrgID</code> do the same job.</li>
+      <li>What it costs: the delegating account writes the trust policy and the calling account still needs its own identity policy allowing the assumption - both halves, as always.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0801&lt;br/&gt;machines inside AWS&lt;br/&gt;assuming roles"] --> T["THIS PAGE&lt;br/&gt;callers that are not&lt;br/&gt;on AWS at all"]
+  T --> A["Staff and customers&lt;br/&gt;lesson 0803"]
+  T --> B["Organisation ceilings&lt;br/&gt;module 09"]
+  W["Module 08&lt;br/&gt;identity and access"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page gave a principal to things running on AWS. This page gives one to a build pipeline on somebody else's platform, a server in your own data centre, and a partner company's automation.
+    <b>None of these needs an access key, which is the whole point of registering an issuer rather than issuing a credential.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: four issuers, one role</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  A["Another AWS account&lt;br/&gt;trust names the account or a role"] --> ST["AWS STS"]
+  O["An OIDC issuer&lt;br/&gt;trust conditions on token claims"] --> ST
+  S["A SAML 2.0 provider&lt;br/&gt;enterprise federation"] --> ST
+  X["Your own certificate authority&lt;br/&gt;registered as a Roles Anywhere trust anchor"] --> ST
+  ST --> C["Temporary credentials,&lt;br/&gt;scoped by the role and the session"]
+    </div>
+    <figcaption>Four issuers, all ending at the same object. A CI pipeline is the canonical OIDC case: the role's trust policy conditions on claims in the token rather than holding a secret (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html">OIDC identity providers</a>). Roles Anywhere covers servers that are not on AWS, exchanging X.509 certificates from your PKI for temporary credentials, with profiles scoping the session (<a href="https://docs.aws.amazon.com/rolesanywhere/latest/userguide/introduction.html">IAM Roles Anywhere</a>).
+    <b>Registering an issuer moves the credential problem to a system that already solves it, which is why no long-lived key appears anywhere on this diagram.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  <b>The most misread string in AWS.</b> A trust policy principal of <code>arn:aws:iam::111122223333:root</code> does <b>not</b> restrict access to that account's root user. It delegates to the entire account: any principal in it whose own identity policy allows the assumption may use the role, and a bare account ID means exactly the same thing (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_principal.html">the Principal element</a>). Naming a specific role ARN is what actually narrows it.</div>
+
+  <h2>2. The confused deputy, and what fixes it</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant V as A monitoring vendor
+  participant A as Your account
+  participant B as Another customer's account
+  Note over V: the vendor holds a role in every customer account
+  V->>A: assume the role, presenting your external ID
+  A-->>V: allowed - the condition matched
+  V->>B: assume the role, presenting your external ID by mistake
+  B-->>V: denied - the condition requires B's own value
+  Note over A,B: without the condition, one customer's identifier would open another's role
+    </div>
+    <figcaption>The confused deputy in one picture: an intermediary trusted by many customers is tricked into using its trust with the wrong one. The External ID condition makes each customer's role require a value only that customer issued, so an identifier belonging to one customer is useless against another (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/confused-deputy.html">the confused deputy problem</a>).
+    <b>The External ID is not a password - if it leaks, nothing breaks, because its whole job is to be different per customer rather than hard to guess.</b></figcaption>
+  </figure>
+
+  <p>Where the intermediary is an AWS service rather than a third party, the same defence is written with condition keys instead: <b><code>aws:SourceArn</code></b> and <b><code>aws:SourceAccount</code></b> pin which resource and account may cause the service to act, and <b><code>aws:PrincipalOrgID</code></b> restricts a resource policy to principals inside your own organisation (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_condition-keys.html">global condition keys</a>).</p>
+
+  <h2>3. Policies that stop naming ARNs</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "A federated user signs in" as F
+  state "Session tags carry their attributes into the request" as S
+  state "The policy compares a principal tag to a resource tag" as C
+  state "Allowed - the two tags match" as A
+  state "Denied - they do not" as D
+  [*] --> F
+  F --> S: attributes arrive as session tags
+  S --> C
+  C --> A
+  C --> D
+    </div>
+    <figcaption>Attribute-based access control, drawn end to end. A policy matches <code>aws:ResourceTag</code> against the caller's <code>aws:PrincipalTag</code>, so one policy covers every resource that will ever carry the right tag rather than listing ARNs (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_attribute-based-access-control.html">ABAC tutorial</a>). <b>Session tags</b> are how a federated identity's attributes reach the request in the first place (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/id_session-tags.html">session tags</a>).
+    <b>ABAC refines authorisation inside an account and never replaces account-level isolation, because a tag is data that somebody in the account can set.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Federation is not a way of importing users. It is <b>a statement about which issuer you believe</b>, written once in a trust policy, after which every credential is minted by STS and expires on its own. The security question is therefore never "where is the key kept" - it is "what does the trust policy actually accept".</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A trust policy names <code>arn:aws:iam::111122223333:root</code> as its principal. Who can assume the role?</div>
+      <button class="q-opt">Only that account's root user, and nobody else</button>
+      <button class="q-opt">Only roles in that account created after the trust</button>
+      <button class="q-opt">Any principal in that account allowed to assume it</button>
+      <button class="q-opt">Any principal in any account inside the organisation</button>
+      <div class="q-fb">The account ARN delegates to the whole account, so any principal there whose own identity policy allows the assumption may use it. It is not restricted to the root user despite the spelling, creation order is irrelevant, and it reaches one account rather than an organisation.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What kind of protection does an External ID provide?</div>
+      <button class="q-opt">Uniqueness per customer, so one value cannot open another</button>
+      <button class="q-opt">Secrecy, so a leaked value must be rotated at once</button>
+      <button class="q-opt">Encryption of the session token issued by the service</button>
+      <button class="q-opt">Proof that the caller holds a registered certificate</button>
+      <div class="q-fb">External ID defeats confused-deputy replay by being different for every customer, which is a uniqueness property rather than a secret. It does not encrypt anything, and certificate-based proof is what Roles Anywhere provides through a trust anchor.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A build pipeline outside AWS must deploy without any stored credential. What is registered?</div>
+      <button class="q-opt">A certificate authority, as a Roles Anywhere anchor</button>
+      <button class="q-opt">An OIDC provider, with trust conditioned on claims</button>
+      <button class="q-opt">A SAML provider, with the response size capped</button>
+      <button class="q-opt">An access key pair, stored in the pipeline's vault</button>
+      <div class="q-fb">A CI system that issues OIDC tokens is registered as an OIDC provider and the role's trust policy conditions on the token's claims. A trust anchor is for servers presenting X.509 certificates, SAML is the enterprise sign-in path for people, and a stored key pair is precisely what the requirement excludes.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>You are onboarding a cost-analysis vendor. Their documentation asks you to create a role whose trust policy names their account ARN ending in <code>:root</code>, with no other condition, and to attach a broad read-only policy. Separately, your own build pipeline runs on a hosted CI platform and currently deploys using an access key stored in the platform's secret store.</p>
+      <p><b>Review both</b>, say what is wrong with each, and write down what you would ask the vendor for before proceeding.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For the vendor, ask what the trust policy actually accepts rather than what the vendor intends. For the pipeline, ask what the platform can already prove about itself.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Read the vendor's trust policy literally.</b> The account ARN delegates to their entire account, so any principal there that is allowed to assume roles can use yours - including one created later by someone at the vendor with no connection to your engagement.</li>
+        <li><b>Name the missing condition.</b> There is no External ID, so if the vendor serves many customers, an identifier or a mistake in their orchestration can point your role at the wrong customer's request. This is the confused deputy, and the condition is the standard defence.</li>
+        <li><b>Write down what to ask for.</b> The specific role ARN on their side rather than the account, an External ID that the vendor generates uniquely for you, and confirmation of exactly which read actions they need so the attached policy can be narrowed from a broad read-only one.</li>
+        <li><b>Turn the pipeline into federation.</b> If the CI platform issues OIDC tokens, register it as an OIDC provider and condition the role's trust policy on the claims that identify your repository and branch. The stored access key then has nothing to do and can be deleted.</li>
+        <li><b>Say what remains your job either way.</b> Both halves still have to allow: your trust policy on this side, and the caller's own permission to assume on the other. A vendor whose engineers cannot assume the role after you have written a correct trust policy has a problem in their account, not in yours.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your vendor answer should ask for two things - a narrower principal and an External ID - and your pipeline answer should end with a credential being deleted rather than rotated. If your objection to the trust policy was that it names the root user, re-read what that ARN means.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0803-neither-your-staff-nor-your-customers.html">Neither your staff nor your customers</a></b> covers the two directories that exist because IAM users are wrong for both.</li>
+    <li>Lesson 0800 explains <a href="0800-the-gates-an-access-decision-passes.html">why both halves must allow</a> on a cross-account call.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the principal trap still feels like a curiosity, ask an agent to list every role in one account whose trust policy names an account rather than a specific role, and say who could actually assume each one.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/confused-deputy.html">The confused deputy problem</a> explains why an intermediary's trust is the dangerous kind, and it is the page that makes External ID and the source conditions look like the same idea rather than two unrelated features.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0801-machines-carry-no-passwords.html"><span class="dir">&larr; Previous</span><span class="ttl">Machines carry no passwords</span></a>
+    <a class="nxt" href="0803-neither-your-staff-nor-your-customers.html"><span class="dir">Next &rarr;</span><span class="ttl">Neither your staff nor your customers</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0802 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
