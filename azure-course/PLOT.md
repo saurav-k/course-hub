@@ -93,9 +93,17 @@ is wrong and it gets fixed before anything new is added.
 | 1003 | Instrumenting what the platform cannot see |
 | 1004 | Alerts, health and the blind spots |
 
+**Module 11 - Security services**
+
+| Lesson | Title |
+| 1100 | Two managed firewalls at two layers |
+| 1101 | Boundaries and access without a path |
+| 1102 | Knowing how exposed you are |
+| 1103 | Detection and response |
+
 ## Planned, in order
 
-Modules 11 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Modules 12 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -129,7 +137,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 11 to 14**, none started. New numbers go at the end of the
+- **Modules 12 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a

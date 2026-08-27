@@ -253,6 +253,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1004-alerts-health-and-the-blind-spots.html"
         }
       ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "Two managed firewalls at two layers",
+          "href": "lessons/1100-two-managed-firewalls-at-two-layers.html"
+        },
+        {
+          "title": "Boundaries and access without a path",
+          "href": "lessons/1101-boundaries-and-access-without-a-path.html"
+        },
+        {
+          "title": "Knowing how exposed you are",
+          "href": "lessons/1102-knowing-how-exposed-you-are.html"
+        },
+        {
+          "title": "Detection and response",
+          "href": "lessons/1103-detection-and-response.html"
+        }
+      ]
     }
   ],
   "extras": []

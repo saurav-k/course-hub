@@ -263,6 +263,18 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/aks/monitor-aks>
 - <https://learn.microsoft.com/en-us/azure/application-gateway/application-gateway-diagnostics>
 
+**Module 11 - Security services**
+
+- <https://learn.microsoft.com/en-us/azure/web-application-firewall/overview>
+- <https://learn.microsoft.com/en-us/azure/firewall/overview>
+- <https://learn.microsoft.com/en-us/azure/private-link/network-security-perimeter-concepts>
+- <https://learn.microsoft.com/en-us/entra/global-secure-access/concept-private-access>
+- <https://learn.microsoft.com/en-us/azure/bastion/bastion-overview>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-tap-overview>
+- <https://learn.microsoft.com/en-us/azure/defender-for-cloud/defender-for-cloud-introduction>
+- <https://learn.microsoft.com/en-us/purview/information-protection>
+- <https://learn.microsoft.com/en-us/azure/sentinel/overview>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
