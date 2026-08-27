@@ -5,6 +5,29 @@
 window.COURSE_OUTLINE = {
   "key": "azure",
   "title": "Inside Azure",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "One door: Azure Resource Manager",
+          "href": "lessons/0100-one-door-azure-resource-manager.html"
+        },
+        {
+          "title": "The four-scope ladder",
+          "href": "lessons/0101-the-four-scope-ladder.html"
+        },
+        {
+          "title": "Regions, zones and the redundancy ladder",
+          "href": "lessons/0102-regions-zones-and-the-redundancy-ladder.html"
+        },
+        {
+          "title": "The platform map",
+          "href": "lessons/0103-the-platform-map.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

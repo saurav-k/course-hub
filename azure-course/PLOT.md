@@ -6,8 +6,13 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing yet. `azure-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+**Module 01 - The lay of the land**
+
+| Lesson | Title |
+| 0100 | One door: Azure Resource Manager |
+| 0101 | The four-scope ladder |
+| 0102 | Regions, zones and the redundancy ladder |
+| 0103 | The platform map |
 
 ## Planned, in order
 

@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>One door: Azure Resource Manager - Inside Azure</title>
+<meta name="description" content="Every management request to Azure - portal, CLI, PowerShell, SDK or REST - arrives at one layer that authenticates it, authorises it, tests it against policy, and only then hands it to a resource provider.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The lay of the land &middot; Lesson 0100</div>
+  <h1>Everything you do to Azure goes through one door, and the door is Azure Resource Manager</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">9 min</span>
+    The control plane, before any service. Capability area <code>iac-deployment</code>, rows <code>native-iac-template</code> and <code>resource-graph-query</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview">Resource Manager overview</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Azure has one management layer, <b>Azure Resource Manager</b>, and the portal is a client of it exactly like a script is. There is no second, richer path.</li>
+      <li>Manager runs a fixed sequence on every call: <b>authenticate, authorise, test against policy, then forward to a resource provider</b> such as <code>Microsoft.Compute</code>.</li>
+      <li>Because every tool rides the same API surface, tooling stays at parity. The one documented lag is <b>portal-side</b>, at about 180 days from a capability's release.</li>
+      <li>A <b>resource group</b> is a lifecycle container, not a location. Its own region holds only metadata, and deleting the group deletes everything in it.</li>
+      <li>The cost of one door is that <b>every guardrail is a property of that door</b>: role assignments, policy and locks are all evaluated there, so a data-plane action that never touches Manager is not covered by any of them.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["You have a subscription&lt;br/&gt;and somewhere to sign in"] --> T["THIS PAGE&lt;br/&gt;Azure Resource Manager&lt;br/&gt;the one control plane"]
+  T --> H["The four-scope ladder&lt;br/&gt;what Manager evaluates against"]
+  T --> R["Regions and zones&lt;br/&gt;where a resource is placed"]
+  T --> S["Every service module&lt;br/&gt;all of them are providers"]
+  W["Inside Azure&lt;br/&gt;the whole course"] -.- T
+    </div>
+    <figcaption>Where this sits. Manager is underneath every other page in this course: a virtual machine, a storage account and a Kubernetes cluster are all resources created through the same call shape, by the same layer, subject to the same checks.
+    <b>Learn the door once and every service page afterwards is only a question of which provider is behind it.</b></figcaption>
+  </figure>
+
+  <h2>One door, five clients</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["Azure portal"] --> ARM
+  B["Azure CLI"] --> ARM
+  C["Azure PowerShell"] --> ARM
+  D["Language SDKs"] --> ARM
+  E["REST clients"] --> ARM
+  ARM["Azure Resource Manager&lt;br/&gt;management.azure.com"] --> AU["Authenticate&lt;br/&gt;then authorise"]
+  AU --> PO["Azure Policy&lt;br/&gt;evaluated separately"]
+  PO --> RP["Resource provider&lt;br/&gt;Microsoft.Compute, Microsoft.Storage"]
+  RP --> RES["The resource"]
+    </div>
+    <figcaption>Every management client converges on one layer, and that layer does the same four things every time before a provider sees the request. A resource provider is the service team's own API - <code>Microsoft.Compute</code> makes virtual machines, <code>Microsoft.Storage</code> makes storage accounts - and Manager is what stands in front of all of them.
+    <b>There is no privileged client: the portal cannot do anything a REST call cannot, which is why every Azure design is scriptable by construction.</b></figcaption>
+  </figure>
+
+  <p>The <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview">Resource Manager overview</a> states the consequence plainly: because all tools ride one API surface, they stay consistent with each other. The exception it documents is the portal, where new API functionality appears within about 180 days of initial release. So a capability announced with a REST or template example may be some months from having a form to fill in.</p>
+
+  <p>The endpoint itself is worth knowing by name. Microsoft recommends the global endpoint <code>management.azure.com</code> because it enables DNS-based traffic distribution, automatic failover and routing to the closest or healthiest region. Manager's own operations are distributed per region and fail over across availability zones, so the control plane is not a single building somewhere.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Azure's control plane is not "the portal, plus some automation". It is <b>one API with several skins</b>. Every guardrail you will meet in this course - role assignments, policy effects, resource locks, deny assignments - is a rule attached to that API, which is also why none of them can see a request that does not use it.</div>
+
+  <h2>What a single call actually passes through</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Your client
+  participant M as Resource Manager
+  participant P as Azure Policy
+  participant R as Resource provider
+  U->>M: create this resource, with my token
+  M->>M: collect role assignments and deny assignments for the target scope
+  M->>M: a matching deny assignment blocks the call immediately
+  M->>M: otherwise union the role assignments, then subtract NotActions
+  M->>P: does the resulting resource break a rule
+  P-->>M: allow, or deny the effect
+  M->>R: forward to the provider
+  R-->>U: the resource, or the error
+    </div>
+    <figcaption>The order matters because the layers answer different questions. Role assignments ask whether this principal may perform this action here, and they are <a href="https://learn.microsoft.com/en-us/azure/role-based-access-control/overview">purely additive</a> - overlapping assignments union, they never subtract. <a href="https://learn.microsoft.com/en-us/azure/governance/policy/overview">Azure Policy</a> asks a different question entirely, about the resource that would result, and it evaluates independently of who asked.
+    <b>A fully authorised request can still be refused, because being allowed to create a thing and being allowed to create that particular thing are two separate tests.</b></figcaption>
+  </figure>
+
+  <p>Subtraction exists in exactly one place. A <a href="https://learn.microsoft.com/en-us/azure/role-based-access-control/deny-assignments">deny assignment</a> blocks an action regardless of what roles the principal holds, and customers cannot create one: Azure itself creates them, today mainly when a <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-stacks">deployment stack</a> is configured to protect what it made. Module 08 works the whole evaluation out in detail; here it is enough to know that the additive model has one platform-owned exception and that the exception outranks an Owner.</p>
+
+  <h2>A resource group is a lifecycle container, not a place</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Healthy
+  Healthy --> MetadataRerouted: the resource group's own region degrades
+  MetadataRerouted --> Healthy: region recovers
+  Healthy --> DataPlaneDown: the resource's region dies
+  Healthy --> Gone: the resource group is deleted
+  Gone --> [*]
+  note right of MetadataRerouted
+    Control-plane calls reroute
+    to a backup region.
+    The running resource is unaffected.
+  end note
+  note right of DataPlaneDown
+    Resource-group placement
+    does not help here.
+  end note
+    </div>
+    <figcaption>A resource group has a region of its own, and it is easy to read too much into it. That region stores the group's metadata, and Manager reroutes control-plane calls to a backup region if it degrades. What lives where is decided by each resource's own region, not by the group's.
+    <b>Two failures look alike from the portal and are not alike at all: losing the metadata region costs you management operations, and losing the resource's region costs you the workload.</b></figcaption>
+  </figure>
+
+  <p>Three structural rules follow from the same <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview">overview page</a> and they shape real designs. Every resource belongs to exactly one group. Deleting the group deletes everything in it, which makes the group the natural unit for anything with a shared lifetime, such as one environment of one application. And a group holds up to 800 instances of a given resource type, with some types exempt, which is the ceiling that eventually splits a very large estate into more groups than its owners expected.</p>
+
+  <div class="callout warn">
+  Tags look like they should inherit down this structure and they do not. A tag on a resource group is <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/tag-resources">not inherited by the resources inside it</a>, so a cost report grouped by a tag that only exists on groups reports almost nothing. The fixes are a policy <code>modify</code> effect that writes the tag onto each resource, or the inheritance view in Cost Management - and choosing neither is the common outcome, discovered a quarter later.</div>
+
+  <h2>Reading the estate back</h2>
+
+  <p>One door has a second benefit that is easy to miss: because every resource was created through Manager, every resource is described in one queryable model. <a href="https://learn.microsoft.com/en-us/azure/governance/resource-graph/overview">Azure Resource Graph</a> queries resource properties across many subscriptions at once in KQL, the same query language Azure Monitor uses for logs, and it carries change-history tables as well. It is the fastest inventory and drift surface on the platform, and it is what the portal's own search box runs on.</p>
+
+  <p>The same property is what makes infrastructure as code unusually clean here. <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview">Bicep</a> transpiles to Resource Manager JSON and keeps no state file of its own, because Manager already holds the state. Module 12 takes that apart properly.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A principal holds Owner on a resource group and tries to delete a resource in it. The delete fails. Which explanation is consistent with how Resource Manager evaluates a call?</div>
+      <button class="q-opt">Owner never covers deletion, so a second role assignment was needed here</button>
+      <button class="q-opt">A platform-created deny assignment matched and blocked the call outright</button>
+      <button class="q-opt">Role assignments on a group subtract from the ones held above it</button>
+      <button class="q-opt">The resource provider re-checks the token and can refuse it again</button>
+      <div class="q-fb">Deny assignments are the one subtractive element and they outrank an Owner. The first option is wrong because Owner does carry delete. The third inverts the model - assignments union, they never subtract. The fourth invents a second authorisation step: the provider is reached only after Manager has already decided.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does the region you choose for a resource group actually decide?</div>
+      <button class="q-opt">Which region every resource inside the group must be created in</button>
+      <button class="q-opt">Which region the group's resources fail over into automatically</button>
+      <button class="q-opt">Which region bills for the resources that the group holds today</button>
+      <button class="q-opt">Which region stores the group's metadata and its control calls</button>
+      <div class="q-fb">The group's region holds metadata, and control-plane calls reroute to a backup region if it degrades. The first option is wrong because resources in a group may sit in different regions. The second describes a failover the group does not perform. The third is a plausible confusion: billing follows each resource, not its group.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does a new Azure capability sometimes have a CLI command before it has a portal blade?</div>
+      <button class="q-opt">The portal reflects new API functionality within about 180 days</button>
+      <button class="q-opt">The portal calls a separate control plane that lags behind</button>
+      <button class="q-opt">Command-line tools bypass Resource Manager and reach providers</button>
+      <button class="q-opt">Resource providers publish to scripting clients ahead of others</button>
+      <div class="q-fb">All clients share one API surface, and the documented lag is portal-side at about 180 days. The second and third options both imagine two control planes, which is the misconception this page exists to remove. The fourth invents a publishing order that providers do not have.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill easy">foundation</span></div>
+
+    <div class="p-stem">
+      <p>A team runs one application in one Azure region. All of its resources sit in a single resource group, and that group's region was set to a second region "for resilience". Someone has also tagged the group <code>costCentre=retail</code> and is confused that the monthly cost export shows almost nothing under that tag.</p>
+      <p><b>Write down</b> what the group's region genuinely buys them, what it does not, and the two ways the tag can be made to reach the resources.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Separate the two planes before you answer. Ask what still works if the group's region is unavailable, then ask what still works if the application's region is unavailable.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Name what the group's region stores.</b> Metadata only. If that region degrades, Resource Manager reroutes control-plane calls for the group to a backup region, so the team can still list, update and delete their resources.</li>
+        <li><b>Name what it does not do.</b> It moves nothing. Data-plane access is unaffected by group placement, and it is affected if the resource's own region dies. The application still lives entirely in its one region, so the arrangement buys management continuity and no workload resilience at all.</li>
+        <li><b>Explain the empty cost report.</b> Tags do not inherit from a group to the resources in it, so a tag written once on the group is present on exactly one object. The resources carry no <code>costCentre</code> at all.</li>
+        <li><b>Give the two fixes.</b> Assign an Azure Policy <code>modify</code> effect that writes the tag onto resources in scope and remediates the existing ones, or read cost through the inheritance view in Cost Management, which applies the group's tag at reporting time rather than on the resource.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should contain the sentence "the workload is still single-region". If placing the resource group elsewhere came out looking like a resilience measure, the two planes have been merged back together.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0101-the-four-scope-ladder.html">the four-scope ladder</a></b> gives Manager the structure it evaluates against: what a tenant, a management group and a subscription each are, and which of them a rule can be attached to.</li>
+    <li><b>Then, <a href="0102-regions-zones-and-the-redundancy-ladder.html">regions, zones and the redundancy ladder</a></b> answers the other half of every create call - where the resource physically lands.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two planes are still blurred, ask an agent to take one resource you know and list, separately, every operation that goes through Resource Manager and every operation that does not. The second list - reading a blob, querying a database, connecting over SSH - is exactly the set that role assignments at management scope will not see.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview">What is Azure Resource Manager?</a> end to end. It is short, it is the page every other claim on this page rests on, and its resource-group section carries the limits and the failover behaviour in the vendor's own words.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. Read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Back</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0101-the-four-scope-ladder.html"><span class="dir">Next &rarr;</span><span class="ttl">The four-scope ladder</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0100 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
