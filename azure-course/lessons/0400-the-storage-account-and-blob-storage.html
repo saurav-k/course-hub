@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The storage account and Blob Storage - Inside Azure</title>
+<meta name="description" content="The storage account is the unit almost every storage decision is made at - redundancy, namespace shape, keys and private access - and several of those decisions are made once, at creation.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0400</div>
+  <h1>The storage account is where the decisions live, and some of them are made once at creation</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>storage</code>, row <code>object-storage</code>, with <code>data-lake</code> beside it.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/storage/blobs/">Azure Blob Storage</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>storage account</b> is the object that carries redundancy, the namespace shape, the keys and the network posture. Individual blobs carry far less than people expect.</li>
+      <li>The namespace is <b>flat unless the hierarchical namespace is enabled</b>, and that is a choice made when the account is created rather than later.</li>
+      <li>The hierarchical form is <b>Data Lake Storage Gen2</b>: the same storage with directory semantics and POSIX-style access control lists tied to Entra identities.</li>
+      <li>Access has four shapes, and only one of them is both short-lived and identity-backed: a <b>user-delegation shared access signature</b>, signed by Entra credentials.</li>
+      <li>Private access is granular in a way that surprises people. A <b>private endpoint targets one subresource</b>, so blob and file need separate endpoints.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Runtimes that write&lt;br/&gt;module 03"] --> T["THIS PAGE&lt;br/&gt;the storage account&lt;br/&gt;and the object store in it"]
+  T --> A["Tiers, lifecycle and archive&lt;br/&gt;lesson 0401"]
+  T --> B["Disks for machines&lt;br/&gt;lesson 0402"]
+  T --> C["Shared file systems&lt;br/&gt;lesson 0403"]
+  W["Module 04&lt;br/&gt;storage"] -.- T
+    </div>
+    <figcaption>Where this sits. Every runtime in the previous module ends up writing somewhere, and on Azure that somewhere is nearly always a storage account. This page is the container; the rest of the module is what you put in it and how it ages.
+    <b>Because so much is set on the account rather than on the data, the account layout is a design decision rather than a naming exercise.</b></figcaption>
+  </figure>
+
+  <h2>What is decided where</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  ACC["Storage account&lt;br/&gt;General Purpose v2"] --> R["Redundancy&lt;br/&gt;LRS, ZRS, GRS, GZRS&lt;br/&gt;and the read-access variants"]
+  ACC --> HNS["Hierarchical namespace&lt;br/&gt;on or off - chosen at creation"]
+  ACC --> KEYS["Account keys&lt;br/&gt;and the signatures derived from them"]
+  ACC --> NET["Network posture&lt;br/&gt;firewall rules and private endpoints"]
+  ACC --> SVC["The services inside it&lt;br/&gt;blobs, files and the rest"]
+  SVC --> BLOB["A blob&lt;br/&gt;carries its own access tier&lt;br/&gt;and its own immutability policy"]
+    </div>
+    <figcaption>Four account-level decisions and one blob-level one. Redundancy, the namespace shape, the keys and the network posture all belong to the account. The access tier is per blob, and so is an immutability policy.
+    <b>Two of the account decisions are effectively permanent - the namespace shape is set at creation, and changing redundancy or account layout later means moving data.</b></figcaption>
+  </figure>
+
+  <p>The account type matters as a prerequisite too. <a href="https://learn.microsoft.com/en-us/azure/storage/blobs/">Blob Storage</a> features described in this module require <b>General Purpose v2</b> accounts, and private endpoints for the blob subresource are General Purpose v2 only. An older account is not a smaller account; it is an account several features simply do not apply to.</p>
+
+  <h2>Flat by default, hierarchical by decision</h2>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A blob container's namespace is <b>flat</b>. What looks like a folder is a prefix in the blob's name. Turning on the hierarchical namespace makes directories real, which is what <a href="https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-introduction">Data Lake Storage Gen2</a> is: the same storage with directory semantics and POSIX-style access control lists that resolve against Entra identities. It is <b>enabled per account at creation</b>, so a lake workload discovered later is a new account and a copy, not a setting.</div>
+
+  <h2>Four ways in, and only one of them ages well</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant E as Microsoft Entra ID
+  participant S as Storage account
+  Note over C,S: 1 - account key. Long-lived, full power, nothing to trace back to a person
+  Note over C,S: 2 - shared access signature signed by the account key. Inherits that key's lifetime
+  C->>E: 3 - sign in and request a user delegation key
+  E-->>C: user delegation key, short-lived
+  C->>C: sign a shared access signature with it
+  C->>S: use the signature - short expiry, traceable to the Entra principal
+  C->>S: 4 - call directly as an Entra principal, with role assignments deciding
+    </div>
+    <figcaption>The four access shapes in increasing order of how well they age. Account keys and the signatures derived from them are the long-lived exception in an estate that is otherwise credential-free. A <b>user-delegation shared access signature</b> is signed by Entra credentials with a short expiry, which is the modern replacement path, and a direct call as an Entra principal needs no signature at all.
+    <b>If a design still hands out account keys, the question to ask is which of the last two shapes it could use instead - not how to rotate the key more often.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Private access to storage is <b>per subresource</b>, not per account. A <a href="https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview">private endpoint</a> targets the blob subresource, or the file subresource, and so on - so an account serving both needs two endpoints and two private DNS zone records. A design that provisions one endpoint and declares the account private has made half of it private and left the other half reachable exactly as before.</div>
+
+  <h2>What the object store does not offer</h2>
+
+  <p>Two shapes that exist elsewhere have honest answers here rather than products. There is <b>no single-zone high-performance object class</b>: premium block blob accounts are solid-state backed with single-digit millisecond first-byte latency and per-transaction pricing, but they remain regionally redundant, so they do not make the trade of giving up cross-zone redundancy to buy latency. And Azure Storage itself has <b>no table-aware container type</b>: Delta tables with managed maintenance live in OneLake and the Fabric lakehouse, while storage holds table files as ordinary objects.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A team discovers six months in that its analytics workload needs directory semantics and POSIX-style access control lists. What does that cost them?</div>
+      <button class="q-opt">A per-container setting change, applied to the containers that need it</button>
+      <button class="q-opt">A redundancy change on the account, from the locally redundant option</button>
+      <button class="q-opt">A firewall rule change, because the lake tooling reaches a different path</button>
+      <button class="q-opt">A new account and a data copy, because the namespace is set at creation</button>
+      <div class="q-fb">The hierarchical namespace is enabled per storage account at creation, so it is not a switch you flip afterwards. The first option invents container-level granularity. The second and third describe real account settings that have nothing to do with the namespace shape.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which access shape is both short-lived and traceable to a person or workload identity?</div>
+      <button class="q-opt">A shared access signature signed with one of the account keys</button>
+      <button class="q-opt">A user-delegation shared access signature, signed by Entra credentials</button>
+      <button class="q-opt">An account key that is rotated on a schedule by an automated job</button>
+      <button class="q-opt">A stored access policy attached to the container holding the blobs</button>
+      <div class="q-fb">A user-delegation signature is signed with a key obtained from Entra, so it has a short expiry and an identity behind it. The first inherits the account key's long life and anonymity. The third rotates a credential without making it identity-backed. The fourth is a real mechanism for managing signature validity, but it does not by itself supply an identity.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">An account serves both blobs and file shares. One private endpoint has been created for it. What is the state of the account?</div>
+      <button class="q-opt">One subresource is reachable privately and the other is not</button>
+      <button class="q-opt">Both subresources are private, since the endpoint targets the account</button>
+      <button class="q-opt">Neither is private until a second endpoint completes the pairing</button>
+      <button class="q-opt">Both are private, but only after the private DNS zone is linked twice</button>
+      <div class="q-fb">A private endpoint targets one subresource, so a single endpoint covers blob or file and not both. The second and fourth options both assume account-level granularity. The third invents a pairing requirement, which would at least fail loudly - the real behaviour fails quietly, which is why it matters.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A design proposes one storage account for a whole product: application uploads, an analytics lake, and a file share for a legacy Windows component. The account is to be locally redundant, private, and accessed by a single account key stored in a secrets manager and shared by all three consumers.</p>
+      <p><b>Take the design apart</b>: say which requirements conflict at the account level, how many accounts and private endpoints you would end up with, and what replaces the shared key.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>List the four account-level decisions first, then check each of the three workloads against them. The conflicts appear wherever two workloads want different answers to the same account-level question.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Test the namespace shape.</b> The lake needs the hierarchical namespace with its directory semantics and access control lists; the upload store does not, and the shape is an account-level choice made at creation. That is the first hard split: <b>at least two accounts</b>.</li>
+        <li><b>Test the redundancy.</b> Locally redundant storage survives hardware failure inside one location. Whether that is acceptable differs by workload - application uploads are usually the least replaceable data in the list - and redundancy is again an account-level setting, so a workload needing more is a further split rather than a per-container option.</li>
+        <li><b>Count the private endpoints.</b> Endpoints target one subresource each. The blob subresource on each account needs one, and the file share needs one for the file subresource, so the count is per account and per subresource - never one for the product.</li>
+        <li><b>Replace the shared key.</b> A single account key shared by three consumers gives all three full power over everything and traces back to nobody. Replace it with Entra principals holding role assignments for the direct callers, and user-delegation shared access signatures where a signature genuinely has to be handed to something that cannot hold an identity.</li>
+        <li><b>State the resulting shape.</b> Two or three accounts split by namespace shape and redundancy need, one private endpoint per subresource in use on each, and no long-lived key in the design at all.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your endpoint count should be larger than your account count, because at least one account serves two subresources. If they are equal, the file share's endpoint has been forgotten - which is the same mistake the design started with.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0401-tiers-lifecycle-and-archive.html">tiers, lifecycle and archive</a></b> takes the blobs this page placed and follows them as they get colder.</li>
+    <li><b>Lesson 0102</b> is where the redundancy letters were introduced, including the recovery point objective that geo-redundant storage never published.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the account boundary still feels arbitrary, ask an agent to list every setting that is per account and every setting that is per blob. The first list is the one that decides how many accounts you need, and it is longer than most people guess.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-introduction">Data Lake Storage Gen2 introduction</a> even if you are not building a lake. It is the clearest statement of what the hierarchical namespace changes, and therefore of what the default flat namespace actually is.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0304-app-service-and-static-web-apps.html"><span class="dir">&larr; Previous</span><span class="ttl">App Service and Static Web Apps</span></a>
+    <a class="nxt" href="0401-tiers-lifecycle-and-archive.html"><span class="dir">Next &rarr;</span><span class="ttl">Tiers, lifecycle and archive</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0400 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

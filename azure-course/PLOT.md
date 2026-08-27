@@ -6,10 +6,42 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing yet. `azure-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+**Module 01 - The lay of the land**
+
+| Lesson | Title |
+| 0100 | One door: Azure Resource Manager |
+| 0101 | The four-scope ladder |
+| 0102 | Regions, zones and the redundancy ladder |
+| 0103 | The platform map |
+
+**Module 02 - Compute**
+
+| Lesson | Title |
+| 0200 | The virtual machine |
+| 0201 | Who else is on the host |
+| 0202 | Images and the gallery |
+| 0203 | Holding a fleet at a size |
+
+**Module 03 - Containers and serverless**
+
+| Lesson | Title |
+| 0300 | Azure Kubernetes Service |
+| 0301 | What AKS adds around the cluster |
+| 0302 | Serverless containers and the registry |
+| 0303 | Azure Functions |
+| 0304 | App Service and Static Web Apps |
+
+**Module 04 - Storage**
+
+| Lesson | Title |
+| 0400 | The storage account and Blob Storage |
+| 0401 | Tiers, lifecycle and archive |
+| 0402 | Managed disks and Elastic SAN |
+| 0403 | Shared file systems and bulk transfer |
 
 ## Planned, in order
+
+Modules 05 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -43,9 +75,10 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
+- **Modules 05 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
-- **Reference: glossary of Azure terms**, linked from every lesson foot once the
-  first lessons exist. Not written yet.
+- **Reference: glossary of Azure terms**, linked from every lesson foot once it
+  exists. Not written yet, so no lesson links it and no lesson spine carries a
+  Glossary entry.
 
 No module opens for writing until its topics are covered by verified research.

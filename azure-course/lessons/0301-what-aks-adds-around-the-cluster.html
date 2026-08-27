@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What AKS adds around the cluster - Inside Azure</title>
+<meta name="description" content="How a pod proves who it is with no stored secret, the managed Istio mesh, backup delivered inside the central backup service, running many clusters as one fleet, and the two metric stores an AKS cluster feeds.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Containers and serverless &middot; Lesson 0301</div>
+  <h1>A pod on AKS can hold an Azure identity without ever holding a secret</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>containers</code>, rows <code>service-mesh</code>, <code>kubernetes-backup</code> and <code>kubernetes-fleet-management</code>, with <code>workload-identity-federation</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation">Workload identity federation</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An AKS cluster issues <b>service-account-bound OIDC tokens</b>, and a federated credential in Entra trusts that issuer - so a pod exchanges its own token for an Azure token with no secret anywhere.</li>
+      <li>The trust is described by three fields, <b>issuer, subject and audience</b>, and every one of them is matched <b>case-sensitively</b>.</li>
+      <li>Secrets that must still be read come through the <b>Secrets Store CSI driver</b>, which mounts Key Vault content and detects rotation.</li>
+      <li>The mesh path on AKS is the <b>managed Istio add-on</b>, whose revisions upgrade independently of the Kubernetes version. The older Open Service Mesh add-on is retired.</li>
+      <li>Backup and multi-cluster management are <b>not Kubernetes-shaped products</b> here: backup lives inside the central Azure Backup service, and many clusters are grouped by <b>Fleet Manager</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The cluster and its pools&lt;br/&gt;lesson 0300"] --> T["THIS PAGE&lt;br/&gt;identity, mesh, backup, fleet&lt;br/&gt;and the metric stores"]
+  T --> A["Containers with no cluster&lt;br/&gt;lesson 0302"]
+  T --> B["Machine identity in full&lt;br/&gt;module 08"]
+  W["Module 03&lt;br/&gt;containers and serverless"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page drew the line between what Azure runs and what you run. This page is everything Azure wraps around that line, and the pattern in all of it is the same: the Kubernetes-shaped concern is answered by an Azure-shaped service.
+    <b>An AKS cluster is not an island in an Azure estate; each of these four features is the join between the two worlds.</b></figcaption>
+  </figure>
+
+  <h2>How a pod gets an Azure token</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Pod with a service account
+  participant K as The cluster OIDC issuer
+  participant E as Microsoft Entra ID
+  participant R as An Azure resource
+  P->>K: request a service-account-bound token
+  K-->>P: signed OIDC token
+  P->>E: exchange it at the token endpoint
+  E->>E: check issuer, subject and audience - all case-sensitive
+  E-->>P: Entra access token
+  P->>R: call the resource - role assignments now decide
+    </div>
+    <figcaption>The exchange has no secret in it at any step. A <a href="https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation">federated identity credential</a> configured on a user-assigned managed identity or an app registration carries the three fields the platform matches against the incoming token's claims.
+    <b>Once the exchange succeeds the pod is an ordinary Entra principal, so everything you know about role assignments applies unchanged.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two documented details turn a working setup into a silent failure. The issuer, subject and audience match is <b>case-sensitive end to end</b>, so a subject that differs only in capitalisation fails with no useful signal. And only the <b>first 100 signing keys</b> from an identity provider's key set are cached, which matters when the provider is not the cluster. There is also a ceiling of <b>20 federated credentials</b> on a managed identity used this way, so a design that mints one credential per branch or per namespace will meet it.</div>
+
+  <p>Where a secret genuinely has to be read - a third-party API key, a connection string - the <a href="https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-driver">Secrets Store CSI driver</a> mounts Key Vault content into the pod and detects rotation, authenticating with a user-assigned managed identity or with workload identity. The point of the pair is that the pod's own identity is never a secret, and the secrets it does read arrive through a mount rather than an environment variable baked at deploy time.</p>
+
+  <h2>The mesh, and what an add-on being managed buys</h2>
+
+  <p>The mesh path on AKS is the <a href="https://learn.microsoft.com/en-us/azure/aks/istio-about">Istio add-on</a>, giving mutual TLS between workloads, traffic management and layer-seven observability. The Open Service Mesh add-on that preceded it is retired, so "the AKS service mesh" means Istio.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  The managed part that matters is the upgrade story. Mesh upgrades run on <b>revision channels decoupled from the Kubernetes version</b>, so you are not choosing between a cluster upgrade and a mesh upgrade in the same maintenance window. On a self-run mesh those two clocks are yours to reconcile.</div>
+
+  <h2>Backup and many clusters are Azure services, not Kubernetes ones</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  V["Backup vault policy&lt;br/&gt;schedule and retention"] --> EXT["In-cluster extension&lt;br/&gt;performs the backup"]
+  EXT --> SA["Storage account&lt;br/&gt;holds cluster state"]
+  SA --> RES["Restore, filtered by namespace,&lt;br/&gt;label or resource type"]
+  RES --> OTHER["and able to target&lt;br/&gt;a different cluster"]
+  F["Fleet Manager&lt;br/&gt;a fleet resource"] --> UR["Update runs stage version and&lt;br/&gt;node-image upgrades in a chosen order"]
+  F --> HUB["A hub cluster propagates objects&lt;br/&gt;to selected members"]
+  F --> XS["Members may be joined across&lt;br/&gt;subscriptions inside one tenant"]
+    </div>
+    <figcaption>Two capabilities that arrive as Azure resources rather than as things you install. <a href="https://learn.microsoft.com/en-us/azure/backup/azure-kubernetes-service-backup-overview">Azure Backup for AKS</a> is workload-aware - cluster resources together with their persistent volumes - and is delivered inside the central backup service rather than as a standalone Kubernetes product. <a href="https://learn.microsoft.com/en-us/azure/kubernetes-fleet/overview">Fleet Manager</a> groups clusters so that upgrades, placement and multi-cluster load balancing are managed once.
+    <b>Restoring into a different cluster is what makes the backup a migration and recovery tool rather than only an undo button.</b></figcaption>
+  </figure>
+
+  <h2>Two metric stores, two clocks</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing retention windows: managed Prometheus keeps eighteen months of metrics with a thirty-two day maximum query span, while container insights tables default to thirty days">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="grid" x1="264" y1="50" x2="264" y2="250"/>
+      <line class="grid" x1="457" y1="50" x2="457" y2="250"/>
+      <rect class="m-stat" x="70" y="80" width="527" height="36"/>
+      <rect class="m-alarm" x="70" y="170" width="29" height="36"/>
+      <line class="s-noise ref thick" x1="101" y1="70" x2="101" y2="126"/>
+      <text class="ttl" x="16" y="30">How long each AKS telemetry store keeps a number</text>
+      <text class="lbl-sm" x="70" y="70">Managed Prometheus - 18 months</text>
+      <text class="lbl-sm" x="109" y="146">one PromQL query may span at most 32 days</text>
+      <text class="lbl-sm" x="70" y="162">Container insights tables - 30 days by default</text>
+      <text class="lbl-sm" x="70" y="272">0</text>
+      <text class="lbl-sm" x="264" y="272" text-anchor="middle">200 days</text>
+      <text class="lbl-sm" x="457" y="272" text-anchor="middle">400 days</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>managed Prometheus metrics</span><span><i class="sw-alarm"></i>container insights logs</span></div>
+    <figcaption>An AKS cluster feeds two different stores with two different clocks. <a href="https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-metrics-overview">Managed Prometheus</a> writes to an Azure Monitor workspace queried in PromQL and usually fronted by Managed Grafana, and it is on by default in the Automatic tier. <a href="https://learn.microsoft.com/en-us/azure/azure-monitor/vm/vminsights-overview">Container insights</a> writes curated log tables queried in KQL, defaulting to thirty days.
+    <b>The long retention comes with a short query window: eighteen months of history that no single PromQL query may cross more than thirty-two days of.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A pod's token exchange with Entra fails, and the federated credential looks correct at a glance. What is worth checking first?</div>
+      <button class="q-opt">Whether the node pool was created with a system-assigned identity</button>
+      <button class="q-opt">Whether the cluster has more than twenty node pools defined on it</button>
+      <button class="q-opt">Whether issuer, subject and audience match exactly, including case</button>
+      <button class="q-opt">Whether the mesh revision channel matches the Kubernetes version</button>
+      <div class="q-fb">The three fields are matched case-sensitively end to end, which is the documented trap and produces no useful signal when it fails. The first option confuses node identity with pod identity. The second misapplies the twenty-credential ceiling to node pools. The fourth names a real mesh property that has nothing to do with a token exchange.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does backup of AKS cluster resources and their volumes live?</div>
+      <button class="q-opt">Inside Azure Backup, driven by a vault policy and a cluster extension</button>
+      <button class="q-opt">Inside the cluster only, as a self-run controller you deploy yourself</button>
+      <button class="q-opt">Inside Fleet Manager, whose update runs snapshot each member cluster</button>
+      <button class="q-opt">Inside the container registry, beside the images the cluster is running</button>
+      <div class="q-fb">It is delivered inside the central Azure Backup service: a vault policy sets the schedule and an in-cluster extension writes state to a storage account. The second option describes what you would do without the service. The third gives Fleet Manager a job it does not have. The fourth confuses images with cluster state.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Managed Prometheus keeps eighteen months of metrics. What limits how you read them?</div>
+      <button class="q-opt">Only the Automatic tier may query beyond the first thirty days of data</button>
+      <button class="q-opt">Queries must run in KQL, because the store is a Log Analytics table</button>
+      <button class="q-opt">Data older than thirty days is moved into container insights tables</button>
+      <button class="q-opt">A single PromQL query may span at most thirty-two days of that history</button>
+      <div class="q-fb">The retention is long and the per-query window is short, so a year-over-year view is several queries rather than one. The first invents a tier restriction. The second names the wrong query language and store - Prometheus data is PromQL against an Azure Monitor workspace. The third invents a migration between two independent stores.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>A platform team runs eight AKS clusters across three subscriptions in one tenant. Each cluster runs the same twelve services. Today, every service holds a client secret in a Kubernetes secret so it can reach a storage account and a database, upgrades are done cluster by cluster by hand, and there is no way to move a namespace to another cluster after an incident.</p>
+      <p><b>Replace all three practices</b> with the Azure-shaped answer, and name the one limit that could bite the identity design at this scale.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Each of the three has a service that answers it. For the identity limit, count how many federated credentials the naive design would need on one identity.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Remove the secrets.</b> Turn on workload identity: each cluster issues service-account-bound OIDC tokens, and a federated credential on a user-assigned managed identity trusts that issuer with a matching subject and audience. The Kubernetes secrets holding client secrets then have nothing left to hold, and role assignments in Azure decide what each service may reach.</li>
+        <li><b>Handle the secrets that remain.</b> Anything that is genuinely a secret rather than an identity - a third-party API key - moves to Key Vault and is mounted through the Secrets Store CSI driver, which also detects rotation.</li>
+        <li><b>Replace hand upgrades.</b> Join the eight clusters to a Fleet Manager fleet. Members may be joined across subscriptions inside one tenant, which covers the three subscriptions, and update runs stage version and node-image upgrades across members in an order you choose.</li>
+        <li><b>Answer the incident case.</b> Azure Backup for AKS backs up cluster resources together with their persistent volumes, and a restore can be filtered by namespace and can target a different cluster - which is exactly "move this namespace somewhere else after an incident".</li>
+        <li><b>Name the limit.</b> A managed identity used this way supports at most twenty federated credentials. One credential per cluster per service - eight times twelve - is ninety-six, so the design must not mint a credential per pairing. Share one identity per service across clusters where the subject allows it, or split identities per service, so no single identity approaches the ceiling.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The final design should contain zero client secrets and no identity carrying more than twenty federated credentials. If your credential count per identity is in the dozens, the identity boundary was drawn per cluster when it should have been drawn per service.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0302-serverless-containers-and-the-registry.html">serverless containers and the registry</a></b> drops the cluster entirely and asks what is left.</li>
+    <li><b>Module 08</b> takes federated credentials past the AKS case, to build pipelines and workloads on other clouds.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the token exchange is still abstract, ask an agent to write out the exact issuer, subject and audience values for one namespace and service account on a cluster you know, then to say which of the three would change if the namespace were renamed. The answer makes the case-sensitivity warning concrete.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation">Workload identity federation</a>. It is the page behind both the AKS pattern here and the pipeline pattern in module 12, and its supported-scenarios list is the fastest way to see how wide the mechanism reaches.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0300-azure-kubernetes-service.html"><span class="dir">&larr; Previous</span><span class="ttl">Azure Kubernetes Service</span></a>
+    <a class="nxt" href="0302-serverless-containers-and-the-registry.html"><span class="dir">Next &rarr;</span><span class="ttl">Serverless containers and the registry</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0301 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

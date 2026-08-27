@@ -5,6 +5,99 @@
 window.COURSE_OUTLINE = {
   "key": "azure",
   "title": "Inside Azure",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "One door: Azure Resource Manager",
+          "href": "lessons/0100-one-door-azure-resource-manager.html"
+        },
+        {
+          "title": "The four-scope ladder",
+          "href": "lessons/0101-the-four-scope-ladder.html"
+        },
+        {
+          "title": "Regions, zones and the redundancy ladder",
+          "href": "lessons/0102-regions-zones-and-the-redundancy-ladder.html"
+        },
+        {
+          "title": "The platform map",
+          "href": "lessons/0103-the-platform-map.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The virtual machine",
+          "href": "lessons/0200-the-virtual-machine.html"
+        },
+        {
+          "title": "Who else is on the host",
+          "href": "lessons/0201-who-else-is-on-the-host.html"
+        },
+        {
+          "title": "Images and the gallery",
+          "href": "lessons/0202-images-and-the-gallery.html"
+        },
+        {
+          "title": "Holding a fleet at a size",
+          "href": "lessons/0203-holding-a-fleet-at-a-size.html"
+        }
+      ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "Azure Kubernetes Service",
+          "href": "lessons/0300-azure-kubernetes-service.html"
+        },
+        {
+          "title": "What AKS adds around the cluster",
+          "href": "lessons/0301-what-aks-adds-around-the-cluster.html"
+        },
+        {
+          "title": "Serverless containers and the registry",
+          "href": "lessons/0302-serverless-containers-and-the-registry.html"
+        },
+        {
+          "title": "Azure Functions",
+          "href": "lessons/0303-azure-functions.html"
+        },
+        {
+          "title": "App Service and Static Web Apps",
+          "href": "lessons/0304-app-service-and-static-web-apps.html"
+        }
+      ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "The storage account and Blob Storage",
+          "href": "lessons/0400-the-storage-account-and-blob-storage.html"
+        },
+        {
+          "title": "Tiers, lifecycle and archive",
+          "href": "lessons/0401-tiers-lifecycle-and-archive.html"
+        },
+        {
+          "title": "Managed disks and Elastic SAN",
+          "href": "lessons/0402-managed-disks-and-elastic-san.html"
+        },
+        {
+          "title": "Shared file systems and bulk transfer",
+          "href": "lessons/0403-shared-file-systems-and-bulk-transfer.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };
