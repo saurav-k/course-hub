@@ -50,9 +50,96 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0403 | File Storage: the mount target is the thing with a location |
 | 0404 | Moving bytes in, out and duplicated |
 
+**Module 05 - Databases**
+
+| Lesson | Title |
+| 0500 | The database ladder, and where the managed line falls |
+| 0501 | Autonomous Database and the two autoscale switches |
+| 0502 | The open-source engines, and the cache that came back |
+| 0503 | When one relational database is the wrong shape |
+| 0504 | Getting data in, keeping it in sync, and seeing the fleet |
+
+**Module 06 - Analytics**
+
+| Lesson | Title |
+| 0600 | The lakehouse is a workload type, not a separate product |
+| 0601 | Two Kafka products, and the line between them |
+| 0602 | Two ways to run Spark, and where stream analytics lives |
+| 0603 | The managed pipeline layer, and what it orchestrates |
+| 0604 | Reading the answers back, and the two kinds of dashboard |
+
+**Module 07 - Networking and delivery**
+
+| Lesson | Title |
+| 0700 | The VCN, the subnet, and the two places a rule lives |
+| 0701 | Six gateways, and what a route table may point at |
+| 0702 | The routing gateway is the hub, and peering is the spoke |
+| 0703 | Two load balancers, and the front door that is not a proxy |
+| 0704 | DNS at the edge and inside the network |
+
+**Module 08 - Identity and access**
+
+| Lesson | Title |
+| 0800 | Who acts: identity domains, groups, and the missing role |
+| 0801 | The policy language, and the deny that is a one-way door |
+| 0802 | How a machine proves who it is |
+| 0803 | Crossing a boundary without assuming a role |
+| 0804 | Keys, secrets and certificates |
+
+**Module 09 - Governance, tenancy and cost**
+
+| Lesson | Title |
+| 0900 | Four guardrails, and which of them actually blocks |
+| 0901 | The landing zone is a framework, and how you check what exists |
+| 0902 | Tagging is the cost model |
+| 0903 | Seeing and shaping the bill |
+
+**Module 10 - Observability and audit**
+
+| Lesson | Title |
+| 1000 | Three log families, one store, and the one that is always on |
+| 1001 | Metrics, the query language, and the alarm that resets |
+| 1002 | Every stream, and what each one silently misses |
+| 1003 | Traces, synthetics and the agent |
+| 1004 | Getting telemetry out, and where it can go |
+
+**Module 11 - Security services**
+
+| Lesson | Title |
+| 1100 | Two firewalls at two layers, and where each one attaches |
+| 1101 | A fourth check on every packet |
+| 1102 | Finding what is wrong: posture, vulnerabilities and intelligence |
+| 1103 | Reaching a private host, and copying the traffic |
+
+**Module 12 - Delivery and integration**
+
+| Lesson | Title |
+| 1200 | Terraform is the native language, and the stack is where it runs |
+| 1201 | The pipeline, and the two progressive strategies |
+| 1202 | Five messaging services, and how to tell them apart |
+| 1203 | The gateway in front, and the integration platform beside it |
+| 1204 | Keeping the fleet configured after it is deployed |
+
+**Module 13 - AI and ML**
+
+| Lesson | Title |
+| 1300 | The managed model API, and the capacity behind it |
+| 1301 | The vector store is a database you already have |
+| 1302 | Agents, knowledge bases and the conversation layer |
+| 1303 | Training your own, and the ladder of pretrained services |
+
+**Module 14 - Resilience and migration**
+
+| Lesson | Title |
+| 1400 | What a recovery plan is made of |
+| 1401 | The drill is the product |
+| 1402 | Replication is per service, and the plan is what ties it together |
+| 1403 | Moving workloads in |
+
 ## Planned, in order
 
-Fourteen modules, following the platform the way a first architecture meets it:
+All fourteen modules below are now written. The table stays as the record of
+why this order and no other. Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
 and watched, how change ships, and finally how it survives failure.
 
@@ -84,8 +171,8 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **Nothing in the module plan remains unwritten.** New numbers go at the end of a
+  module's own sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of OCI terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
 

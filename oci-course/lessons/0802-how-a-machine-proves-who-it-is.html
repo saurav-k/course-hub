@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How a machine proves who it is - Inside OCI</title>
+<meta name="description" content="Instance principals, resource principals and pod workload identity remove stored keys, and two documented caveats mean an instance principal is broader than most designs expect.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Identity and access &middot; Lesson 0802</div>
+  <h1>A workload authenticates as itself, and whoever reaches the host inherits that identity</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>identity-workload</code>, matrix rows <code>workload-identity</code>, <code>workload-identity-federation</code> and <code>short-lived-credentials</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An <b>instance principal</b> lets a compute instance authenticate as itself with certificates the platform rotates. No key is stored on disk.</li>
+      <li>Authorisation is two steps: the instance must <b>match a dynamic group rule</b>, and a policy must grant that dynamic group its verbs.</li>
+      <li>Oracle documents two caveats on the same page. <b>Anyone who can reach the instance inherits its privileges</b>, and every instance principal holds an <b>irrevocable permission to inspect compartments</b> tenancy-wide.</li>
+      <li><b>Resource principals</b> are the same idea for services, and a function receives its token through the development kit's context rather than from a file.</li>
+      <li>On <b>enhanced Kubernetes clusters</b>, a pod authenticates with its own service account. On basic clusters, pods fall back to the node's instance principal, which over-grants.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The policy language&lt;br/&gt;and the verb ladder"] --> T["THIS PAGE&lt;br/&gt;how a workload authenticates&lt;br/&gt;without a stored secret"]
+  T --> N1["Crossing a boundary&lt;br/&gt;without assuming a role"]
+  T --> N2["Keys, secrets&lt;br/&gt;and certificates"]
+  W["Identity and access&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous two pages covered who may act and how a grant is written. This page is the half of the identity model that has no human in it, and it is where the dynamic groups of lesson 0800 finally do their job.
+    <b>Everything here removes a stored secret, and two of the caveats mean the identity that replaces it is wider than the machine it belongs to.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: three mechanisms, one idea</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  I["A workload needs to call an OCI API"] --> A["Instance principal&lt;br/&gt;a compute instance&lt;br/&gt;matched by a dynamic group"]
+  I --> B["Resource principal&lt;br/&gt;a service such as Functions&lt;br/&gt;token from the platform context"]
+  I --> C["Workload identity&lt;br/&gt;a pod on an enhanced cluster&lt;br/&gt;matched by service account"]
+  A -.- S["short-lived session tokens&lt;br/&gt;issued and refreshed for you"]
+  B -.- S
+  C -.- S
+    </div>
+    <figcaption>Three names for one arrangement: the platform vouches for the workload and hands it a token with a short life. What differs is the granularity of the thing being vouched for.
+    <b>Granularity is the whole design question here, because the token is scoped to whatever the mechanism can identify, and only one of the three can identify something smaller than a machine.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: an instance principal call, in order</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant App as Code on the instance
+  participant Meta as The instance metadata service
+  participant IAM as Identity
+  participant Svc as The service being called
+  App->>Meta: ask for a session token
+  Meta-->>App: a short-lived token, refreshed as needed
+  App->>Svc: call the API with that token
+  Svc->>IAM: does this instance match a dynamic group
+  IAM->>IAM: evaluate the policies naming that dynamic group
+  IAM-->>Svc: allowed or not
+  Svc-->>App: the result
+    </div>
+    <figcaption><a href="https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm">Calling services from instances</a> describes this flow. The instance never holds a long-lived credential, and the dynamic group match is what turns an identity into permissions.
+    <b>A workload with no permissions can still authenticate perfectly: authentication succeeds at step two and authorisation fails at step five, which is why an access error here is almost never a credential problem.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two sentences on that same vendor page change how an instance principal should be scoped. The first is that any user who can reach the instance automatically inherits the privileges granted to it, which makes access to the host equivalent to holding its permissions. The second is that every compute instance principal carries a permission to inspect compartments that <b>cannot be revoked</b>, so a compromised instance can enumerate compartment names, descriptions and free-form tags across the whole tenancy. Neither is a defect to report; both are documented behaviour to design around.</div>
+
+  <p>That first caveat pairs with an absence worth naming. This platform has no identity-controlled authorisation for host sign-in: keys are supplied when the instance is launched and managed inside the guest, and the Bastion service brokers the session. So who may reach a host is decided by the guest's own key management, not by the policy language of the previous lesson, while what that host may do is decided by policy.</p>
+
+  <h2>The mechanism: what a pod gets depends on the cluster kind</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> WhichCluster: a pod calls an OCI API
+  WhichCluster --> Enhanced: enhanced cluster
+  WhichCluster --> Basic: basic cluster
+  Enhanced --> PodIdentity: the pod's own service account is matched by policy
+  Basic --> NodeIdentity: the pod uses the node's instance principal
+  PodIdentity --> [*]: permissions scoped to one workload
+  NodeIdentity --> [*]: every pod on the node shares those permissions
+    </div>
+    <figcaption><a href="https://docs.oracle.com/en-us/iaas/Content/ContEng/Tasks/contenggrantingworkloadaccesstoresources.htm">Workload identity</a> is available on enhanced clusters, and every call a pod makes lands in the audit trail. On a basic cluster the fallback is the node, so a permission given to one workload is held by all of them.
+    <b>This is why lesson 0300 called the cluster kind a decision you make once: it silently sets the smallest unit your permissions can address.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Ask <b>what is the smallest thing this platform can name</b>, then scope permissions to it. A machine, a service, or a pod: the mechanism you pick decides the answer, and no amount of careful policy writing can address something smaller than the mechanism can identify.</div>
+
+  <h2>The trade-off: no stored secret, and a wider identity</h2>
+
+  <p>The gain is unambiguous. There is no key file to leak, no rotation to schedule and no secret in an image or a repository, and the platform refreshes the token without anyone writing code to do it. Databases join in too, since clients can present an identity token instead of a password.</p>
+
+  <p>The cost is that the identity now belongs to the host rather than to the program. Two programs on one instance are one principal, and a person who can reach the instance is that principal as well. The remedy is smaller units, which usually means one instance per job or an enhanced cluster with per-pod identity, and both cost more than putting everything on one machine.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An instance principal call is refused. Which step most likely failed?</div>
+      <button class="q-opt">Token issue, because the certificate had expired</button>
+      <button class="q-opt">Token issue, because no key was placed on the disk</button>
+      <button class="q-opt">Authorisation, because no policy names its group</button>
+      <button class="q-opt">Authorisation, because the token was not refreshed</button>
+      <div class="q-fb">Authentication is handled by the platform, so a refusal is almost always the dynamic group match or the policy behind it. The first and second describe credential problems the mechanism is designed to remove. The fourth confuses refreshing with authorisation.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Who effectively holds the permissions granted to a compute instance?</div>
+      <button class="q-opt">Anyone who can reach the instance itself, per the docs</button>
+      <button class="q-opt">Only the process the policy statement was written for</button>
+      <button class="q-opt">Only the identity that originally launched the instance</button>
+      <button class="q-opt">Anyone in the group that manages the compartment above</button>
+      <div class="q-fb">The documentation states that a user with access to the instance inherits its privileges. The second is the assumption most designs carry and the page contradicts it directly. The third and fourth name plausible-sounding identities that have nothing to do with the mechanism.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which permission does every compute instance principal hold and keep?</div>
+      <button class="q-opt">Reading objects in every bucket in the tenancy</button>
+      <button class="q-opt">Inspecting compartments across the whole tenancy</button>
+      <button class="q-opt">Launching further instances in its own compartment</button>
+      <button class="q-opt">Reading secrets stored in the vault of its compartment</button>
+      <div class="q-fb">The documented irrevocable permission is compartment inspection, which exposes names, descriptions and free-form tags. The other three are all things a policy could grant and none of them is held by default, which is what makes them plausible.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>One instance runs two programs. The first reads a bucket of customer files. The second is a small internal web tool that several engineers sign into and that can run shell commands on request. A single dynamic group matches the instance and a policy grants it read on the bucket. The team believes only the first program can read customer files.</p>
+      <p><b>Explain</b> why that belief is wrong in two separate ways, then give two designs that fix it and say what each one costs.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The identity is attached to the machine, so ask what else is on the machine. Then ask, separately, what the second program lets a person do once they are signed into it. Both answers point at the same boundary.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The first way it is wrong.</b> The principal is the instance, not the program. Both programs run on the instance, so both can obtain the token and both can read the bucket.</li>
+        <li><b>The second way.</b> The web tool runs shell commands for signed-in engineers, and the documentation states that a user who can reach the instance inherits its privileges. Every engineer who can use that tool can read customer files.</li>
+        <li><b>Fix one: separate the machines.</b> Two instances, two dynamic groups, and the bucket grant attached only to the first. The cost is a second instance to run, patch and pay for.</li>
+        <li><b>Fix two: separate the workloads on a cluster.</b> Run both as pods on an enhanced cluster with workload identity, so each service account is a distinct principal and only one is granted the bucket. The cost is that basic clusters cannot do this, so the cluster kind has to be right, and lesson 0300 explains why that is not a setting to change casually.</li>
+        <li><b>What neither fix removes.</b> The irrevocable compartment inspection permission stays on any instance principal, so compartment names and free-form tags remain readable by whatever runs there.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Both explanations should end at the same place: the identity is the host. If your second reason was about the policy being written too broadly, re-read what the web tool lets a person do once they are on the machine.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent which instances match more than one dynamic group, and what the union of those grants is. Rules written months apart overlap without anyone intending it, and the union is a permission nobody ever wrote down in a single place.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Identity/Tasks/callingservicesfrominstances.htm">Calling services from an instance</a> in full. Both caveats on this page come from it, and they sit in the middle of a page most readers skim for the setup steps.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0801-the-policy-language-and-the-deny-door.html"><span class="dir">&larr; Previous</span><span class="ttl">The policy language, and the deny that is a one-way door</span></a>
+    <a class="nxt" href="0803-crossing-a-boundary-without-a-role.html"><span class="dir">Next &rarr;</span><span class="ttl">Crossing a boundary without assuming a role</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 0802 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

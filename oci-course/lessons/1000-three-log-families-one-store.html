@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three log families, one store, and the one that is always on - Inside OCI</title>
+<meta name="description" content="Audit logs, service logs and custom logs all land in the OCI Logging service, the audit stream is always on with a retention nobody can change, and its listing API is not the way to export it.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1000</div>
+  <h1>Three log families feed one store, and only the control-plane one is on without asking</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>audit-telemetry</code>, matrix rows <code>control-plane-audit-log</code> and <code>log-store</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Three families land in one place: <b>audit logs</b> from the control plane, <b>service logs</b> enabled per resource, and <b>custom logs</b> from your own applications.</li>
+      <li>They live in <b>log groups</b>, which are ordinary resources that policy statements can be written against, and one search language reads all of them.</li>
+      <li><b>The audit stream is always on, cannot be disabled, and costs nothing.</b> Its retention is fixed at three hundred and sixty-five days for the whole tenancy and cannot be changed.</li>
+      <li>Audit records <b>API calls</b>. It does not record data-plane actions such as reading an object, or anything that happens inside a database.</li>
+      <li>Its listing API is <b>not a bulk export</b>. Build the export on Connector Hub from the first day rather than reconstructing history by paging through calls.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Governance and cost,&lt;br/&gt;module 09"] --> T["THIS PAGE&lt;br/&gt;the three log families&lt;br/&gt;and the one store"]
+  T --> N1["Metrics, the query language&lt;br/&gt;and alarms"]
+  T --> N2["Every stream, and what&lt;br/&gt;each one misses"]
+  W["Observability and audit&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. Every module so far has produced something that emits telemetry. This module is where all of it goes, and this page is the store that most of it goes to.
+    <b>One of the three families is on in every tenancy that has ever existed, which makes it the only telemetry you can rely on having for something that already happened.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: three sources, one destination</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  A["Audit logs&lt;br/&gt;every call to a public API&lt;br/&gt;always on"] --> LG["Log groups&lt;br/&gt;containers that policy&lt;br/&gt;statements can scope"]
+  S["Service logs&lt;br/&gt;categories enabled per resource&lt;br/&gt;off until asked"] --> LG
+  C["Custom logs&lt;br/&gt;your applications, through the&lt;br/&gt;agent or the ingestion API"] --> LG
+  LG --> Q["One search language&lt;br/&gt;across all three"]
+  LG --> X["Connector Hub&lt;br/&gt;the way anything leaves"]
+    </div>
+    <figcaption>The <a href="https://docs.oracle.com/en-us/iaas/Content/Logging/Concepts/loggingoverview.htm">Logging service</a> is the single store. A log group is an ordinary resource, so who may read which logs is expressed with the policy language of lesson 0801 rather than with a separate permission model.
+    <b>Because the group is the unit that policy scopes, log group design is access control design, and it is worth doing before the first log is enabled.</b></figcaption>
+  </figure>
+
+  <p>Oracle indexes twenty-nine service log categories in its reference, so the second family is a long list rather than a handful. The next lesson but one walks the streams that matter most; the reference is the authority for the tail.</p>
+
+  <h2>The mechanism: the audit stream, and its fixed clock</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Recorded: any call to a public API
+  Recorded --> Searchable: available in seconds to minutes
+  Searchable --> Searchable: for the whole retention period
+  Searchable --> Gone: three hundred and sixty-five days later
+  Gone --> [*]
+  note right of Searchable
+    the retention is tenancy-wide
+    and the documentation states
+    it cannot be changed
+  end note
+    </div>
+    <figcaption>The <a href="https://docs.oracle.com/en-us/iaas/Content/Audit/Concepts/auditoverview.htm">Audit service</a> records calls to supported public endpoints automatically, at no charge, with a fixed retention. Events stay queryable for that entire period.
+    <b>A retention requirement longer than a year is therefore an export requirement, and it has to be built rather than configured.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  What audit does not capture is as important as what it does. It records the control plane, so creating a bucket appears and reading an object from it does not. Object access is a separate service log that is off until enabled, network packets are never in it, and what happens inside a database is not in it either. A question that begins "who read" almost always needs a different stream from a question that begins "who created".</div>
+
+  <h2>The mechanism: the export path, and the one that looks like it</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant You as An operator
+  participant API as The audit listing API
+  participant CH as Connector Hub
+  participant OS as Object Storage
+  You->>API: page through events to build an archive
+  API-->>You: pages, one call at a time
+  Note over You,API: documented as not intended for bulk export
+  You->>CH: configure a connector once
+  CH->>OS: deliver events continuously
+  Note over CH,OS: this is the path that scales
+    </div>
+    <figcaption>Oracle's own <a href="https://docs.oracle.com/en-us/iaas/Content/Audit/Tasks/listing-log-events.htm">listing documentation</a> says the listing operation is not intended for bulk export. Connector Hub is the managed pipeline, and lesson 1004 covers it properly.
+    <b>The expensive version of this mistake is discovering it during an investigation, when a year of history is needed at once and the only tool available is a paginated call.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Treat the audit stream as a <b>rolling window with a hard edge</b>, not as an archive. It is complete, free and untouchable for a year, and then it is gone. Whether you have five years of history is decided by a connector somebody configured, not by the audit service.</div>
+
+  <h2>The trade-off: an unchangeable default is a guarantee and a ceiling</h2>
+
+  <p>Nobody can disable the audit stream, shorten its retention, or exclude a noisy service from it. That is unusual and genuinely valuable: an investigation can assume the record exists without first proving that somebody left it turned on.</p>
+
+  <p>The same rigidity means the retention cannot be extended either, and there is no tier to buy that changes it. The only lever is the export, and the storage tiers of module 04 are then what decide how much a decade of audit history costs to keep.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which question can the audit stream alone answer?</div>
+      <button class="q-opt">Which client address downloaded a file from a bucket</button>
+      <button class="q-opt">Which principal created the bucket, and when they did</button>
+      <button class="q-opt">Which query the application sent to its own database</button>
+      <button class="q-opt">Which packets were dropped by a subnet's rule set</button>
+      <div class="q-fb">Audit records control-plane calls, so creating a bucket is in it. The first is a data-plane action needing a service log. The third happens inside a database. The fourth needs flow logs, which are off by default.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A rule requires five years of API history. What has to be built?</div>
+      <button class="q-opt">A longer retention setting on the audit service itself</button>
+      <button class="q-opt">A scheduled job paging through the audit listing API</button>
+      <button class="q-opt">A second audit trail enabled in each compartment used</button>
+      <button class="q-opt">A connector delivering audit events into Object Storage</button>
+      <div class="q-fb">Retention is fixed and the export path is Connector Hub. The first names a setting the documentation says cannot be changed. The second is exactly the approach the vendor documentation warns against. The third invents a per-compartment trail that does not exist.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What decides who can read a particular set of logs?</div>
+      <button class="q-opt">A retention setting chosen when the log was created</button>
+      <button class="q-opt">A separate permission model owned by the log service</button>
+      <button class="q-opt">Policy statements written against the log group</button>
+      <button class="q-opt">Membership of the group that enabled the log category</button>
+      <div class="q-fb">Log groups are ordinary resources, so the policy language scopes access to them. The first confuses lifetime with access. The second invents a parallel model. The fourth ties access to whoever configured the log, which is not how any resource on this platform works.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An incident review asks four questions about something that happened eight months ago. Who deleted a production instance. Who downloaded a particular object from a bucket. Which application errors preceded the deletion. And whether any of this will still be answerable in two years.</p>
+      <p><b>Say</b>, for each question, which family the answer lives in and whether it was available by default, then answer the fourth question about what is needed to make all of it durable.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Sort the first three by whether they describe a control-plane call, a data-plane action or an application's own output. Only one of the three is available without anyone having turned anything on.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Who deleted the instance.</b> The audit family, and it is available: the stream is always on, and eight months is inside the fixed retention.</li>
+        <li><b>Who downloaded the object.</b> A service log for bucket access, which is off until somebody enabled it for that bucket. If it was not enabled eight months ago, the answer does not exist anywhere.</li>
+        <li><b>The application errors.</b> The custom family, arriving through the agent or the ingestion API. Available only if the application was shipping its logs, and retained for whatever period was configured on that log.</li>
+        <li><b>Two years from now.</b> Nothing survives on its own. Audit reaches a year and then stops, and service and custom logs keep whatever retention was set. Durability means a connector delivering all three into Object Storage, and then the tier decisions of module 04.</li>
+        <li><b>The lesson to draw.</b> Two of the three questions depended on a decision made before the incident, and the platform gave no warning at the time that the decision had been made by default.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one of the three questions should be answerable with no prior configuration. If you answered all three from audit alone, re-read which family a bucket download belongs to.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent which log categories are enabled anywhere in a tenancy, and compare that list against the resources that matter. The gap is what the next incident review will not be able to answer, and it is far cheaper to close now than during the review.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://docs.oracle.com/en-us/iaas/Content/Logging/Concepts/loggingoverview.htm">Logging overview</a>. It sets out the three families and the log group model in one page, and everything else in this module is a stream flowing into what it describes.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0903-seeing-and-shaping-the-bill.html"><span class="dir">&larr; Previous</span><span class="ttl">Seeing and shaping the bill</span></a>
+    <a class="nxt" href="1001-metrics-mql-and-the-alarm-reset.html"><span class="dir">Next &rarr;</span><span class="ttl">Metrics, the query language, and the alarm that resets</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 1000 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

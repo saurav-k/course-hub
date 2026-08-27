@@ -101,6 +101,250 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0404-moving-bytes-in-out-and-duplicated.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "The database ladder, and where the managed line falls",
+          "href": "lessons/0500-the-database-ladder.html"
+        },
+        {
+          "title": "Autonomous Database and the two autoscale switches",
+          "href": "lessons/0501-autonomous-and-the-two-switches.html"
+        },
+        {
+          "title": "The open-source engines, and the cache that came back",
+          "href": "lessons/0502-the-open-engines-and-the-cache.html"
+        },
+        {
+          "title": "When one relational database is the wrong shape",
+          "href": "lessons/0503-when-one-database-is-the-wrong-shape.html"
+        },
+        {
+          "title": "Getting data in, keeping it in sync, and seeing the fleet",
+          "href": "lessons/0504-getting-data-in-and-keeping-it-in-sync.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "The lakehouse is a workload type, not a separate product",
+          "href": "lessons/0600-the-lakehouse-is-a-workload-type.html"
+        },
+        {
+          "title": "Two Kafka products, and the line between them",
+          "href": "lessons/0601-two-kafka-products.html"
+        },
+        {
+          "title": "Two ways to run Spark, and where stream analytics lives",
+          "href": "lessons/0602-two-ways-to-run-spark.html"
+        },
+        {
+          "title": "The managed pipeline layer, and what it orchestrates",
+          "href": "lessons/0603-the-managed-pipeline-layer.html"
+        },
+        {
+          "title": "Reading the answers back, and the two kinds of dashboard",
+          "href": "lessons/0604-reading-the-answers-back.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "The VCN, the subnet, and the two places a rule lives",
+          "href": "lessons/0700-the-vcn-and-two-places-a-rule-lives.html"
+        },
+        {
+          "title": "Six gateways, and what a route table may point at",
+          "href": "lessons/0701-six-gateways-and-the-route-table.html"
+        },
+        {
+          "title": "The routing gateway is the hub, and peering is the spoke",
+          "href": "lessons/0702-the-routing-gateway-is-the-hub.html"
+        },
+        {
+          "title": "Two load balancers, and the front door that is not a proxy",
+          "href": "lessons/0703-two-load-balancers-and-the-edge.html"
+        },
+        {
+          "title": "DNS at the edge and inside the network",
+          "href": "lessons/0704-dns-at-the-edge-and-inside.html"
+        }
+      ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "Who acts: identity domains, groups, and the missing role",
+          "href": "lessons/0800-who-acts-domains-groups-and-no-roles.html"
+        },
+        {
+          "title": "The policy language, and the deny that is a one-way door",
+          "href": "lessons/0801-the-policy-language-and-the-deny-door.html"
+        },
+        {
+          "title": "How a machine proves who it is",
+          "href": "lessons/0802-how-a-machine-proves-who-it-is.html"
+        },
+        {
+          "title": "Crossing a boundary without assuming a role",
+          "href": "lessons/0803-crossing-a-boundary-without-a-role.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-secrets-and-certificates.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "Four guardrails, and which of them actually blocks",
+          "href": "lessons/0900-four-guardrails-and-which-blocks.html"
+        },
+        {
+          "title": "The landing zone is a framework, and how you check what exists",
+          "href": "lessons/0901-the-landing-zone-is-a-framework.html"
+        },
+        {
+          "title": "Tagging is the cost model",
+          "href": "lessons/0902-tagging-is-the-cost-model.html"
+        },
+        {
+          "title": "Seeing and shaping the bill",
+          "href": "lessons/0903-seeing-and-shaping-the-bill.html"
+        }
+      ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Three log families, one store, and the one that is always on",
+          "href": "lessons/1000-three-log-families-one-store.html"
+        },
+        {
+          "title": "Metrics, the query language, and the alarm that resets",
+          "href": "lessons/1001-metrics-mql-and-the-alarm-reset.html"
+        },
+        {
+          "title": "Every stream, and what each one silently misses",
+          "href": "lessons/1002-every-stream-and-what-it-misses.html"
+        },
+        {
+          "title": "Traces, synthetics and the agent",
+          "href": "lessons/1003-traces-synthetics-and-the-agent.html"
+        },
+        {
+          "title": "Getting telemetry out, and where it can go",
+          "href": "lessons/1004-getting-telemetry-out.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "Two firewalls at two layers, and where each one attaches",
+          "href": "lessons/1100-two-firewalls-at-two-layers.html"
+        },
+        {
+          "title": "A fourth check on every packet",
+          "href": "lessons/1101-a-fourth-check-on-every-packet.html"
+        },
+        {
+          "title": "Finding what is wrong: posture, vulnerabilities and intelligence",
+          "href": "lessons/1102-finding-what-is-wrong.html"
+        },
+        {
+          "title": "Reaching a private host, and copying the traffic",
+          "href": "lessons/1103-reaching-a-private-host.html"
+        }
+      ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Terraform is the native language, and the stack is where it runs",
+          "href": "lessons/1200-terraform-is-the-native-language.html"
+        },
+        {
+          "title": "The pipeline, and the two progressive strategies",
+          "href": "lessons/1201-the-pipeline-and-two-strategies.html"
+        },
+        {
+          "title": "Five messaging services, and how to tell them apart",
+          "href": "lessons/1202-five-messaging-services.html"
+        },
+        {
+          "title": "The gateway in front, and the integration platform beside it",
+          "href": "lessons/1203-the-gateway-and-the-integration-platform.html"
+        },
+        {
+          "title": "Keeping the fleet configured after it is deployed",
+          "href": "lessons/1204-keeping-the-fleet-configured.html"
+        }
+      ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "The managed model API, and the capacity behind it",
+          "href": "lessons/1300-the-model-api-and-its-capacity.html"
+        },
+        {
+          "title": "The vector store is a database you already have",
+          "href": "lessons/1301-the-vector-store-is-a-database.html"
+        },
+        {
+          "title": "Agents, knowledge bases and the conversation layer",
+          "href": "lessons/1302-agents-and-the-conversation-layer.html"
+        },
+        {
+          "title": "Training your own, and the ladder of pretrained services",
+          "href": "lessons/1303-training-your-own-and-the-ladder.html"
+        }
+      ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "What a recovery plan is made of",
+          "href": "lessons/1400-what-a-recovery-plan-is-made-of.html"
+        },
+        {
+          "title": "The drill is the product",
+          "href": "lessons/1401-the-drill-is-the-product.html"
+        },
+        {
+          "title": "Replication is per service, and the plan is what ties it together",
+          "href": "lessons/1402-replication-is-per-service.html"
+        },
+        {
+          "title": "Moving workloads in",
+          "href": "lessons/1403-moving-workloads-in.html"
+        }
+      ]
     }
   ],
   "extras": []

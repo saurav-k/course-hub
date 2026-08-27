@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Crossing a boundary without assuming a role - Inside OCI</title>
+<meta name="description" content="There is no assume-role step on OCI: access across tenancies is granted by matching policy statements on both sides, and the caller keeps their own identity the whole way through.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Identity and access &middot; Lesson 0803</div>
+  <h1>Both sides write a statement, and the caller never stops being themselves</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">11 min</span>
+    Capability area <code>identity-workload</code>, matrix row <code>cross-account-assumption</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>There is <b>no assume-role step</b>. No temporary credential is minted, and the caller's identity is the same on both sides of the boundary.</li>
+      <li>Access across tenancies needs statements in <b>both tenancies</b>: an <b>Endorse</b> at home and an <b>Admit</b> at the destination. One alone does nothing.</li>
+      <li>Each side must <b>Define</b> the other's identifier first, and the destination must also Define the <b>foreign group</b> so its Admit statement can resolve it.</li>
+      <li>The destination's location clause names <b>its own tenancy or compartment</b>, never the alias for the foreign one.</li>
+      <li>There is <b>no general resource-sharing service</b>. Compartments plus these statements are the mechanism, and the deny forms of lesson 0801 reach across the boundary too.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["How a machine proves&lt;br/&gt;who it is"] --> T["THIS PAGE&lt;br/&gt;reaching across a compartment&lt;br/&gt;or a tenancy boundary"]
+  T --> N1["Keys, secrets&lt;br/&gt;and certificates"]
+  T --> N2["Governance and the&lt;br/&gt;tenancy tree, module 09"]
+  W["Identity and access&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. The module has covered principals, grants and machine identity, all inside one boundary. This page is what changes when the resource is somewhere else, and the answer is smaller than most readers expect.
+    <b>The mechanism is the same policy language you already know, written twice, which is the whole of the difference from a platform with an assume-role step.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: three distances, three requirements</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Where is the resource"] --> S["Same compartment&lt;br/&gt;a statement scoped there"]
+  Q --> C["Another compartment&lt;br/&gt;in the same tenancy"]
+  Q --> T["Another tenancy"]
+  C --> C1["one statement, with the&lt;br/&gt;location clause naming it"]
+  T --> T1["statements in both tenancies&lt;br/&gt;Endorse at home, Admit at the destination"]
+  S -.- N["nothing is ever assumed&lt;br/&gt;at any of the three distances"]
+  C1 -.- N
+  T1 -.- N
+    </div>
+    <figcaption>Distance changes how many statements are needed and nothing else. Crossing a compartment is a location clause; crossing a tenancy is two administrators agreeing in writing.
+    <b>Because no credential is minted at any distance, the audit trail names the same caller on both sides, which is the property this model buys.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: the statements, in full</h2>
+
+  <div class="code-cap">cross-tenancy access &middot; the shape both sides must write</div>
+  <pre><code># In the requesting tenancy A
+Define tenancy B as ocid1.tenancy.oc1..bbbb
+Endorse group A-Devs to read object-family in tenancy B
+
+# In the owning tenancy B
+Define tenancy A as ocid1.tenancy.oc1..aaaa
+Define group A-Devs as ocid1.group.oc1..aaaa-group-ocid
+Admit group A-Devs of tenancy A to read object-family in tenancy
+</code></pre>
+
+  <p>Read the last line carefully. The location clause says <code>in tenancy</code>, meaning tenancy B's own, and never the alias for the foreign one. The <a href="https://docs.oracle.com/en-us/iaas/Content/Identity/policieshow/iam-cross-domain.htm">cross-tenancy documentation</a> also requires the second <code>Define</code> in tenancy B: without a definition for the foreign group, the Admit statement has nothing to resolve.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as A user in tenancy A
+  participant Svc as A service in tenancy B
+  participant IAM as Identity
+  U->>Svc: call the API as themselves
+  Svc->>IAM: is this caller allowed here
+  IAM->>IAM: check the Endorse statement in tenancy A
+  IAM->>IAM: check the Admit statement in tenancy B
+  IAM-->>Svc: allowed only if both exist
+  Svc-->>U: the result, recorded against the original caller
+    </div>
+    <figcaption>The request path. Nothing is exchanged for anything: the caller presents their own identity and two separate tenancies' policy sets are consulted.
+    <b>Either statement missing produces the same refusal, so the diagnosis is always to ask which of the two administrators has not written their half.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  On a platform with roles, cross-account access is <b>one side granting and the other side stepping through</b>. Here it is <b>two sides agreeing</b>. That makes the grant harder to arrange and much harder to arrange by accident, and it means nobody can widen the path from one side alone.</div>
+
+  <h2>The mechanism: what else lives at this boundary</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+mindmap
+  root((Reaching across a boundary))
+    Granting access
+      Endorse at home
+      Admit at the destination
+      Define on both sides
+    Taking it back
+      deny endorse
+      deny admit
+      only once the feature is enabled
+    Sharing a resource
+      no general sharing service
+      compartments plus these statements
+    Trusting an outside identity
+      federation for people
+      pod service accounts on enhanced clusters
+      identity-domain applications for software clients
+    </div>
+    <figcaption>Four separate questions that all sound like one. The deny forms from lesson 0801 exist precisely so that an endorsed path can be fenced, and they only apply in a tenancy where that feature has been enabled.
+    <b>There is no resource-sharing product to look for: the compartment plus the statement pair is the sharing mechanism on this platform.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  One item is recorded as unresolved rather than settled, and it is repeated here in the same spirit. For machine identities from outside this platform, the documented paths are pod service accounts on enhanced Kubernetes clusters and applications registered in an identity domain. Whether a general exchange of an arbitrary external token exists beyond those is an open question in the research behind this course rather than a confirmed absence. Treat it as something to check on the vendor's pages for your own case rather than as a fact in either direction.</div>
+
+  <h2>The trade-off: two signatures, and no way to be quiet about it</h2>
+
+  <p>Requiring both sides removes the confused-deputy problem by construction. A tenancy cannot be reached because someone in another one wrote a generous statement, and revoking access needs only one of the two halves to be deleted, by whichever administrator moves first.</p>
+
+  <p>The cost is coordination. Every cross-tenancy grant is a change request in two places, usually owned by two teams, and it cannot be prepared in advance from one side. In an organisation with many tenancies, that is real friction, and it is exactly the friction that the organisation-level structures of the next module are designed to manage.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A cross-tenancy call is refused although the Endorse statement exists. Why?</div>
+      <button class="q-opt">The endorsed group must first assume the target's role</button>
+      <button class="q-opt">The caller needs a session token minted by the target</button>
+      <button class="q-opt">The endorsement has to be approved in the console first</button>
+      <button class="q-opt">The destination's Admit statement has not been written</button>
+      <div class="q-fb">Both halves must exist, so a missing Admit refuses the call. The first and second describe an assume-role model that this platform does not have. The third invents an approval workflow that the policy language does not contain.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">In the destination tenancy's Admit statement, what does the location clause name?</div>
+      <button class="q-opt">The alias defined for the requesting foreign tenancy</button>
+      <button class="q-opt">Its own tenancy, or a compartment inside its own</button>
+      <button class="q-opt">The compartment holding the group being admitted</button>
+      <button class="q-opt">Both tenancies, joined so that the path resolves</button>
+      <div class="q-fb">The clause names the destination's own tenancy or compartment. The first is the mistake the documentation calls out directly. The third confuses where the caller lives with where the resource lives. The fourth invents a syntax the language does not have.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which identity appears in the audit record of a cross-tenancy action?</div>
+      <button class="q-opt">A temporary identity created for the crossing</button>
+      <button class="q-opt">The destination tenancy's own service identity</button>
+      <button class="q-opt">The original caller, unchanged on both sides</button>
+      <button class="q-opt">The group named in the Admit statement, not a user</button>
+      <div class="q-fb">The caller keeps their identity throughout, which is the property this model buys. The first describes assumed credentials. The second invents a proxy identity. The fourth confuses the unit a grant is written against with the identity that acts.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>A partner organisation has its own tenancy and wants its analysts to read one bucket in yours. Their group is called PartnerAnalysts. Your bucket sits in a compartment named Shared. A colleague has written an Endorse statement in the partner's tenancy and a single Admit statement in yours, and the calls are still refused.</p>
+      <p><b>Write</b> the complete set of statements for both tenancies, and name the two most likely mistakes in the colleague's version.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Count the Define statements the documentation requires on each side, then look hard at the location clause of the Admit statement. Both errors are things that are absent or wrong in one line rather than missing statements of a whole kind.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The partner's tenancy.</b> Define your tenancy as its identifier, then Endorse group PartnerAnalysts to read object-family in your tenancy alias.</li>
+        <li><b>Your tenancy, first Define.</b> Define the partner tenancy as its identifier, so your statements can refer to it.</li>
+        <li><b>Your tenancy, second Define.</b> Define group PartnerAnalysts as its own identifier from the partner tenancy. This is the line the documentation warns about and the one most often missed.</li>
+        <li><b>Your tenancy, the Admit.</b> Admit group PartnerAnalysts of the partner tenancy to read object-family in compartment Shared. The location is your compartment.</li>
+        <li><b>The two likely mistakes.</b> The missing Define for the foreign group, so the Admit had nothing to resolve, and a location clause naming the partner's alias instead of your own compartment.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Four statements in your tenancy and two in theirs, with three Define lines in total. If your version has only one Define on the destination side, that is exactly the failure described.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent to list every Admit statement in a tenancy and the foreign tenancy each one names. That list is the complete set of outside parties who can reach inside, it is short, and it is almost never reviewed on any schedule.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Identity/policieshow/iam-cross-domain.htm">Cross-Tenancy Policies</a>. It carries the Define, Endorse and Admit shapes with worked examples, and it is the page to read beside a refused call rather than after one.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0802-how-a-machine-proves-who-it-is.html"><span class="dir">&larr; Previous</span><span class="ttl">How a machine proves who it is</span></a>
+    <a class="nxt" href="0804-keys-secrets-and-certificates.html"><span class="dir">Next &rarr;</span><span class="ttl">Keys, secrets and certificates</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 0803 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
