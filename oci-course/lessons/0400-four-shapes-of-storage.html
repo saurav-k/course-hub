@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Four shapes of storage, and the choice a bucket cannot take back - Inside OCI</title>
+<meta name="description" content="OCI stores bytes four ways, each with a different failure boundary, and one of the four fixes a decision when the container is created that nothing afterwards can change.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0400</div>
+  <h1>The four storage shapes differ by failure boundary, and one of them is chosen once</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Capability area <code>storage</code>, matrix rows <code>object-storage</code>, <code>block-storage</code>, <code>file-storage</code> and <code>archive-storage</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Four shapes: <b>Object Storage</b> for anything addressable by name, <b>Block Volume</b> for a disk attached to a machine, <b>File Storage</b> for a shared filesystem, and <b>Archive</b> for bytes you must ask for before you read.</li>
+      <li>They differ by failure boundary before they differ by interface. <b>Object Storage is regional</b> and replicated across availability or fault domains without being asked.</li>
+      <li>A <b>Block Volume</b> is attached to one machine at a time, so its resilience is a copy rather than a property.</li>
+      <li>A bucket's <b>default storage tier is fixed when the bucket is created</b> and cannot be changed afterwards. That is the one irreversible decision in this module.</li>
+      <li>Object Storage speaks its own interface and an <b>S3-compatible one</b>, so existing tooling usually moves without a rewrite.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Runtimes that need&lt;br/&gt;somewhere to put bytes"] --> T["THIS PAGE&lt;br/&gt;the four shapes and&lt;br/&gt;their failure boundaries"]
+  T --> T1["Object tiers and&lt;br/&gt;auto-tiering"]
+  T --> T2["Block performance,&lt;br/&gt;bought by the gigabyte"]
+  W["Storage&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. The three modules before this one produced things that run. This module is where their state lives, and the first question about state is not how fast it is but what it survives.
+    <b>Every later page in the module refines one of the four shapes, so the shape chosen here is the one whose limits you inherit.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: what each shape is attached to</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["A region"] --> O["OBJECT STORAGE&lt;br/&gt;regional, replicated across&lt;br/&gt;availability or fault domains"]
+  R --> F["FILE STORAGE&lt;br/&gt;data spread across availability&lt;br/&gt;domains in the region"]
+  R --> B["BLOCK VOLUME&lt;br/&gt;attached to one machine&lt;br/&gt;at a time"]
+  O --> A["ARCHIVE&lt;br/&gt;the cold tier, read only&lt;br/&gt;after an explicit restore"]
+    </div>
+    <figcaption>Three shapes hang off the region and one hangs off the object store. The vertical position is the point: the higher a shape sits, the less any single machine or building has to do with whether the bytes survive.
+    <b>A block volume is the only one of the four whose availability is tied to something you launched, which is why it is the only one that needs a deliberate second copy.</b></figcaption>
+  </figure>
+
+  <p>Object Storage is unbounded and regional, and Oracle's own <a href="https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/understandingstoragetiers.htm">storage tiers</a> page carries an eleven-nines durability claim for it. It offers an S3-compatible interface alongside its own, and supports versioning, retention rules and replication.</p>
+
+  <p><a href="https://docs.oracle.com/en-us/iaas/Content/File/home.htm">File Storage</a> is the shared-filesystem shape, serving NFS version 3 and version 4 with snapshots, clones and cross-region replication. Its data is spread across availability domains within the region - the next-but-one page is about the part of it that is not.</p>
+
+  <p>The same four shapes exist on every cloud with different failure boundaries behind them, and <a href="../../cloud-comparison-course/lessons/0301-storage-four-clouds.html">the four-way view</a> is in the comparison course. The rest of this module stays inside OCI.</p>
+
+  <p><a href="https://docs.oracle.com/en-us/iaas/Content/Block/Concepts/blockvolumeperformance.htm">Block Volume</a> is the disk shape, attachable to virtual machines and to bare metal, and the page after this one is about how its performance is bought.</p>
+
+  <h2>The mechanism: the decision a bucket cannot revisit</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Choosing: create a bucket
+  Choosing --> StandardBucket: default tier Standard
+  Choosing --> ArchiveBucket: default tier Archive
+  StandardBucket --> StandardBucket: objects may still move between tiers
+  ArchiveBucket --> ArchiveBucket: objects land cold and are restored to read
+  note right of Choosing
+    the default tier is immutable
+    after the bucket exists
+  end note
+    </div>
+    <figcaption>The bucket's default storage tier is set at creation and cannot be changed. Individual objects still move, but the bucket's own default is fixed for its lifetime.
+    <b>Getting this wrong means copying every object into a new bucket, and the copy is charged and takes time, so it is worth five seconds of thought at creation.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Choose the shape by <b>what has to survive what</b>, not by the interface. An application that wants a filesystem can usually be given one; an application whose data must survive losing a machine cannot be given a block volume and left there.</div>
+
+  <h2>The trade-off: reading Archive costs a request</h2>
+
+  <p><a href="https://docs.oracle.com/en-us/iaas/Content/Archive/Concepts/archivestorageoverview.htm">Archive Storage</a> is the cold tier, and its defining property is not its price but its access pattern: an object must be restored before it can be read, and Oracle documents the first byte arriving in about an hour. A restored object is billed at the standard rate while it is restored.</p>
+
+  <div class="callout warn">
+  That hour is a design constraint and not an inconvenience. An application that reads archived data on a user's request has to be written to accept a refused read and to come back later, which is a different program from one that accepts a slow read. If the code cannot do that, the data is not archivable however cold it is.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which of the four shapes has its availability tied to something you launched?</div>
+      <button class="q-opt">Object Storage, tied to the chosen region</button>
+      <button class="q-opt">Block Volume, tied to the machine it is on</button>
+      <button class="q-opt">File Storage, tied to the region it serves</button>
+      <button class="q-opt">Archive Storage, tied to the restore job</button>
+      <div class="q-fb">A block volume attaches to one machine at a time, so a deliberate copy is what gives it resilience. The first and third name shapes that are regional by construction. The fourth confuses an access step with an availability boundary - a restore delays a read, it does not decide whether the bytes exist.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A bucket was created with the wrong default storage tier. What can be done?</div>
+      <button class="q-opt">Change the default tier on the existing bucket</button>
+      <button class="q-opt">Raise a limit increase to unlock the setting</button>
+      <button class="q-opt">Apply a lifecycle rule that overrides the default</button>
+      <button class="q-opt">Create a new bucket and copy the objects across</button>
+      <div class="q-fb">The default tier is immutable once the bucket exists, so the fix is a new bucket and a copy. The first states the thing the documentation rules out. The second invents a support path, and the third confuses moving individual objects, which lifecycle rules do, with changing the bucket's own default.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does an application have to handle before its data can live in Archive?</div>
+      <button class="q-opt">A read that is refused until a restore completes</button>
+      <button class="q-opt">A read that is slower than a standard tier read</button>
+      <button class="q-opt">A read that returns a partial object then the rest</button>
+      <button class="q-opt">A read that is charged at a higher request price</button>
+      <div class="q-fb">Archive requires an explicit restore before the object can be read at all, so the code has to accept a refusal and come back. The second is the most tempting wrong answer and describes a different design entirely. The third invents a streaming behaviour, and the fourth names a cost rather than a program change.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Four datasets need a home. (a) A database's data files, on one machine. (b) A shared working directory that six render nodes mount at once. (c) Uploaded customer documents, read often for thirty days and rarely afterwards. (d) Seven years of regulatory records that are read about twice a year, on request from a compliance officer who can wait.</p>
+      <p><b>Assign each</b> to a shape, and for the two that involve a bucket say what has to be decided at creation and what can be changed later.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask of each dataset what has to be able to reach it and what it must survive. Then, for anything that lands in a bucket, separate the bucket-level decision from the object-level one.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The database files.</b> One machine reads them and they need a block device, so this is a Block Volume. Its availability is tied to that machine, so the design owes a second copy - which is the subject of the last page in this module.</li>
+        <li><b>The shared working directory.</b> Six machines mount it at once, which is the definition of the file shape, so this is File Storage over NFS. No bucket decision is involved.</li>
+        <li><b>The customer documents.</b> Object Storage, in a bucket whose default tier is Standard. What is decided at creation is that default; what can change later is which tier individual objects sit in as they cool.</li>
+        <li><b>The regulatory records.</b> Object Storage again, and the reader can wait about an hour, so Archive is genuinely available here. Because they are always cold, the bucket's default tier can be Archive at creation - and that choice is the irreversible one, so it must be made now rather than discovered later.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two of the four should have been buckets and only one of those two should have been created with an Archive default. If the customer documents ended up in an Archive-default bucket, the thirty days of frequent reading was traded away for an hourly restore on every one of them.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent for the default storage tier of every bucket in a tenancy. Any bucket whose default surprises its owner is carrying a decision nobody remembers making, and it is the only storage decision on this platform that a later change cannot repair.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/understandingstoragetiers.htm">Understanding Object Storage Tiers</a>. It carries the tier table, the retention minimums and the immutability of a bucket's default tier in one place, and the next lesson works entirely from it.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0304-a-pattern-instead-of-a-runtime.html"><span class="dir">&larr; Previous</span><span class="ttl">Where OCI sells a pattern instead of a runtime</span></a>
+    <a class="nxt" href="0401-object-storage-tiers.html"><span class="dir">Next &rarr;</span><span class="ttl">Object Storage tiers and the auto-tiering rule</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 0400 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

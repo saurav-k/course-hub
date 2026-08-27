@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>From one instance to a fleet - Inside OCI</title>
+<meta name="description" content="An OCI fleet is a chain of three objects - an image, an instance configuration and an instance pool - and the instance configuration is where the exclusions that break a design are recorded.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Compute &middot; Lesson 0202</div>
+  <h1>A fleet is a chain of three objects, and the middle one decides what it may contain</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Capability areas <code>compute-iaas</code> and <code>compute-scaling</code>, matrix rows <code>vm-images</code>, <code>instance-template</code> and <code>autoscaling-group</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Scaling on OCI is a chain: an <b>image</b>, an <b>instance configuration</b> that saves a whole launch, and an <b>instance pool</b> that keeps a count of instances built from it.</li>
+      <li>Autoscaling attaches to the pool and fires on one of two triggers: a <b>metric threshold</b> or a <b>schedule</b>. There is no predictive scaling.</li>
+      <li>An instance pool can attach a load balancer, so new members join the backend set without a separate step.</li>
+      <li>The chain is what makes the exclusions bite. <b>Preemptible instances cannot go into an instance configuration</b>, so a preemptible instance pool does not exist.</li>
+      <li>An image is either one Oracle publishes or one you build, and a custom image is stored and billed like the object it is.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["One sized, placed instance&lt;br/&gt;the previous two pages"] --> T["THIS PAGE&lt;br/&gt;image, configuration, pool,&lt;br/&gt;autoscaling"]
+  T --> C["Cheap capacity, which&lt;br/&gt;this chain cannot hold"]
+  T --> K["Kubernetes node pools&lt;br/&gt;module 03"]
+  W["Compute&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. Everything before this page produced one machine. This page is how a count of machines is held, and it is also the page that explains why the next one has to reach for a different mechanism.
+    <b>The chain is short and it is rigid, and knowing where it refuses to bend is worth more than knowing how to build it.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: the chain</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  I["IMAGE&lt;br/&gt;platform or custom"] --> C["INSTANCE CONFIGURATION&lt;br/&gt;shape, image, metadata,&lt;br/&gt;networking - saved"]
+  C --> P["INSTANCE POOL&lt;br/&gt;a target count of&lt;br/&gt;identical instances"]
+  P --> A["AUTOSCALING&lt;br/&gt;metric or schedule&lt;br/&gt;moves the count"]
+  P --> L["LOAD BALANCER&lt;br/&gt;attached to the pool"]
+    </div>
+    <figcaption>Four objects and one optional fifth. The configuration is a saved launch rather than a running thing, the pool is the running thing, and autoscaling is a policy on the pool rather than a property of it.
+    <b>Read the arrows as constraints: anything the instance configuration cannot express is something no pool can contain, whatever the pool is willing to do.</b></figcaption>
+  </figure>
+
+  <p>An <a href="https://docs.oracle.com/en-us/iaas/Content/Compute/References/images.htm">image</a> is the first link. Oracle publishes platform images - Oracle Linux, Ubuntu, Windows - and you can capture a custom image from a running instance or import one from Object Storage in the usual disk formats. A custom image is stored per gigabyte-month as object data, and a Windows image brings its own licence cost, so the image line of a bill grows with the number of golden images kept rather than with the fleet size.</p>
+
+  <p>The <a href="https://docs.oracle.com/en-us/iaas/Content/Compute/Concepts/instancemanagement.htm">instance configuration</a> is the second link and the important one. It saves an entire launch: the shape, the image, the metadata, the networking. A pool is then simply a count applied to that saved launch.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  The instance configuration is not a convenience. It is the <b>gate</b>: what may enter a fleet on OCI is exactly what an instance configuration can express, and the platform's exclusions are written at that boundary rather than at the pool.</div>
+
+  <h2>The mechanism: two triggers, and only two</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> AtTarget: pool created at a target count
+  AtTarget --> ScalingOut: metric crosses the upper threshold
+  AtTarget --> ScalingOut: schedule says grow
+  ScalingOut --> AtTarget: new instances launched from the configuration
+  AtTarget --> ScalingIn: metric falls below the lower threshold
+  AtTarget --> ScalingIn: schedule says shrink
+  ScalingIn --> AtTarget: instances terminated
+  note right of AtTarget
+    no predictive trigger
+    the pool reacts, it does not anticipate
+  end note
+    </div>
+    <figcaption><a href="https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/autoscalinginstancepools.htm">Autoscaling</a> on OCI reacts to a measured value or to a clock, and both paths end in the same place. Pools of virtual machines and of bare metal shapes are both supported, including dense and GPU pools.
+    <b>Because there is no predictive trigger, a workload with a sharp known peak is served by the schedule rather than by the metric, and choosing the metric for it means arriving late every time.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart. Fifty scaling policies are allowed per instance configuration. An hourly schedule up and down uses forty-eight of them, leaving two for metric rules.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <line class="grid" x1="70" y1="60" x2="610" y2="60"/>
+      <rect class="m-stat"  x="140" y="60"  width="90" height="190"/>
+      <rect class="m-alarm" x="290" y="68"  width="90" height="182"/>
+      <rect class="m-prob"  x="440" y="242" width="90" height="8"/>
+      <text class="ttl" x="70" y="26">The policy budget, spent by an hourly schedule</text>
+      <text class="lbl-sm" x="185" y="52"  text-anchor="middle">50</text>
+      <text class="lbl-sm" x="335" y="60"  text-anchor="middle">48</text>
+      <text class="lbl-sm" x="485" y="234" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="185" y="270" text-anchor="middle">allowed per</text>
+      <text class="lbl-sm" x="185" y="286" text-anchor="middle">configuration</text>
+      <text class="lbl-sm" x="335" y="270" text-anchor="middle">used by hourly</text>
+      <text class="lbl-sm" x="335" y="286" text-anchor="middle">up and down</text>
+      <text class="lbl-sm" x="485" y="270" text-anchor="middle">left for</text>
+      <text class="lbl-sm" x="485" y="286" text-anchor="middle">metric rules</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>published limit</span><span><i class="sw-alarm"></i>derived usage</span><span><i class="sw-prob"></i>what remains</span></div>
+    <figcaption>The fifty-policy figure is Oracle's, per instance configuration. The middle bar is arithmetic: a schedule that grows the pool at the start of each hour and shrinks it at the end needs 24 &plus; 24 = 48 policies.
+    <b>Fifty sounds generous until a schedule is written at hourly resolution, at which point the budget is almost gone and the metric rules have nowhere to live.</b></figcaption>
+  </figure>
+
+  <h2>The trade-off: what the chain refuses</h2>
+
+  <div class="callout warn">
+  Preemptible instances cannot be used in instance configurations. Because an instance pool is built from a configuration, that single exclusion removes the entire pattern of a discounted, automatically replaced fleet. A design carried in from a cloud where reclaimable capacity sits inside a launch template and a scaling group has no direct translation here, and the honest options are to drop the discount, to drive the reclaimable instances from your own launcher without the pool, or to move the workload onto Kubernetes, whose node pools do support preemptible capacity.</div>
+
+  <p>The second refusal came from the previous page: a dedicated virtual machine host supports neither pools nor autoscaling. Between the two exclusions, the shape of an OCI fleet is decided by what the instance configuration will accept, and it is worth checking that before the design is drawn rather than after.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can a fleet of preemptible instances not be built with an instance pool?</div>
+      <button class="q-opt">A pool refuses instances that can be reclaimed</button>
+      <button class="q-opt">A pool needs a configuration, which excludes them</button>
+      <button class="q-opt">A pool needs a load balancer, which excludes them</button>
+      <button class="q-opt">A pool needs a metric, which they do not emit</button>
+      <div class="q-fb">The exclusion is written at the instance configuration, and a pool can only be built from a configuration - so the refusal happens one object earlier than most people look. The first option puts the rule on the wrong object, and the third and fourth invent requirements a pool does not have.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A workload has a sharp, well known daily peak at a fixed time. Which autoscaling trigger fits, and why?</div>
+      <button class="q-opt">Metric, because thresholds respond to real load</button>
+      <button class="q-opt">Predictive, because the peak repeats each day</button>
+      <button class="q-opt">Schedule, because there is no predictive trigger</button>
+      <button class="q-opt">Metric, because schedules cannot shrink a pool</button>
+      <div class="q-fb">OCI offers a metric trigger and a schedule trigger and nothing that anticipates, so a known peak is served by growing the pool before it arrives. The second option names a trigger that does not exist here. The first arrives late by definition, and the fourth adds a false limitation - a schedule shrinks a pool as readily as it grows one.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does an instance configuration actually store?</div>
+      <button class="q-opt">A whole launch: shape, image, metadata, networking</button>
+      <button class="q-opt">A running count of the instances in one pool</button>
+      <button class="q-opt">A disk snapshot taken from a chosen instance</button>
+      <button class="q-opt">A scaling rule bound to one measured threshold</button>
+      <div class="q-fb">It is a saved launch, which is why it is the object the exclusions attach to. The second describes the pool, the third describes a custom image, and the fourth describes an autoscaling policy - three other real objects in the same chain, each of which people name when they mean this one.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A media transcoder is being moved onto OCI. Today it runs sixty reclaimable workers that a scaling group replaces automatically, behind a load balancer, growing on queue depth and shrinking overnight. Cost is the reason the workers are reclaimable.</p>
+      <p><b>Rebuild it on OCI</b> in three ways, and say what each one gives up: one that keeps the pool, one that keeps the discount, and one that keeps both.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Start from the object that refuses, not from the requirement. Then ask, for each of the three answers, which link in the chain has been replaced by something else.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Name the refusal.</b> Preemptible instances cannot enter an instance configuration, and a pool is built from a configuration. So no single object gives a discounted, self-replacing pool.</li>
+        <li><b>Keep the pool.</b> Build the instance configuration with ordinary on-demand instances, put them in a pool, attach the load balancer, and drive the count from a metric on queue depth. Everything works and the discount is gone - this is the version that costs money.</li>
+        <li><b>Keep the discount.</b> Launch preemptible instances directly from your own controller, react to the two-minute preemption event yourself, and register instances with the load balancer as they come up. The discount survives and the platform's replacement behaviour does not - this is the version that costs engineering.</li>
+        <li><b>Keep both.</b> Move the workers onto a Kubernetes node pool, which does support preemptible capacity, and let the cluster handle replacement and draining. Both requirements survive and the cost is a new runtime to operate - which is the subject of the next module.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Each of the three answers should give up exactly one thing, and the third should be the only one that changes the runtime rather than the fleet. If any answer kept the discount inside an instance pool, the refusal in step one was not applied.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent to write the instance configuration for a fleet you actually run, then to try to make it preemptible. Reading the refusal at the object where it happens is worth more than reading it here, because that is where you will meet it again.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Compute/Tasks/autoscalinginstancepools.htm">Autoscaling</a> alongside the <a href="https://docs.oracle.com/en-us/iaas/Content/Compute/Concepts/instancemanagement.htm">instance management</a> concepts page. The first tells you what a pool will do and the second tells you what it may contain, and only the pair of them answers a real design question.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0201-placement-and-the-host.html"><span class="dir">&larr; Previous</span><span class="ttl">Placement, host tenancy and what maintenance does</span></a>
+    <a class="nxt" href="0203-capacity-you-give-back.html"><span class="dir">Next &rarr;</span><span class="ttl">Capacity you can be asked to give back</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 0202 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

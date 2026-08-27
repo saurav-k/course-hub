@@ -5,6 +5,103 @@
 window.COURSE_OUTLINE = {
   "key": "oci",
   "title": "Inside OCI",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "Regions, availability domains and fault domains",
+          "href": "lessons/0100-regions-availability-fault-domains.html"
+        },
+        {
+          "title": "Realms, subscriptions and where OCI runs",
+          "href": "lessons/0101-realms-and-where-oci-runs.html"
+        },
+        {
+          "title": "The tenancy, the compartment and the organization above them",
+          "href": "lessons/0102-tenancy-compartments-and-the-organization.html"
+        },
+        {
+          "title": "The platform map, and the names that mislead",
+          "href": "lessons/0103-the-platform-map.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The shape is a dial, and it moves more than you think",
+          "href": "lessons/0200-the-shape-is-a-dial.html"
+        },
+        {
+          "title": "Placement, host tenancy and what maintenance does",
+          "href": "lessons/0201-placement-and-the-host.html"
+        },
+        {
+          "title": "From one instance to a fleet",
+          "href": "lessons/0202-from-one-instance-to-a-fleet.html"
+        },
+        {
+          "title": "Capacity you can be asked to give back",
+          "href": "lessons/0203-capacity-you-give-back.html"
+        }
+      ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "OKE: the cluster kind you pick once",
+          "href": "lessons/0300-oke-the-cluster-kind.html"
+        },
+        {
+          "title": "Containers that live only as long as the work",
+          "href": "lessons/0301-containers-that-live-as-long-as-the-work.html"
+        },
+        {
+          "title": "Container Registry: where every runtime gets its image",
+          "href": "lessons/0302-ocir-where-the-image-comes-from.html"
+        },
+        {
+          "title": "Functions: the two timeouts that decide the design",
+          "href": "lessons/0303-functions-and-the-two-timeouts.html"
+        },
+        {
+          "title": "Where OCI sells a pattern instead of a runtime",
+          "href": "lessons/0304-a-pattern-instead-of-a-runtime.html"
+        }
+      ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "Four shapes of storage, and the choice a bucket cannot take back",
+          "href": "lessons/0400-four-shapes-of-storage.html"
+        },
+        {
+          "title": "Object Storage tiers and the auto-tiering rule",
+          "href": "lessons/0401-object-storage-tiers.html"
+        },
+        {
+          "title": "Block Volume: performance is bought by the gigabyte",
+          "href": "lessons/0402-block-volume-performance.html"
+        },
+        {
+          "title": "File Storage: the mount target is the thing with a location",
+          "href": "lessons/0403-file-storage-and-the-mount-target.html"
+        },
+        {
+          "title": "Moving bytes in, out and duplicated",
+          "href": "lessons/0404-moving-bytes-in-out-and-duplicated.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

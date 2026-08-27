@@ -27,8 +27,19 @@ In this order: [`MISSION.md`](MISSION.md), [`NOTES.md`](NOTES.md),
   `BUILDER-SPEC.md`.
 - **Everything here is evergreen.** No dates, countdowns or study schedules on any
   page; dates live only in `RESOURCES.md`.
+- **A lesson number names its module.** `lessons/MMxx-*.html`, `MM` from the module
+  table in [`PLOT.md`](PLOT.md), which is authoritative. The four-digit number is
+  carried unchanged into the eyebrow, the card `.ln` and the footer. `PLOT.md`
+  carries the reasoning.
 
 ## Out of scope here
 
 Cross-cloud comparison - [Comparing the Four Clouds](../cloud-comparison-course/index.html)
 owns it. `MISSION.md` owns the full list and the reasons.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

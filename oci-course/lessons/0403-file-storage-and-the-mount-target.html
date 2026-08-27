@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>File Storage: the mount target is the thing with a location - Inside OCI</title>
+<meta name="description" content="An OCI file system spreads its data across availability domains while its mount target sits in one subnet, so reachability and durability are two different boundaries on the same service.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0403</div>
+  <h1>The file system and the way in are two objects with two different boundaries</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Capability area <code>storage</code>, matrix row <code>file-storage</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>File Storage serves <b>NFS version 3 and version 4</b>, fully managed, with snapshots, clones and cross-region replication.</li>
+      <li>The service is three objects, not one: the <b>file system</b> holding the data, the <b>mount target</b> that gives it an address in a subnet, and the <b>export</b> that joins them.</li>
+      <li>Their boundaries differ. The data is spread across <b>availability domains within the region</b>; the mount target lives in <b>one subnet</b>.</li>
+      <li>Capacity is not provisioned. The file system <b>grows and shrinks with what is stored</b>, so there is no size to get wrong.</li>
+      <li>Its encryption keys are now reached through <b>resource principals</b>, replacing an older service-principal policy - a live example of why the service change log is worth reading.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Object and block storage&lt;br/&gt;the two previous pages"] --> T["THIS PAGE&lt;br/&gt;the shared file system&lt;br/&gt;and the way into it"]
+  T --> D["Copies, backups and&lt;br/&gt;moving bytes in"]
+  T --> N["Subnets and routing&lt;br/&gt;module 07"]
+  W["Storage&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. Object Storage is reached by an endpoint and a block volume is reached by being attached. File Storage is the shape whose reachability is a separate object you create, which is why it is the shape most entangled with the network module.
+    <b>A file system that cannot be mounted is not a storage problem, and knowing which of the three objects is at fault is most of the diagnosis.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: three objects</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  FS["FILE SYSTEM&lt;br/&gt;the data&lt;br/&gt;spread across availability&lt;br/&gt;domains in the region"] --- EX["EXPORT&lt;br/&gt;the path, and who&lt;br/&gt;may reach it"]
+  EX --- MT["MOUNT TARGET&lt;br/&gt;an address in one subnet&lt;br/&gt;that clients mount"]
+  MT --- C1["Client in that network"]
+  MT --- C2["Another client"]
+    </div>
+    <figcaption>The data, the address and the join between them are three separate resources. The export carries the path a client mounts and the rules about which addresses may do so, and it is the object that lets one mount target serve several file systems.
+    <b>Two of the three have a location and one does not, so the question "where is this file system" has two different correct answers depending on which one you meant.</b></figcaption>
+  </figure>
+
+  <p><a href="https://docs.oracle.com/en-us/iaas/Content/File/home.htm">File Storage</a> is fully managed on both sides of that split. Capacity is elastic rather than provisioned, growing and shrinking with what is actually stored, so there is no volume size to size wrongly and no resize to schedule.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Durability and reachability are <b>different boundaries on the same service</b>. The data spans availability domains inside the region; the mount target is an address in one subnet. A resilience conversation about File Storage that only discusses the data has answered half the question.</div>
+
+  <h2>The mechanism: what a client actually does</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as A client instance
+  participant M as The mount target in a subnet
+  participant E as The export
+  participant F as The file system
+  C->>M: mount the exported path over NFS
+  M->>E: check the export rules for this source address
+  E->>F: read and write against the data
+  F-->>C: the mounted file system
+  Note over C,M: the client needs a network path to the mount target
+    </div>
+    <figcaption>Every mount goes through the target's address, so ordinary network reachability - route tables, security rules, the right subnet - decides whether a client can mount at all. The export rules then decide what that client may do once it arrives.
+    <b>Two independent gates sit between a machine and its files, one in the network and one in the export, and a failed mount is almost always the first of them.</b></figcaption>
+  </figure>
+
+  <h2>What the service gives you for free, and what it does not</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  F["A file system"] --> S["Snapshots&lt;br/&gt;a point in time, kept in place"]
+  F --> CL["Clones&lt;br/&gt;a new file system from a snapshot"]
+  F --> R["Cross-region replication&lt;br/&gt;a copy in another region"]
+  F --> B["Backups&lt;br/&gt;and membership of a&lt;br/&gt;disaster recovery plan"]
+  F --> L["Access logs&lt;br/&gt;OFF until enabled"]
+    </div>
+    <figcaption>Four of these are protections and the fifth is visibility. Snapshots and clones are local and cheap to take, replication puts a copy in another region, and the file system can be a member of an orchestrated recovery plan - which module 14 works properly.
+    <b>The last box follows the platform's habit: file access logging exists and is off, so a file system with no log entries was never asked for any.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  The encryption-key path for File Storage changed: keys are now reached through resource principals, and the older service-principal policy is recorded as deprecated on Oracle's <a href="https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm">service change announcements</a> page. An estate whose policies were written against the old shape still works today and is running on a deprecated mechanism, which is exactly the situation the change log exists to surface.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A client cannot mount a file system. Which object should be checked first?</div>
+      <button class="q-opt">The file system, whose data may not be ready</button>
+      <button class="q-opt">The snapshot schedule, which may hold a lock</button>
+      <button class="q-opt">The clone, which may be using the same path</button>
+      <button class="q-opt">The network path to the mount target address</button>
+      <div class="q-fb">The mount goes to an address in a subnet, so reachability is the first gate and the export rules are the second. The first option names the object with no location at all, and the second and third invent interactions between features that do not block a mount.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How much capacity does an OCI file system have to be created with?</div>
+      <button class="q-opt">A provisioned size, chosen when it is created</button>
+      <button class="q-opt">None, since it grows and shrinks with the data</button>
+      <button class="q-opt">A minimum size, raised by a support request</button>
+      <button class="q-opt">A size band, chosen from a fixed set of tiers</button>
+      <div class="q-fb">Capacity is elastic, so there is no size to pick and none to get wrong. The first describes a block volume, the third invents a support path, and the fourth borrows the ladder idea from the function memory settings - three plausible models, none of which this service uses.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which statement matches how File Storage spreads risk?</div>
+      <button class="q-opt">Data and mount target both sit in one subnet</button>
+      <button class="q-opt">Data and mount target both span the whole region</button>
+      <button class="q-opt">Data spans availability domains, the target does not</button>
+      <button class="q-opt">Data sits in one domain, the target spans the region</button>
+      <div class="q-fb">The data is spread across availability domains within the region while the mount target is an address in one subnet, so the two boundaries genuinely differ. The first and second collapse them together in opposite directions, and the fourth reverses them - which would make the mount the resilient half and the data the fragile one.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A shared build cache lives on File Storage. Sixty build agents mount it, spread across three availability domains for resilience. A review asks: "if we lose an availability domain, what happens to the builds?"</p>
+      <p><b>Answer it properly</b>: separate what happens to the data from what happens to the mount, say which of the two the current design has actually planned for, and name the vendor page that settles the remaining question.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Answer for each of the three objects in turn rather than for the service as a whole. Two of the three have a location, and only one of those is in the failing availability domain.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Take the data.</b> The file system's data is spread across availability domains within the region, so losing one availability domain is not the same event as losing the data. That half of the question has a reassuring answer and it is the half people ask about.</li>
+        <li><b>Take the agents.</b> They are spread across three availability domains, so losing one removes roughly a third of the fleet. That is the part the current design has explicitly planned for, and it is working.</li>
+        <li><b>Take the mount target.</b> It is an address in one subnet. If that subnet's availability domain is the one lost, every surviving agent in the other two loses its path to the file system - the data is intact and nobody can reach it. Nothing in the described design addresses this.</li>
+        <li><b>Name what settles it.</b> How many mount targets a file system may have, and how a client is pointed at a second one, is a vendor question rather than an architectural one. The <a href="https://docs.oracle.com/en-us/iaas/Content/File/home.htm">File Storage documentation</a> is the authority, and the review should be answered from it rather than from an assumption in either direction.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The answer should identify the mount target as the exposure, not the data and not the agents. If it concluded that the builds are safe because the data spans availability domains, the object with a location was never separated from the object without one.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent to draw one file system, its mount target and its export as three separate resources with their compartments and subnets. Any diagram that draws them as one box has already lost the distinction this page is about.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://docs.oracle.com/en-us/iaas/Content/File/home.htm">File Storage</a> documentation home and follow it into the mount target and export pages specifically. Those two are where the reachability half of the service lives, and they are the half a storage-shaped reading of the service skips.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0402-block-volume-performance.html"><span class="dir">&larr; Previous</span><span class="ttl">Block Volume: performance is bought by the gigabyte</span></a>
+    <a class="nxt" href="0404-moving-bytes-in-out-and-duplicated.html"><span class="dir">Next &rarr;</span><span class="ttl">Moving bytes in, out and duplicated</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 0403 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
