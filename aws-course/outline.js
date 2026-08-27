@@ -313,6 +313,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1204-workflows-and-api-surfaces.html"
         }
       ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "The model API",
+          "href": "lessons/1300-the-model-api.html"
+        },
+        {
+          "title": "Retrieval, and where vectors live",
+          "href": "lessons/1301-retrieval-and-where-vectors-live.html"
+        },
+        {
+          "title": "Agents, and the platform underneath",
+          "href": "lessons/1302-agents-and-the-platform-underneath.html"
+        },
+        {
+          "title": "Training, and the ready-made",
+          "href": "lessons/1303-training-and-the-ready-made.html"
+        }
+      ]
     }
   ],
   "extras": []

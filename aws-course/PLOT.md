@@ -113,6 +113,14 @@ is wrong and it gets fixed before anything new is added.
 | 1203 | Queues, topics and buses | working |
 | 1204 | Workflows and API surfaces | working |
 
+### Module 13 - AI and ML
+
+| Lesson | Title | Rung |
+| 1300 | The model API | working |
+| 1301 | Retrieval, and where vectors live | working |
+| 1302 | Agents, and the platform underneath | working |
+| 1303 | Training, and the ready-made | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -151,7 +159,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 13 and 14 above**, none started. New numbers go at the end of the
+- **Module 14 above**, not started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
