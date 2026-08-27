@@ -157,7 +157,7 @@ claims, so **NO EQUIVALENT is reserved for `absent`** and a cell must never impl
 something it demonstrably can. Which gaps are which is a list the research directory holds, not
 something to read out of the prose - the wording does not separate them.
 
-Nine traps in that design system, all found on the published site:
+Ten traps in that design system, all found on the published site:
 
 - **Theme tokens are declared four times** (`:root`, the `prefers-color-scheme: dark` block, and
   the two explicit-choice selectors, because the toggle must beat the OS). A token added to
@@ -217,6 +217,13 @@ Nine traps in that design system, all found on the published site:
   `.chart :where(.ref)`, held at zero specificity so an `s-*` pairing still wins the colour. Before
   you add a chart class, check whether it sets a paint property or only modifies one, and **look at
   the figure** rather than trusting that the markup is present.
+- **A hand-authored chart's text is not clipped, it just leaves the box.** `svg.chart` scales its
+  `viewBox` to the column, and SVG text neither wraps nor is bounded by the viewBox, so a caption
+  or axis note longer than the width simply runs off the right-hand edge - visible on screen and
+  invisible to every check in the repository, because the element is present and `getBBox` is
+  happy. At the `640` width these charts use, a `.lbl-sm` line runs out of room somewhere past
+  about ninety characters. Keep footnotes short or split them across two `<text>` elements, and
+  check the widest line in the rendered figure rather than in the source.
 
 Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
 tolerate Mermaid's async draw. `hub.js` drives the render itself and awaits `mermaid.run()`, so it
