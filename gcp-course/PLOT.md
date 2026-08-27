@@ -50,6 +50,16 @@ renumbered.
 | 0403 | Shared filesystems | `file-storage` |
 | 0404 | Where the storage menu stops | `hybrid-storage-gateway`, `object-storage-tables`, `bulk-transfer-appliance`, `online-transfer` |
 
+**Module 05 - Databases**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0500 | The managed relational tier | `relational-managed`, `relational-serverless` |
+| 0501 | Spanner, and the rows it quietly fills | `globally-distributed-sql`, `graph-database`, `ledger` |
+| 0502 | Bigtable and Firestore | `nosql-keyvalue`, `nosql-document`, `timeseries-database` |
+| 0503 | Memorystore and the cache tier | `in-memory-cache` |
+| 0504 | Moving a database in | `db-migration-service`, `change-data-capture`, `database-fleet-management` |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -84,7 +94,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 05 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 06 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.

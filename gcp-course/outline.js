@@ -101,6 +101,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0404-where-the-storage-menu-stops.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "The managed relational tier",
+          "href": "lessons/0500-managed-relational.html"
+        },
+        {
+          "title": "Spanner, and the rows it quietly fills",
+          "href": "lessons/0501-spanner.html"
+        },
+        {
+          "title": "Bigtable and Firestore",
+          "href": "lessons/0502-bigtable-and-firestore.html"
+        },
+        {
+          "title": "Memorystore and the cache tier",
+          "href": "lessons/0503-memorystore.html"
+        },
+        {
+          "title": "Moving a database in",
+          "href": "lessons/0504-moving-a-database-in.html"
+        }
+      ]
     }
   ],
   "extras": []

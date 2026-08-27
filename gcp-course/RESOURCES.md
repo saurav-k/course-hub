@@ -21,7 +21,7 @@ The course records what it rests on with the date it was read, so a refresh chas
 only what changed:
 
 - **Verified per-cloud inventory for Google Cloud: complete, snapshot 2026-08-26.**
-  It is the sole factual input to modules 01 to 04: a service inventory, a deep-dive
+  It is the sole factual input to every module written so far: a service inventory, a deep-dive
   report and a reference set, produced by original research and then carried through a
   first independent audit, a second audit on a different model, a corrections pass, a
   reconciliation and a repair pass. Every claim in it traces to a vendor page fetched on
@@ -32,7 +32,7 @@ only what changed:
 - Where the inventory itself flagged a statement as unverified, the lesson says so in a
   warning callout instead of repeating it. Those flags are listed under `## Gaps` below.
 
-## Pages the first four modules rest on
+## Pages the written modules rest on
 
 All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
 
@@ -85,6 +85,17 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [Parallelstore](https://cloud.google.com/parallelstore/docs/overview),
   [Storage Transfer Service](https://cloud.google.com/storage-transfer/docs/overview),
   [Transfer Appliance](https://cloud.google.com/transfer-appliance/docs/4.0/overview).
+- **Module 05.** [Cloud SQL](https://cloud.google.com/sql/docs/introduction),
+  [AlloyDB](https://cloud.google.com/alloydb/docs/overview),
+  [Spanner](https://cloud.google.com/spanner/docs/overview),
+  [Spanner Graph](https://cloud.google.com/spanner/docs/graph),
+  [Bigtable](https://cloud.google.com/bigtable/docs/overview),
+  [Firestore](https://cloud.google.com/firestore/docs),
+  [Memorystore for Redis](https://cloud.google.com/memorystore/docs/redis/redis-overview),
+  [Memorystore for Valkey](https://cloud.google.com/memorystore/docs/valkey),
+  [Database Migration Service](https://cloud.google.com/database-migration/docs),
+  [Datastream](https://cloud.google.com/datastream/docs/overview),
+  [Database Center](https://cloud.google.com/database-center/docs/overview).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -109,3 +120,8 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
 - **Compute and runtime telemetry rows.** The inventory carries an explicit caution that
   its App Engine request-log behaviour and legacy storage-log rows were never verified.
   Nothing in modules 01 to 04 rests on them; a future module 10 must re-check before use.
+- **AlloyDB elastic scaling and read-pool autoscaling.** The inventory records the
+  Autopilot-style Slices feature with an instruction to confirm its stage, and records
+  read-pool autoscaling as preview. Named in lesson 0500; neither is stated as settled.
+- **Database Center stage.** Recorded as preview with an explicit instruction to verify
+  the stage before teaching it. Named in lesson 0504.
