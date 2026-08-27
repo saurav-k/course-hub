@@ -59,6 +59,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0503 | When one relational database is the wrong shape |
 | 0504 | Getting data in, keeping it in sync, and seeing the fleet |
 
+**Module 06 - Analytics**
+
+| Lesson | Title |
+| 0600 | The lakehouse is a workload type, not a separate product |
+| 0601 | Two Kafka products, and the line between them |
+| 0602 | Two ways to run Spark, and where stream analytics lives |
+| 0603 | The managed pipeline layer, and what it orchestrates |
+| 0604 | Reading the answers back, and the two kinds of dashboard |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

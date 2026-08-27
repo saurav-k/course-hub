@@ -127,6 +127,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0504-getting-data-in-and-keeping-it-in-sync.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "The lakehouse is a workload type, not a separate product",
+          "href": "lessons/0600-the-lakehouse-is-a-workload-type.html"
+        },
+        {
+          "title": "Two Kafka products, and the line between them",
+          "href": "lessons/0601-two-kafka-products.html"
+        },
+        {
+          "title": "Two ways to run Spark, and where stream analytics lives",
+          "href": "lessons/0602-two-ways-to-run-spark.html"
+        },
+        {
+          "title": "The managed pipeline layer, and what it orchestrates",
+          "href": "lessons/0603-the-managed-pipeline-layer.html"
+        },
+        {
+          "title": "Reading the answers back, and the two kinds of dashboard",
+          "href": "lessons/0604-reading-the-answers-back.html"
+        }
+      ]
     }
   ],
   "extras": []

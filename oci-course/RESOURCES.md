@@ -114,6 +114,21 @@ from and the date it was read.
 - [Database Management](https://docs.oracle.com/en-us/iaas/database-management/home.htm) - the fleet console covering Autonomous, Base, Exadata and external databases through a management agent.
 - [Service Change Announcements](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) - the end of life of the Classic GoldenGate Cloud Service, which shares a name with the current one.
 
+### Module 06 - Analytics
+
+- [Autonomous AI Database billing summary](https://docs.oracle.com/en-us/iaas/autonomous-database-serverless/doc/autonomous-database-billing-overview.html) - the Lakehouse workload type, and external tables querying Object Storage in place.
+- [Data platform lakehouse reference architecture](https://docs.oracle.com/en/solutions/data-platform-lakehouse/index.html) - open table formats on Object Storage read by the Autonomous Lakehouse, by Data Flow Spark, or by external engines.
+- [Data Catalog](https://docs.oracle.com/en-us/iaas/Content/data-catalog/home.htm) - technical, business and operational metadata, and the Hive metastore interface Spark engines use.
+- [Streaming](https://docs.oracle.com/en-us/iaas/Content/Streaming/Concepts/streamingoverview.htm) - the serverless Kafka-compatible event log, partitions, the seven-day replay window and IAM-authenticated Kafka access.
+- [Streaming with Apache Kafka](https://docs.oracle.com/en-us/iaas/Content/kafka/overview.htm) - managed Kafka clusters, full Kafka API compatibility, no partition ceiling, the availability commitment, and the comparison table between the two services.
+- [Data Flow](https://www.oracle.com/big-data/data-flow/) - serverless Spark and Spark Streaming, per-second execution billing, the acceleration option, and Data Catalog as its metastore. Vendor product page rather than documentation.
+- [Big Data Service](https://docs.oracle.com/en-us/iaas/Content/bigdata/home.htm) - persistent Hadoop, Spark, Trino and Flink clusters with Kerberos security and autoscaling.
+- [Data Integration](https://docs.oracle.com/en-us/iaas/Content/data-integration/home.htm) - the serverless visual designer, schema drift protection, pushdown into Oracle targets, and the Data Flow, Data Science and Container Instance task types.
+- [Oracle Integration 3](https://docs.oracle.com/en-us/iaas/application-integration/) - the process automation substitute named where a general workflow orchestrator is expected.
+- [Search with OpenSearch](https://docs.oracle.com/en-us/iaas/Content/search-opensearch/home.htm) - managed OpenSearch clusters, OpenSearch Dashboards, vector search, searchable snapshots and alerting into Notifications.
+- [Oracle Analytics Cloud](https://docs.oracle.com/en/cloud/paas/analytics-cloud/index.html) - semantic models, dashboards, self-service visualisation and natural-language questions, connected natively to the Autonomous Lakehouse.
+- [Dashboards service](https://docs.oracle.com/en-us/iaas/Content/Dashboards/home.htm) - console-native widgets for metrics, logs and custom HTML, recorded as distinct from the business intelligence product.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover
