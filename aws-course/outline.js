@@ -335,6 +335,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1303-training-and-the-ready-made.html"
         }
       ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Backup is not disaster recovery",
+          "href": "lessons/1400-backup-is-not-disaster-recovery.html"
+        },
+        {
+          "title": "The four strategies",
+          "href": "lessons/1401-the-four-strategies.html"
+        },
+        {
+          "title": "Replicating and failing over",
+          "href": "lessons/1402-replicating-and-failing-over.html"
+        },
+        {
+          "title": "Proving it",
+          "href": "lessons/1403-proving-it.html"
+        },
+        {
+          "title": "Moving in",
+          "href": "lessons/1404-moving-in.html"
+        }
+      ]
     }
   ],
   "extras": []

@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replicating and failing over - Inside AWS</title>
+<meta name="description" content="Continuous block replication into a cheap staging area is what makes a recovery point measured in seconds affordable, and what makes a failover drill something you can run without disturbing production.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 14 &middot; Resilience and migration &middot; Lesson 1402</div>
+  <h1>Replicate into a cheap staging area, and the drill stops being frightening</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>dr-orchestration</code>.
+    &middot; <a href="https://docs.aws.amazon.com/drs/latest/userguide/what-is-drs.html">AWS Elastic Disaster Recovery</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An <b>agent on each source server</b> replicates blocks continuously into a <b>low-cost staging subnet</b> - storage and minimal compute, not running copies of your machines.</li>
+      <li>That is what makes the economics work: a recovery point measured in <b>seconds</b> without paying for a second running fleet.</li>
+      <li>The replicated state is <b>crash consistent</b>, and recovery instances are launched from it on demand, giving a recovery time measured in <b>minutes</b>.</li>
+      <li>Because launching is a separate step from replicating, a <b>drill is non-disruptive</b>: it creates instances without interrupting replication or touching production.</li>
+      <li>What it costs: there is <b>no agentless path for disaster recovery</b>. Agentless replication belongs to the migration service, and only for VMware sources.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1401&lt;br/&gt;a strategy chosen from&lt;br/&gt;two accepted numbers"] --> T["THIS PAGE&lt;br/&gt;replicating whole machines,&lt;br/&gt;and rehearsing the switch"]
+  T --> A["Proving the claim&lt;br/&gt;lesson 1403"]
+  T --> B["Moving workloads in&lt;br/&gt;lesson 1404"]
+  W["Module 14&lt;br/&gt;resilience and migration"] -.- T
+    </div>
+    <figcaption>Where this sits. The strategies of the previous page assumed something was replicating. This page is the service that replicates a whole server rather than a single data store, which is what an estate with instances rather than managed services actually needs.
+    <b>Its most valuable property is not the replication - it is that a rehearsal costs almost nothing and disturbs nothing.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: replication and launching are separate</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  S["Source servers&lt;br/&gt;on-premises or in another Region"] --> A["A replication agent on each one"]
+  A --> ST["A staging subnet&lt;br/&gt;low-cost storage and minimal compute"]
+  ST --> P["Point-in-time state, crash consistent"]
+  P --> L["Launch templates"]
+  L --> D["A drill - instances launched for a test"]
+  L --> R["A real recovery - instances launched for production"]
+    </div>
+    <figcaption>Two halves that are deliberately independent. Replication runs continuously and cheaply; launching happens only when asked. That separation is what lets the same mechanism serve a rehearsal and a real disaster without any change of configuration.
+    <b>The staging area is not a standby environment - it holds the data, not running copies of your machines, which is why it costs a fraction of a warm standby.</b></figcaption>
+  </figure>
+
+  <h2>2. Three operations that use the same replication</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as Source servers
+  participant R as Replication into staging
+  participant D as A drill environment
+  participant P as Production in the recovery Region
+  S->>R: continuous block replication
+  R->>D: launch a drill - replication continues untouched
+  D-->>D: validate, then discard the drill instances
+  R->>P: a real event - launch recovery instances
+  P-->>S: failback - replicate the changes back when the source returns
+    </div>
+    <figcaption>The same replication stream serving a rehearsal, a recovery and a return. A drill leaves replication running, which is what makes "test the failover" an operation somebody is willing to run on a Tuesday afternoon rather than a project.
+    <b>Failback matters as much as failover: a recovery you cannot come back from is a migration you did not plan.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Replicating - healthy and current" as R
+  state "Drill instances running beside it" as D
+  state "Recovery instances serving production" as F
+  state "Replicating back towards the source" as B
+  [*] --> R
+  R --> D: run a drill
+  D --> R: discard the drill
+  R --> F: a real recovery
+  F --> B: the source Region returns
+  B --> R: cut back, and resume normal replication
+    </div>
+    <figcaption>The states a protected server moves through. Note that the drill returns to the same state it left, while a real recovery goes on to a failback loop - the two paths differ in where they end rather than in how they start.
+    <b>A team that has run the left-hand loop repeatedly is the one that finds the right-hand path uneventful.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  <b>There is no agentless disaster-recovery path.</b> The agent is required on each source server. Agentless replication exists only in the migration service, and only for VMware sources - so a fleet that cannot take an agent needs a different plan rather than a different setting (<a href="https://docs.aws.amazon.com/drs/latest/userguide/what-is-drs.html">Elastic Disaster Recovery</a>).</div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  The reason this service exists is <b>the cost of the waiting state</b>. Warm standby pays for running machines you hope never to use; continuous replication into staging pays for storage instead, and buys the running machines only at the moment of the disaster. That is why it can sit between pilot light and warm standby on the previous page's curve.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is a failover drill described as non-disruptive?</div>
+      <button class="q-opt">Launching instances is separate from replicating</button>
+      <button class="q-opt">The drill runs against yesterday's point in time</button>
+      <button class="q-opt">Replication pauses while the drill is running</button>
+      <button class="q-opt">Drill instances are created without any network</button>
+      <div class="q-fb">Replication and launching are independent, so a drill creates instances while replication continues untouched. Pausing replication would be disruptive by definition, the drill uses current state, and drill instances are launched into a real environment rather than into none.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What sits in the staging subnet between replications?</div>
+      <button class="q-opt">Running copies of every protected source server</button>
+      <button class="q-opt">Nothing - the data is held in the source Region</button>
+      <button class="q-opt">Low-cost storage and minimal compute, no fleet</button>
+      <button class="q-opt">A scaled-down copy of the production environment</button>
+      <div class="q-fb">The staging area holds the replicated data on low-cost storage with minimal compute, which is why it is far cheaper than a standby. Running copies and a scaled-down environment are the warm standby strategy, and the data is deliberately not left in the source Region.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A fleet of servers cannot accept a replication agent. What follows for disaster recovery?</div>
+      <button class="q-opt">Use the agentless mode of the recovery service</button>
+      <button class="q-opt">A different plan is needed - there is no agentless path</button>
+      <button class="q-opt">Enable agentless replication for VMware sources only</button>
+      <button class="q-opt">Replicate at the storage layer instead of per server</button>
+      <div class="q-fb">The recovery service has no agentless mode, so the plan has to change rather than a setting. Agentless replication belongs to the migration service and only for VMware sources, and there is no per-server storage-layer substitute offered here.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A manufacturer runs sixty virtual machines in one Region: application servers, a licence server, and four appliances supplied by a vendor who forbids installing software on them. The business will accept losing a few minutes of data and being down for under an hour. Nobody has ever tested a failover because the last attempt required a maintenance window.</p>
+      <p><b>Design the recovery</b>, say what happens to the four appliances, and explain what changes about testing.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Check the two accepted numbers against what continuous replication provides. Then deal separately with the machines that cannot take an agent, because no setting will help them.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Check the numbers.</b> A few minutes of data loss and under an hour of downtime match continuous block replication comfortably: recovery point in seconds and recovery time in minutes, with room to spare for the launch and validation.</li>
+        <li><b>Protect the fifty-six servers that can take an agent.</b> Install the replication agent, replicate into a staging subnet in the recovery Region, and prepare launch templates so the recovery instances land in the right subnets with the right security groups.</li>
+        <li><b>Deal with the four appliances honestly.</b> There is no agentless recovery path, so they cannot be protected this way. The options are to ask the vendor for a supported replication method, to rebuild them from the vendor's own installation media as part of the recovery procedure, or to accept that they are recovered more slowly and to say so in the plan.</li>
+        <li><b>Check the appliances against the objective.</b> If rebuilding an appliance takes two hours, the service's recovery time is two hours regardless of the fifty-six servers - the slowest component rule from the previous lesson. That has to be resolved or the objective renegotiated.</li>
+        <li><b>Say what changes about testing.</b> A drill launches recovery instances while replication continues, so no maintenance window is needed and production is untouched. Testing moves from a project to a routine, which is the change that makes the plan believable.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Fifty-six servers should be covered by replication and four should be a named exception with a stated cost, and your testing answer should not contain the phrase maintenance window. If the appliances were quietly left out, the objective is not met.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1403-proving-it.html">Proving it</a></b> turns a drill into a deliberate experiment with a stop condition.</li>
+    <li>Lesson 1401 covered <a href="1401-the-four-strategies.html">the cost curve</a> this service sits on.</li>
+    <li>Lesson 0201 covered <a href="0201-the-image-and-the-template.html">the launch templates</a> that recovery instances are created from.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the drill still sounds risky, ask an agent to write out exactly which production resources a drill launch touches, and check the list against replication.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/drs/latest/userguide/what-is-drs.html">What is Elastic Disaster Recovery</a> sets out the staging-area model and the drill and failback operations, which together explain why this approach costs so much less than a standby environment.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1401-the-four-strategies.html"><span class="dir">&larr; Previous</span><span class="ttl">The four strategies</span></a>
+    <a class="nxt" href="1403-proving-it.html"><span class="dir">Next &rarr;</span><span class="ttl">Proving it</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1402 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

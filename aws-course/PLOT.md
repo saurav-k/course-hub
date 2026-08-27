@@ -121,7 +121,19 @@ is wrong and it gets fixed before anything new is added.
 | 1302 | Agents, and the platform underneath | working |
 | 1303 | Training, and the ready-made | working |
 
-## Planned, in order
+### Module 14 - Resilience and migration
+
+| Lesson | Title | Rung |
+| 1400 | Backup is not disaster recovery | working |
+| 1401 | The four strategies | working |
+| 1402 | Replicating and failing over | working |
+| 1403 | Proving it | working |
+| 1404 | Moving in | working |
+
+## The plan, now complete
+
+All fourteen modules are written. The plan below stays here because it is the
+argument for the order, and any future module joins the end of it.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -159,9 +171,9 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Module 14 above**, not started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
-- **Reference: glossary of AWS terms**, linked from every lesson foot once the
-  first lessons exist. Not written yet.
+- **Reference: glossary of AWS terms**, linked from every lesson foot. Not written
+  yet. It is the one planned page the fourteen modules do not cover.
+- Any further module takes the next number at the end of the sequence; nothing
+  already published is renumbered or renamed.
 
 No module opens for writing until its topics are covered by verified research.
