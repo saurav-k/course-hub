@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The virtual machine - Inside Azure</title>
+<meta name="description" content="An Azure virtual machine is a small assembly of separate resources. Read the size name, know what a network interface owns, and sign in without putting a public address on the machine.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Compute &middot; Lesson 0200</div>
+  <h1>An Azure virtual machine is an assembly, and the interesting parts are the resources bolted to it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Capability area <code>compute-iaas</code>, rows <code>vm-instances</code> and <code>gpu-compute</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/virtual-machines/">Azure Virtual Machines</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The machine resource itself is thin. The <b>network interface, the disks and the image</b> are separate resources with their own lifetimes, and most of the design lives in them.</li>
+      <li>A size is a name from a catalogue, and the <b>family letter carries the ratio</b>: B for burstable, D for general, E for memory, F for compute, L for storage.</li>
+      <li>The <b>network interface is the debugging unit</b>. It owns the addresses, the security-group attachment and the accelerated-networking switch, and it is where the effective-rules view is rendered.</li>
+      <li>Graphics and accelerator work is the <b>N-series</b>, and it is usually consumed through a higher service rather than as a standalone machine.</li>
+      <li>You should not need a public address to sign in. <b>Bastion</b> brokers the session and <b>Entra login</b> authorises the operating-system sign-in itself.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The platform map&lt;br/&gt;module 01"] --> T["THIS PAGE&lt;br/&gt;one virtual machine&lt;br/&gt;and what bolts onto it"]
+  T --> A["Who else is on the host&lt;br/&gt;lesson 0201"]
+  T --> B["The image it boots&lt;br/&gt;lesson 0202"]
+  T --> C["Many of them at once&lt;br/&gt;lesson 0203"]
+  W["Module 02&lt;br/&gt;compute"] -.- T
+    </div>
+    <figcaption>Where this sits. This is the atom of the compute module: the next three pages are about the host underneath it, the image behind it and the fleet made of it.
+    <b>Learn the assembly once and the later pages are only questions about which part you are varying.</b></figcaption>
+  </figure>
+
+  <h2>The assembly</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  IMG["Image&lt;br/&gt;what it boots from"] --> VM
+  SIZE["Size&lt;br/&gt;a name from the catalogue"] --> VM
+  VM["Virtual machine&lt;br/&gt;the resource you create"]
+  VM --> NIC["Network interface&lt;br/&gt;addresses, security group,&lt;br/&gt;accelerated networking"]
+  VM --> OSD["OS disk&lt;br/&gt;a managed disk resource"]
+  VM --> DAT["Data disks&lt;br/&gt;managed disk resources"]
+  VM --> MI["Managed identity&lt;br/&gt;how it calls other services"]
+  NIC --> SUB["Subnet in a virtual network&lt;br/&gt;same region as the machine"]
+    </div>
+    <figcaption>Six things, five of which outlive a resize and three of which can outlive the machine entirely. The <a href="https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-network-interface">network interface</a> and the <a href="https://learn.microsoft.com/en-us/azure/virtual-machines/disks-types">managed disks</a> are first-class resources, not properties.
+    <b>Nothing here is a single object you can move: a machine is pinned to its region and its virtual network by the interface, and to its data by the disks.</b></figcaption>
+  </figure>
+
+  <h2>Reading a size name</h2>
+
+  <table>
+    <thead><tr><th>Family letter</th><th>What the ratio is tuned for</th></tr></thead>
+    <tbody>
+      <tr><td>B</td><td>Burstable: cheap baseline with credit-driven bursts</td></tr>
+      <tr><td>D</td><td>General purpose: the default balance</td></tr>
+      <tr><td>E</td><td>Memory optimised</td></tr>
+      <tr><td>F</td><td>Compute optimised</td></tr>
+      <tr><td>L</td><td>Storage optimised</td></tr>
+      <tr><td>N</td><td><a href="https://learn.microsoft.com/en-us/azure/virtual-machines/sizes-gpu">GPU</a>: NC for accelerated compute, ND for multi-GPU training, NV for visualisation</td></tr>
+    </tbody>
+  </table>
+
+  <p>Alongside the family letter a size carries a generation, which is why the catalogue is full of names such as <code>Dav5</code> and <code>Ev5</code>. The <a href="https://learn.microsoft.com/en-us/azure/virtual-machines/">Virtual Machines documentation</a> is the live authority for what every letter in a size name means, and it is worth reading rather than guessing, because the suffix letters encode processor vendor and feature options that change between generations.</p>
+
+  <div class="callout warn">
+  A size existing in a region does not mean it can be placed anywhere in that region. <b>Some sizes are zonal-only in newer regions</b>, so a design that pins machines to zones can meet a size that is available in the region and not in the zone you wanted. Check the size against the zone, not only against the region, before committing a placement.</div>
+
+  <h2>The interface is where the network truth lives</h2>
+
+  <p>Every machine attaches through one or more network interfaces, and the interface is the object that carries the interesting switches. It owns the IP configurations, including any public address association. It is one of the two places a <a href="https://learn.microsoft.com/en-us/azure/virtual-network/network-security-group-how-it-works">network security group</a> can attach - the other being the subnet, and both can apply at once. It carries the accelerated-networking switch, which offloads the datapath through single-root input-output virtualisation, and the IP-forwarding flag that lets the machine act as a network appliance.</p>
+
+  <p>It is also the debugging unit. The effective security rules view renders per interface, which is why a "why can we not reach this machine" session starts at the interface rather than at the machine.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  When both a subnet security group and an interface security group exist, <b>both must allow the traffic</b>. Inbound is evaluated subnet first then interface, and outbound is evaluated interface first then subnet. Microsoft's own advice is to pick one layer, and the reason is exactly this: two layers double the places an answer can hide.</div>
+
+  <h2>Getting in without a public address</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Operator
+  participant B as Azure Bastion
+  participant E as Microsoft Entra ID
+  participant V as The virtual machine
+  U->>B: open a session from the browser or a native client
+  B->>V: SSH or RDP over the private network
+  Note over U,E: separately, the operating-system sign-in is authorised
+  U->>E: sign in, with Conditional Access and MFA applied
+  E-->>U: short-lived OpenSSH certificate on Linux, same model over RDP on Windows
+  U->>V: sign in as an Entra principal, no local account required
+    </div>
+    <figcaption>Two independent mechanisms that people conflate. <a href="https://learn.microsoft.com/en-us/azure/bastion/bastion-overview">Azure Bastion</a> answers "how does the session reach a machine with no public address" and records the session in its own diagnostics. <a href="https://learn.microsoft.com/en-us/entra/identity/devices/howto-vm-sign-in-azure-ad-linux">Entra login for virtual machines</a> answers "who is allowed to sign in", through two roles - Virtual Machine Administrator Login and Virtual Machine User Login - with Conditional Access applied to the sign-in itself.
+    <b>Together they remove both the public address and the local credential, which is why they are worth configuring at the same time rather than one at a time.</b></figcaption>
+  </figure>
+
+  <p>The third leg of the same idea is the machine's outbound identity. A <a href="https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview">managed identity</a> lets code on the machine fetch tokens from the local instance metadata service with no secret stored anywhere. Module 08 works it through properly; the point here is that a well-built machine has no inbound public address, no local account and no outbound secret.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Traffic to a machine is being dropped. A security group is attached to the subnet and another to the machine's interface. What is true?</div>
+      <button class="q-opt">The interface group replaces the subnet group, so only one is applied</button>
+      <button class="q-opt">The subnet group replaces the interface group, so only one is applied</button>
+      <button class="q-opt">Both apply, and inbound traffic must be allowed by each of them</button>
+      <button class="q-opt">Neither applies, because two groups on one path cancel each other</button>
+      <div class="q-fb">Both attachments can exist at once and inbound traffic is evaluated at the subnet then the interface, so both must allow it. The first two options each describe a replacement that does not happen, and picking either is what leads to hours spent reading the wrong rule set. The fourth invents a cancellation.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which pairing of mechanism and question is correct?</div>
+      <button class="q-opt">Bastion brokers the session, Entra login authorises the sign-in</button>
+      <button class="q-opt">Bastion authorises the sign-in, Entra login brokers the session</button>
+      <button class="q-opt">Bastion issues the certificate, Entra login opens the network path</button>
+      <button class="q-opt">Bastion assigns the identity, Entra login attaches the interface</button>
+      <div class="q-fb">Bastion answers how the session reaches a machine without a public address, and Entra login answers who may sign in to the operating system. The second and third options swap the two jobs, and the fourth attributes to both of them work that belongs to managed identity and to the network interface.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A design pins machines to availability zone 2 in a new region, using a size confirmed available in that region. What still has to be checked?</div>
+      <button class="q-opt">Whether the network interface supports the accelerated networking switch</button>
+      <button class="q-opt">Whether the subscription has been granted a second managed identity</button>
+      <button class="q-opt">Whether the operating system image has been replicated to that zone</button>
+      <button class="q-opt">Whether that size is offered in the zone, since some are zonal-only</button>
+      <div class="q-fb">Some sizes are zonal-only in newer regions, so regional availability does not settle zonal availability. The first option names a real interface property that has nothing to do with placement. The second invents an identity quota. The third confuses zones with regions - image replication is a regional concern, covered in lesson 0202.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An operations team asks for "one Linux jump box with a public address, a local <code>opsadmin</code> account whose key is in a password manager, and a stored service-principal secret so scripts on it can call Azure".</p>
+      <p><b>Rewrite the request</b> using the three mechanisms on this page, and say what each replacement removes.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>There are three separate credentials or exposures in the request. Deal with them one at a time: the inbound path, the operating-system account, and the outbound secret.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Remove the public address.</b> Put Azure Bastion in front of the machine. The session reaches the machine over the private network, so the machine needs no public address at all, and the session is recorded in Bastion's own diagnostics.</li>
+        <li><b>Remove the local account.</b> Enable Entra login for virtual machines. Sign-in is then authorised by two roles - Virtual Machine Administrator Login and Virtual Machine User Login - and the Linux path uses a short-lived OpenSSH certificate rather than a stored key. Conditional Access, including multifactor authentication, now applies to the sign-in itself.</li>
+        <li><b>Remove the outbound secret.</b> Assign a managed identity to the machine. Code fetches tokens from the local instance metadata service, so there is no service-principal secret to store, rotate or leak.</li>
+        <li><b>State what is left.</b> One machine with no inbound public address, no local credential and no stored outbound secret - and three audit trails instead of none: Bastion session diagnostics, Entra sign-in logs, and the Activity Log for what the identity did.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Count the secrets in your rewritten design. If the answer is not zero, one of the three mechanisms has been left out - and if you added a key vault to hold the jump box's key, you replaced a stored secret with a better-stored secret rather than removing it.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0201-who-else-is-on-the-host.html">who else is on the host</a></b> takes the one property this page skipped: the tenancy of the hardware underneath, and the discount you can take for giving the capacity back.</li>
+    <li><b>Module 04</b> covers the managed disks this page only named.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the assembly still feels like one object, ask an agent to list what survives each of three actions on a machine: resizing it, deallocating it, and deleting it. The three answers are different, and the differences are exactly the resource boundaries this page drew.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://learn.microsoft.com/en-us/azure/virtual-machines/">The Azure Virtual Machines documentation</a> is the live authority for the size catalogue, and its size pages are the only correct way to decode a name such as <code>Dav5</code>. Read one family's page end to end rather than a summary of all of them.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0103-the-platform-map.html"><span class="dir">&larr; Previous</span><span class="ttl">The platform map</span></a>
+    <a class="nxt" href="0201-who-else-is-on-the-host.html"><span class="dir">Next &rarr;</span><span class="ttl">Who else is on the host</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0200 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

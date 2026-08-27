@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Holding a fleet at a size - Inside Azure</title>
+<meta name="description" content="Virtual Machine Scale Sets in their two orchestration modes, health-based replacement through the Application Health extension, and where a fleet of machines stops being the right shape and a job scheduler starts.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Compute &middot; Lesson 0203</div>
+  <h1>A scale set is two products wearing one name, and the orchestration mode is the choice that decides which one you get</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Capability area <code>compute-scaling</code>, row <code>autoscaling-group</code>, with <code>batch-compute</code> beside it.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/">Virtual Machine Scale Sets</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>scale set</b> holds a homogeneous group of load-balanced machines at a size, replacing members that fail.</li>
+      <li>It has two <b>orchestration modes</b>, and they are not two tiers of one thing. <b>Uniform</b> is the classic form; <b>Flexible</b> mixes sizes, spreads across availability zones and works with ordinary machine features.</li>
+      <li>Autoscale, including <b>scheduled and predictive scaling</b>, is documented against Uniform mode - so the mode choice reaches further than it first appears.</li>
+      <li>Replacement is driven by the <b>Application Health extension</b>: the fleet acts on what the application reports, not only on whether the machine is powered on.</li>
+      <li>When the work is a queue of jobs rather than a service to keep up, <b>Azure Batch</b> is the shape, and it can draw on Spot capacity with its own autoscale formulas.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The image and the model&lt;br/&gt;lesson 0202"] --> T["THIS PAGE&lt;br/&gt;many machines held at a size&lt;br/&gt;and replaced when unwell"]
+  T --> A["Containers and clusters&lt;br/&gt;module 03"]
+  T --> B["Load balancing in front&lt;br/&gt;module 07"]
+  W["Module 02&lt;br/&gt;compute"] -.- T
+    </div>
+    <figcaption>Where this sits. This is the last page of the virtual-machine walk and the bridge to the container one: a scale set is the platform saying "I will keep this many of these running", which is the same promise a Kubernetes deployment makes at a different altitude.
+    <b>Everything after this module assumes a fleet is normal and a hand-placed machine is the exception.</b></figcaption>
+  </figure>
+
+  <h2>The mode is the product choice</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Which orchestration mode"] --> U["Uniform"]
+  Q --> F["Flexible"]
+  U --> U1["The classic homogeneous fleet"]
+  U --> U2["Azure Monitor autoscale,&lt;br/&gt;including scheduled&lt;br/&gt;and predictive scaling"]
+  F --> F1["Mixes machine sizes&lt;br/&gt;within one fleet"]
+  F --> F2["Spreads across&lt;br/&gt;availability zones"]
+  F --> F3["Works with standard&lt;br/&gt;virtual machine features"]
+    </div>
+    <figcaption>Two modes of one resource, chosen at creation. <a href="https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/">Uniform</a> is the older, stricter shape and the one Azure Monitor autoscale is documented against, including its scheduled and predictive profiles. Flexible relaxes the homogeneity - mixed sizes, explicit zone spread - and keeps the ordinary machine feature set available to its members.
+    <b>The trade is between the richer scaling behaviour on one side and the freedom to treat members as ordinary machines on the other, so decide which of the two the workload actually needs before creating the set.</b></figcaption>
+  </figure>
+
+  <p>The model that members are stamped from lives inside the scale set, because Azure has no separate template resource - the previous page located it. Two consequences follow. Scheduled scaling is configured in the autoscale profile beside the set rather than in a launch specification. And changing what members look like is an edit to the set itself, which is why a scale set is often the smallest unit an infrastructure-as-code module manages.</p>
+
+  <h2>Replacement is driven by what the application says</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Application on a member
+  participant H as Application Health extension
+  participant S as The scale set
+  participant L as Load balancer
+  A->>H: report healthy, or stop reporting healthy
+  H->>S: this instance is unhealthy
+  S->>L: take the instance out of rotation
+  S->>S: replace the instance from the model
+  S->>L: put the new instance into rotation once it reports healthy
+    </div>
+    <figcaption>Health-based replacement is the property that turns a group of machines into a fleet. The <a href="https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/">Application Health extension</a> is how the application itself tells the set that a member is no longer serving, which is a stronger signal than whether the machine is powered on.
+    <b>A fleet with no health extension will happily hold ten machines at a size while three of them serve errors, because nothing has told it otherwise.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  This is also what makes Spot capacity usable. <a href="https://learn.microsoft.com/en-us/azure/virtual-machines/spot-vms">Spot machines</a> are available for scale sets and for Kubernetes node pools, and an eviction inside a fleet is a member disappearing - which the fleet already knows how to handle. The same eviction on a hand-placed single machine is an outage, so the discount belongs to the fleet, not to the individual machine.</div>
+
+  <h2>When a fleet is the wrong shape</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["What is the work"] --> S["A service that must stay up&lt;br/&gt;and absorb varying load"]
+  W --> J["A queue of finite jobs&lt;br/&gt;that ends when they are done"]
+  S --> VMSS["Virtual Machine Scale Set&lt;br/&gt;held at a size, health-replaced"]
+  J --> BATCH["Azure Batch&lt;br/&gt;pools, jobs and tasks&lt;br/&gt;with autoscale formulas"]
+  BATCH --> SP["Pools can draw&lt;br/&gt;on Spot capacity"]
+    </div>
+    <figcaption>The two shapes answer different questions and the wrong one is expensive in both directions. <a href="https://learn.microsoft.com/en-us/azure/batch/">Azure Batch</a> is a managed job scheduler: it models pools of machines, jobs and tasks, drives pool size from autoscale formulas, and can run its pools on Spot capacity. Its model is jobs and tasks rather than containers-first, though containers are supported on pool nodes.
+    <b>If the work has an end, a scheduler that tears the pool down beats a fleet that has to be told to shrink.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A fleet holds ten machines at a size. Three of them are running but returning errors, and the count never changes. What is most likely missing?</div>
+      <button class="q-opt">The Application Health extension, so nothing reports the members unwell</button>
+      <button class="q-opt">The autoscale profile, so nothing raises the target count above ten</button>
+      <button class="q-opt">The Flexible orchestration mode, so members cannot be replaced at all</button>
+      <button class="q-opt">The regional replication of the image, so replacements cannot be built</button>
+      <div class="q-fb">Health-based replacement acts on what the application reports, and with no health extension a powered-on member serving errors looks healthy to the set. The second option describes scaling rather than replacement. The third is false - replacement is not a Flexible-only behaviour. The fourth would break deployments in a region, not leave running members unhealthy.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A design needs one fleet containing two different machine sizes, deliberately spread across availability zones. Which mode fits?</div>
+      <button class="q-opt">Uniform, because homogeneity is what makes zone spread possible</button>
+      <button class="q-opt">Uniform, because mixed sizes are configured in the autoscale profile</button>
+      <button class="q-opt">Flexible, because it mixes sizes and spreads across the zones</button>
+      <button class="q-opt">Neither, because a scale set holds one size in exactly one zone</button>
+      <div class="q-fb">Mixing sizes and spreading across availability zones is what Flexible mode is for. The first two options attach Flexible's properties to Uniform, and the second also puts sizing in the autoscale profile, which holds scaling rules rather than the member model. The fourth denies a capability the product has.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is Spot capacity a better fit for a scale set than for a single machine?</div>
+      <button class="q-opt">Because a scale set is billed per fleet rather than per member machine</button>
+      <button class="q-opt">Because an eviction inside a fleet is a member the fleet can replace</button>
+      <button class="q-opt">Because Spot capacity is offered only through scale sets and node pools</button>
+      <button class="q-opt">Because Spot machines inside a fleet are given a service level agreement</button>
+      <div class="q-fb">A fleet already handles members disappearing, so an eviction is an event it knows how to absorb. The first option invents a billing model. The third is wrong because Spot is also available as a standalone machine - it is just a worse idea there. The fourth contradicts the fact that Spot carries no service level agreement anywhere.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A media company runs two workloads. The first is a public API that must stay available and whose traffic has a strong, repeatable daily shape. The second is a nightly transcode of the day's uploads: thousands of independent tasks that finish when the queue empties.</p>
+      <p><b>Choose the compute shape for each</b>, name the orchestration mode where one applies, say where the daily shape is configured, and place the Spot discount where it belongs.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask of each workload whether it ends. Then, for whichever one is a fleet, ask which mode the scaling behaviour you need is documented against.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Classify the two workloads.</b> The API is a service that must stay up under varying load, so it is a scale set. The transcode is a finite queue of independent tasks that ends, so it is Azure Batch with pools, jobs and tasks.</li>
+        <li><b>Pick the mode for the fleet.</b> The repeatable daily shape is exactly what scheduled and predictive scaling are for, and Azure Monitor autoscale with those profiles is documented against Uniform mode. Choose Uniform unless something else in the design needs mixed sizes or an explicit zone spread, in which case the trade has to be made deliberately.</li>
+        <li><b>Locate the daily shape.</b> In the Azure Monitor autoscale profile beside the scale set. There is no launch template to hold it, so a search of the machine or image configuration finds nothing.</li>
+        <li><b>Place the discount.</b> Spot belongs on the Batch pools: the work is interruptible, the pool tears down at the end anyway, and Batch pools can use Spot capacity with autoscale formulas. Keep the public API off Spot, because Spot carries no service level agreement and availability is the API's whole requirement.</li>
+        <li><b>Add the health signal.</b> Put the Application Health extension on the fleet so the API's own health, not merely its power state, drives replacement.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one of the two workloads should end up on Spot, and it should be the one that ends. If the API ended up on Spot to save money, the design has traded the single requirement it was given.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, module 03</b> makes the same promise at a higher altitude, with the fleet becoming node pools underneath a scheduler.</li>
+    <li><b>For a four-way view</b> of fleets and templates, see <a href="../../cloud-comparison-course/lessons/0201-holding-a-fleet-at-a-size.html">Holding a fleet at a size</a> in the comparison course.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two modes still blur, ask an agent to list which ordinary machine operations are available to a member in each mode. The list is the clearest statement of what Flexible relaxed and what Uniform bought with the strictness.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/">Virtual Machine Scale Sets documentation</a>, starting with its orchestration-modes material. It is the page that decides the design, and it is short enough to read before you create a set rather than after.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0202-images-and-the-gallery.html"><span class="dir">&larr; Previous</span><span class="ttl">Images and the gallery</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0203 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

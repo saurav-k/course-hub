@@ -27,6 +27,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0103-the-platform-map.html"
         }
       ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The virtual machine",
+          "href": "lessons/0200-the-virtual-machine.html"
+        },
+        {
+          "title": "Who else is on the host",
+          "href": "lessons/0201-who-else-is-on-the-host.html"
+        },
+        {
+          "title": "Images and the gallery",
+          "href": "lessons/0202-images-and-the-gallery.html"
+        },
+        {
+          "title": "Holding a fleet at a size",
+          "href": "lessons/0203-holding-a-fleet-at-a-size.html"
+        }
+      ]
     }
   ],
   "extras": []

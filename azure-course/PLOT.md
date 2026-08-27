@@ -14,6 +14,14 @@ is wrong and it gets fixed before anything new is added.
 | 0102 | Regions, zones and the redundancy ladder |
 | 0103 | The platform map |
 
+**Module 02 - Compute**
+
+| Lesson | Title |
+| 0200 | The virtual machine |
+| 0201 | Who else is on the host |
+| 0202 | Images and the gallery |
+| 0203 | Holding a fleet at a size |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
