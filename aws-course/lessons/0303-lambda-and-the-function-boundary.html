@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lambda and the function boundary - Inside AWS</title>
+<meta name="description" content="A Lambda function has a fifteen-minute ceiling, assumes its own role at invoke time, and shifts traffic through an alias - three properties that decide whether a workload belongs inside a function at all.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Containers and serverless &middot; Lesson 0303</div>
+  <h1>A function is a container with three properties taken away and one given back</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>functions-faas</code>.
+    &middot; <a href="https://docs.aws.amazon.com/lambda/latest/dg/welcome.html">AWS Lambda</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A Lambda function is invoked by an event, billed per request and per gigabyte-second, and has <b>no long-running process for you to hold state in</b>.</li>
+      <li>The ceiling that decides most designs is duration: <b>fifteen minutes is the maximum</b> a single invocation may run.</li>
+      <li>It <b>assumes its execution role automatically</b> at invoke time, so a function is the cleanest identity story in this module - there is no credential anywhere in the package.</li>
+      <li>A function can be packaged as a <b>container image of up to ten gigabytes</b> pulled from ECR, so the container and function worlds share a build.</li>
+      <li>What it costs: releasing safely happens through an <b>alias</b> rather than through the function, and a workload that does not fit inside fifteen minutes has to be split rather than tuned.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0300 to 0302&lt;br/&gt;orchestrators, capacity&lt;br/&gt;and the registry"] --> T["THIS PAGE&lt;br/&gt;the smallest unit in the module&lt;br/&gt;and the limits that define it"]
+  T --> A["Managed runtimes above&lt;br/&gt;the container, lesson 0304"]
+  T --> B["Knowing when a workload&lt;br/&gt;must move back up"]
+  T --> C["The identity model with&lt;br/&gt;no stored secret, module 08"]
+  W["Module 03&lt;br/&gt;containers and serverless"] -.- T
+    </div>
+    <figcaption>Where this sits. The module has moved down a ladder: a cluster you operate, a cluster whose nodes vanish, and now a unit with no cluster and no process at all. Each step removed something and forbade something.
+    <b>The function is the bottom of the ladder, so the interesting question on this page is which workloads cannot go there.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: an event, a handler, and nothing between invocations</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as An event source
+  participant L as Lambda
+  participant R as The execution role
+  participant D as Whatever the code touches
+  S-&gt;&gt;L: an event arrives
+  L-&gt;&gt;R: assume the execution role automatically
+  R--&gt;&gt;L: temporary credentials, no secret in the package
+  L-&gt;&gt;D: the handler runs, for at most fifteen minutes
+  D--&gt;&gt;L: result
+  L--&gt;&gt;S: response, and the environment may be discarded
+    </div>
+    <figcaption>The whole invocation. The role assumption is the step worth noticing: Lambda assumes the <a href="https://docs.aws.amazon.com/lambda/latest/dg/lambda-intro-execution-role.html">execution role</a> for you and hands the code temporary credentials, so a correctly built function has no access key in it anywhere.
+    <b>Because the environment may be discarded between invocations, anything a function needs to remember has to live outside it.</b></figcaption>
+  </figure>
+
+  <p>Function logs go to CloudWatch Logs by default, which is unusual on a platform where most services log only once you ask (<a href="https://docs.aws.amazon.com/lambda/latest/dg/monitoring-cloudwatchlogs.html">Lambda and CloudWatch Logs</a>). It is convenient and it is a cost line, and Module 10 returns to what that costs at volume.</p>
+
+  <h2>2. The mechanism: releasing through an alias</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  V1["Version 7&lt;br/&gt;immutable, already live"] --> AL["Alias&lt;br/&gt;the name callers actually use"]
+  V2["Version 8&lt;br/&gt;immutable, newly published"] --> AL
+  AL --> W["Weighted routing&lt;br/&gt;send a percentage to version 8"]
+  W --> CFG["Shifting patterns&lt;br/&gt;all at once, canary,&lt;br/&gt;or linear steps"]
+  CFG --> HK["Pre-traffic and post-traffic hooks&lt;br/&gt;functions that can stop the shift"]
+  HK --> RB["Revert is one alias update"]
+    </div>
+    <figcaption>Versions are immutable and an <a href="https://docs.aws.amazon.com/lambda/latest/dg/configuration-aliases.html">alias</a> is the moving pointer callers hold. <a href="https://docs.aws.amazon.com/lambda/latest/dg/configuring-alias-routing.html">Weighted routing</a> sends a percentage of invocations to the new version, and the deployment configurations that automate that shift come in all-at-once, canary and linear shapes (<a href="https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations.html">deployment configurations</a>), with hook functions that can abort it (<a href="https://docs.aws.amazon.com/lambda/latest/dg/automating-updates-to-serverless-apps.html">automating updates</a>).
+    <b>Rollback is a single alias update, which is the cheapest rollback anywhere in this module.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Every layer of this module has the same release shape and a different price for it. A fleet rolls a launch-template version and rebuilds machines. A service rolls a task set and drains connections. A function <b>repoints a name</b>. The mechanism you get is decided by the layer you chose, so "how do we roll back?" is really a question you answered earlier.</div>
+
+  <h2>3. The wall at fifteen minutes</h2>
+
+  <p>A single invocation may run for at most fifteen minutes. That is not a default to raise; it is the shape of the product, and it is the boundary that sends a workload back up the ladder.</p>
+
+  <table>
+    <thead><tr><th>What the work looks like</th><th>Where it belongs</th></tr></thead>
+    <tbody>
+      <tr><td>Short, event-shaped, independent</td><td>A function</td></tr>
+      <tr><td>Long but divisible into short steps</td><td>Several functions with a workflow between them - Module 12</td></tr>
+      <tr><td>Long and genuinely one process</td><td>A container task or a batch job - lessons 0300 and 0204</td></tr>
+      <tr><td>Needs a GPU, a host port or a block volume</td><td>Node-backed container capacity, per lesson 0301</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+  Splitting a long job into steps looks free and is not. The state that lived in one process now has to be written down and passed between invocations, retries stop being local, and partial failure becomes a case you must design rather than one the runtime handles. Workflow orchestration is Module 12's subject, and the express execution mode there carries a five-minute ceiling of its own, so the split has to be genuine rather than nominal.</div>
+
+  <h2>4. One build for two worlds</h2>
+
+  <p>A function does not have to be a zip archive. It can be a <a href="https://docs.aws.amazon.com/lambda/latest/dg/images-create.html">container image of up to ten gigabytes</a> pulled from ECR, which lets a team keep one build pipeline, one scanning path and one registry for both its containers and its functions. Lesson 0302's exception applies here and nowhere else: that image must be pushed rather than reached through a pull-through cache rule.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A nightly job takes about fifty minutes as a single process and cannot be divided. Where does it belong?</div>
+      <button class="q-opt">A function, with its timeout raised to fifty minutes</button>
+      <button class="q-opt">A function, invoked repeatedly until the work ends</button>
+      <button class="q-opt">A container task or a batch job, not a function</button>
+      <button class="q-opt">A workflow of functions, each running a short step</button>
+      <div class="q-fb">Fifteen minutes is the ceiling rather than a default, so no timeout setting reaches fifty. Re-invoking a function repeatedly only works if the work is divisible, and the requirement says it is not. A workflow of short steps has the same problem. Indivisible long work belongs on container or batch capacity.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does a Lambda function get its AWS credentials from?</div>
+      <button class="q-opt">Lambda assumes the execution role for it at invoke</button>
+      <button class="q-opt">The deployment package, from an encrypted key file</button>
+      <button class="q-opt">An environment variable set by the build pipeline</button>
+      <button class="q-opt">The metadata service, in the way an instance does</button>
+      <div class="q-fb">Lambda assumes the execution role automatically at invoke time and hands the code temporary credentials, so nothing is stored in the package or in configuration. A key file or an environment variable would be the credential this design exists to remove, and the instance metadata service belongs to EC2 rather than to functions.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A new function version misbehaves under a canary shift. What is the rollback?</div>
+      <button class="q-opt">Redeploy the previous package over the new version</button>
+      <button class="q-opt">Delete the new version so callers fall back to it</button>
+      <button class="q-opt">Drain the environments and let them be recreated</button>
+      <button class="q-opt">Point the alias back at the previous version</button>
+      <div class="q-fb">Versions are immutable and the alias is the moving pointer, so rollback is one alias update and the previous version is untouched and still there. Redeploying over a version is not possible, deleting the new version is destructive and unnecessary, and draining environments is not a concept a caller sees.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A media pipeline has four stages: accept an upload and record it, transcode a file that takes between two and forty minutes depending on size, generate three thumbnails, and notify a downstream system. The team wants everything on functions "because it is serverless".</p>
+      <p><b>Place each stage</b>, name the property that decided it, and say what new failure case the team inherits from the one stage that has to be split or moved.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Only one of the four stages has an unbounded duration, and it is the only one worth arguing about. Ask what the runtime handled for you that you now have to handle yourself.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Accept and record: a function.</b> It is short, event-shaped and independent, which is exactly the fit. The execution role is assumed at invoke, so it writes its record with no stored credential.</li>
+        <li><b>Thumbnails: a function, or three.</b> Also short and independent, and the three can be separate invocations that fail independently rather than one that fails as a unit.</li>
+        <li><b>Notify: a function.</b> Shortest of all, and event-shaped by definition.</li>
+        <li><b>Transcode: not a function.</b> Up to forty minutes exceeds the fifteen-minute ceiling, and no setting raises it. If the transcode can be split by segment, it becomes several short invocations behind a workflow. If it cannot, it belongs on a container task or a batch job.</li>
+        <li><b>Name the inherited failure case.</b> Whichever way the transcode is moved, partial failure becomes yours. A single long process either finished or did not; a segmented job can leave some segments done and some not, so the pipeline now needs a record of which segments completed, a retry that does not redo finished work, and a decision about what a half-transcoded file means downstream.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Three stages should be functions and exactly one should be argued about, and your answer should end with a new failure case rather than with a service name. If the split cost you nothing, you have not yet asked where the intermediate state lives.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0304-above-the-container.html">Above the container</a></b> closes the module with the managed runtimes that hide all of this, and with the service mesh that is mid-transition.</li>
+    <li><b>Module 08</b> returns to the execution role and the wider machine-identity model it belongs to.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the fifteen-minute wall keeps arriving late in your designs, ask an agent to look at one workload and state its worst-case duration rather than its typical one, then to place it from that number.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/lambda/latest/dg/configuring-alias-routing.html">Configuring alias routing</a> is the page to read, because the alias is the object that makes safe releases cheap on Lambda and it is the piece most tutorials skip entirely.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0302-the-registry-that-feeds-them.html"><span class="dir">&larr; Previous</span><span class="ttl">The registry that feeds them</span></a>
+    <a class="nxt" href="0304-above-the-container.html"><span class="dir">Next &rarr;</span><span class="ttl">Above the container</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0303 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

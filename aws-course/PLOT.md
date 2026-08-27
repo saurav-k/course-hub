@@ -23,6 +23,15 @@ is wrong and it gets fixed before anything new is added.
 | 0203 | Holding a fleet at a size | working |
 | 0204 | Buying the same machine for less | working |
 
+### Module 03 - Containers and serverless
+
+| Lesson | Title | Rung |
+| 0300 | Two orchestrators, one platform | working |
+| 0301 | Fargate is a capacity mode | working |
+| 0302 | The registry that feeds them | working |
+| 0303 | Lambda and the function boundary | working |
+| 0304 | Above the container | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

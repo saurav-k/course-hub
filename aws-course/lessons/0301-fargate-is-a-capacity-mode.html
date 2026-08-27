@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fargate is a capacity mode - Inside AWS</title>
+<meta name="description" content="Fargate is not a service you deploy to - it is a way of supplying capacity underneath ECS and EKS, and on EKS it withdraws a specific list of Kubernetes capabilities.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Containers and serverless &middot; Lesson 0301</div>
+  <h1>Fargate is not somewhere you deploy - it is how the nodes stop existing</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>serverless-containers</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html">AWS Fargate</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Fargate is <b>a capacity mode shared by both orchestrators</b>, not a third orchestrator. You still write an ECS service or a Kubernetes deployment; Fargate only changes where it runs.</li>
+      <li>Each task or pod gets <b>its own kernel-isolated environment</b>, which is the isolation property that makes it different from packing containers onto a shared node.</li>
+      <li>On ECS it appears as a <b>capacity provider</b>, and there is a reclaimable variant with a two-minute eviction.</li>
+      <li>On EKS it appears as a <b>profile</b>, and it withdraws a specific list of Kubernetes capabilities that a manifest may already depend on.</li>
+      <li>What it costs: the withdrawn list is the whole trade. <b>No DaemonSets, no privileged containers, no host ports, no GPUs, no EBS volumes</b>, and no reclaimable variant on EKS.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0300&lt;br/&gt;two orchestrators&lt;br/&gt;and their nodes"] --> T["THIS PAGE&lt;br/&gt;the capacity mode where&lt;br/&gt;the nodes stop existing"]
+  T --> A["Images that feed it&lt;br/&gt;lesson 0302"]
+  T --> B["The next step down&lt;br/&gt;to functions, lesson 0303"]
+  T --> C["Knowing which manifests&lt;br/&gt;can move onto it"]
+  W["Module 03&lt;br/&gt;containers and serverless"] -.- T
+    </div>
+    <figcaption>Where this sits. Lesson 0300 said both orchestrators need a node-supply layer. This is the layer where that supply becomes invisible, and it is the same layer for both of them.
+    <b>Fargate sits under an orchestrator rather than beside one, so choosing it never replaces the orchestrator decision you already made.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: one layer, two doors</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  ECS["Amazon ECS"] --> CPF["Capacity provider: Fargate"]
+  ECS --> CPE["Capacity provider: EC2 instances you own"]
+  EKS["Amazon EKS"] --> PRF["Fargate profile&lt;br/&gt;selects which pods land there"]
+  EKS --> NG["Node groups or Auto Mode"]
+  CPF --> F["Fargate&lt;br/&gt;one kernel-isolated environment&lt;br/&gt;per task or per pod"]
+  PRF --> F
+    </div>
+    <figcaption>The same capacity layer reached through two different doors. On ECS you name it as a capacity provider for a service; on EKS you write a profile that selects which pods it applies to, so one cluster can run some pods on Fargate and others on nodes.
+    <b>The unit of isolation is the task or the pod, not the machine, which is why nothing about the underlying host is yours to configure.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism on ECS: a capacity provider you can make reclaimable</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as ECS service
+  participant C as Fargate Spot capacity provider
+  participant T as Your task
+  S-&gt;&gt;C: place a task
+  C--&gt;&gt;T: running, at the reclaimable rate
+  C-&gt;&gt;T: eviction notice - about two minutes
+  T-&gt;&gt;T: drain connections and checkpoint
+  C-&gt;&gt;S: capacity returned - the service places a replacement
+    </div>
+    <figcaption>The reclaimable Fargate capacity provider carries a two-minute eviction, and the service around it is what places the replacement. It is the same bargain as EC2 Spot in lesson 0204 with one useful difference: the orchestrator, rather than your own tooling, owns the replacement.
+    <b>Reclaimable Fargate exists on ECS and does not exist on EKS, so a plan to run cheap evictable pods on an EKS cluster has no Fargate answer.</b></figcaption>
+  </figure>
+
+  <h2>3. What Fargate withdraws on EKS</h2>
+
+  <p>This list is the reason a working manifest can fail to move onto Fargate, and every item on it is a capability a real cluster commonly uses (<a href="https://docs.aws.amazon.com/eks/latest/userguide/fargate.html">Fargate on EKS</a>).</p>
+
+  <table>
+    <thead><tr><th>Not available on Fargate with EKS</th><th>What that breaks in practice</th></tr></thead>
+    <tbody>
+      <tr><td>DaemonSets</td><td>The usual way a log shipper or agent is placed on every node, since there is no node to place it on</td></tr>
+      <tr><td>Privileged containers</td><td>Anything that expected elevated access to the host</td></tr>
+      <tr><td>Host ports</td><td>Manifests that bind a port on the node rather than on the pod</td></tr>
+      <tr><td>GPUs</td><td>Every accelerated workload, which stays on node-backed capacity</td></tr>
+      <tr><td>EBS volumes</td><td>Pods that expected a block volume attached to their node</td></tr>
+      <tr><td>Fargate Spot</td><td>The reclaimable rate, which exists on ECS only</td></tr>
+    </tbody>
+  </table>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Every item on that list is <b>a thing that assumed a node</b>. Read it that way and it stops being arbitrary: Fargate did not remove six unrelated features, it removed the one object those six features are addressed to. A manifest ports onto Fargate cleanly exactly when it never mentions the host.</div>
+
+  <div class="callout warn">
+  There is one more node-shaped assumption, and it is in identity rather than in the manifest. Newer EKS designs default to the pod-identity mechanism that does not need a per-cluster identity provider, but <b>Fargate still requires the older service-account approach</b>. Module 08 works through both; what matters here is that "we use the new way everywhere" is not true of a cluster with a Fargate profile in it.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A team says they are "moving from ECS to Fargate". What is wrong with the sentence?</div>
+      <button class="q-opt">Fargate is a capacity mode used by ECS, not an alternative</button>
+      <button class="q-opt">Fargate is an orchestrator, so the move is a rewrite</button>
+      <button class="q-opt">Fargate runs only under EKS, so ECS cannot use it</button>
+      <button class="q-opt">Fargate is a region-scoped service and ECS is global</button>
+      <div class="q-fb">Fargate supplies capacity underneath both orchestrators, so a service keeps its task definitions and only changes where tasks run. It is not a third orchestrator, it is available to ECS as a capacity provider, and neither service is global in the sense the last option implies.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A Kubernetes manifest runs a logging agent as a DaemonSet. What happens when its pods move to Fargate?</div>
+      <button class="q-opt">The agent runs once per Fargate profile in the cluster</button>
+      <button class="q-opt">DaemonSets are unavailable, so logging must be rebuilt</button>
+      <button class="q-opt">The agent runs as a sidecar automatically alongside pods</button>
+      <button class="q-opt">The agent runs on the control plane instead of on nodes</button>
+      <div class="q-fb">A DaemonSet places one copy per node, and Fargate has no node to place it on, so the mechanism is unavailable and the logging path has to be built another way. Nothing converts a DaemonSet into a per-profile or sidecar deployment, and the control plane never runs your workloads.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where can you run containers on reclaimable Fargate capacity?</div>
+      <button class="q-opt">On ECS only, through its Spot capacity provider</button>
+      <button class="q-opt">On EKS only, through a Spot Fargate profile</button>
+      <button class="q-opt">On both, using the same capacity provider name</button>
+      <button class="q-opt">On neither, since reclaimable means EC2 capacity</button>
+      <div class="q-fb">The reclaimable Fargate capacity provider exists on ECS and is unsupported on EKS, which is a real asymmetry between the two doors into the same capacity layer. Reclaimable capacity is certainly not EC2-only, since the ECS provider is exactly that on Fargate.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An EKS cluster runs four workloads: a stateless web API, a log-shipping agent deployed as a DaemonSet, a nightly batch job that would happily be interrupted, and an inference service that needs a GPU.</p>
+      <p><b>Decide for each</b> whether it can move to a Fargate profile. For the ones that cannot, name the exact capability that blocks them and say what the workload runs on instead.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Go through the withdrawn list once per workload and ask the single question this page reduced it to: does this workload mention the host?</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Web API: yes.</b> A stateless HTTP service names no host port, needs no privileged access, attaches no block volume and wants no accelerator. It is the shape Fargate was built for.</li>
+        <li><b>Log shipper: no, blocked by DaemonSets.</b> The mechanism places one copy per node and there is no node. The workload does not simply move elsewhere - the logging design changes, because the pods on Fargate still need their output collected by some other path.</li>
+        <li><b>Nightly batch: yes for the compute, no for the discount.</b> The job itself is an ordinary container, but reclaimable Fargate capacity is unsupported on EKS, so it runs at the full Fargate rate. If the discount matters more than the isolation, it belongs on node-backed capacity with reclaimable instances underneath.</li>
+        <li><b>Inference service: no, blocked by GPUs.</b> Accelerators are not available on Fargate, so this workload stays on node-backed capacity - a node group or Auto Mode - inside the same cluster.</li>
+        <li><b>State the resulting cluster.</b> A mixed cluster: a Fargate profile selecting the API's pods, and node-backed capacity for the accelerated service, the batch job and whatever logging path replaces the DaemonSet. That mixture is normal and is exactly why a profile selects pods rather than applying to the cluster.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two of the four should move cleanly and two should be blocked by named capabilities, and your answer should end with one cluster rather than two. If you concluded that the cluster has to choose Fargate or nodes for everything, re-read what a profile does: it selects pods.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0302-the-registry-that-feeds-them.html">The registry that feeds them</a></b> follows the image every one of these tasks and pods actually starts from.</li>
+    <li>A four-cloud view of serverless containers is in <a href="../../cloud-comparison-course/lessons/0203-the-function-container-boundary.html">Comparing the Four Clouds</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the withdrawn list feels like trivia, ask an agent to take one manifest you actually run and mark every line that mentions the host - a host port, a node selector, a DaemonSet, a device request. The marked lines are your entire porting effort.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/eks/latest/userguide/fargate.html">Fargate on EKS</a> is the page that states the constraint list, and it is worth reading before a migration plan is written rather than during one.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0300-two-orchestrators-one-platform.html"><span class="dir">&larr; Previous</span><span class="ttl">Two orchestrators, one platform</span></a>
+    <a class="nxt" href="0302-the-registry-that-feeds-them.html"><span class="dir">Next &rarr;</span><span class="ttl">The registry that feeds them</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0301 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

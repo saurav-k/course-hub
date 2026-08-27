@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The registry that feeds them - Inside AWS</title>
+<meta name="description" content="Elastic Container Registry authenticates with IAM rather than a stored password, scans on push, and caches upstream registries - with one consumer that cannot use the cache.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Containers and serverless &middot; Lesson 0302</div>
+  <h1>The registry is where a container estate's supply chain either exists or does not</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>container-registry</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonECR/latest/userguide/what-is-ecr.html">Amazon ECR</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Elastic Container Registry</b> is the private image registry every runtime in this module pulls from, and it authenticates with <b>IAM</b> rather than with a password somebody stored.</li>
+      <li>It <b>scans on push</b>, so a vulnerable image is found at the moment it enters the estate rather than at the moment it is deployed.</li>
+      <li><b>Replication</b> copies repositories across regions and accounts, which is what stops a region's deployments depending on another region's registry.</li>
+      <li><b>Pull-through cache</b> rules mirror an upstream public registry into your own, so a public outage or a rate limit stops being your outage.</li>
+      <li>What it costs: the cache has a real gap. <b>Lambda cannot pull an image through a pull-through-cache rule</b>, so one consumer needs the image pushed rather than cached.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0300 and 0301&lt;br/&gt;orchestrators and&lt;br/&gt;the capacity under them"] --> T["THIS PAGE&lt;br/&gt;where the image every&lt;br/&gt;task and pod starts from lives"]
+  T --> A["Functions packaged&lt;br/&gt;as images, lesson 0303"]
+  T --> B["A build that ends&lt;br/&gt;somewhere real"]
+  T --> C["Not depending on a&lt;br/&gt;public registry at deploy time"]
+  W["Module 03&lt;br/&gt;containers and serverless"] -.- T
+    </div>
+    <figcaption>Where this sits. Both orchestrators and both capacity modes converge on one question at start-up: where does this image come from? The registry is that single point, which makes it the natural place to put scanning and the natural single point of failure if it is somebody else's.
+    <b>An estate whose deployments pull from a public registry has outsourced its availability to a service it does not pay for.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: one supply point, three jobs</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  UP["Upstream public registries&lt;br/&gt;Docker Hub, Quay, GitHub"] --> PTC["Pull-through cache rule&lt;br/&gt;mirrors on first request"]
+  BUILD["Your build pipeline"] --> ECR["Private ECR repository&lt;br/&gt;IAM authentication,&lt;br/&gt;scan on push"]
+  PTC --> ECR
+  ECR --> REP["Replication to other&lt;br/&gt;regions and accounts"]
+  ECR --> C1["ECS tasks and EKS pods"]
+  REP --> C2["Consumers in other regions"]
+  ECR --> C3["Lambda functions packaged as images"]
+    </div>
+    <figcaption>The three jobs a registry does for an estate: hold what you built, mirror what you borrowed, and put copies where the consumers are. IAM authentication is the property that removes the long-lived registry password from every pipeline and every node.
+    <b>Every arrow into a consumer should start inside your own registry, which is exactly what the cache rule is for.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what a cached pull actually does</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant N as A node or task
+  participant E as Your ECR registry
+  participant U as The upstream public registry
+  N-&gt;&gt;E: pull an image covered by a cache rule
+  E-&gt;&gt;U: first request only - fetch and store a copy
+  E--&gt;&gt;N: image, now held in your own registry
+  N-&gt;&gt;E: a later pull of the same tag
+  E-&gt;&gt;U: re-check upstream, at most once a day per tag
+  E--&gt;&gt;N: served from your copy
+    </div>
+    <figcaption>A <a href="https://docs.aws.amazon.com/AmazonECR/latest/userguide/pull-through-cache.html">pull-through cache rule</a> pulls from the upstream registry the first time and serves your own copy afterwards, re-checking upstream at most once a day for a given tag.
+    <b>The upstream registry moves out of your deployment path and into your image-refresh path, which is a very different place for someone else's availability to sit.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Scanning on push and caching on pull are the same idea applied at two boundaries: <b>every image entering the estate should be examined once, at the door, rather than repeatedly at the point of use</b>. That is why the registry, not the cluster, is where a container supply chain is actually governed.</div>
+
+  <h2>3. What it costs: the consumer that cannot use the cache</h2>
+
+  <p>Functions packaged as container images pull from ECR like anything else, with one documented exception: <b>Lambda cannot pull an image through a pull-through-cache rule</b>. An estate that standardised on cache rules for every base image therefore needs a real push into a repository for anything a function will run.</p>
+
+  <div class="callout warn">
+  This is the kind of gap that survives a design review and fails at deployment, because the same image reference works for ECS and EKS and fails only for Lambda. Decide the rule once, estate-wide: base images that functions use get built and pushed, and cache rules cover only what containers pull.</div>
+
+  <p>The registry has a public face as well. <b>ECR Public</b> serves anonymous pulls from a gallery, which is how an image you publish becomes usable by people with no account of yours - and it is also, from the other direction, one of the upstream registries somebody else might be caching.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A public registry rate-limits your cluster during a deployment. Which ECR feature removes that dependency?</div>
+      <button class="q-opt">Scan on push, run against every incoming image</button>
+      <button class="q-opt">Cross-region replication of your repositories</button>
+      <button class="q-opt">IAM authentication in place of a stored password</button>
+      <button class="q-opt">A pull-through cache rule for that upstream</button>
+      <div class="q-fb">A cache rule mirrors the upstream image into your own registry on first pull and serves your copy afterwards, so the upstream leaves your deployment path. Scanning inspects images and changes nothing about where they come from. Replication moves your own repositories. IAM authentication changes how you prove identity, not who hosts the bytes.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which consumer cannot pull an image through a pull-through-cache rule?</div>
+      <button class="q-opt">An ECS task using the Fargate capacity provider</button>
+      <button class="q-opt">An EKS pod running on a managed node group</button>
+      <button class="q-opt">A Lambda function packaged as a container image</button>
+      <button class="q-opt">A build job that pulls the base image it needs</button>
+      <div class="q-fb">Lambda is documented as unable to pull through a cache rule, so images for functions have to be pushed into a repository. Both container runtimes and ordinary build jobs use cache rules normally, which is what makes this asymmetry easy to miss until a function deployment fails.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How often does a pull-through cache re-check the upstream registry for a given tag?</div>
+      <button class="q-opt">On every pull, which is why it stays current</button>
+      <button class="q-opt">At most once a day, and serves the copy between</button>
+      <button class="q-opt">Only when the cached copy has been deleted</button>
+      <button class="q-opt">Never, since a cached tag is treated as frozen</button>
+      <div class="q-fb">The rule re-checks upstream at most once a day per tag and serves your own copy in between, which is what keeps the upstream out of the deployment path. Re-checking every pull would put it straight back in. And the cache does refresh, so neither a delete-only nor a frozen model is right.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An estate deploys into two regions. Its pipelines currently pull base images straight from a public registry, push application images to one registry in one region, and run a mixture of ECS services, EKS pods and container-packaged Lambda functions.</p>
+      <p><b>Redesign the supply chain</b>: name what you would change at each of the three boundaries - what enters, what is stored, what is consumed - and name the one workload that needs a different rule from the others.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Three boundaries, three ECR features. Then check your answer against the one documented consumer exception before you call it done.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>What enters: cache rules for every upstream.</b> Replace direct pulls from the public registry with pull-through cache rules, so the first pull mirrors the image into your own registry and later pulls are served from your copy, re-checked upstream at most once a day.</li>
+        <li><b>What is stored: scanning at the door.</b> Scan on push means every image entering the estate is examined once, on arrival, rather than repeatedly at deployment, and it covers the cached upstream images as well as your own builds.</li>
+        <li><b>What is consumed: replication into the second region.</b> A single registry in one region makes the second region's deployments depend on the first region's availability. Replicating the repositories removes that cross-region dependency at start-up time.</li>
+        <li><b>Fix the authentication story while you are here.</b> ECR authenticates with IAM, so the pipelines and nodes stop holding a long-lived registry password and start using the role they already have.</li>
+        <li><b>Name the exception.</b> The container-packaged Lambda functions. They cannot pull through a cache rule, so their base images have to be built and pushed into a repository rather than covered by the estate-wide cache rule.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> After your redesign, no arrow in the deployment path should start outside your own registry, and exactly one workload should have its own rule. If every workload has the same rule, you have not yet accounted for the function exception.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0303-lambda-and-the-function-boundary.html">Lambda and the function boundary</a></b> takes the smallest unit in this module - the function - and the limits that decide whether a workload fits inside it.</li>
+    <li><b>Lesson 0201</b> built images for machines with the same pipeline service that builds container images here.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the supply chain still feels abstract, ask an agent to trace one running container in your estate back to every registry its layers came from, and to mark which of those registries you control.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AmazonECR/latest/userguide/pull-through-cache.html">Pull-through cache rules</a> is the page worth reading properly. It carries the refresh cadence and the consumer exception, and both are the sort of detail that only matters once, on the day it breaks something.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0301-fargate-is-a-capacity-mode.html"><span class="dir">&larr; Previous</span><span class="ttl">Fargate is a capacity mode</span></a>
+    <a class="nxt" href="0303-lambda-and-the-function-boundary.html"><span class="dir">Next &rarr;</span><span class="ttl">Lambda and the function boundary</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0302 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

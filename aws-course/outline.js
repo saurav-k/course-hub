@@ -53,6 +53,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0204-buying-the-same-machine-for-less.html"
         }
       ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "Two orchestrators, one platform",
+          "href": "lessons/0300-two-orchestrators-one-platform.html"
+        },
+        {
+          "title": "Fargate is a capacity mode",
+          "href": "lessons/0301-fargate-is-a-capacity-mode.html"
+        },
+        {
+          "title": "The registry that feeds them",
+          "href": "lessons/0302-the-registry-that-feeds-them.html"
+        },
+        {
+          "title": "Lambda and the function boundary",
+          "href": "lessons/0303-lambda-and-the-function-boundary.html"
+        },
+        {
+          "title": "Above the container",
+          "href": "lessons/0304-above-the-container.html"
+        }
+      ]
     }
   ],
   "extras": []
