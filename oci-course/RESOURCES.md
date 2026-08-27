@@ -80,6 +80,20 @@ from and the date it was read.
 - [Static site hosting behind API Gateway](https://docs.oracle.com/en/learn/oci-api-gateway-web-hosting/index.html) - the documented composition for a bucket with a custom domain.
 - [Service Mesh](https://docs.oracle.com/en-us/iaas/Content/service-mesh/overview.htm) - the end-of-life notice naming open-source Istio as the replacement.
 
+### Module 04 - Storage
+
+- [Understanding Object Storage tiers](https://docs.oracle.com/en-us/iaas/Content/Object/Concepts/understandingstoragetiers.htm) - the tier table, the minimum retention on Infrequent Access and Archive, the retrieval fee, auto-tiering behaviour, the durability claim and the immutable bucket default tier.
+- [Overview of Archive Storage](https://docs.oracle.com/en-us/iaas/Content/Archive/Concepts/archivestorageoverview.htm) - restore before read, and first byte in about an hour.
+- [Object Storage auto tiering](https://blogs.oracle.com/cloud-infrastructure/post/introducing-object-storage-auto-tiering) - the one-mebibyte threshold and the no-cost move. Vendor blog rather than documentation.
+- [Block Volume performance](https://docs.oracle.com/en-us/iaas/Content/Block/Concepts/blockvolumeperformance.htm) - the performance-unit ladder, the named tiers and the operations-per-second ceiling.
+- [Changing the performance of an existing volume](https://docs.oracle.com/en-us/iaas/Content/Block/Concepts/update-performance-block-bv-volume.htm) - the unit values and how auto-tune is enabled.
+- [Dynamic performance scaling](https://blogs.oracle.com/cloud-infrastructure/post/announcing-dynamic-performance-scaling-with-oci-block-volume-autotuning) - the fast-up, slow-down asymmetry and the detached-volume behaviour. Vendor blog rather than documentation.
+- [File Storage](https://docs.oracle.com/en-us/iaas/Content/File/home.htm) - NFS versions, elastic capacity, snapshots, clones, cross-region replication, and the mount target and export objects.
+- [Using replication](https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/usingreplication.htm) - bucket replication policies.
+- [Scheduling volume backups](https://docs.oracle.com/en-us/iaas/Content/Block/Tasks/schedulingvolumebackups.htm) - backup policies, cross-region copies, volume groups and restore semantics.
+- [Data Transfer Appliance](https://blogs.oracle.com/cloud-infrastructure/post/introducing-oracle-cloud-infrastructure-data-transfer-appliance) - the 150 TB appliance, free shipping, the NFS dataset mount and the tamper-evident seals. Vendor blog rather than documentation.
+- [Service Change Announcements](https://docs.oracle.com/en-us/iaas/Content/servicechanges.htm) - the deprecation of the older File Storage encryption-key policy shape.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

@@ -75,6 +75,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0304-a-pattern-instead-of-a-runtime.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "Four shapes of storage, and the choice a bucket cannot take back",
+          "href": "lessons/0400-four-shapes-of-storage.html"
+        },
+        {
+          "title": "Object Storage tiers and the auto-tiering rule",
+          "href": "lessons/0401-object-storage-tiers.html"
+        },
+        {
+          "title": "Block Volume: performance is bought by the gigabyte",
+          "href": "lessons/0402-block-volume-performance.html"
+        },
+        {
+          "title": "File Storage: the mount target is the thing with a location",
+          "href": "lessons/0403-file-storage-and-the-mount-target.html"
+        },
+        {
+          "title": "Moving bytes in, out and duplicated",
+          "href": "lessons/0404-moving-bytes-in-out-and-duplicated.html"
+        }
+      ]
     }
   ],
   "extras": []

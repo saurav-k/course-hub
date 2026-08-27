@@ -41,6 +41,15 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0303 | Functions: the two timeouts that decide the design |
 | 0304 | Where OCI sells a pattern instead of a runtime |
 
+**Module 04 - Storage**
+
+| Lesson | Title |
+| 0400 | Four shapes of storage, and the choice a bucket cannot take back |
+| 0401 | Object Storage tiers and the auto-tiering rule |
+| 0402 | Block Volume: performance is bought by the gigabyte |
+| 0403 | File Storage: the mount target is the thing with a location |
+| 0404 | Moving bytes in, out and duplicated |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
