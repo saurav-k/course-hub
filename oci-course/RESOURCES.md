@@ -232,6 +232,18 @@ from and the date it was read.
 - [Oracle Integration](https://docs.oracle.com/en-us/iaas/application-integration/) - adapters, recipes, and the larger edition's process automation and business-to-business exchange.
 - [OS Management Hub](https://docs.oracle.com/en-us/iaas/osmh/doc/home.htm) - fleet patching across this platform and beyond it, groups, lifecycle stages, versioned software sources and live kernel patching.
 
+### Module 13 - AI and ML
+
+- [Generative AI](https://docs.oracle.com/en-us/iaas/Content/generative-ai/home.htm) - hosted foundation models from several providers with regional variation, fine-tuning, dedicated single-tenant clusters, content moderation and a custom model import path.
+- [AI vector search](https://docs.oracle.com/en/database/oracle/oracle-database/26/vecse/overview-ai-vector-search.html) - the vector datatype, similarity operators and in-database embedding generation that make the database the vector store.
+- [Generative AI Agents](https://docs.oracle.com/en-us/iaas/Content/generative-ai-agents/home.htm) - knowledge bases indexing object storage and search content, tool-calling agents, and answers returned with citations.
+- [Digital Assistant](https://docs.oracle.com/en-us/iaas/Content/digital-assistant/index.html) - the chatbot builder with skills, channels and integrations that can call agent endpoints.
+- [Data Science](https://docs.oracle.com/en-us/iaas/Content/data-science/using/home.htm) - notebooks, jobs, pipelines, automated model selection, the model catalogue with provenance and deployment endpoints.
+- [Speech](https://docs.oracle.com/en-us/iaas/Content/speech/using/speech.htm) - transcription with speaker separation, live transcription, synthesis, and the job shape and retention.
+- [Vision](https://docs.oracle.com/en-us/iaas/Content/vision/using/home.htm) - classification, object and text detection, and custom models trained on your own examples.
+- [Language](https://www.oracle.com/artificial-intelligence/language/) - sentiment, entity extraction, key phrases, translation and classification. Vendor product page rather than documentation.
+- [Document Understanding](https://docs.oracle.com/en-us/iaas/Content/document-understanding/using/home.htm) - key-value extraction from documents with prebuilt models, sharing its character recognition with Vision.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

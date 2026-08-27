@@ -120,6 +120,14 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 1203 | The gateway in front, and the integration platform beside it |
 | 1204 | Keeping the fleet configured after it is deployed |
 
+**Module 13 - AI and ML**
+
+| Lesson | Title |
+| 1300 | The managed model API, and the capacity behind it |
+| 1301 | The vector store is a database you already have |
+| 1302 | Agents, knowledge bases and the conversation layer |
+| 1303 | Training your own, and the ladder of pretrained services |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

@@ -301,6 +301,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1204-keeping-the-fleet-configured.html"
         }
       ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "The managed model API, and the capacity behind it",
+          "href": "lessons/1300-the-model-api-and-its-capacity.html"
+        },
+        {
+          "title": "The vector store is a database you already have",
+          "href": "lessons/1301-the-vector-store-is-a-database.html"
+        },
+        {
+          "title": "Agents, knowledge bases and the conversation layer",
+          "href": "lessons/1302-agents-and-the-conversation-layer.html"
+        },
+        {
+          "title": "Training your own, and the ladder of pretrained services",
+          "href": "lessons/1303-training-your-own-and-the-ladder.html"
+        }
+      ]
     }
   ],
   "extras": []
