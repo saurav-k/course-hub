@@ -191,28 +191,86 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0038-graded-4-the-alternating-dice-game.html"
         },
         {
-          "title": "Every independence verdict is one product test, once the events are straight",
+          "title": "Practice: independence and conditioning",
           "href": "lessons/0039-practice-independence-and-conditioning.html"
         },
         {
-          "title": "Counting problems are won or lost on what counts as one outcome",
+          "title": "Practice: counting and arrangements",
           "href": "lessons/0040-practice-counting-and-arrangements.html"
         },
         {
-          "title": "\"At least one\" questions are union questions, and the overlaps carry the answer",
+          "title": "Practice: inclusion-exclusion and derangements",
           "href": "lessons/0041-practice-inclusion-exclusion-and-derangements.html"
         },
         {
-          "title": "Five problems where the win is a proven inequality, not a number",
+          "title": "Practice: bounds and inequalities",
           "href": "lessons/0042-practice-bounds-and-inequalities.html"
         },
         {
-          "title": "Six problems, one machine - and half of them run it backwards",
+          "title": "Practice: Bayes and total probability",
           "href": "lessons/0043-practice-bayes-and-total-probability.html"
         },
         {
-          "title": "Eight problems where the modelling choice is the whole problem",
+          "title": "Practice: processes and modelling",
           "href": "lessons/0044-practice-processes-and-modelling.html"
+        }
+      ]
+    },
+    {
+      "n": "L4",
+      "title": "Lecture 4: the applied pass",
+      "lessons": [
+        {
+          "title": "Lecture 4: start here",
+          "href": "lessons/0045-lecture-4-start-here.html"
+        },
+        {
+          "title": "The three numbers a test carries",
+          "href": "lessons/0046-the-three-numbers-a-test-carries.html"
+        },
+        {
+          "title": "Two roads to a positive result",
+          "href": "lessons/0047-two-roads-to-a-positive-result.html"
+        },
+        {
+          "title": "The base rate answer",
+          "href": "lessons/0048-the-base-rate-answer.html"
+        },
+        {
+          "title": "The negative result, left unfinished",
+          "href": "lessons/0049-the-negative-result-left-unfinished.html"
+        },
+        {
+          "title": "Independence, checked on a table",
+          "href": "lessons/0050-independence-checked-on-a-table.html"
+        },
+        {
+          "title": "Independence for n events",
+          "href": "lessons/0051-independence-for-n-events.html"
+        },
+        {
+          "title": "Conditional independence",
+          "href": "lessons/0052-conditional-independence.html"
+        },
+        {
+          "title": "Equally likely means counting",
+          "href": "lessons/0053-equally-likely-means-counting.html"
+        },
+        {
+          "title": "The basic counting rule",
+          "href": "lessons/0054-the-basic-counting-rule.html"
+        },
+        {
+          "title": "Ordered sampling: the two cases",
+          "href": "lessons/0055-ordered-sampling.html"
+        },
+        {
+          "title": "Unordered sampling: the two cases",
+          "href": "lessons/0056-unordered-sampling.html"
+        },
+        {
+          "title": "The four boxes, side by side",
+          "href": "lessons/0057-the-four-boxes.html"
         }
       ]
     }
@@ -229,6 +287,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Lecture 3 Formula Sheet",
       "href": "reference/lecture-3-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 4 Formula Sheet",
+      "href": "reference/lecture-4-formula-sheet.html"
     }
   ]
 };
