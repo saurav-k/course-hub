@@ -97,6 +97,250 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0403-shared-file-systems-and-bulk-transfer.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "The relational shapes",
+          "href": "lessons/0500-the-relational-shapes.html"
+        },
+        {
+          "title": "Buying relational capacity",
+          "href": "lessons/0501-buying-relational-capacity.html"
+        },
+        {
+          "title": "Cosmos DB: the request unit and the partition key",
+          "href": "lessons/0502-cosmos-db-the-request-unit-and-the-partition-key.html"
+        },
+        {
+          "title": "The specialised stores",
+          "href": "lessons/0503-the-specialised-stores.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "The analytics fork",
+          "href": "lessons/0600-the-analytics-fork.html"
+        },
+        {
+          "title": "The lake and the engines that read it",
+          "href": "lessons/0601-the-lake-and-the-engines-that-read-it.html"
+        },
+        {
+          "title": "Pipelines and the runtime that reaches your data",
+          "href": "lessons/0602-pipelines-and-the-runtime-that-reaches-your-data.html"
+        },
+        {
+          "title": "Streams and the units that carry them",
+          "href": "lessons/0603-streams-and-the-units-that-carry-them.html"
+        },
+        {
+          "title": "Who reads the result",
+          "href": "lessons/0604-who-reads-the-result.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "The virtual network is an address plan",
+          "href": "lessons/0700-the-virtual-network-is-an-address-plan.html"
+        },
+        {
+          "title": "Rules and routes",
+          "href": "lessons/0701-rules-and-routes.html"
+        },
+        {
+          "title": "Joining networks",
+          "href": "lessons/0702-joining-networks.html"
+        },
+        {
+          "title": "Private endpoints and the DNS behind them",
+          "href": "lessons/0703-private-endpoints-and-the-dns-behind-them.html"
+        },
+        {
+          "title": "The edge",
+          "href": "lessons/0704-the-edge.html"
+        },
+        {
+          "title": "Paths in from outside",
+          "href": "lessons/0705-paths-in-from-outside.html"
+        }
+      ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "One tenant, three populations",
+          "href": "lessons/0800-one-tenant-three-populations.html"
+        },
+        {
+          "title": "How a request is authorised",
+          "href": "lessons/0801-how-a-request-is-authorised.html"
+        },
+        {
+          "title": "What is demanded at sign-in",
+          "href": "lessons/0802-what-is-demanded-at-sign-in.html"
+        },
+        {
+          "title": "Machine identity without secrets",
+          "href": "lessons/0803-machine-identity-without-secrets.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-secrets-and-certificates.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "Policy is the guardrail engine",
+          "href": "lessons/0900-policy-is-the-guardrail-engine.html"
+        },
+        {
+          "title": "Policy as code and the effect ramp",
+          "href": "lessons/0901-policy-as-code-and-the-effect-ramp.html"
+        },
+        {
+          "title": "Landing zones and subscription vending",
+          "href": "lessons/0902-landing-zones-and-subscription-vending.html"
+        },
+        {
+          "title": "Knowing what you have",
+          "href": "lessons/0903-knowing-what-you-have.html"
+        },
+        {
+          "title": "Paying for it",
+          "href": "lessons/0904-paying-for-it.html"
+        }
+      ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Three planes and one routing primitive",
+          "href": "lessons/1000-three-planes-and-one-routing-primitive.html"
+        },
+        {
+          "title": "What is on by default",
+          "href": "lessons/1001-what-is-on-by-default.html"
+        },
+        {
+          "title": "What keeping it costs",
+          "href": "lessons/1002-what-keeping-it-costs.html"
+        },
+        {
+          "title": "Instrumenting what the platform cannot see",
+          "href": "lessons/1003-instrumenting-what-the-platform-cannot-see.html"
+        },
+        {
+          "title": "Alerts, health and the blind spots",
+          "href": "lessons/1004-alerts-health-and-the-blind-spots.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "Two managed firewalls at two layers",
+          "href": "lessons/1100-two-managed-firewalls-at-two-layers.html"
+        },
+        {
+          "title": "Boundaries and access without a path",
+          "href": "lessons/1101-boundaries-and-access-without-a-path.html"
+        },
+        {
+          "title": "Knowing how exposed you are",
+          "href": "lessons/1102-knowing-how-exposed-you-are.html"
+        },
+        {
+          "title": "Detection and response",
+          "href": "lessons/1103-detection-and-response.html"
+        }
+      ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Four ways to describe infrastructure",
+          "href": "lessons/1200-four-ways-to-describe-infrastructure.html"
+        },
+        {
+          "title": "A deployment is an object",
+          "href": "lessons/1201-a-deployment-is-an-object.html"
+        },
+        {
+          "title": "Shipping change",
+          "href": "lessons/1202-shipping-change.html"
+        },
+        {
+          "title": "Messages, events and the three that get confused",
+          "href": "lessons/1203-messages-events-and-the-three-that-get-confused.html"
+        },
+        {
+          "title": "APIs, workflows and what is not a product",
+          "href": "lessons/1204-apis-workflows-and-what-is-not-a-product.html"
+        }
+      ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "Model endpoints and how throughput is bought",
+          "href": "lessons/1300-model-endpoints-and-how-throughput-is-bought.html"
+        },
+        {
+          "title": "Grounding and the pipeline that fills it",
+          "href": "lessons/1301-grounding-and-the-pipeline-that-fills-it.html"
+        },
+        {
+          "title": "Training, tools and agents",
+          "href": "lessons/1302-training-tools-and-agents.html"
+        }
+      ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Backup and the two kinds of vault",
+          "href": "lessons/1400-backup-and-the-two-kinds-of-vault.html"
+        },
+        {
+          "title": "Replication, failover and the objective nobody published",
+          "href": "lessons/1401-replication-failover-and-the-objective-nobody-published.html"
+        },
+        {
+          "title": "Proving it",
+          "href": "lessons/1402-proving-it.html"
+        },
+        {
+          "title": "Moving workloads in",
+          "href": "lessons/1403-moving-workloads-in.html"
+        }
+      ]
     }
   ],
   "extras": []

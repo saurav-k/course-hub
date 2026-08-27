@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Joining networks - Inside Azure</title>
+<meta name="description" content="Peering joins exactly two networks and is never transitive, so every hub design on Azure is a design for supplying the transit the platform declines to assume.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0702</div>
+  <h1>Peering joins two networks and only two, so every hub is a transit design</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>networking-core</code>, rows <code>network-peering</code> and <code>transit-hub</code>, with the recorded absence <code>shared-vpc</code> beside them.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview">Virtual network peering</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Peering is non-transitive.</b> Two spokes peered to a hub cannot reach each other through it unless something in the hub is made to forward them.</li>
+      <li><b>Gateway transit</b> is the exception worth knowing: a spoke can use the hub's VPN or ExpressRoute gateway rather than holding one of its own.</li>
+      <li>Peering costs nothing for bandwidth <b>inside a region</b> and bills per gigabyte <b>across regions</b>, which quietly shapes where chatty components are placed.</li>
+      <li>A <b>Virtual WAN hub</b> is the managed alternative: <b>Basic is site-to-site only</b>, <b>Standard is any-to-any</b>, and the secured-hub pattern embeds Azure Firewall with routing intent.</li>
+      <li>Azure has <b>no shared-network construct</b>. A hub subscription owns the network and workload subscriptions either peer into it or receive role assignments on its subnets.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Rules and routes inside&lt;br/&gt;one network - lesson 0701"] --> T["THIS PAGE&lt;br/&gt;joining networks,&lt;br/&gt;and supplying the transit"]
+  T --> A["Reaching services privately&lt;br/&gt;lesson 0703"]
+  T --> B["Paths in from outside&lt;br/&gt;lesson 0705"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits. The last two pages built one working network. This page is what happens when there are many of them, which on any real estate is immediately - a landing zone hands each workload its own network by design.
+    <b>The shape of an estate's network is decided here, and it is decided by one property of peering rather than by a product choice.</b></figcaption>
+  </figure>
+
+  <h2>The property that decides everything</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  A["Spoke A"] ---|"peered"| H["Hub"]
+  B["Spoke B"] ---|"peered"| H
+  A -.-|"NOT reachable&lt;br/&gt;peering is non-transitive"| B
+  H --> FIX["To make A reach B, the hub must forward:&lt;br/&gt;a network virtual appliance or firewall in the path,&lt;br/&gt;plus routes on each spoke pointing at it"]
+    </div>
+    <figcaption>Two peerings do not make a network of three. Peering is a direct relationship between exactly two networks, so the dotted line is the gap every hub-and-spoke design exists to fill: an appliance or firewall in the hub, and a user-defined route on each spoke sending the other spoke's prefix to it.
+    <b>Spoke-to-spoke traffic is a routing decision you make, never a consequence of both spokes being peered to the same hub.</b></figcaption>
+  </figure>
+
+  <h2>How a packet actually crosses between two spokes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Workload in spoke A
+  participant RA as Route table on spoke A
+  participant F as Firewall or appliance in the hub
+  participant B as Workload in spoke B
+  A->>RA: destination is a prefix in spoke B
+  RA->>F: the route sends it to the appliance, not to spoke B
+  F->>F: inspect and decide
+  F->>B: forwarded across the hub-to-spoke peering
+  B-->>F: reply
+  F-->>A: reply returns the same way
+  Note over RA,F: without that route the packet follows the system route and is dropped
+    </div>
+    <figcaption>The hop that the diagram above compresses into one arrow. The appliance is reachable because the hub is peered to both spokes, and the packet reaches the appliance only because a route on spoke A says so. Both halves are needed, and the route is the half that is usually missing.
+    <b>Every spoke-to-spoke path is two peerings plus two route entries plus a device willing to forward - and the absence of any one of the four looks identical from the workload.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  <b>Gateway transit</b> is the one place the platform does supply transit for you. A spoke peered with gateway transit enabled uses the hub's VPN or ExpressRoute gateway instead of deploying its own, which is what makes a central connectivity subscription affordable: one gateway serves the estate rather than one per workload network.</div>
+
+  <h2>Two hub shapes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q{"Who operates the hub"} -->|"you do"| SELF["Hub-and-spoke with peering&lt;br/&gt;a virtual network you own,&lt;br/&gt;holding firewalls and gateways"]
+  Q -->|"Microsoft does"| VW["Virtual WAN hub&lt;br/&gt;a managed hub router"]
+  SELF --> LIM["Scales until the peering-link count&lt;br/&gt;and the route-table size begin to hurt"]
+  VW --> B1["Basic hub&lt;br/&gt;site-to-site connectivity only"]
+  VW --> B2["Standard hub&lt;br/&gt;any-to-any, including ExpressRoute,&lt;br/&gt;point-to-site and hub-to-hub"]
+  B2 --> SEC["Secured hub&lt;br/&gt;Azure Firewall embedded,&lt;br/&gt;with routing intent"]
+    </div>
+    <figcaption>The same job with two operating models. A self-built hub is an ordinary virtual network that happens to hold the shared devices, and it scales until link counts and route tables become the constraint. A <a href="https://learn.microsoft.com/en-us/azure/virtual-wan/virtual-wan-about">Virtual WAN hub</a> is a managed hub router, and its two types are not sizes - Basic carries site-to-site connectivity only, and any-to-any needs Standard.
+    <b>Choosing Basic to save money is the trap: it is a capability tier, and spoke-to-spoke or ExpressRoute connectivity is on the other side of it.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  The per-hub connection and scale numbers move, and this course deliberately quotes none of them. Read them from the vendor's current limits table at the moment you design, and treat any figure written into an architecture document as needing a date beside it. The same applies to how many peerings one network will carry.</div>
+
+  <h2>The construct Azure does not have</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  NEED["Several subscriptions&lt;br/&gt;need to use one network"] --> NONE["There is no network-sharing construct"]
+  NONE --> W1["A hub subscription owns the network"]
+  W1 --> O1["Workload subscriptions peer their own networks into it"]
+  W1 --> O2["Or workload teams receive role assignments&lt;br/&gt;on the hub's subnets"]
+  NONE -.-|"the same shape appears for resources generally"| GEN["No general resource-sharing service either&lt;br/&gt;- place the resource in a shared subscription&lt;br/&gt;and grant access at the right scope"]
+    </div>
+    <figcaption>A recorded absence, drawn so it is not mistaken for a missing feature to search for. Azure has no construct that lets one subscription's network be projected into another. Sharing is achieved by ownership plus access: the network lives in one subscription, and other subscriptions either peer into it or are granted rights on its subnets.
+    <b>This makes the connectivity subscription a real ownership boundary rather than a naming convention, and it is why landing-zone designs put it there deliberately.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Two spokes are peered to the same hub and cannot reach each other. What is missing?</div>
+      <button class="q-opt">Routes pointing at a device in the hub that will forward between them</button>
+      <button class="q-opt">A third peering directly between the two spokes, which is unsupported</button>
+      <button class="q-opt">Gateway transit, which is what carries spoke-to-spoke traffic through a hub</button>
+      <button class="q-opt">A Standard hub type, since Basic hubs cannot carry any peered traffic</button>
+      <div class="q-fb">Peering is non-transitive, so spoke-to-spoke needs a forwarding device plus routes sending traffic to it. The second option is wrong twice - direct peering between spokes is possible and would not be "unsupported", it is simply not what a hub design uses. The third names a real feature that carries gateway traffic, not spoke-to-spoke traffic. The fourth confuses the managed hub types with self-built peering.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is the difference between a Basic and a Standard Virtual WAN hub?</div>
+      <button class="q-opt">Basic is a smaller hub, and Standard raises its throughput ceiling</button>
+      <button class="q-opt">Basic is regional, and Standard extends the same hub across regions</button>
+      <button class="q-opt">Basic carries site-to-site only, and Standard adds any-to-any transit</button>
+      <button class="q-opt">Basic omits the firewall, and Standard embeds one by default in it</button>
+      <div class="q-fb">The two types differ in capability rather than in size - any-to-any, ExpressRoute and hub-to-hub arrive with Standard. The first and second treat a capability tier as a size or a scope. The fourth describes the secured-hub pattern, which is an option on top rather than the definition of the tier.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Four subscriptions must use one virtual network. What does Azure offer?</div>
+      <button class="q-opt">A network-sharing construct that projects a network into subscriptions</button>
+      <button class="q-opt">A resource-sharing service that grants named accounts use of a network</button>
+      <button class="q-opt">A management-group setting that makes networks visible below the node</button>
+      <button class="q-opt">Ownership by one subscription, plus peering or rights on its subnets</button>
+      <div class="q-fb">There is no sharing construct - the pattern is one owner plus access granted to others. The first two options describe constructs the corpus records as absent. The third invents an inheritance behaviour that management groups do not have for resources.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An estate has one connectivity subscription and twelve workload subscriptions, each with its own virtual network in the same region. Requirements: every workload must reach an on-premises estate; two of the twelve must talk directly to each other; a shared logging component in the connectivity subscription must be reachable from all twelve; and the platform team wants inspection of all traffic between workloads. A proposal peers all twelve to the hub and declares the requirements met.</p>
+      <p><b>Take it apart</b>: say which requirements the peering alone satisfies, which it does not, and what else is needed for each of the rest.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Sort the four requirements into "between a spoke and the hub" and "between two spokes". Peering answers one of those categories on its own and neither part of the other.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Sort the requirements.</b> Reaching on-premises and reaching the shared logging component are both spoke-to-hub. Talking between two workloads and inspecting traffic between workloads are both spoke-to-spoke.</li>
+        <li><b>Check the shared logging component.</b> It lives in the connectivity subscription's network, and each spoke is peered to that network, so this one is genuinely satisfied by the peering as proposed.</li>
+        <li><b>Check the on-premises requirement.</b> Peering alone does not give a spoke the use of the hub's gateway - that is what gateway transit is for. With it enabled on each peering, one gateway in the connectivity subscription serves all twelve, which is the reason the subscription exists.</li>
+        <li><b>Check the direct workload-to-workload requirement.</b> Peering is non-transitive, so the two spokes cannot reach each other through the hub. This needs a forwarding device in the hub plus a user-defined route on each of the two spokes sending the other's prefix to it.</li>
+        <li><b>Check the inspection requirement.</b> Inspection of traffic between workloads is the same mechanism seen from the platform team's side: the device in the hub is where inspection happens, and the routes are what guarantee traffic reaches it rather than taking a shorter path.</li>
+        <li><b>Notice what the last two share.</b> Once inspection is required for all inter-workload traffic, direct spoke-to-spoke peering between the two chatty subscriptions would bypass it. So the answer to requirement two must be the hub path rather than a direct peering, even though a direct peering would be simpler.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one of the four requirements should have been met by the proposal as written. If you also counted the on-premises one, check whether gateway transit was actually enabled - being peered to a network that has a gateway is not the same as being allowed to use it.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0703-private-endpoints-and-the-dns-behind-them.html">private endpoints and the DNS behind them</a></b> is how a platform service is reached from inside the network this page has now joined up.</li>
+    <li><b>Lesson 0701</b> supplies the user-defined route that every spoke-to-spoke path on this page depends on.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If non-transitivity still feels like a limitation rather than a design input, ask an agent to list what would have to be true for a hub to forward automatically. The list is a set of decisions somebody has to own, which is exactly why the platform does not make them for you.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview">peering overview</a> and then the <a href="https://learn.microsoft.com/en-us/azure/virtual-wan/virtual-wan-about">Virtual WAN overview</a>. The second reads as a list of the problems the first creates at scale, which is the most useful way to hold the pair.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. Per-hub scale figures are deliberately not quoted; the vendor's limits table is the live authority.</p>
+
+  <div class="pager">
+    <a href="0701-rules-and-routes.html"><span class="dir">&larr; Previous</span><span class="ttl">Rules and routes</span></a>
+    <a class="nxt" href="0703-private-endpoints-and-the-dns-behind-them.html"><span class="dir">Next &rarr;</span><span class="ttl">Private endpoints and the DNS behind them</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0702 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

@@ -39,9 +39,95 @@ is wrong and it gets fixed before anything new is added.
 | 0402 | Managed disks and Elastic SAN |
 | 0403 | Shared file systems and bulk transfer |
 
-## Planned, in order
+**Module 05 - Databases**
 
-Modules 05 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+| Lesson | Title |
+| 0500 | The relational shapes |
+| 0501 | Buying relational capacity |
+| 0502 | Cosmos DB: the request unit and the partition key |
+| 0503 | The specialised stores |
+
+**Module 06 - Analytics**
+
+| Lesson | Title |
+| 0600 | The analytics fork |
+| 0601 | The lake and the engines that read it |
+| 0602 | Pipelines and the runtime that reaches your data |
+| 0603 | Streams and the units that carry them |
+| 0604 | Who reads the result |
+
+**Module 07 - Networking and delivery**
+
+| Lesson | Title |
+| 0700 | The virtual network is an address plan |
+| 0701 | Rules and routes |
+| 0702 | Joining networks |
+| 0703 | Private endpoints and the DNS behind them |
+| 0704 | The edge |
+| 0705 | Paths in from outside |
+
+**Module 08 - Identity and access**
+
+| Lesson | Title |
+| 0800 | One tenant, three populations |
+| 0801 | How a request is authorised |
+| 0802 | What is demanded at sign-in |
+| 0803 | Machine identity without secrets |
+| 0804 | Keys, secrets and certificates |
+
+**Module 09 - Governance, tenancy and cost**
+
+| Lesson | Title |
+| 0900 | Policy is the guardrail engine |
+| 0901 | Policy as code and the effect ramp |
+| 0902 | Landing zones and subscription vending |
+| 0903 | Knowing what you have |
+| 0904 | Paying for it |
+
+**Module 10 - Observability and audit**
+
+| Lesson | Title |
+| 1000 | Three planes and one routing primitive |
+| 1001 | What is on by default |
+| 1002 | What keeping it costs |
+| 1003 | Instrumenting what the platform cannot see |
+| 1004 | Alerts, health and the blind spots |
+
+**Module 11 - Security services**
+
+| Lesson | Title |
+| 1100 | Two managed firewalls at two layers |
+| 1101 | Boundaries and access without a path |
+| 1102 | Knowing how exposed you are |
+| 1103 | Detection and response |
+
+**Module 12 - Delivery and integration**
+
+| Lesson | Title |
+| 1200 | Four ways to describe infrastructure |
+| 1201 | A deployment is an object |
+| 1202 | Shipping change |
+| 1203 | Messages, events and the three that get confused |
+| 1204 | APIs, workflows and what is not a product |
+
+**Module 13 - AI and ML**
+
+| Lesson | Title |
+| 1300 | Model endpoints and how throughput is bought |
+| 1301 | Grounding and the pipeline that fills it |
+| 1302 | Training, tools and agents |
+
+**Module 14 - Resilience and migration**
+
+| Lesson | Title |
+| 1400 | Backup and the two kinds of vault |
+| 1401 | Replication, failover and the objective nobody published |
+| 1402 | Proving it |
+| 1403 | Moving workloads in |
+
+## The plan, complete
+
+All fourteen modules are written. The full plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -75,8 +161,9 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 05 to 14**, none started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **Nothing further is reserved by module.** The fourteen-module plan is
+  complete. New numbers go at the end of the sequence; nothing already
+  published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a
   Glossary entry.

@@ -9,8 +9,8 @@ This file adds only what is true of this course and nowhere else.
 
 The deep Azure course of the Cloud Architecture category: one platform walked end
 to end as a connected design, from its account hierarchy (subscriptions under a tenant and management-group tree) to the
-services built on it. Modules 01 to 04 are written; `PLOT.md` holds the full
-fourteen-module plan and is the authority for what is written and what is reserved.
+services built on it. All fourteen modules are written; `PLOT.md` holds the plan and
+remains the authority for the reading order and for anything reserved.
 
 ## Read before you write
 

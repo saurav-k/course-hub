@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three planes and one routing primitive - Inside Azure</title>
+<meta name="description" content="Azure telemetry decomposes into metrics, platform logs and agent streams converging on two stores, and almost all of it reaches a destination through one object: the diagnostic setting.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1000</div>
+  <h1>Three planes, two stores, and one object that routes almost everything</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>observability</code>, rows <code>metrics-store</code> and <code>log-store</code>, with <code>data-plane-access-log</code> from <code>audit-telemetry</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/diagnostic-settings">Diagnostic settings</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Telemetry decomposes into three planes - <b>metrics</b>, <b>platform logs</b>, and <b>agent and application streams</b> - converging on two stores plus a third for Prometheus.</li>
+      <li>The stores are the <b>Azure Monitor metrics time-series database</b> and <b>Log Analytics workspaces</b>, queried by two different languages against two different clocks.</li>
+      <li>Almost every stream reaches a destination through a <b>diagnostic setting</b>, whose destinations are a workspace, a storage account, an event hub or a partner solution - <b>one of each type per setting</b>.</li>
+      <li>There is a hard cap of <b>five diagnostic settings per resource</b>, which makes multi-team log fan-out a design problem rather than a configuration task.</li>
+      <li>After creating a setting, expect up to <b>ninety minutes</b> before data flows. Investigating an empty destination inside that window is investigating nothing.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["An estate you can inventory&lt;br/&gt;module 09"] --> T["THIS PAGE&lt;br/&gt;the shape of every telemetry&lt;br/&gt;stream, and how it is routed"]
+  T --> A["The streams that are on&lt;br/&gt;by default - lesson 1001"]
+  T --> B["What keeping them costs&lt;br/&gt;lesson 1002"]
+  W["Module 10&lt;br/&gt;observability and audit"] -.- T
+    </div>
+    <figcaption>Where this sits. Module 09 could say what exists. This module says what happened, and it opens with the routing model because every later page in it is a stream that either flows through that model or deliberately does not.
+    <b>The routing object is the thing to learn first: it has limits, latencies and a lossy behaviour, and all three shape what an observability design can promise.</b></figcaption>
+  </figure>
+
+  <h2>Three planes, and where each one lands</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  M["Metrics plane&lt;br/&gt;numeric series per resource"] --> TSDB["Azure Monitor metrics&lt;br/&gt;time-series database"]
+  PL["Platform logs plane&lt;br/&gt;the control-plane record and resource logs"] --> LA["Log Analytics workspaces&lt;br/&gt;queried in KQL"]
+  AG["Agent and application plane&lt;br/&gt;guest telemetry and application traces"] --> LA
+  PR["Prometheus series"] --> AMW["Azure Monitor workspaces&lt;br/&gt;queried in PromQL"]
+  TSDB --> C1["Its own retention clock"]
+  LA --> C2["Retention chosen per table"]
+  AMW --> C3["Its own retention and query-span limits"]
+    </div>
+    <figcaption>Three producers, three stores, three clocks. The split that matters most is between the first two: a metric is a pre-aggregated number in a purpose-built series database, and a log is a record in a query engine. They are not two views of one thing, and a question answerable from one is often unanswerable from the other.
+    <b>Prometheus is a genuinely separate store rather than a view over the metrics database, so PromQL and the metrics explorer look at different data.</b></figcaption>
+  </figure>
+
+  <h2>The object almost everything flows through</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  SRC["Sources&lt;br/&gt;platform metrics, the control-plane record,&lt;br/&gt;and a resource's own log categories"] --> DS["A diagnostic setting"]
+  DS --> D1["A Log Analytics workspace"]
+  DS --> D2["A storage account&lt;br/&gt;same region, standard tier"]
+  DS --> D3["An event hub namespace&lt;br/&gt;same region"]
+  DS --> D4["A partner solution"]
+  DS --> R1["One destination of each type per setting"]
+  DS --> R2["Five settings per resource, maximum"]
+  DS --> R3["Category groups - allLogs and audit -&lt;br/&gt;which pick up future categories automatically"]
+    </div>
+    <figcaption>The routing primitive, with the two constraints that decide designs. Five settings per resource sounds generous until an estate has a security team, an operations team, a data platform and a partner tool all wanting their own destination - at which point the fan-out has to be built downstream of a shared destination rather than by adding settings.
+    <b>Category groups are the maintenance win: choosing allLogs or audit means a category added by the vendor later is collected without anybody revisiting the setting.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A diagnostic setting is <b>coarse on purpose</b>. Its granularity is the log category, and there is no filter for individual entries inside a category - lesson 0900 already noted that policy cannot supply one either. Trimming what is kept happens <b>after</b> ingestion, through workspace transformations, which means the volume decision and the retention decision are made at two different places in the pipeline.</div>
+
+  <h2>What the pipeline does not promise</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as You
+  participant DS as A new diagnostic setting
+  participant P as The pipeline
+  participant D as The destination
+  U->>DS: create the setting
+  Note over DS,D: expect up to ninety minutes before anything appears
+  P->>D: resource logs, store-and-forward with retries
+  Note over P,D: small losses may occur by design - this is not a transactional pipeline
+  P->>D: exported metrics
+  Note over P,D: multidimensional metrics flatten - the dimensions are aggregated away
+  Note over P,D: an idle resource backs off, stretching export delay up to two hours
+    </div>
+    <figcaption>Four documented behaviours that break assumptions. The ninety-minute wait wastes an afternoon roughly once per engineer. The lossiness is the one with real design consequences: <b>resource logs are a store-and-forward pipeline where small losses may occur</b>, so nothing that must be complete should be built on them alone.
+    <b>Build anything requiring durability on event-hub capture or workspace data export rather than on resource logs alone, because the vendor documents the losses rather than denying them.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two more traps sit around the edges. <b>Metric dimensions are flattened on export</b>, so per-node analysis of a multidimensional metric is impossible in the workspace copy and has to be done against the metrics store itself. And a deleted, renamed or moved resource can leave an <b>orphaned diagnostic setting that silently reattaches</b> to a resource recreated with the same identity - so a stream you thought you had removed can come back on its own.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Four teams each want a resource's logs in their own workspace, and a partner tool wants them too. What is the constraint?</div>
+      <button class="q-opt">A destination may only be named by one diagnostic setting across the estate</button>
+      <button class="q-opt">A category may only be routed once, so the teams must share categories</button>
+      <button class="q-opt">A workspace may only receive from resources in its own subscription</button>
+      <button class="q-opt">Five settings per resource, each with one destination of a given type</button>
+      <div class="q-fb">The cap is five settings per resource, and each setting takes at most one destination of each type - so five separate workspaces is the ceiling and fan-out beyond it happens downstream. The other three invent constraints that do not exist and would each rule out ordinary configurations.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A compliance requirement says no audit record may be lost. Which routing is defensible?</div>
+      <button class="q-opt">Resource logs to a workspace, since the pipeline retries on failure</button>
+      <button class="q-opt">Event-hub capture or workspace export, since resource logs may lose records</button>
+      <button class="q-opt">Resource logs to a storage account, since blobs are append-only there</button>
+      <button class="q-opt">Resource logs to five destinations, since a loss is unlikely to hit all five</button>
+      <div class="q-fb">The vendor documents that small losses may occur in the store-and-forward pipeline, so durability is built downstream of it. The first and third options change the destination without changing the pipeline. The fourth assumes losses are independent per destination, which the documented behaviour does not support.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A per-node metric looks right in the metrics explorer and is unusable in the workspace. Why?</div>
+      <button class="q-opt">The workspace stores metrics at a coarser sampling interval than the store</button>
+      <button class="q-opt">The workspace applies its retention policy before the metric is written</button>
+      <button class="q-opt">Multidimensional metrics flatten on export - the dimensions are aggregated</button>
+      <button class="q-opt">Metrics reach the workspace only for resources with an agent installed</button>
+      <div class="q-fb">Export flattens dimensions, which is exactly what removes the per-node view. The first and second invent transformations that do not happen. The fourth confuses platform metrics with guest telemetry, which is a different plane.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A platform must satisfy four consumers of one busy service's telemetry: a security team wanting audit categories retained for years, an operations team wanting everything for a month, a data team wanting raw events for analysis, and a partner monitoring tool. Somebody proposes four diagnostic settings, one per consumer, and adds a fifth later for a compliance archive. Two weeks after the settings are created, the security team reports that a handful of records they expected are missing.</p>
+      <p><b>Design it properly</b>: say what is wrong with one setting per consumer, propose a routing, and explain the missing records.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Count the settings against the cap, and count the destinations of each type inside one setting. Then ask which of the four consumers actually needs its own copy from the source, and which could be served from somebody else's copy.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Count against the cap.</b> Five settings is the maximum per resource, so the proposal reaches the ceiling exactly and leaves no room for the next consumer. That is a design with no headroom on a limit that cannot be raised.</li>
+        <li><b>Use the destinations inside one setting.</b> A single setting can carry one workspace, one storage account and one event hub at once. So one setting can serve the operations workspace, the archive in storage and the event hub feeding the data team and the partner tool - which collapses most of the proposal into one object.</li>
+        <li><b>Fan out downstream.</b> The event hub is the fan-out point: the data team consumes it, the partner tool consumes it, and anything else that appears later consumes it too, without touching the resource's settings again.</li>
+        <li><b>Serve the security requirement.</b> Route the audit category group to the workspace and hold it under a long retention there, or export it onward. Choosing the <b>audit</b> category group rather than naming categories means a category added later is picked up automatically.</li>
+        <li><b>Explain the missing records.</b> Resource logs are a store-and-forward pipeline in which small losses may occur by design. A handful of missing records is documented behaviour rather than a fault, and no amount of reconfiguration removes it.</li>
+        <li><b>Fix the security team's guarantee.</b> If completeness is a requirement rather than a preference, it cannot rest on resource logs. Build it on event-hub capture or on workspace data export, and say plainly in the design that the diagnostic-setting path is best-effort.</li>
+        <li><b>Watch the timing.</b> If any of this is being tested immediately after configuration, remember the ninety-minute wait before data flows - and that a setting for a recreated resource may have reattached from an earlier deployment.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your final design should use fewer than five settings and should serve at least two consumers from one downstream copy. If you still have one setting per consumer, the three-destinations-per-setting property has not been used.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1001-what-is-on-by-default.html">what is on by default</a></b> separates the two streams you already have from the many you have to turn on.</li>
+    <li><b>Lesson 0503</b> introduced the engine family behind the log store, and lesson 0903 used the same query language against inventory.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the five-setting cap feels remote, ask an agent to list the consumers of telemetry in an organisation you know. The list reaches five faster than anybody expects, and it is the moment a fan-out design becomes necessary.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/diagnostic-settings">diagnostic settings</a> page in full, including the limitations. It is short, and nearly every line of it is a constraint that decides something.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0904-paying-for-it.html"><span class="dir">&larr; Previous</span><span class="ttl">Paying for it</span></a>
+    <a class="nxt" href="1001-what-is-on-by-default.html"><span class="dir">Next &rarr;</span><span class="ttl">What is on by default</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 1000 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
