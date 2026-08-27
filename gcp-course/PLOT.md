@@ -118,6 +118,21 @@ in lessons 0101 and 0102, so module 09 builds on them rather than repeating them
 Command Center appears here on its compliance and drift face, and in module 11 on its
 threat and posture face - one product, two audiences.
 
+**Module 10 - Observability and audit**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 1000 | Where a log lands and how long it stays | `log-store`, `telemetry-export-pipeline`, `log-analytics`, `error-reporting` |
+| 1001 | The four audit streams | `control-plane-audit-log`, `data-plane-access-log`, `policy-denied-audit-log`, `access-transparency-logs` |
+| 1002 | The streams that are off until you turn them on | `network-flow-log`, `firewall-rules-log`, `nat-logs`, `load-balancer-access-log`, `dns-query-log`, `service-specific-log` |
+| 1003 | Metrics, agents and three retention schedules | `metrics-store`, `managed-prometheus`, `telemetry-agent` |
+| 1004 | Traces, profiles and being told | `alerting`, `dashboards`, `synthetic-monitoring`, `distributed-tracing`, `profiler`, `network-diagnostics`, `service-health-dashboard` |
+
+`telemetry-export-pipeline` sits in the integration-messaging domain of the shared
+taxonomy and is taught here, because the Log Router cannot be separated from the log
+store it decides storage for. `identity-provider-audit-log` is a recorded absence named
+in lesson 0803 and reaching Cloud Logging as Admin Activity records.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -152,7 +167,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 10 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 11 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.

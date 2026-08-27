@@ -235,6 +235,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0904-paying-less-on-purpose.html"
         }
       ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Where a log lands and how long it stays",
+          "href": "lessons/1000-where-a-log-lands.html"
+        },
+        {
+          "title": "The four audit streams",
+          "href": "lessons/1001-the-four-audit-streams.html"
+        },
+        {
+          "title": "The streams that are off until you turn them on",
+          "href": "lessons/1002-streams-that-are-off.html"
+        },
+        {
+          "title": "Metrics, agents and three retention schedules",
+          "href": "lessons/1003-metrics-and-retention.html"
+        },
+        {
+          "title": "Traces, profiles and being told",
+          "href": "lessons/1004-being-told.html"
+        }
+      ]
     }
   ],
   "extras": []

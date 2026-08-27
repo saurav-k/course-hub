@@ -168,6 +168,28 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [billing export](https://cloud.google.com/billing/docs/how-to/export-data-bigquery-tables),
   [committed use discounts](https://cloud.google.com/docs/cuds),
   [Recommender](https://cloud.google.com/recommender/docs/overview).
+- **Module 10.** [Cloud Logging storage](https://cloud.google.com/logging/docs/storage),
+  [routing overview](https://cloud.google.com/logging/docs/routing/overview),
+  [logging quotas](https://cloud.google.com/logging/quotas),
+  [Observability Analytics](https://cloud.google.com/logging/docs/log-analytics),
+  [Error Reporting](https://cloud.google.com/error-reporting/docs/grouping-errors),
+  [audit logs overview](https://cloud.google.com/logging/docs/audit),
+  [configuring Data Access logs](https://cloud.google.com/logging/docs/audit/configure-data-access),
+  [VPC Flow Logs](https://cloud.google.com/vpc/docs/flow-logs),
+  [firewall rules logging](https://cloud.google.com/firewall/docs/firewall-rules-logging),
+  [Cloud NAT monitoring](https://cloud.google.com/nat/docs/monitoring),
+  [DNS monitoring](https://cloud.google.com/dns/docs/monitoring),
+  [logs viewer](https://cloud.google.com/logging/docs/view/logs_viewer),
+  [Monitoring quotas](https://cloud.google.com/monitoring/quotas),
+  [metric latency and retention](https://cloud.google.com/monitoring/api/v3/latency-n-retention),
+  [Managed Service for Prometheus](https://cloud.google.com/stackdriver/docs/managed-prometheus),
+  [Ops Agent](https://cloud.google.com/stackdriver/docs/solutions/agents/ops-agent),
+  [alerting](https://cloud.google.com/monitoring/alerts),
+  [uptime checks](https://cloud.google.com/monitoring/uptime-checks),
+  [Cloud Trace](https://cloud.google.com/trace/docs/overview),
+  [Cloud Profiler](https://cloud.google.com/profiler/docs/about-profiler),
+  [Network Intelligence Center](https://cloud.google.com/network-intelligence-center),
+  [Personalized Service Health](https://cloud.google.com/service-health/docs/overview).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).
@@ -191,7 +213,14 @@ would otherwise have asserted it, in a warning callout, and none is stated as fa
   moves. Lesson 0100 points at the vendor's live list instead.
 - **Compute and runtime telemetry rows.** The inventory carries an explicit caution that
   its App Engine request-log behaviour and legacy storage-log rows were never verified.
-  Nothing in modules 01 to 04 rests on them; a future module 10 must re-check before use.
+  Nothing in this course rests on them; lesson 1002 names both as leads to check rather
+  than as facts.
+- **Log ingestion and retention prices.** Recorded in the inventory as figures per
+  gibibyte. Not printed anywhere in the course, because `MISSION.md` puts list prices out
+  of scope; lesson 1000 teaches the cost shape and links the vendor's page.
+- **Cloud Trace BigQuery sink retirement.** Recorded with deprecation and shutdown dates.
+  Lesson 1004 states that the sink is deprecated with a scheduled shutdown and prints no
+  date, because dates belong only in this file.
 - **AlloyDB elastic scaling and read-pool autoscaling.** The inventory records the
   Autopilot-style Slices feature with an instruction to confirm its stage, and records
   read-pool autoscaling as preview. Named in lesson 0500; neither is stated as settled.
