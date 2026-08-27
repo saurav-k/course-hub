@@ -41,6 +41,15 @@ is wrong and it gets fixed before anything new is added.
 | 0403 | Shared file systems | working |
 | 0404 | Cold data and getting data in | working |
 
+### Module 05 - Databases
+
+| Lesson | Title | Rung |
+| 0500 | Two storage designs under one API | working |
+| 0501 | Capacity with no instance class | working |
+| 0502 | DynamoDB and the partition | working |
+| 0503 | Two in-memory services | working |
+| 0504 | The purpose-built stores | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -79,7 +88,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 05 to 14 above**, none started. New numbers go at the end of the
+- **Modules 06 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

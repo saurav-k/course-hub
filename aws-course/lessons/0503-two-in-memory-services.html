@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two in-memory services - Inside AWS</title>
+<meta name="description" content="ElastiCache and MemoryDB speak the same protocols and answer different questions: one is a cache you may lose, the other persists every write to a Multi-AZ transactional log and can be the system of record.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Databases &middot; Lesson 0503</div>
+  <h1>Two in-memory services, and the question is which one you may lose</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>in-memory-cache</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WhatIs.html">Amazon ElastiCache</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two products sit under the same capability key and speak the same protocols. <b>ElastiCache</b> runs managed Valkey, Redis OSS and Memcached; <b>MemoryDB</b> runs Redis OSS and Valkey as a <b>durable primary database</b>.</li>
+      <li>The difference is what happens to a write. MemoryDB persists every write to a <b>Multi-AZ transactional log</b> before acknowledging it, which is what lets it be the system of record.</li>
+      <li>The old rule that caches never persist is <b>out of date</b>: an ElastiCache Valkey cluster can add a distributed Multi-AZ transactional log of its own for zero data loss.</li>
+      <li>ElastiCache comes in <b>two forms</b> - serverless, which AWS documents as scaling in under a minute, and node-based, where you choose the instances.</li>
+      <li>What it costs: durability is paid for on the write path, so choosing the durable product for data you were happy to lose buys latency you did not need.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0500 to 0502&lt;br/&gt;stores that answer in&lt;br/&gt;milliseconds from disk"] --> T["THIS PAGE&lt;br/&gt;the layer that answers&lt;br/&gt;from memory instead"]
+  T --> A["Purpose-built engines&lt;br/&gt;lesson 0504"]
+  T --> B["Vector storage for models&lt;br/&gt;module 13"]
+  W["Module 05&lt;br/&gt;databases"] -.- T
+    </div>
+    <figcaption>Where this sits. Everything so far in this module reads from durable storage and answers in milliseconds. This page is the layer above it, where the working set lives in memory - and where AWS ships two services that look like one.
+    <b>The choice between them is not a performance choice. It is a decision about whether the data has anywhere else to live.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: where a write is safe</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant App as Application
+  participant EC as ElastiCache node
+  participant MD as MemoryDB node
+  participant Log as Multi-AZ transactional log
+  App->>EC: write to the cache
+  EC-->>App: acknowledged from memory
+  Note over EC: the source of truth is elsewhere - a lost node is a cold cache
+  App->>MD: write to the database
+  MD->>Log: append the write across zones
+  Log-->>MD: durable
+  MD-->>App: acknowledged
+    </div>
+    <figcaption>The same protocol, two contracts. ElastiCache acknowledges from memory, which is why it is fast and why a lost node costs you the contents rather than the data. MemoryDB appends every write to a Multi-AZ transactional log first, and that is the whole reason it can be a primary database (<a href="https://docs.aws.amazon.com/memorydb/latest/devguide/what-is-memorydb.html">What is MemoryDB</a>).
+    <b>Choose MemoryDB when the cache must also be the system of record - not when you want the cache to be faster.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  The familiar rule that "a cache never persists" no longer separates these two products. An <b>ElastiCache Valkey</b> cluster can be configured with a distributed Multi-AZ transactional log for zero-data-loss durability (<a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/durability.html">ElastiCache durability</a>). The distinction that survives is one of positioning: MemoryDB is sold and documented as the primary database, ElastiCache as the cache with a durability option.</div>
+
+  <h2>2. The mechanism: two forms, and the engine underneath</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["What are you storing"] --> C["Data that exists elsewhere&lt;br/&gt;sessions, computed pages, hot rows"]
+  Q --> S["Data that exists nowhere else"]
+  C --> E["ElastiCache"]
+  S --> M["MemoryDB&lt;br/&gt;durable primary, adds vector search"]
+  E --> SF["Serverless form&lt;br/&gt;scales in under a minute"]
+  E --> NF["Node-based form&lt;br/&gt;you choose the instances"]
+  E --> EN["Engines - Valkey,&lt;br/&gt;Redis OSS, Memcached"]
+    </div>
+    <figcaption>The decision, then the two forms it splits into. ElastiCache offers a serverless form that AWS documents as scaling in under a minute and a node-based form where the instances are yours to size (<a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/WhatIs.html">What is ElastiCache</a>). Memcached is the odd engine out - it is the simple one, and only ElastiCache carries it.
+    <b>The engine list is the first place these two products stop being interchangeable: a Memcached workload has exactly one home here.</b></figcaption>
+  </figure>
+
+  <p>MemoryDB carries one capability ElastiCache does not: <b>vector search</b> over data held in memory (<a href="https://docs.aws.amazon.com/memorydb/latest/devguide/vector-search.html">MemoryDB vector search</a>). That matters for retrieval workloads in front of a model, and module 13 returns to where vectors are stored across the platform.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Grid comparing ElastiCache and MemoryDB across five rows: the Memcached engine and a serverless form belong to ElastiCache alone, Valkey and Redis OSS belong to both, and a durable write path by default and vector search belong to MemoryDB alone">
+      <text class="ttl" x="20" y="24">What each service carries</text>
+      <text class="lbl-b" x="300" y="52" text-anchor="middle">ElastiCache</text>
+      <text class="lbl-b" x="500" y="52" text-anchor="middle">MemoryDB</text>
+      <line class="grid" x1="20" y1="62" x2="620" y2="62"/>
+      <text class="lbl-sm" x="20" y="92">Memcached engine</text>
+      <rect class="m-stat"  x="270" y="76" width="60" height="20"/>
+      <line class="grid" x1="20" y1="106" x2="620" y2="106"/>
+      <text class="lbl-sm" x="20" y="136">Valkey and Redis OSS</text>
+      <rect class="m-stat"  x="270" y="120" width="60" height="20"/>
+      <rect class="m-stat"  x="470" y="120" width="60" height="20"/>
+      <line class="grid" x1="20" y1="150" x2="620" y2="150"/>
+      <text class="lbl-sm" x="20" y="180">Serverless form</text>
+      <rect class="m-stat"  x="270" y="164" width="60" height="20"/>
+      <line class="grid" x1="20" y1="194" x2="620" y2="194"/>
+      <text class="lbl-sm" x="20" y="224">Durable write path by default</text>
+      <rect class="m-gold"  x="470" y="208" width="60" height="20"/>
+      <line class="grid" x1="20" y1="238" x2="620" y2="238"/>
+      <text class="lbl-sm" x="20" y="268">Vector search</text>
+      <rect class="m-gold"  x="470" y="252" width="60" height="20"/>
+      <line class="grid" x1="20" y1="282" x2="620" y2="282"/>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>ElastiCache carries it</span><span><i class="sw-gold"></i>only MemoryDB carries it</span></div>
+    <figcaption>Five rows, and only the bottom two decide anything important. The rows above them are about engine choice and deployment shape, which are convenience arguments; the two below are about whether an acknowledged write survives a lost node, which is a correctness one.
+    <b>A team that picks on the top three rows has chosen a product without ever asking the question that matters.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  These two are not fast and faster. They are <b>the same data structures with different promises about a lost node</b>. Ask what has to be true after a node disappears: if the answer is "the application refills it", the cache is correct; if the answer is "the data is gone", the cache was being used as a database and should be one.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A leaderboard is held only in memory and cannot be rebuilt from anywhere. Which service is correct, and why?</div>
+      <button class="q-opt">ElastiCache, because leaderboards are read far more</button>
+      <button class="q-opt">ElastiCache, because Valkey supports sorted sets</button>
+      <button class="q-opt">MemoryDB, because it is the system of record here</button>
+      <button class="q-opt">MemoryDB, because it answers reads more quickly</button>
+      <div class="q-fb">Nothing else holds this data, so the store is the system of record and needs a durable write path. Read-heaviness and the availability of sorted sets are true of both products and decide nothing, and MemoryDB is chosen for durability rather than for being quicker on reads.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which statement about persistence is accurate for these two services?</div>
+      <button class="q-opt">ElastiCache Valkey can add a durable transactional log</button>
+      <button class="q-opt">Only MemoryDB can persist, since caches never persist</button>
+      <button class="q-opt">Memcached gains durability when run in serverless form</button>
+      <button class="q-opt">Persistence is a Region setting applied to both alike</button>
+      <div class="q-fb">An ElastiCache Valkey cluster can be given a distributed Multi-AZ transactional log, so the blanket rule in the second option is out of date. Durability is a cluster configuration rather than a Region-level setting, and it is not something the serverless form confers on Memcached.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A team must run an existing Memcached workload without changing its protocol. What are their options?</div>
+      <button class="q-opt">Either service, since both carry the Memcached engine</button>
+      <button class="q-opt">ElastiCache only, as it is the one carrying Memcached</button>
+      <button class="q-opt">MemoryDB only, since Memcached needs a durable log</button>
+      <button class="q-opt">Neither, because Memcached is no longer offered here</button>
+      <div class="q-fb">Memcached appears in the ElastiCache engine list and not in the MemoryDB one, so the choice is made for them. Memcached is still offered, it carries no durability requirement of its own, and MemoryDB's engines are Redis OSS and Valkey.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A retail application holds four things in memory today, all in one Redis-compatible cluster: rendered category pages, shopping baskets that customers expect to survive a browser restart, a rate-limit counter per client, and a queue of orders waiting to be handed to the payment system.</p>
+      <p><b>Sort the four</b> into what belongs on a cache and what belongs on a durable store, and for each one name the observable consequence of losing the node it sits on.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For each item ask one question and only that question: if this node vanished, could the application recompute the value from somewhere else? Do not let "it would be annoying" count as "it is gone".</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Rendered category pages - cache.</b> They are derived from the catalogue, so losing the node costs a burst of re-rendering and slower pages until it refills. Nothing is lost.</li>
+        <li><b>Rate-limit counters - cache.</b> They are recomputed from the next window of traffic. Losing the node briefly relaxes the limit, which is a security and cost consideration rather than a data-loss one, and worth stating out loud rather than assuming.</li>
+        <li><b>Shopping baskets - durable.</b> The customer expects them to survive, and nothing else holds them, so a lost node is lost customer data and, in a checkout flow, lost revenue. This is a system of record wearing a cache's clothes.</li>
+        <li><b>Order queue - durable, and probably not here at all.</b> Losing a node loses orders that were accepted and not yet paid for, which is the worst outcome on the list. A durable in-memory store removes the data-loss risk; module 12 covers the queue services that are built for this shape of work in the first place.</li>
+        <li><b>Split the deployment.</b> Two of the four are correctly on ElastiCache. The other two need a durable write path, which is either MemoryDB or an ElastiCache Valkey cluster configured with its transactional log - and the deciding factor between those is whether the data is being treated as a primary database, because that is what MemoryDB is documented as being.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly two items should be on each side, and every consequence you wrote for the cache side should be a word like "slower" or "refills" while every consequence on the durable side should be a word like "lost". If any consequence on the cache side reads as data loss, that item is on the wrong side.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0504-the-purpose-built-stores.html">The purpose-built stores</a></b> finishes the module with the engines chosen for a shape of data rather than a shape of access.</li>
+    <li>Lesson 0502 covered <a href="0502-dynamodb-and-the-partition.html">the store these caches most often sit in front of</a>, and its own microsecond cache.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the split still feels arbitrary, ask an agent to list every key prefix in one running cluster and say, for each one, which system would refill it after a total flush.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/durability.html">Durability in ElastiCache</a> is the page that undoes the old cache-versus-database dividing line, and reading it is what stops you choosing a product on a rule that has changed.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0502-dynamodb-and-the-partition.html"><span class="dir">&larr; Previous</span><span class="ttl">DynamoDB and the partition</span></a>
+    <a class="nxt" href="0504-the-purpose-built-stores.html"><span class="dir">Next &rarr;</span><span class="ttl">The purpose-built stores</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0503 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

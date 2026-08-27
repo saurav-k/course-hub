@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DynamoDB and the partition - Inside AWS</title>
+<meta name="description" content="DynamoDB scales without limit at the table level and is strictly bounded at the partition level, so the partition key you choose is the throughput you actually get.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Databases &middot; Lesson 0502</div>
+  <h1>The table has no size limit and the partition has three</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability key <code>nosql-keyvalue</code>.
+    &middot; <a href="https://aws.amazon.com/dynamodb/">Amazon DynamoDB</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>DynamoDB is a serverless key-value and document store that AWS positions at <b>single-digit millisecond latency at any scale</b>, and there is no instance, cluster or storage to size.</li>
+      <li>The scale is at the <b>table</b> level. Every hard limit that shapes a design is at the <b>partition</b> level, and the partition key is what decides which partition a request lands on.</li>
+      <li>Those limits are about <b>3,000 read units and 1,000 write units per partition</b>, softened but not removed by adaptive capacity, and a <b>400 KB</b> ceiling on a single item.</li>
+      <li><b>Global Tables</b> make replicas in several Regions that all accept writes, with a strongly consistent mode available alongside the eventually consistent one.</li>
+      <li>What it costs: a badly chosen key concentrates traffic on one partition, and the table looks under-used while requests are throttled.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0500 and 0501&lt;br/&gt;relational, where scale is&lt;br/&gt;bought as a bigger writer"] --> T["THIS PAGE&lt;br/&gt;the store where scale is&lt;br/&gt;a property of your key"]
+  T --> A["Caches in front of it&lt;br/&gt;lesson 0503"]
+  T --> B["Purpose-built engines&lt;br/&gt;lesson 0504"]
+  W["Module 05&lt;br/&gt;databases"] -.- T
+    </div>
+    <figcaption>Where this sits. The relational pages sized a writer and asked how many readers could share its storage. DynamoDB removes that question and replaces it with a different one, asked at design time rather than at deployment time.
+    <b>On a relational database the schema decides correctness and the instance decides capacity. Here the key decides both.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the key picks the machine</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["A request carrying a partition key"] --> H["The service hashes the key"]
+  H --> P1["Partition 1&lt;br/&gt;its own throughput ceiling"]
+  H --> P2["Partition 2&lt;br/&gt;its own throughput ceiling"]
+  H --> P3["Partition 3&lt;br/&gt;its own throughput ceiling"]
+  P1 --> S["One logical table&lt;br/&gt;no size limit of its own"]
+  P2 --> S
+  P3 --> S
+    </div>
+    <figcaption>A DynamoDB table is a set of partitions and the partition key is the routing decision. The table grows by adding partitions, which is why table size and table throughput have no stated ceiling.
+    <b>Every request goes to exactly one partition, so a key that only ever takes a handful of values sends the whole workload to a handful of machines.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: where the ceilings actually are</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of per-partition throughput ceilings in DynamoDB: about three thousand read capacity units against about one thousand write capacity units, showing writes bounded three times more tightly than reads">
+      <text class="ttl" x="20" y="24">What one partition can absorb</text>
+      <line class="axis" x1="200" y1="50" x2="200" y2="230"/>
+      <rect class="m-stat"  x="200" y="70"  width="400" height="34"/>
+      <rect class="m-alarm" x="200" y="140" width="133" height="34"/>
+      <text class="lbl-sm" x="192" y="92"  text-anchor="end">reads</text>
+      <text class="lbl-sm" x="192" y="162" text-anchor="end">writes</text>
+      <text class="lbl-b lbl-on" x="590" y="92" text-anchor="end">about 3,000 units per second</text>
+      <text class="lbl-b" x="343" y="162">about 1,000 units per second</text>
+      <text class="lbl-sm" x="20" y="262">the table above these partitions has no stated throughput ceiling of its own</text>
+      <text class="lbl-sm" x="20" y="282">ceilings as published in the burst and adaptive capacity reference</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>read ceiling</span><span><i class="sw-alarm"></i>write ceiling</span></div>
+    <figcaption>The two numbers that decide whether a key design works, and the asymmetry between them: a partition absorbs roughly three times as much reading as writing (<a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/burst-adaptive-capacity.html">burst and adaptive capacity</a>). Adaptive capacity moves throughput towards partitions that need it and buys headroom for uneven traffic, and it does not lift the ceiling on a single partition.
+    <b>A write-heavy design concentrated on one key hits a wall three times sooner than the read-heavy version of the same mistake.</b></figcaption>
+  </figure>
+
+  <p>The third ceiling is on the item itself: a single item may not exceed <b>400 KB</b> (<a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Constraints.html">DynamoDB quotas and constraints</a>). Designs that would grow an item without bound - an append-only list of events on one record, a document that accumulates comments - meet that wall as a hard failure rather than as a slowdown, so the item ceiling is a modelling constraint rather than a tuning one.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  DynamoDB does not remove capacity planning. It <b>moves it from the deployment into the data model</b>, where it is decided once, early, and by whoever chose the partition key. That is why "it scales automatically" and "our table is throttling at ten percent of its provisioned throughput" are routinely true at the same time.</div>
+
+  <h2>3. Beyond one Region, and the two consistency modes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant W as Writer in Region A
+  participant A as Replica in Region A
+  participant B as Replica in Region B
+  participant R as Reader in Region B
+  W->>A: put item
+  A-->>W: acknowledged
+  A->>B: replicate
+  R->>B: get item under eventual consistency
+  B-->>R: may still be the older value
+  R->>B: get item under strong consistency
+  B-->>R: the value committed everywhere
+    </div>
+    <figcaption>A Global Table keeps replicas in several Regions and every replica accepts writes, which is what multi-active means. The consistency mode decides what a read in the second Region is promised: the eventually consistent mode may return a value that has not caught up, and the strongly consistent mode does not (<a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/GlobalTables.html">global tables</a>).
+    <b>Multi-active is about where writes are accepted. Consistency mode is about what reads are promised, and choosing one never chooses the other.</b></figcaption>
+  </figure>
+
+  <div class="callout">
+  Two attachments are worth knowing by name because designs lean on them. <b>DynamoDB Streams</b> exposes an ordered change feed of a table with <b>24 hours</b> of retention, which makes it a trigger source and not an archive. <b>DAX</b> is an in-front cache that AWS positions in microseconds rather than milliseconds. Both carry their own limits on the <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/Constraints.html">quotas and constraints</a> page.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A table provisioned well above its measured load is throttling requests. What is the first thing to inspect?</div>
+      <button class="q-opt">The item sizes, which may exceed the 400 KB ceiling</button>
+      <button class="q-opt">The partition key, since ceilings are per partition</button>
+      <button class="q-opt">The Region list, because replicas divide throughput</button>
+      <button class="q-opt">The stream retention, which throttles when it fills</button>
+      <div class="q-fb">Throughput ceilings apply per partition, so traffic concentrated on few key values throttles while the table looks idle. An oversized item fails outright rather than throttling, replicas in a Global Table do not divide a table's throughput between them, and stream retention governs how long changes stay readable rather than whether writes are accepted.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which design meets the item ceiling as a hard failure rather than as a gradual slowdown?</div>
+      <button class="q-opt">A key whose values are drawn from a small fixed set</button>
+      <button class="q-opt">A table replicated into four Regions at once</button>
+      <button class="q-opt">A read pattern that scans far more than it queries</button>
+      <button class="q-opt">An item holding an event list that grows forever</button>
+      <div class="q-fb">An unbounded list inside one item eventually crosses 400 KB and the write is rejected. A small key set concentrates throughput and throttles rather than failing outright, extra Regions raise cost rather than item size, and a scan-heavy pattern consumes capacity rather than breaking a size limit.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does adaptive capacity change about the per-partition throughput ceiling?</div>
+      <button class="q-opt">It removes the ceiling once traffic becomes uneven</button>
+      <button class="q-opt">It raises the ceiling for reads but not for writing</button>
+      <button class="q-opt">It shifts throughput towards busy partitions, not up</button>
+      <button class="q-opt">It splits the busiest key across several partitions</button>
+      <div class="q-fb">Adaptive capacity moves throughput towards the partitions that need it, which absorbs uneven traffic without lifting what one partition can do. It does not remove the ceiling, does not apply asymmetrically to reads, and cannot spread a single key value over more than one partition, because the key is the routing decision.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A payments team stores transactions in DynamoDB. The partition key is the merchant identifier. Ninety percent of the volume comes from four large merchants, and the peak is 6,000 writes a second across the whole table. The table is provisioned far above that and requests are being throttled.</p>
+      <p><b>Show the arithmetic</b> that explains the throttling, propose a key change, and say what the change costs the read path.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Work out how much of the peak lands on the busiest single key, then compare that with what one partition can absorb. The fix is always to give the key more distinct values, and the question is what those extra values break.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Find the traffic on one key.</b> Ninety percent of 6,000 writes a second is 5,400, spread across four merchant identifiers. Evenly split that is 1,350 writes a second per key, and real traffic is never even, so the largest is higher still.</li>
+        <li><b>Compare with the ceiling.</b> A partition absorbs about 1,000 write units a second. 1,350 is already above it, so at least the busiest merchants throttle continuously, whatever the table is provisioned for.</li>
+        <li><b>Confirm the table-level number is a red herring.</b> The other ten percent, 600 writes a second, is spread over many merchants and lands on many partitions, so the table's overall utilisation looks low. The console showing headroom and the application seeing throttles are the same fact.</li>
+        <li><b>Change the key.</b> Give the partition key more distinct values by combining the merchant identifier with something that varies per item - a date, or a small suffix chosen at write time. Four hot keys becoming, say, forty spreads 1,350 writes a second down to about 135 each, comfortably inside the ceiling.</li>
+        <li><b>Say what it costs the read path.</b> A single get by merchant is no longer a single get. Every read that used to name one key must now name, or iterate over, every variant of it, so the reading code changes, the request count per read rises, and any code path that assumed one item per merchant has to be found and fixed.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your arithmetic should show a per-key figure above 1,000 before the change and comfortably below it after, and your cost should be paid by the reader rather than the writer. If your fix raised provisioned throughput instead of changing the key, re-read where the ceiling is: raising a table-level number does not raise a partition-level one.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0503-two-in-memory-services.html">Two in-memory services that are not one product</a></b> puts a cache in front of everything on this page, and finds that one of the two is not a cache at all.</li>
+    <li>Lesson 0501 covered <a href="0501-capacity-with-no-instance-class.html">the other multi-Region writer</a> on the platform, which reaches the same capability from the relational side.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the partition ceiling still feels abstract, ask an agent to take one real table, count the distinct values its partition key actually takes in production, and divide the peak write rate by that number.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/burst-adaptive-capacity.html">Burst and adaptive capacity</a> is the page that states the per-partition ceilings and explains exactly how much unevenness the service absorbs for you, which is the line between a key design that works and one that throttles.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0501-capacity-with-no-instance-class.html"><span class="dir">&larr; Previous</span><span class="ttl">Capacity with no instance class</span></a>
+    <a class="nxt" href="0503-two-in-memory-services.html"><span class="dir">Next &rarr;</span><span class="ttl">Two in-memory services that are not one product</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0502 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

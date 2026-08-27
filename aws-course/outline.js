@@ -105,6 +105,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0404-cold-data-and-getting-data-in.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "Two storage designs under one API",
+          "href": "lessons/0500-two-storage-designs-under-one-api.html"
+        },
+        {
+          "title": "Capacity with no instance class",
+          "href": "lessons/0501-capacity-with-no-instance-class.html"
+        },
+        {
+          "title": "DynamoDB and the partition",
+          "href": "lessons/0502-dynamodb-and-the-partition.html"
+        },
+        {
+          "title": "Two in-memory services",
+          "href": "lessons/0503-two-in-memory-services.html"
+        },
+        {
+          "title": "The purpose-built stores",
+          "href": "lessons/0504-the-purpose-built-stores.html"
+        }
+      ]
     }
   ],
   "extras": []

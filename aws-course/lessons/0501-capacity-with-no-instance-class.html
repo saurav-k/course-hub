@@ -1,0 +1,212 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Capacity with no instance class - Inside AWS</title>
+<meta name="description" content="Aurora Serverless v2 scales a cluster you still design in half-ACU steps and can pause to zero; Aurora DSQL removes the cluster as well, and pays for it with conflicts that surface at commit.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Databases &middot; Lesson 0501</div>
+  <h1>Two products remove the instance class, and only one removes the cluster</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>relational-serverless</code> and <code>globally-distributed-sql</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2.html">Aurora Serverless v2</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Aurora Serverless v2 is a capacity configuration, not a product.</b> The cluster, its writer and its readers are all still yours to design; what changes is that each instance is sized in Aurora Capacity Units instead of an instance class.</li>
+      <li>Capacity moves in <b>half-ACU increments</b> between a minimum and maximum you set, and a minimum of <b>zero</b> lets an idle instance pause entirely.</li>
+      <li>A paused instance <b>resumes in roughly fifteen seconds</b>, and attaching RDS Proxy stops it pausing at all.</li>
+      <li><b>Aurora DSQL removes the instance class outright.</b> There is nothing to size, writes are active-active across Regions and strongly consistent, and the published availability is 99.99 percent in one Region and 99.999 percent across Regions.</li>
+      <li>What it costs: DSQL uses optimistic concurrency, so a write conflict is not a lock you wait on - it is <b>an error your application receives at commit</b> and has to retry.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0500&lt;br/&gt;an engine, a storage design&lt;br/&gt;and an instance class"] --> T["THIS PAGE&lt;br/&gt;what is left when the&lt;br/&gt;instance class goes away"]
+  T --> A["The store that never had&lt;br/&gt;one, lesson 0502"]
+  T --> B["Caches sized the same&lt;br/&gt;two ways, lesson 0503"]
+  W["Module 05&lt;br/&gt;databases"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page chose a storage design and then an instance to put in front of it. This page asks what happens when that second choice is taken away, which AWS answers in two quite different ways.
+    <b>One of them keeps the cluster and automates its sizing; the other has no cluster to size.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  <b>"Serverless" names three unrelated things on AWS</b> and they are not interchangeable: Fargate is a capacity mode for containers, Lambda is a function runtime, and Aurora Serverless v2 is a capacity configuration inside a cluster you still design. Aurora Serverless v2 is not a per-request database, and reading it as one is the single most common misunderstanding of this page.</div>
+
+  <h2>1. The mechanism: a dial with a floor of zero</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Line chart of Aurora Capacity Units over one day, flat at zero overnight while the instance is paused, rising to fourteen units at midday, and returning to zero late in the evening, with a dashed line marking the configured maximum of sixteen units">
+      <text class="ttl" x="20" y="24">One instance, one day, capacity in ACUs</text>
+      <rect class="f-prob" x="70"  y="50" width="135" height="200"/>
+      <rect class="f-prob" x="565" y="50" width="45"  height="200"/>
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="50"  x2="70"  y2="250"/>
+      <line class="s-signal ref" x1="70" y1="50" x2="610" y2="50"/>
+      <polyline class="s-stat thick" points="70,250 205,250 227,200 272,150 340,75 407,100 475,175 542,238 565,250 610,250"/>
+      <text class="lbl-sm" x="62" y="254" text-anchor="end">0</text>
+      <text class="lbl-sm" x="62" y="154" text-anchor="end">8</text>
+      <text class="lbl-sm" x="62" y="54"  text-anchor="end">16</text>
+      <text class="lbl-sm" x="70"  y="270">midnight</text>
+      <text class="lbl-sm" x="340" y="270" text-anchor="middle">noon</text>
+      <text class="lbl-sm" x="610" y="270" text-anchor="end">midnight</text>
+      <text class="lbl-b" x="137" y="140" text-anchor="middle">paused</text>
+      <text class="lbl-b" x="352" y="42">configured maximum</text>
+      <text class="lbl-sm" x="20" y="290">shape of the dial as documented - the values are an illustration, not a measurement</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>capacity in use</span><span><i class="sw-signal"></i>maximum you set</span><span><i class="sw-prob"></i>paused at zero ACUs</span></div>
+    <figcaption>Capacity moves between the minimum and maximum you configure, in <b>half-ACU increments</b>, and a minimum of zero adds the flat sections at each end where the instance is paused (<a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html">Aurora Serverless v2 auto-pause</a>). The maximum is a ceiling you own: set it too low and the dial stops climbing while the workload does not.
+    <b>The interesting number is the floor. Everything above zero is a smoother version of provisioning, and zero is the only setting that changes the cost model.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Serving - capacity between your minimum and maximum" as S
+  state "Idle - no connections and no work" as I
+  state "Paused - zero ACUs, storage still charged" as P
+  state "Resuming - roughly fifteen seconds" as R
+  [*] --> S
+  S --> I: workload stops
+  I --> P: minimum is set to zero ACUs
+  P --> R: a connection arrives
+  R --> S
+  I --> S: work returns before the pause
+  note right of P
+    RDS Proxy holds connections open,
+    so a cluster behind it never reaches this state
+  end note
+    </div>
+    <figcaption>The states an Aurora Serverless v2 instance moves through, and the one that surprises people. Pausing needs a minimum of zero and a recent engine version, and the resume is documented at roughly fifteen seconds.
+    <b>RDS Proxy and pause-to-zero solve opposite problems, so a cluster configured for both gets the behaviour of neither.</b></figcaption>
+  </figure>
+
+  <h2>2. The other answer: no cluster to size at all</h2>
+
+  <p>Aurora DSQL is PostgreSQL-compatible distributed SQL with an active-active design. Compute, I/O and storage scale with the workload and there is no instance class to choose, and writes are strongly consistent across Regions rather than replicated to a read-only secondary (<a href="https://docs.aws.amazon.com/aurora-dsql/latest/userguide/what-is-aurora-dsql.html">What is Aurora DSQL</a>). That is the capability the previous page ended without: two Regions that both accept writes.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Application in Region A
+  participant D as Aurora DSQL
+  participant B as Application in Region B
+  A->>D: begin, read row 42, write row 42
+  B->>D: begin, read row 42, write row 42
+  A->>D: commit
+  D-->>A: committed
+  B->>D: commit
+  D-->>B: rejected - the row changed under this transaction
+  B->>D: retry the whole transaction
+  D-->>B: committed
+    </div>
+    <figcaption>Optimistic concurrency, drawn as it is felt by the application. Nothing blocks while both transactions run - the conflict is detected at commit and the loser is told to try again.
+    <b>A database that never makes you wait for a lock makes you write retry logic instead, and that code has to exist before the first conflict, not after it.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  These two products answer different questions. Aurora Serverless v2 answers <b>"how do I stop paying for capacity I am not using"</b> and leaves the cluster's shape and its single writer exactly where they were. Aurora DSQL answers <b>"how do I write in more than one Region"</b> and charges for it in the concurrency model your application sees. Neither is the serverless version of the other.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A development Aurora cluster is set to a minimum of zero ACUs but never pauses overnight. What is the likeliest reason?</div>
+      <button class="q-opt">The maximum ACU setting is too low for the load</button>
+      <button class="q-opt">Pausing needs a Multi-AZ cluster to be enabled</button>
+      <button class="q-opt">RDS Proxy sits in front and holds connections open</button>
+      <button class="q-opt">The cluster has more readers than the writer does</button>
+      <div class="q-fb">RDS Proxy keeps connections established, so the cluster is never idle and never pauses. The maximum setting bounds how high capacity climbs and says nothing about the floor, pausing is a capacity setting rather than a Multi-AZ one, and the number of readers does not decide whether an idle instance pauses.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which requirement points at Aurora DSQL rather than at Aurora Serverless v2?</div>
+      <button class="q-opt">Transactions committed in two Regions at the same time</button>
+      <button class="q-opt">A quiet cluster that should cost nothing when idle</button>
+      <button class="q-opt">A PostgreSQL dialect the application already speaks</button>
+      <button class="q-opt">Capacity that follows the workload without a restart</button>
+      <div class="q-fb">Active-active writes across Regions are what DSQL adds. Pausing when idle and following the workload are both Aurora Serverless v2 behaviours, PostgreSQL compatibility is common to both rather than a reason to pick either.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does optimistic concurrency change about application code on Aurora DSQL?</div>
+      <button class="q-opt">Reads must be taken inside an explicit transaction</button>
+      <button class="q-opt">Writes must be routed to one nominated Region</button>
+      <button class="q-opt">Schema changes must be applied Region by Region</button>
+      <button class="q-opt">Commits can fail on conflict and must be retried</button>
+      <div class="q-fb">Conflicts surface at commit rather than as a wait on a row lock, so retry handling is required. Routing writes to one Region would give up the active-active property that the model exists to provide, and neither read transactions nor per-Region schema work follows from the concurrency model.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A platform team runs sixty ephemeral test databases. Each one is used for about ninety minutes on a working day and is untouched the rest of the time. They currently run as small provisioned Aurora instances and the bill is flat.</p>
+      <p>Separately, the same team is asked to build a session store for a product with users on two continents, where a session written on either continent must be visible immediately on the other.</p>
+      <p><b>Pick a configuration or product for each</b>, and for each one name the specific operational cost your choice introduces that the current design does not have.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>One of these is a question about time - how much of the day is capacity actually wanted. The other is a question about geography - where a write must be accepted. Do not let the word serverless carry both.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Size the first problem.</b> Ninety minutes out of twenty-four hours is a little over six percent of the day. The remaining ninety-four percent is capacity bought and not used, which is what makes the flat bill flat.</li>
+        <li><b>Choose for the first.</b> Aurora Serverless v2 with a minimum of zero ACUs, so each idle test database pauses. The cluster shape does not change; only the sizing does.</li>
+        <li><b>Name its cost.</b> The first connection after a pause waits roughly fifteen seconds while the instance resumes. A test suite that opens a connection and times out in five seconds will now fail intermittently, and that is a test-harness change, not a database setting. Note too that pausing needs a recent engine version, so the oldest clusters may have to be upgraded first.</li>
+        <li><b>Choose for the second.</b> Aurora DSQL. The requirement is that a write on either continent is immediately visible on the other, which is a strongly consistent multi-Region write - not something a read-only secondary Region provides.</li>
+        <li><b>Name its cost.</b> Optimistic concurrency. Two sessions touching the same row concurrently will see one commit rejected, so the session store needs retry logic around every write path before it goes live.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Each answer should name one cost that is code or process rather than money. If both costs you wrote down were about price, look again: the interesting cost of pause-to-zero is the resume, and the interesting cost of active-active is the retry.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0502-dynamodb-and-the-partition.html">DynamoDB and the partition</a></b> reaches the store that never had an instance class to remove.</li>
+    <li>Lesson 0500 set up the <a href="0500-two-storage-designs-under-one-api.html">cluster this page resizes</a>, including the single-writer limit DSQL is the answer to.</li>
+    <li>Lesson 0301 explains why <a href="0301-fargate-is-a-capacity-mode.html">Fargate is also called a capacity mode</a>, which is the same word doing a different job.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If pause-to-zero still sounds free, ask an agent to work out what a fifteen-second resume does to a health check that runs every thirty seconds against the same cluster.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AmazonRDS/latest/AuroraUserGuide/aurora-serverless-v2-auto-pause.html">Auto-pause for Aurora Serverless v2</a> carries the pause mechanics, the resume timing and the engine-version requirements on one page, which is the combination that decides whether a cluster can use it at all.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0500-two-storage-designs-under-one-api.html"><span class="dir">&larr; Previous</span><span class="ttl">Two storage designs under one API</span></a>
+    <a class="nxt" href="0502-dynamodb-and-the-partition.html"><span class="dir">Next &rarr;</span><span class="ttl">DynamoDB and the partition</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0501 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
