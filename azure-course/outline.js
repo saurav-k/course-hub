@@ -97,6 +97,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0403-shared-file-systems-and-bulk-transfer.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "The relational shapes",
+          "href": "lessons/0500-the-relational-shapes.html"
+        },
+        {
+          "title": "Buying relational capacity",
+          "href": "lessons/0501-buying-relational-capacity.html"
+        },
+        {
+          "title": "Cosmos DB: the request unit and the partition key",
+          "href": "lessons/0502-cosmos-db-the-request-unit-and-the-partition-key.html"
+        },
+        {
+          "title": "The specialised stores",
+          "href": "lessons/0503-the-specialised-stores.html"
+        }
+      ]
     }
   ],
   "extras": []

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cosmos DB: the request unit and the partition key - Inside Azure</title>
+<meta name="description" content="Cosmos DB prices work rather than hardware, so the partition key becomes the design decision everything else rests on, and consistency becomes a dial you set per request.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Databases &middot; Lesson 0502</div>
+  <h1>Cosmos DB prices work rather than hardware, which is why the partition key decides everything else</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>databases</code>, rows <code>nosql-keyvalue</code> and <code>nosql-document</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/cosmos-db/">Azure Cosmos DB</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Cosmos DB meters every operation in <b>request units</b>. Reads, writes and queries all draw from the same meter, so a query's shape is a cost as well as a latency.</li>
+      <li>The <b>partition-key choice is the core design decision</b>, and it is made in the data model rather than in a tier or a size.</li>
+      <li>Consistency is a <b>spectrum from eventual to strong, selectable per request</b>, so one application can pay for strength only where it needs it.</li>
+      <li>Throughput comes in three shapes: provisioned, <b>autoscale billed against the maximum</b> you set, and a serverless form for spiky small workloads.</li>
+      <li>Cosmos DB carries several API surfaces. The <b>Table API gives Azure Tables semantics</b>, while native Azure Tables stay inside a storage account - two different products with one vocabulary.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Relational capacity as an&lt;br/&gt;abstraction - lesson 0501"] --> T["THIS PAGE&lt;br/&gt;a store that meters work&lt;br/&gt;and distributes globally"]
+  T --> A["The specialised stores&lt;br/&gt;lesson 0503"]
+  T --> B["Where analytics reads&lt;br/&gt;operational data&lt;br/&gt;module 06"]
+  W["Module 05&lt;br/&gt;databases"] -.- T
+    </div>
+    <figcaption>Where this sits. The relational pages bought capacity by the hour and held it. This page buys it by the operation, and that single change is what makes global distribution and a per-request consistency dial possible in the first place.
+    <b>Everything distinctive about Cosmos DB follows from metering work instead of renting a server, so start there rather than at the feature list.</b></figcaption>
+  </figure>
+
+  <h2>One meter, and everything draws from it</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  RU["Request units per second&lt;br/&gt;the meter on a container"] --> R["A point read&lt;br/&gt;cheapest, most predictable"]
+  RU --> W["A write&lt;br/&gt;cost rises with document size and indexing"]
+  RU --> Q["A query&lt;br/&gt;cost rises with how much it has to scan"]
+  RU --> M{"How the meter is bought"}
+  M -->|"provisioned"| PR["A fixed rate you hold"]
+  M -->|"autoscale"| AS["Scales up to a maximum&lt;br/&gt;and is billed against that maximum"]
+  M -->|"serverless"| SV["For spiky small workloads&lt;br/&gt;with no held rate"]
+    </div>
+    <figcaption>The request unit is a single normalised currency for work. Because reads, writes and queries all spend from it, a query that scans widely is expensive in the same unit that a point read is cheap in, and the two become directly comparable.
+    <b>A performance problem and a cost problem are the same problem here, which is the most useful consequence of the whole model.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  In a relational design the schema decides correctness and the tier decides capacity. In Cosmos DB the <b>partition key does both</b>. It is the field that decides how documents are grouped, therefore which requests can be served from one place, therefore how evenly the meter is spent. Microsoft names it the <b>core design decision</b> of the service, and it is chosen in the data model rather than in any setting you can revise from a portal blade later.</div>
+
+  <h2>Consistency is a dial, and it is per request</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant W as Writer in region A
+  participant A as Region A replica
+  participant B as Region B replica
+  participant R as Reader in region B
+  W->>A: write a document
+  A-->>W: acknowledged
+  A->>B: replicate
+  Note over R,B: a read issued at the eventual end of the spectrum
+  R->>B: read
+  B-->>R: may return the value from before the write
+  Note over R,B: the same application issuing a read at the strong end
+  R->>B: read
+  B-->>R: returns only once the write is visible - more request units, more latency
+    </div>
+    <figcaption>The same pair of regions, read twice at two ends of the consistency spectrum. The spectrum runs from eventual to strong and is selectable per request, so an application can pay for strength on the few reads that need it and take the cheap, fast answer everywhere else.
+    <b>Consistency here is a per-request cost decision rather than a database-wide setting, which means the design owes a rule for which reads are which.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Cosmos DB being globally distributed does <b>not</b> make it a globally consistent relational engine, and Azure ships no such engine. What is on offer is a <b>tunable consistency spectrum over a NoSQL model</b>, not one strongly consistent SQL image spread across regions. A requirement that says "global writes, relational guarantees" is a requirement to choose one of the two, and lesson 0500 is where the relational half of that trade was set out.</div>
+
+  <h2>Several front doors on one service</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  C["Azure Cosmos DB"] --> N["API for NoSQL&lt;br/&gt;the native surface"]
+  C --> G["API for Apache Gremlin&lt;br/&gt;a managed TinkerPop graph database"]
+  C --> TA["Table API&lt;br/&gt;Azure Tables semantics"]
+  MV["API for MongoDB - vCore&lt;br/&gt;vCore clusters, full driver compatibility"] --- C
+  ST["Azure Storage&lt;br/&gt;native Azure Tables live here"] -.-|"same vocabulary,&lt;br/&gt;different product"| TA
+  G -.-|"its own overview steers new&lt;br/&gt;OLAP graph work elsewhere"| FG["Graph in Microsoft Fabric&lt;br/&gt;covered in lesson 0503"]
+    </div>
+    <figcaption>The API surfaces, and the two places they are easy to confuse. The Table API speaks Azure Tables semantics while native Azure Tables remain a storage-account feature, so "Azure Tables" names two things. The <a href="https://learn.microsoft.com/en-us/azure/documentdb/overview">MongoDB vCore</a> service is drawn to the side because its vCore architecture replaced the request-unit-based MongoDB API for most workloads - it is billed and sized like a cluster rather than metered like a container.
+    <b>Ask which product a name refers to before designing against it - on this page alone, two names each cover two different things.</b></figcaption>
+  </figure>
+
+  <p>The MongoDB compatibility story carries one caution the vendor states plainly: driver compatibility is full, but feature parity is not automatic, so an existing estate should be checked against the published parity matrix before it is moved rather than after.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does the request unit make a performance problem and a cost problem the same problem?</div>
+      <button class="q-opt">Reads, writes and queries all spend from one normalised meter</button>
+      <button class="q-opt">Throughput is billed by the hour once the container is provisioned</button>
+      <button class="q-opt">Latency is guaranteed, so only the cost of a request can vary</button>
+      <button class="q-opt">Queries are charged separately from writes on a second meter</button>
+      <div class="q-fb">One currency covers every operation, so a query that scans more is more expensive in exactly the unit that measures how much work it did. The second option describes provisioning without explaining the shared unit. The third confuses a latency guarantee with the absence of a performance dimension. The fourth is the opposite of the mechanism.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which statement about consistency in Cosmos DB is correct?</div>
+      <button class="q-opt">It is fixed for the account, so all reads share one guarantee level</button>
+      <button class="q-opt">It is fixed per container, so partitioning decides the guarantee level</button>
+      <button class="q-opt">It is a spectrum from eventual to strong, selectable per request</button>
+      <button class="q-opt">It is strong across regions, which is what global distribution buys</button>
+      <div class="q-fb">The spectrum runs from eventual to strong and the level is selectable per request. The first two options place the choice at the wrong object, which would remove the per-request cost decision entirely. The fourth is the specific mistake the page warns about - global distribution is not global relational consistency.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A team says its data is "in Azure Tables". What has to be established before designing against that?</div>
+      <button class="q-opt">Whether the container uses autoscale or a fixed provisioned rate</button>
+      <button class="q-opt">Whether it means the Cosmos DB Table API or storage-account Tables</button>
+      <button class="q-opt">Whether the partition key was chosen before or after the load test</button>
+      <button class="q-opt">Whether the account replicates to a second region for read locality</button>
+      <div class="q-fb">One vocabulary covers two products - the Cosmos DB Table API and native Azure Tables inside a storage account - so the product must be established first. The other three are real questions, but each one only becomes answerable once you know which of the two products is being discussed.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A telemetry service stores one document per device reading in Cosmos DB. Almost every read is "give me the last hour of readings for one device". The team has proposed the calendar date as the partition key, because it is short and always present, and has set autoscale with a high maximum so that "throughput is never the constraint". They also plan to read at the strong end of the consistency spectrum everywhere, on the grounds that correctness matters.</p>
+      <p><b>Take the design apart</b>: say what the partition key does to the dominant read, what the autoscale setting actually commits them to, and where the consistency choice is buying nothing.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask which field the dominant read filters on, then ask whether the proposed key groups documents the same way. Then look again at what autoscale is billed against, rather than what it scales to.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Name the dominant access pattern.</b> Every read is scoped to one device and a time window, so the field the reads filter on first is the device, not the date.</li>
+        <li><b>Check the proposed key against it.</b> Partitioning by date groups every device's readings for a day together, so a single-device read cannot be answered from one group and instead spends request units scanning across devices. The key has been chosen for its shape rather than for the query, which is the classic form of this mistake.</li>
+        <li><b>Check what the key does to writes.</b> Every reading written on a given day carries the same key value, so the entire write load of the service concentrates on one group at a time and moves to a new one at midnight. The design has made the meter spend unevenly by construction.</li>
+        <li><b>Read the autoscale setting honestly.</b> Autoscale is billed against the maximum that is set, not only against what is used, so "a high maximum so throughput is never the constraint" is a standing cost commitment rather than a free safety margin. It also hides the partitioning defect, because the scan is paid for rather than failing.</li>
+        <li><b>Test the consistency choice.</b> The spectrum is selectable per request, so reading at the strong end everywhere charges more request units and adds latency on every read, including the many that are a device fetching its own recent history and would tolerate a weaker level. Strength should be reserved for the reads whose correctness genuinely depends on it.</li>
+        <li><b>State the corrected shape.</b> Partition on the device so that the dominant read is served from one group and the write load spreads across devices, set the autoscale maximum to a figure you are willing to be billed against, and choose the consistency level per request rather than once for the whole application.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your partition key should be the field the dominant read filters on first, and it should also be the field that spreads writes most evenly. If those two tests disagree, you have found a genuine trade-off - if they agree, as they do here, the original choice was simply wrong on both counts.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0503-the-specialised-stores.html">the specialised stores</a></b> takes the four engines that exist because neither a relational table nor a document fits the question.</li>
+    <li><b>Lesson 0400</b> is where storage accounts were introduced, and it is the other home of the name "Azure Tables".</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the partition key still feels like a naming choice, ask an agent to write out the three most frequent queries of a system you know and then propose a key for each. Where the three disagree is where the real design work is, and no tier setting will resolve it.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Start at the <a href="https://learn.microsoft.com/en-us/azure/cosmos-db/">Azure Cosmos DB documentation</a> and read the partitioning and consistency material before anything about APIs. Those two subjects decide whether a design works; the API surface only decides what it is written in.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0501-buying-relational-capacity.html"><span class="dir">&larr; Previous</span><span class="ttl">Buying relational capacity</span></a>
+    <a class="nxt" href="0503-the-specialised-stores.html"><span class="dir">Next &rarr;</span><span class="ttl">The specialised stores</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0502 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
