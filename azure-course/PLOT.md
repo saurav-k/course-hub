@@ -110,9 +110,16 @@ is wrong and it gets fixed before anything new is added.
 | 1203 | Messages, events and the three that get confused |
 | 1204 | APIs, workflows and what is not a product |
 
+**Module 13 - AI and ML**
+
+| Lesson | Title |
+| 1300 | Model endpoints and how throughput is bought |
+| 1301 | Grounding and the pipeline that fills it |
+| 1302 | Training, tools and agents |
+
 ## Planned, in order
 
-Modules 13 and 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Module 14 remains unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -146,7 +153,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 13 and 14**, neither started. New numbers go at the end of the
+- **Module 14**, not started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a

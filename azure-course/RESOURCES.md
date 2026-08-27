@@ -294,6 +294,16 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/azure-app-configuration/overview>
 - <https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-overview>
 
+**Module 13 - AI and ML**
+
+- <https://learn.microsoft.com/en-us/azure/ai-foundry/openai/overview>
+- <https://learn.microsoft.com/en-us/azure/ai-services/content-safety/overview>
+- <https://learn.microsoft.com/en-us/azure/search/vector-search-overview>
+- <https://learn.microsoft.com/en-us/azure/search/vector-search-integrated-vectorization>
+- <https://learn.microsoft.com/en-us/azure/machine-learning/overview-what-is-azure-machine-learning>
+- <https://learn.microsoft.com/en-us/azure/ai-services/>
+- <https://learn.microsoft.com/en-us/azure/ai-services/agents/overview>
+
 Two entries in this module are labelled third party at the point of use, because
 they are not vendor-published: the in-code infrastructure ecosystems, and the
 community characterisation of how far a provider lags a new API version. The Azure

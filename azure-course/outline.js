@@ -301,6 +301,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1204-apis-workflows-and-what-is-not-a-product.html"
         }
       ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "Model endpoints and how throughput is bought",
+          "href": "lessons/1300-model-endpoints-and-how-throughput-is-bought.html"
+        },
+        {
+          "title": "Grounding and the pipeline that fills it",
+          "href": "lessons/1301-grounding-and-the-pipeline-that-fills-it.html"
+        },
+        {
+          "title": "Training, tools and agents",
+          "href": "lessons/1302-training-tools-and-agents.html"
+        }
+      ]
     }
   ],
   "extras": []
