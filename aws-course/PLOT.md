@@ -59,6 +59,15 @@ is wrong and it gets fixed before anything new is added.
 | 0603 | Two ways to run a Spark job | working |
 | 0604 | Ingest, deliver, process | working |
 
+### Module 07 - Networking and delivery
+
+| Lesson | Title | Rung |
+| 0700 | The interface, the address and the route | working |
+| 0701 | Two filters that both must pass | working |
+| 0702 | Egress and private access | working |
+| 0703 | From peering to a hub | working |
+| 0704 | The front door | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -97,7 +106,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 07 to 14 above**, none started. New numbers go at the end of the
+- **Modules 08 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

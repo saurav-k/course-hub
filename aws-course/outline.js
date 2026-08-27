@@ -157,6 +157,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0604-ingest-deliver-process.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "The interface, the address and the route",
+          "href": "lessons/0700-the-interface-the-address-and-the-route.html"
+        },
+        {
+          "title": "Two filters that both must pass",
+          "href": "lessons/0701-two-filters-that-both-must-pass.html"
+        },
+        {
+          "title": "Egress and private access",
+          "href": "lessons/0702-egress-and-private-access.html"
+        },
+        {
+          "title": "From peering to a hub",
+          "href": "lessons/0703-from-peering-to-a-hub.html"
+        },
+        {
+          "title": "The front door",
+          "href": "lessons/0704-the-front-door.html"
+        }
+      ]
     }
   ],
   "extras": []
