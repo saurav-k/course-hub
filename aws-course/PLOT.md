@@ -41,7 +41,99 @@ is wrong and it gets fixed before anything new is added.
 | 0403 | Shared file systems | working |
 | 0404 | Cold data and getting data in | working |
 
-## Planned, in order
+### Module 05 - Databases
+
+| Lesson | Title | Rung |
+| 0500 | Two storage designs under one API | working |
+| 0501 | Capacity with no instance class | working |
+| 0502 | DynamoDB and the partition | working |
+| 0503 | Two in-memory services | working |
+| 0504 | The purpose-built stores | working |
+
+### Module 06 - Analytics
+
+| Lesson | Title | Rung |
+| 0600 | The lake is three layers | working |
+| 0601 | Three ways to read the lake | working |
+| 0602 | The warehouse beside the lake | working |
+| 0603 | Two ways to run a Spark job | working |
+| 0604 | Ingest, deliver, process | working |
+
+### Module 07 - Networking and delivery
+
+| Lesson | Title | Rung |
+| 0700 | The interface, the address and the route | working |
+| 0701 | Two filters that both must pass | working |
+| 0702 | Egress and private access | working |
+| 0703 | From peering to a hub | working |
+| 0704 | The front door | working |
+
+### Module 08 - Identity and access
+
+| Lesson | Title | Rung |
+| 0800 | The gates an access decision passes | working |
+| 0801 | Machines carry no passwords | working |
+| 0802 | Trusting an identity from outside | working |
+| 0803 | Neither your staff nor your customers | working |
+| 0804 | Keys, secrets and certificates | working |
+
+### Module 09 - Governance, tenancy and cost
+
+| Lesson | Title | Rung |
+| 0900 | Shaping the tree | working |
+| 0901 | Two ceilings that grant nothing | working |
+| 0902 | The landing zone and the catalogue | working |
+| 0903 | Quotas, tags and what you own | working |
+| 0904 | The cost model | working |
+
+### Module 10 - Observability and audit
+
+| Lesson | Title | Rung |
+| 1000 | Three stores and no workspace | working |
+| 1001 | What is on and what is off | working |
+| 1002 | How fast each stream arrives | working |
+| 1003 | Noticing and acting | working |
+| 1004 | Instrumenting, and what telemetry cannot answer | working |
+
+### Module 11 - Security services
+
+| Lesson | Title | Rung |
+| 1100 | Protection at the edge | working |
+| 1101 | Inspection inside the network | working |
+| 1102 | Four detectors | working |
+| 1103 | Posture and org-wide enforcement | working |
+| 1104 | Three decisions above the network | working |
+
+### Module 12 - Delivery and integration
+
+| Lesson | Title | Rung |
+| 1200 | Describing infrastructure | working |
+| 1201 | The pipeline | working |
+| 1202 | Shipping change gradually | working |
+| 1203 | Queues, topics and buses | working |
+| 1204 | Workflows and API surfaces | working |
+
+### Module 13 - AI and ML
+
+| Lesson | Title | Rung |
+| 1300 | The model API | working |
+| 1301 | Retrieval, and where vectors live | working |
+| 1302 | Agents, and the platform underneath | working |
+| 1303 | Training, and the ready-made | working |
+
+### Module 14 - Resilience and migration
+
+| Lesson | Title | Rung |
+| 1400 | Backup is not disaster recovery | working |
+| 1401 | The four strategies | working |
+| 1402 | Replicating and failing over | working |
+| 1403 | Proving it | working |
+| 1404 | Moving in | working |
+
+## The plan, now complete
+
+All fourteen modules are written. The plan below stays here because it is the
+argument for the order, and any future module joins the end of it.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -79,9 +171,9 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 05 to 14 above**, none started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
-- **Reference: glossary of AWS terms**, linked from every lesson foot once the
-  first lessons exist. Not written yet.
+- **Reference: glossary of AWS terms**, linked from every lesson foot. Not written
+  yet. It is the one planned page the fourteen modules do not cover.
+- Any further module takes the next number at the end of the sequence; nothing
+  already published is renumbered or renamed.
 
 No module opens for writing until its topics are covered by verified research.

@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Backup is not disaster recovery - Inside AWS</title>
+<meta name="description" content="A central backup service covers dozens of service families with cross-Region and cross-account copies, a write-once lock that survives the root user, and restore testing that turns a hypothesis into evidence.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 14 &middot; Resilience and migration &middot; Lesson 1400</div>
+  <h1>A backup restores data, and disaster recovery restores a service</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>backup-service</code>.
+    &middot; <a href="https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html">AWS Backup</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>One policy-driven service backs up <b>more than twenty service families</b>, so backup stops being a per-service habit and becomes an estate-wide plan.</li>
+      <li>Copies can be made <b>across Regions and across accounts</b>, which is what turns a backup into something a Region failure or a compromised account cannot take with it.</li>
+      <li><b>Vault Lock in compliance mode</b> makes recovery points immutable after a grace period - <b>even to the root user</b> - which is the strongest anti-ransomware control on the platform.</li>
+      <li>A <b>logically air-gapped vault</b> holds malware-resistant copies, separated from the account that produced them.</li>
+      <li>What it costs: an untested backup is a hypothesis, which is why <b>restore testing</b> exists as a feature rather than as a quarterly fire drill somebody forgets.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Module 13&lt;br/&gt;everything this course&lt;br/&gt;has built"] --> T["THIS PAGE&lt;br/&gt;keeping a copy,&lt;br/&gt;and proving it works"]
+  T --> A["The four strategies&lt;br/&gt;lesson 1401"]
+  T --> B["Replicating and failing over&lt;br/&gt;lesson 1402"]
+  W["Module 14&lt;br/&gt;resilience and migration"] -.- T
+    </div>
+    <figcaption>Where this sits, and the start of the last module. Every previous module built something worth losing. This one is about the two different questions that follow: can the data be recovered, and can the service be resumed.
+    <b>They are answered by different mechanisms with different costs, and confusing them is why estates with excellent backups still have long outages.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two different questions</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Something went wrong"] --> D["The DATA is wrong or gone&lt;br/&gt;- deleted, corrupted, encrypted by an attacker"]
+  Q --> S["The SERVICE is unavailable&lt;br/&gt;- a zone, a Region, a dependency"]
+  D --> B["Backup and restore&lt;br/&gt;a point in time, brought back"]
+  S --> R["Replication and failover&lt;br/&gt;lessons 1401 and 1402"]
+  B --> N["Restoring takes as long as it takes&lt;br/&gt;- that duration is your recovery time"]
+    </div>
+    <figcaption>The fork that decides which half of this module applies. Backup answers a question about <i>data at a point in time</i>; disaster recovery answers a question about <i>a service being available now</i>. A backup can serve as a recovery strategy - it is the cheapest of the four in the next lesson - and then the restore duration <b>is</b> the recovery time.
+    <b>Nobody discovers how long a restore takes at a convenient moment, which is the entire argument for testing it on a schedule.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: a lock the root user cannot undo</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "A vault with a lock configured" as C
+  state "Grace period - the settings can still be changed" as G
+  state "Locked in compliance mode" as L
+  state "Recovery points immutable - even to the root user" as I
+  state "Deleted only when the retention expires" as E
+  [*] --> C
+  C --> G
+  G --> C: change the settings while you still can
+  G --> L: the grace period ends
+  L --> I
+  I --> E: retention expires
+    </div>
+    <figcaption>Why the grace period exists and why it matters. Compliance mode is not a permission that can be granted back: once the grace period ends, nobody - including the account's root user - can shorten retention or delete a recovery point early.
+    <b>That is the property ransomware planning actually needs, and it is also the property that will hurt if the retention was set wrongly, so the grace period is the moment to check the numbers.</b></figcaption>
+  </figure>
+
+  <p>Two placements complete the picture. <b>Cross-account and cross-Region copies</b> mean the backup does not share a failure domain with what it protects, and a <b>logically air-gapped vault</b> holds malware-resistant copies separated from the producing account. An attacker with full control of one account should still not be able to reach the copies.</p>
+
+  <h2>3. Turning a hypothesis into evidence</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as A backup plan
+  participant V as The vault
+  participant T as Restore testing
+  participant R as A restored resource
+  participant O as The team
+  P->>V: recovery points, on schedule
+  T->>V: select a recovery point on a schedule of its own
+  V->>R: restore it into a test environment
+  T->>T: validate the restore, and record how long it took
+  T->>O: a result - pass or fail, with a duration
+  R->>R: cleaned up afterwards
+    </div>
+    <figcaption>Restore testing, drawn as the loop it is. The valuable output is not the pass - it is <b>the duration</b>, because that number is what the next lesson's recovery-time objective has to be checked against.
+    <b>Without this, "we have backups" is an assertion about a job that succeeded, not about data anybody has ever seen come back.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Judge a backup design by three questions: <b>can an attacker who owns the account also reach the copies, is the copy in the same failure domain as the original, and when did somebody last restore one</b>. The service has an answer for each - cross-account copies, cross-Region copies, and restore testing - and an estate that has enabled none of them has a backup job rather than a backup strategy.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which control prevents a compromised root user from deleting recovery points early?</div>
+      <button class="q-opt">A cross-Region copy of every recovery point made</button>
+      <button class="q-opt">A resource control policy denying the delete action</button>
+      <button class="q-opt">A vault lock in compliance mode, past its grace period</button>
+      <button class="q-opt">A backup plan whose retention exceeds the audit period</button>
+      <div class="q-fb">Compliance-mode vault lock makes recovery points immutable even to the root user once the grace period has passed. A cross-Region copy protects against losing a Region rather than against deletion, guardrails skip the management account and are policy rather than immutability, and a long retention can still be shortened without the lock.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is the most useful output of a scheduled restore test?</div>
+      <button class="q-opt">The duration, which is your real recovery time</button>
+      <button class="q-opt">The pass result, confirming the job succeeded</button>
+      <button class="q-opt">The storage saving from expiring old points</button>
+      <button class="q-opt">The list of resources included in the plan</button>
+      <div class="q-fb">How long a restore actually takes is the number a recovery-time objective must be checked against. A pass says the data came back but not how quickly, and neither storage cost nor plan coverage is what the test exists to measure.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why copy backups into another account?</div>
+      <button class="q-opt">Because retention rules differ between two accounts</button>
+      <button class="q-opt">So an attacker owning one account cannot reach them</button>
+      <button class="q-opt">Because a vault may hold one service family only</button>
+      <button class="q-opt">So restores can run without affecting production</button>
+      <div class="q-fb">Separating the copies from the account that produced them removes the shared failure domain that a compromise creates. Retention is set by the plan rather than by the account, one service covers many families, and restores go to a test environment regardless of which account holds the copy.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A company runs nightly backups of its databases and file systems into the same account and Region as the workloads. Retention is 35 days. Nobody has restored anything in two years. The board asks whether the company would survive a ransomware attack in which an administrator's credentials are stolen, and what the recovery time would be.</p>
+      <p><b>Answer both questions honestly</b>, then propose the four changes that would let a different answer be given, and say which one has a deadline attached.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For the first question, ask what a stolen administrator credential can reach. For the second, notice that nobody has measured it. One of your four changes cannot be undone after a certain moment.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Answer the ransomware question.</b> No. A stolen administrator credential in the same account reaches the backups, because they are in that account with no immutability. An attacker deletes or encrypts both the data and its copies, and 35 days of retention protects nothing that can be deleted.</li>
+        <li><b>Answer the recovery-time question.</b> Unknown. Nobody has restored in two years, so any figure offered would be a guess. Saying so plainly is more useful to a board than an estimate that has never been tested.</li>
+        <li><b>Change one - immutability.</b> A vault lock in compliance mode, so recovery points cannot be deleted early by anyone, including the root user. This is the change with a deadline: after the grace period the settings cannot be altered, so the retention has to be right before it closes.</li>
+        <li><b>Change two and three - separate the failure domains.</b> Copy recovery points into a different account, and into a different Region. The first removes the compromised-account failure domain, the second removes the Region one. A logically air-gapped vault strengthens the first further.</li>
+        <li><b>Change four - measure it.</b> Scheduled restore testing, so the recovery time becomes a recorded number that improves or degrades visibly. Then the board's second question has an answer, and the next lesson's strategy choice has something real to be checked against.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your first answer should be no and your second should be unknown - if either was reassuring, re-read what a stolen administrator credential can reach. The deadline belongs to the vault lock's grace period.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1401-the-four-strategies.html">The four strategies</a></b> takes the restore duration measured here and turns it into a choice about cost.</li>
+    <li>Lesson 0900 covered <a href="0900-shaping-the-tree.html">the account boundary</a> that makes a cross-account copy meaningful.</li>
+    <li>Lesson 0400 covered <a href="0400-the-object-store-and-its-classes.html">write-once retention</a> on the object store, the same idea one layer down.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If restore testing sounds like paperwork, ask an agent to find the last recorded successful restore in one real estate and how long it took.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html">What is AWS Backup</a> states the service coverage, the copy options and the lock modes together, which is the combination a ransomware answer is actually built from.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1303-training-and-the-ready-made.html"><span class="dir">&larr; Previous</span><span class="ttl">Training, and the ready-made</span></a>
+    <a class="nxt" href="1401-the-four-strategies.html"><span class="dir">Next &rarr;</span><span class="ttl">The four strategies</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1400 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

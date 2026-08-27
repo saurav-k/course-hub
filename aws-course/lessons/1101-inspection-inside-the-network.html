@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Inspection inside the network - Inside AWS</title>
+<meta name="description" content="Security groups decide reachability and never look inside a packet - the managed firewall, the appliance balancer and traffic mirroring are the three ways to inspect what is actually being sent.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Security services &middot; Lesson 1101</div>
+  <h1>The packet filters never look inside the packet</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>cloud-firewall</code>, <code>gateway-load-balancer</code> and <code>packet-mirroring</code>.
+    &middot; <a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/rule-groups.html">AWS Network Firewall</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Security groups and network ACLs decide <b>whether a packet may pass</b>. Nothing about them examines its contents.</li>
+      <li><b>Network Firewall</b> is the managed inspection layer: stateless rules plus a <b>Suricata-compatible stateful engine</b>, with TLS inspection, deployed centrally in an inspection network.</li>
+      <li>Where the appliance is somebody else's, the <b>Gateway Load Balancer</b> puts it transparently in the path and scales it, reached across networks through its own endpoints.</li>
+      <li><b>Traffic mirroring</b> copies traffic from an interface to an out-of-band appliance: a session binds <b>a source interface, a filter and a target</b>, and filters plus truncation keep the volume sane.</li>
+      <li>What it costs: mirroring is <b>limited by instance type</b>, so a design that assumes every instance can be mirrored has to be checked against the supported list first.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1100&lt;br/&gt;protection at the&lt;br/&gt;public front doors"] --> T["THIS PAGE&lt;br/&gt;inspection of traffic&lt;br/&gt;already inside your networks"]
+  T --> A["Detecting what got through&lt;br/&gt;lesson 1102"]
+  T --> B["Posture across accounts&lt;br/&gt;lesson 1103"]
+  W["Module 11&lt;br/&gt;security services"] -.- T
+    </div>
+    <figcaption>Where this sits. Module 07 gave every packet two filters and lesson 1100 gave the public entrance a firewall. This page fills the gap between them: traffic that is inside the estate, already allowed, and never examined.
+    <b>Lateral movement is invisible to a control that only decides reachability, which is the whole reason this layer exists.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: three ways to see inside</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Who inspects the traffic"] --> N["A managed AWS service"]
+  Q --> T["A third-party appliance you choose"]
+  Q --> O["An out-of-band copy for analysis"]
+  N --> NF["Network Firewall&lt;br/&gt;stateless rules and a&lt;br/&gt;Suricata-compatible stateful engine"]
+  T --> GW["Gateway Load Balancer&lt;br/&gt;transparent entry point, scaled,&lt;br/&gt;reached through its endpoints"]
+  O --> TM["Traffic mirroring&lt;br/&gt;a copy of the packets, sent&lt;br/&gt;to an appliance or a fleet"]
+    </div>
+    <figcaption>The three answers, chosen by who is doing the looking. The first two sit <b>in</b> the path and can drop traffic; the third is a copy that cannot, which is what makes it safe to attach to production and useless as an enforcement point.
+    <b>In-path inspection is a dependency of the traffic it protects, so its own availability becomes part of the workload's availability.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: one place to inspect everything</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  V1["Workload network A"] --> H["Transit hub"]
+  V2["Workload network B"] --> H
+  H --> I["Inspection network&lt;br/&gt;Network Firewall endpoints"]
+  I --> H
+  H --> E["Egress, or the other workload"]
+  R["Route tables send traffic&lt;br/&gt;through the inspection network&lt;br/&gt;rather than directly"] -.- H
+    </div>
+    <figcaption>The flagship pattern: a dedicated inspection network attached to the hub of lesson 0703, with route tables steering traffic through it rather than around it. That is why the routing lesson comes first - the firewall inspects nothing that is not routed to it (<a href="https://docs.aws.amazon.com/network-firewall/latest/developerguide/rule-groups.html">Network Firewall rule groups</a>).
+    <b>Security groups and network ACLs remain the basic primitives underneath this - the inspection layer is added to them rather than replacing them.</b></figcaption>
+  </figure>
+
+  <p>The stateful engine being <b>Suricata-compatible</b> matters commercially as well as technically: rule sets written for that engine are portable, so an organisation with existing intrusion-detection rules is not starting from an empty policy. <b>TLS inspection</b> is available where the content of encrypted sessions has to be examined, which is a decision with privacy and key-handling consequences well beyond networking.</p>
+
+  <h2>3. The copy that cannot block</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant S as A source interface
+  participant M as A mirror session
+  participant F as A filter
+  participant T as The target
+  S->>M: traffic continues to its real destination, unaffected
+  M->>F: apply the filter - keep only what matters
+  F->>F: truncate packets, where headers are enough
+  F->>T: a single interface, or a fleet behind a balancer with a UDP listener
+  Note over S,T: the copy is out of band - nothing here can drop the original
+    </div>
+    <figcaption>A mirror session, drawn as the three things it binds together: a source, a filter and a target. The filter and packet truncation are not optimisations - without them a mirror of a busy interface produces more traffic than the interface itself carries (<a href="https://docs.aws.amazon.com/vpc/latest/mirroring/what-is-traffic-mirroring.html">traffic mirroring</a>).
+    <b>The target may be one interface or a fleet behind a network or gateway load balancer with a UDP listener, which is how mirroring scales past a single appliance.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  <b>Instance-type support for mirroring is limited.</b> A monitoring design that assumes every instance in the estate can be mirrored will meet that list at the worst moment, so check it while choosing instance types rather than while building the detection.</div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Sort these three by what happens when the inspection layer fails. <b>In-path inspection failing takes the traffic with it; an out-of-band copy failing costs you visibility and nothing else.</b> That single question decides which of the three a given requirement should use, long before anyone compares rule languages.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Traffic between two workload networks is not being inspected despite a firewall being deployed. What is missing?</div>
+      <button class="q-opt">A security group rule permitting the firewall's interface</button>
+      <button class="q-opt">A stateful rule group matching the protocol in use</button>
+      <button class="q-opt">Route tables steering the traffic through the inspection path</button>
+      <button class="q-opt">A mirror session copying the traffic to the firewall</button>
+      <div class="q-fb">In-path inspection only sees what routing sends to it, so the route tables are the first thing to check. A missing rule would let traffic through after inspection rather than skipping it, and mirroring is an out-of-band mechanism that is not how a firewall receives traffic in the path.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which mechanism cannot drop a malicious packet?</div>
+      <button class="q-opt">Traffic mirroring, which copies out of band</button>
+      <button class="q-opt">Network Firewall's stateful inspection engine</button>
+      <button class="q-opt">A third-party appliance behind a gateway balancer</button>
+      <button class="q-opt">A network ACL rule denying the source range</button>
+      <div class="q-fb">A mirror is a copy and the original is unaffected, so mirroring gives visibility and never enforcement. The stateful engine and an in-path appliance both sit in the traffic path, and a network ACL denies at the subnet edge.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does a mirror session bind together?</div>
+      <button class="q-opt">A subnet, a route table and a gateway endpoint</button>
+      <button class="q-opt">A security group, a rule group and a log group</button>
+      <button class="q-opt">A load balancer, a listener and a target group</button>
+      <button class="q-opt">A source interface, a filter and a mirror target</button>
+      <div class="q-fb">A session is exactly those three: where the copy comes from, what is kept, and where it goes. The other three answers describe routing, filtering and load balancing constructs that belong to other parts of the platform.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A bank must satisfy three requirements. Outbound traffic from every workload network must be inspected and blocked when it matches known-bad indicators. A security team wants to run their existing intrusion-detection rules, written for Suricata, without rewriting them. A forensics team wants full packet capture from four specific application servers, without any risk of affecting production traffic.</p>
+      <p><b>Choose a mechanism for each</b>, say where the routing has to change, and name the one preparation step that has to happen before the forensics requirement can be promised.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask of each requirement whether it must block or only observe. Two of the three must block, and one must be certain not to.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Outbound inspection with blocking - Network Firewall in an inspection network.</b> It must be in the path to block, so a dedicated inspection network attached to the transit hub is the shape, with the firewall's endpoints inside it.</li>
+        <li><b>Say where routing changes.</b> Each workload network's route to the internet, and the hub's route tables, must send traffic through the inspection network rather than directly to egress. Without that change the firewall exists and inspects nothing, which is the most common failure of this pattern.</li>
+        <li><b>Existing Suricata rules - the same service.</b> The stateful engine is Suricata-compatible, so the team's rules are portable rather than rewritten. This is a reason to prefer the managed firewall over a third-party appliance here, since no appliance licence is needed to get the rule language they already use.</li>
+        <li><b>Forensic packet capture - traffic mirroring.</b> The requirement explicitly forbids any risk to production traffic, and a mirror is an out-of-band copy that cannot drop the original. Bind a session per source interface, filter to the traffic of interest, and send the copies to the forensic appliances behind a balancer with a UDP listener if one appliance cannot keep up.</li>
+        <li><b>Name the preparation step.</b> Check the instance types of the four application servers against the mirroring support list. Mirroring is limited by instance type, so the promise cannot be made until that is confirmed, and if a server is unsupported the answer is a different instance type rather than a different filter.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two requirements should share one service, and the third should be the only one described as out of band. If your forensic answer put an appliance in the path, re-read the requirement - it rules that out explicitly.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1102-four-detectors.html">Four detectors</a></b> turns from inspecting traffic to detecting what has already happened.</li>
+    <li>Lesson 0703 covered <a href="0703-from-peering-to-a-hub.html">the transit hub</a> that an inspection network attaches to.</li>
+    <li>Lesson 0704 covered <a href="0704-the-front-door.html">the gateway load balancer</a> that puts a third-party appliance in the path.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the routing point still feels obvious, ask an agent to trace one real egress path and say at which hop the inspection network would have to appear.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/vpc/latest/mirroring/what-is-traffic-mirroring.html">What is traffic mirroring</a> is the shortest of these three references and the one that makes the out-of-band property explicit, which is the property the whole choice turns on.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1100-protection-at-the-edge.html"><span class="dir">&larr; Previous</span><span class="ttl">Protection at the edge</span></a>
+    <a class="nxt" href="1102-four-detectors.html"><span class="dir">Next &rarr;</span><span class="ttl">Four detectors</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1101 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

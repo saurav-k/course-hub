@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipping change gradually - Inside AWS</title>
+<meta name="description" content="Traffic shifting is a different mechanism on every compute type, the named configurations describe the shape of the shift, and what you are really buying is the rollback.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Delivery and integration &middot; Lesson 1202</div>
+  <h1>Traffic shifting differs by compute type, and the rollback is the point</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability key <code>progressive-delivery</code>.
+    &middot; <a href="https://docs.aws.amazon.com/codedeploy/latest/userguide/welcome.html">AWS CodeDeploy</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every compute type shifts traffic differently: instances by <b>in-place or blue-green</b> replacement, functions by <b>alias weights</b>, containers by a <b>second task set behind the balancer</b>, and the API layer by a <b>canary percentage on a stage</b>.</li>
+      <li>The named configurations describe the <b>shape</b> of the shift - a canary holds a small share for a fixed time, a linear shift steps up on a fixed interval, and all-at-once does neither.</li>
+      <li><b>Hook functions</b> run before and after traffic moves, which is where a smoke test belongs.</li>
+      <li>Rollback is what you are buying: deployments <b>roll back on failure or on an alarm threshold</b>, and reverting a function alias is a single call.</li>
+      <li>What it costs: configuration is a separate axis. <b>Feature flags</b> deploy gradually with validators and alarm-triggered rollback, and can be reverted for <b>72 hours</b> after completion.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1201&lt;br/&gt;a pipeline with one&lt;br/&gt;path to production"] --> T["THIS PAGE&lt;br/&gt;the last stage,&lt;br/&gt;slowed down deliberately"]
+  T --> A["Decoupling the pieces&lt;br/&gt;lesson 1203"]
+  T --> B["Surviving failure&lt;br/&gt;module 14"]
+  W["Module 12&lt;br/&gt;delivery and integration"] -.- T
+    </div>
+    <figcaption>Where this sits. The pipeline made deployment repeatable. This page makes it survivable, by ensuring that a bad release reaches a small share of traffic before it reaches all of it - and that undoing it is one operation rather than an incident.
+    <b>Every mechanism here depends on the alarms of lesson 1003, because an automatic rollback needs something to watch.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: four targets, four mechanisms</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["What is being deployed"] --> E["Instances"]
+  Q --> L["Functions"]
+  Q --> C["Containers"]
+  Q --> A["An API stage"]
+  Q --> F["Configuration, not code"]
+  E --> E1["In place, or blue-green with a&lt;br/&gt;replacement environment - all at once,&lt;br/&gt;half at a time, or one at a time"]
+  L --> L1["Alias weights between two versions,&lt;br/&gt;with hook functions before and after"]
+  C --> C1["A second task set behind the listener,&lt;br/&gt;with a bake time before the old one goes"]
+  A --> A1["A canary percentage on the stage,&lt;br/&gt;promoted or discarded"]
+  F --> F1["Feature flags with validators&lt;br/&gt;and a gradual strategy"]
+    </div>
+    <figcaption>Five targets, five mechanisms, one intent. Note the last row: <b>configuration is deployed too</b>, and treating a flag change as a deployment - with validation, a gradual rollout and a rollback - is what stops "it was only a config change" from being an outage (<a href="https://docs.aws.amazon.com/appconfig/latest/userguide/what-is-appconfig.html">AppConfig</a>).
+    <b>Container blue-green has a documented constraint worth knowing: an all-at-once shift is available on the network balancer, and custom configurations are not permitted where the deployment is managed by a template.</b></figcaption>
+  </figure>
+
+  <h2>2. What the named configurations actually describe</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Line chart of the share of traffic on a new version over time under three deployment configurations: all at once jumps to one hundred percent immediately, a canary holds ten percent for five minutes then jumps to one hundred, and a linear shift steps up ten percent every ten minutes reaching one hundred after ninety minutes">
+      <text class="ttl" x="20" y="24">Share of traffic on the new version</text>
+      <line class="axis" x1="80" y1="250" x2="614" y2="250"/>
+      <line class="axis" x1="80" y1="46"  x2="80"  y2="250"/>
+      <polyline class="s-alarm thick" points="80,250 80,50 600,50"/>
+      <polyline class="s-signal thick" points="80,230 106,230 106,50 600,50"/>
+      <polyline class="s-stat thick" points="80,230 132,230 132,210 184,210 184,190 236,190 236,170 288,170 288,150 340,150 340,130 392,130 392,110 444,110 444,90 496,90 496,70 548,70 548,50 600,50"/>
+      <text class="lbl-sm" x="72" y="254" text-anchor="end">0</text>
+      <text class="lbl-sm" x="72" y="154" text-anchor="end">50%</text>
+      <text class="lbl-sm" x="72" y="54"  text-anchor="end">100%</text>
+      <text class="lbl-sm" x="80"  y="270">0</text>
+      <text class="lbl-sm" x="236" y="270" text-anchor="middle">30 min</text>
+      <text class="lbl-sm" x="392" y="270" text-anchor="middle">60 min</text>
+      <text class="lbl-sm" x="548" y="270" text-anchor="middle">90 min</text>
+      <text class="lbl-sm" x="20" y="292">shapes drawn from the published named configurations, not from measured traffic</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>all at once</span><span><i class="sw-signal"></i>canary, ten percent for five minutes</span><span><i class="sw-stat"></i>linear, ten percent every ten minutes</span></div>
+    <figcaption>The three shapes, drawn to the same clock. A canary is a short exposure followed by a jump; a linear shift trades a long window for a gradual one. The window is what an alarm has to notice a problem in, which is why a five-minute canary and a five-minute alarm period are a poor pair.
+    <b>The named configurations are not styles - each one states exactly how long a bad release is limited to a minority of users.</b></figcaption>
+  </figure>
+
+  <h2>3. The rollback, which is what you are actually buying</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant D as The deployment
+  participant H as A pre-traffic hook
+  participant T as Traffic
+  participant AL as An alarm
+  participant R as Rollback
+  D->>H: run the smoke test before any traffic shifts
+  H-->>D: pass
+  D->>T: shift the first share
+  T->>AL: errors rise
+  AL->>R: the alarm threshold is breached
+  R->>T: traffic returns to the previous version
+  Note over R: reverting a function alias is a single call - the weights simply change back
+    </div>
+    <figcaption>The loop that makes gradual delivery worth its complexity. Deployments roll back on failure or on an alarm threshold, and the pre-traffic hook is the cheapest gate of all because it runs before any user is affected (<a href="https://docs.aws.amazon.com/codedeploy/latest/userguide/deployments-rollback-and-redeploy.html">rollback and redeploy</a>).
+    <b>A gradual deployment with no alarm attached is a slow deployment, not a safe one.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Configuration has its own undo and its own deadline: a feature-flag deployment can be <b>reverted within 72 hours of completing</b>, and validators run before it is applied at all (<a href="https://docs.aws.amazon.com/appconfig/latest/userguide/appconfig-deploying-reverting.html">reverting a configuration</a>). After that window, going back means deploying the previous value as a new change - which is fine, and is a different operation with a different audit trail.</div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Do not choose a configuration by how cautious it sounds. Work backwards: <b>how long does your monitoring need to notice this class of problem, and what share of users is acceptable during that window</b>. Those two numbers pick the shape, and the alarm you attach is what makes the choice mean anything.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does a function shift traffic between two versions?</div>
+      <button class="q-opt">A replacement environment is built and cut over</button>
+      <button class="q-opt">An alias carries weights across the two versions</button>
+      <button class="q-opt">A second task set runs behind the same listener</button>
+      <button class="q-opt">A stage setting splits requests by percentage</button>
+      <div class="q-fb">Alias weighting is the function mechanism, and reverting it is a single call. A replacement environment is the instance blue-green pattern, a second task set is the container one, and a stage percentage belongs to the API layer.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A canary holds ten percent of traffic for five minutes. What must be true for that to be useful?</div>
+      <button class="q-opt">The deployment must be managed from a template</button>
+      <button class="q-opt">The previous version must be kept for seventy-two hours</button>
+      <button class="q-opt">The build must produce two artefacts, not one</button>
+      <button class="q-opt">Monitoring must detect the problem inside that window</button>
+      <div class="q-fb">The exposure window is only protective if something notices within it, so the alarm's evaluation has to be faster than the shift. Template management restricts which configurations are available rather than making the canary useful, the seventy-two hours belongs to configuration revert, and one artefact is deployed rather than two.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does a smoke test belong in a gradual deployment?</div>
+      <button class="q-opt">In a pre-traffic hook, before any share shifts</button>
+      <button class="q-opt">In the build stage, before the artefact is stored</button>
+      <button class="q-opt">In a post-traffic hook, after the shift completes</button>
+      <button class="q-opt">In the alarm definition that triggers the rollback</button>
+      <div class="q-fb">A pre-traffic hook runs before any user is affected, which makes it the cheapest gate available. Build-stage tests run against no deployed environment, a post-traffic hook runs after exposure, and an alarm observes rather than tests.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A payments API runs as containers behind a load balancer, with a function handling asynchronous settlement and a rate limit held as configuration. Errors of the kind that matter show up in the error-rate metric within about four minutes. The business will tolerate at most a small minority of requests being affected by a bad release, and a previous incident was caused by a rate-limit value changed by hand.</p>
+      <p><b>Choose a shift shape</b> for the API and for the function, place the rate limit, and say what has to be attached for any of it to work.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Start from the four-minute detection time and compare it against each shape's exposure window. Then ask what kind of change the rate limit actually is.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Do the timing arithmetic first.</b> Detection takes about four minutes. A canary holding ten percent for five minutes leaves roughly a minute of margin, which is thin but workable; a canary holding for fifteen minutes is comfortable. Anything shorter than the detection time offers no protection at all.</li>
+        <li><b>The API - a container blue-green deployment with a canary shift and a bake time.</b> A second task set runs behind the same listener, a small share of traffic goes to it, and the bake time keeps the old task set available until the shift is confirmed. If the deployment is managed from a template, check the available configurations, because custom ones are not permitted there.</li>
+        <li><b>The function - alias weighting, with the same reasoning.</b> A canary weight for at least as long as detection takes, and a pre-traffic hook running a smoke test before any settlement traffic is affected. Reverting is one call, which is the cheapest rollback on the page.</li>
+        <li><b>The rate limit - a feature flag, not a manual edit.</b> It is configuration, so it gets validators before it is applied, a gradual strategy, an alarm-triggered rollback, and a revert window of seventy-two hours after completion. That directly addresses the previous incident, which was a hand-edited value with none of those four.</li>
+        <li><b>Say what must be attached.</b> An alarm on the error-rate metric, wired to each deployment as its rollback trigger. Without it, all three changes above are slower deployments rather than safer ones, and somebody has to be watching a dashboard at the right moment instead.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Both shift windows should be at least as long as the four-minute detection time, and the rate limit should end up as a deployed configuration rather than as a code change. If your answer contains no alarm, nothing in it can roll back on its own.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1203-queues-topics-and-buses.html">Queues, topics and buses</a></b> turns from shipping the parts to letting them talk to each other.</li>
+    <li>Lesson 0303 covered <a href="0303-lambda-and-the-function-boundary.html">the function alias</a> that makes a rollback one call.</li>
+    <li>Lesson 1003 covered <a href="1003-noticing-and-acting.html">the alarms</a> every automatic rollback on this page depends on.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the timing argument feels theoretical, ask an agent to measure how long your monitoring actually took to notice the last bad release, and compare it with your current shift window.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/codedeploy/latest/userguide/deployment-configurations.html">Deployment configurations</a> lists the named shapes for each compute type in one place, which is what turns a vague preference for "canary deployments" into a specific exposure window you can defend.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. The chart draws the published configurations rather than measured traffic.</p>
+
+  <div class="pager">
+    <a href="1201-the-pipeline.html"><span class="dir">&larr; Previous</span><span class="ttl">The pipeline</span></a>
+    <a class="nxt" href="1203-queues-topics-and-buses.html"><span class="dir">Next &rarr;</span><span class="ttl">Queues, topics and buses</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1202 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

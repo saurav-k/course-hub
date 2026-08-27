@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The gates an access decision passes - Inside AWS</title>
+<meta name="description" content="Every AWS request is judged by a fixed sequence of gates: an explicit deny anywhere ends it, ceilings cap it, identity and resource policies union, and boundaries and session policies intersect.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Identity and access &middot; Lesson 0800</div>
+  <h1>Every request is judged by a fixed sequence of gates</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Capability keys <code>iam-principals</code>, <code>iam-roles</code>, <code>iam-policy-language</code>, <code>permission-boundary</code> and <code>privileged-access</code>.
+    &middot; <a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html">IAM policy evaluation logic</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The default answer is <b>implicit deny</b>. Every allow has to be granted by something, and the root user is the one exception to the default.</li>
+      <li><b>An explicit deny anywhere is final.</b> No later gate can undo it, which makes deny the strongest statement any policy can make.</li>
+      <li>The gates run in order: ceilings first, then the <b>union</b> of identity and resource policies in the same account, then the <b>intersection</b> of a permissions boundary and a session policy.</li>
+      <li><b>Cross-account is two evaluations, not one.</b> The caller's side and the resource's side must each reach Allow independently.</li>
+      <li>What it costs: a boundary grants nothing on its own and can only take away, so a policy that looks correct in isolation can still produce no access at all.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Module 07&lt;br/&gt;paths a packet&lt;br/&gt;is allowed to take"] --> T["THIS PAGE&lt;br/&gt;how the platform decides&lt;br/&gt;whether an API call is allowed"]
+  T --> A["Machines with no password&lt;br/&gt;lesson 0801"]
+  T --> B["Trust from outside&lt;br/&gt;lesson 0802"]
+  T --> C["Org-wide ceilings&lt;br/&gt;module 09"]
+  W["Module 08&lt;br/&gt;identity and access"] -.- T
+    </div>
+    <figcaption>Where this sits. Networking decided whether a packet can reach a service. This page is the other half: whether the caller behind that packet may do what it is asking to do, which is decided by the service's own authorisation layer rather than by the network at all.
+    <b>Every service in this course consults the same evaluation, which is why one page can teach authorisation for all of them.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: the gates, in order</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["A request arrives"] --> D0["Default - implicit deny&lt;br/&gt;the root user excepted"]
+  D0 --> D1["Any explicit deny, anywhere&lt;br/&gt;this ends the evaluation"]
+  D1 --> G1["Resource control policies&lt;br/&gt;the resource-side ceiling"]
+  G1 --> G2["Service control policies&lt;br/&gt;the principal-side ceiling"]
+  G2 --> U["Identity and resource policies&lt;br/&gt;a UNION in the same account"]
+  U --> B1["Permissions boundary&lt;br/&gt;INTERSECTS - must also allow"]
+  B1 --> B2["Session policy&lt;br/&gt;INTERSECTS last"]
+  B2 --> A["Allowed"]
+    </div>
+    <figcaption>The evaluation, drawn as the funnel it is (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic_policy-eval-denyallow.html">determining whether a request is allowed</a>). Two gates behave differently from the rest: the identity and resource policies form a <b>union</b>, so being allowed by either is enough, while the boundary and the session policy <b>intersect</b>, so both must allow. Two exceptions to the union are worth memorising: a role trust policy and a KMS key policy each require an explicit allow of their own.
+    <b>Read the funnel from the top when a call is denied and from the union downwards when a call succeeds and should not have.</b></figcaption>
+  </figure>
+
+  <h2>2. The gate that grants nothing</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Venn diagram of a permissions boundary: the identity policy grants one set of actions, the boundary allows another, and only the overlap is effective - the boundary grants nothing on its own">
+      <text class="ttl" x="20" y="24">A permissions boundary intersects, it never grants</text>
+      <circle class="f-stat"   cx="245" cy="175" r="95"/>
+      <circle class="f-signal" cx="395" cy="175" r="95"/>
+      <text class="lbl-b" x="170" y="106" text-anchor="middle">Identity policy</text>
+      <text class="lbl-sm" x="170" y="122" text-anchor="middle">what was granted</text>
+      <text class="lbl-b" x="470" y="106" text-anchor="middle">Boundary</text>
+      <text class="lbl-sm" x="470" y="122" text-anchor="middle">what is permitted at most</text>
+      <text class="lbl-b" x="320" y="172" text-anchor="middle">Effective</text>
+      <text class="lbl-b" x="320" y="190" text-anchor="middle">permissions</text>
+      <text class="lbl-sm" x="20" y="290">a boundary alone produces no access at all, because it intersects an empty set</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>granted by an identity policy</span><span><i class="sw-signal"></i>allowed by the boundary</span></div>
+    <figcaption>The reason a boundary confuses people: attaching one to a role with no identity policy produces nothing, because there is no grant for it to narrow (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/access_policies_boundaries.html">permissions boundaries</a>). Its practical use is delegation - a condition on <code>iam:PermissionsBoundary</code> forces a delegated administrator to attach the mandated boundary to everything they create.
+    <b>The boundary is how you let someone else create roles without letting them create a role more powerful than their own.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  One nuance that decides real investigations: a resource policy grant made directly to a <b>session ARN or a user ARN</b> survives a boundary's implicit deny, while the same grant made to the bare <b>role ARN</b> does not. Two policies that look equivalent produce different answers, and the difference is which ARN form the resource policy names.</div>
+
+  <h2>3. Across an account line, it happens twice</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as A principal in account A
+  participant EA as Evaluation in account A
+  participant EB as Evaluation in account B
+  participant R as A resource in account B
+  C->>EA: call an API on B's resource
+  EA->>EA: identity policy, plus A's own ceilings and boundary
+  EA-->>EB: allowed on the caller side
+  EB->>EB: the resource policy, plus B's resource-side ceiling
+  EB-->>R: allowed on the resource side
+  R-->>C: the call proceeds - both halves said yes
+    </div>
+    <figcaption>Cross-account access is two independent evaluations and both must reach Allow (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic-cross-account.html">cross-account policy evaluation</a>). Inside one account, the union rule means a resource policy alone can be enough. Across accounts it never is.
+    <b>An explicit deny in either half kills the request no matter how generous the other half was, which is why one team's guardrail can break another team's integration.</b></figcaption>
+  </figure>
+
+  <p>Two tools make this reviewable rather than theoretical. <b>IAM Access Analyzer</b> reports external access and unused access, validates policies, and generates a least-privilege policy from observed CloudTrail activity, so a policy can be narrowed from evidence rather than from guesswork (<a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/what-is-access-analyzer.html">Access Analyzer</a>). And a practical limit: a managed policy is capped at <b>6,144 characters</b>, which is what eventually forces a large permission set to be split.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Do not read AWS authorisation as "who has permission". Read it as <b>a request walking a fixed sequence of gates, where two gates add and two gates subtract</b>. Every confusing outcome - a policy that grants nothing, a guardrail that breaks a partner integration, a deny nobody can override - is one of those four behaviours arriving where it was not expected.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A role has an identity policy allowing an action, and a permissions boundary that does not mention it. What happens?</div>
+      <button class="q-opt">Allowed, because the identity policy grants it</button>
+      <button class="q-opt">Allowed, since a boundary only blocks explicit denies</button>
+      <button class="q-opt">Denied, because the boundary contains a deny rule</button>
+      <button class="q-opt">Denied, because the boundary must also allow it</button>
+      <div class="q-fb">A boundary intersects, so anything it does not allow is outside the effective permissions even without a deny statement. The first two answers treat the boundary as advisory, and the third invents an explicit deny where the boundary simply stays silent.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which statement can never be overridden by a later gate in the evaluation?</div>
+      <button class="q-opt">An explicit deny in any applicable policy</button>
+      <button class="q-opt">An allow in the resource-based policy set</button>
+      <button class="q-opt">An allow in an attached identity policy</button>
+      <button class="q-opt">A ceiling that omits the action entirely</button>
+      <div class="q-fb">An explicit deny ends the evaluation wherever it appears. Allows can be narrowed by a boundary or a session policy further down, and a ceiling that stays silent is an implicit deny, which is weaker than an explicit one and different in kind.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A resource policy in account B allows a role in account A, but the call fails. What must also be true?</div>
+      <button class="q-opt">Account B must attach a boundary to the role</button>
+      <button class="q-opt">Account A must own the resource being called</button>
+      <button class="q-opt">Account A's own policies must allow the call too</button>
+      <button class="q-opt">Account B must be in the same organisation as A</button>
+      <div class="q-fb">Cross-account access needs both halves to reach Allow independently, so the caller's identity policy has to permit the action as well. Boundaries are attached by the account owning the principal, resource ownership is what makes this cross-account in the first place, and shared organisation membership is not required.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An analytics role in the data account must read one bucket in the platform account. The bucket policy allows the role's ARN. The role's identity policy allows the read. The call is denied. Investigation finds three more facts: the data account has a permissions boundary attached to the role that allows only actions on a different bucket, the platform account's organisation applies a resource control policy denying access from outside the organisation, and both accounts belong to the same organisation.</p>
+      <p><b>Walk the evaluation</b> for both halves, say which gate produces the denial, and name the smallest change that fixes it.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Do the two halves separately and in the documented order. One of the three extra facts is a red herring, one is decisive, and one only matters if you get the first two wrong.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Caller side, gate by gate.</b> Default deny. No explicit deny is reported anywhere. Ceilings are not reported as blocking. The identity policy allows the read, so the union gate passes.</li>
+        <li><b>Caller side, the intersect gates.</b> The boundary allows actions only on a different bucket, so the requested action is outside the intersection. The caller side therefore reaches Deny, and it does so without any policy containing the word deny.</li>
+        <li><b>Resource side, for completeness.</b> The bucket policy allows the role. The resource control policy denies access from outside the organisation, and both accounts are inside it, so that policy does not apply here - the red herring.</li>
+        <li><b>Name the deciding gate.</b> The permissions boundary on the analytics role. Both halves had to reach Allow and the caller half did not.</li>
+        <li><b>Name the smallest fix, and check it against the trap.</b> Add the target bucket to the boundary, so the intersection contains the read. Do not widen the bucket policy: the resource side already allowed the call, and widening it would grant more access while fixing nothing. Note the ARN nuance as well - had the bucket policy named a session ARN rather than the role ARN, the boundary's implicit deny would have been survivable, which is exactly the kind of difference that makes two apparently identical setups behave differently.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should blame a gate that contains no deny statement, and your fix should change the data account rather than the platform account. If you widened the bucket policy, re-read which half of the evaluation was actually failing.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0801-machines-carry-no-passwords.html">Machines carry no passwords</a></b> takes the role primitive and shows how every compute service on the platform gets credentials without holding a secret.</li>
+    <li>Lesson 0101 covered <a href="0101-the-account-is-the-boundary.html">the account boundary</a> that turns one evaluation into two.</li>
+    <li>Module 09 covers the two organisation-level ceilings this page treats as gates.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the order still feels arbitrary, ask an agent to take one real denied call and walk the seven gates in sequence, saying at each one whether it allowed, denied, or stayed silent.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_evaluation-logic.html">Policy evaluation logic</a> is the page the whole of this module rests on, and it is worth reading in full once rather than consulting in pieces - the order is the content.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0704-the-front-door.html"><span class="dir">&larr; Previous</span><span class="ttl">The front door</span></a>
+    <a class="nxt" href="0801-machines-carry-no-passwords.html"><span class="dir">Next &rarr;</span><span class="ttl">Machines carry no passwords</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0800 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

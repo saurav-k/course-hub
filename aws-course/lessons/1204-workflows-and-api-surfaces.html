@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workflows and API surfaces - Inside AWS</title>
+<meta name="description" content="A workflow engine with two execution models a hundred thousand times apart in duration, and three API surfaces whose internal choice changes guarantees rather than only price.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Delivery and integration &middot; Lesson 1204</div>
+  <h1>One workflow engine with two very different clocks, and three ways to present an API</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>workflow-orchestration</code>, <code>api-gateway</code>, <code>graphql-api</code> and <code>realtime-messaging</code>.
+    &middot; <a href="https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html">AWS Step Functions</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A workflow is a <b>state machine</b> written in a declarative language, and its two execution models differ in guarantee, duration and billing at once.</li>
+      <li><b>Standard is exactly-once, runs up to a year and is billed per state transition. Express is at-least-once, stops at five minutes and is billed per request.</b></li>
+      <li>Two integration patterns carry most designs: <b>run a job and wait for it</b>, and <b>wait for a callback token</b> - which is how a human approval fits inside a workflow.</li>
+      <li>The API layer has three surfaces: <b>REST</b> with usage plans, mapping templates, a firewall attachment and canary stages, <b>HTTP</b> which is leaner and cheaper per call with a native token authoriser, and <b>WebSocket</b> for two-way connections.</li>
+      <li>What it costs: a WebSocket API keeps <b>no subscriber registry</b>, so your application stores connection identifiers itself.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1203&lt;br/&gt;queues, topics&lt;br/&gt;and buses"] --> T["THIS PAGE&lt;br/&gt;the workflow engine, and&lt;br/&gt;the surfaces clients call"]
+  T --> A["Model applications&lt;br/&gt;module 13"]
+  T --> B["Surviving failure&lt;br/&gt;module 14"]
+  W["Module 12&lt;br/&gt;delivery and integration"] -.- T
+    </div>
+    <figcaption>Where this sits, and the last page of the module. Messaging decoupled the parts. This page is about sequencing them when order matters, and about the front door the outside world actually calls.
+    <b>A workflow engine and a queue solve different problems: one remembers where a process got to, the other only remembers that work is waiting.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: two clocks, a hundred thousand apart</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Logarithmic chart of maximum execution duration: an express workflow stops at five minutes, a function stops at fifteen minutes, and a standard workflow runs for up to a year">
+      <text class="ttl" x="20" y="24">How long one execution may run</text>
+      <line class="grid" x1="184" y1="46" x2="184" y2="230"/>
+      <line class="grid" x1="309" y1="46" x2="309" y2="230"/>
+      <line class="grid" x1="405" y1="46" x2="405" y2="230"/>
+      <line class="grid" x1="585" y1="46" x2="585" y2="230"/>
+      <line class="axis" x1="60" y1="230" x2="614" y2="230"/>
+      <rect class="m-alarm"  x="60" y="60"  width="173" height="28"/>
+      <rect class="m-signal" x="60" y="110" width="207" height="28"/>
+      <rect class="m-stat"   x="60" y="160" width="525" height="28"/>
+      <text class="lbl-b" x="241" y="80">express workflow - 5 minutes</text>
+      <text class="lbl-b" x="275" y="130">a function - 15 minutes</text>
+      <text class="lbl-b lbl-on" x="575" y="180" text-anchor="end">standard workflow - up to a year</text>
+      <text class="lbl-sm" x="184" y="250" text-anchor="middle">1 min</text>
+      <text class="lbl-sm" x="309" y="250" text-anchor="middle">1 hour</text>
+      <text class="lbl-sm" x="405" y="250" text-anchor="middle">1 day</text>
+      <text class="lbl-sm" x="585" y="250" text-anchor="middle">1 year</text>
+      <text class="lbl-sm" x="20"  y="278">logarithmic scale - ceilings as published, with the function ceiling from module 03 for scale</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>express</span><span><i class="sw-signal"></i>a single function</span><span><i class="sw-stat"></i>standard</span></div>
+    <figcaption>The two workflow models are not fast and slow versions of one product. The express model is bounded at five minutes and is at-least-once; the standard model is exactly-once and can wait for a year, which is what lets a workflow contain something slow - a human, a shipment, a monthly cycle.
+    <b>The billing follows the same split: per state transition for the long model, per request for the short one, so a chatty short workflow is expensive as a standard execution.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Start" as S
+  state "Run a job and wait for it to finish" as J
+  state "Fan out with a distributed map - child executions" as M
+  state "Wait for a callback token" as C
+  state "A human approves, and the token is returned" as H
+  state "Finish" as F
+  [*] --> S
+  S --> J
+  J --> M
+  M --> C
+  C --> H
+  H --> C: the token comes back
+  C --> F
+    </div>
+    <figcaption>The two integration patterns that carry most real workflows. <b>Run a job and wait</b> makes a long-running task a single state; <b>wait for a callback token</b> suspends the workflow until something external returns the token, which is exactly how an approval by a person fits into an automated process. A <b>distributed map</b> fans out by starting child executions rather than looping inside one.
+    <b>Waiting for a token is why the year-long ceiling matters - a process pausing on a human is not a failure state, it is the design.</b></figcaption>
+  </figure>
+
+  <h2>2. Three surfaces, and what each buys</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["What does the client need"] --> R["Request and response,&lt;br/&gt;with usage plans, request mapping,&lt;br/&gt;a firewall and canary stages"]
+  Q --> H["Request and response,&lt;br/&gt;as lean and cheap as possible"]
+  Q --> W["A two-way connection"]
+  Q --> G["One typed schema over&lt;br/&gt;several back ends"]
+  R --> R1["REST API"]
+  H --> H1["HTTP API&lt;br/&gt;a native token authoriser"]
+  W --> W1["WebSocket API&lt;br/&gt;built-in connect, disconnect and default routes"]
+  G --> G1["The GraphQL service&lt;br/&gt;resolvers, subscriptions, merged APIs"]
+    </div>
+    <figcaption>Four surfaces, chosen by what the client needs rather than by preference. The REST surface carries the features - usage plans, mapping templates, a firewall attachment and canary stages from lesson 1202 - and the HTTP surface trades several of them for a lower per-call price and a built-in token authoriser (<a href="https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-vs-rest.html">choosing between HTTP and REST APIs</a>).
+    <b>The GraphQL service authenticates five different ways - keys, platform identity, the customer directory, an external issuer, or your own function - which is unusual breadth for one surface.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  A WebSocket API gives you <b>connect, disconnect and default routes</b> and <b>keeps no subscriber registry</b>: your application stores connection identifiers itself and uses a management API to push messages back. Billing is per message and per connection-minute, so idle connections cost something. The GraphQL service's event channels cover the same fan-out with server-side namespaces, which removes that bookkeeping (<a href="https://docs.aws.amazon.com/apigateway/latest/developerguide/apigateway-websocket-api.html">WebSocket APIs</a>).</div>
+
+  <p>One account-wide number belongs with all of these: the API layer has a <b>default request-rate throttle per Region</b>, with a burst allowance below it. It is adjustable, and it is an account-level default rather than a per-API one, so a new high-volume API shares it with everything else already running.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Both choices on this page look like price comparisons and are really <b>guarantee comparisons</b>. Express against standard is at-least-once against exactly-once before it is cheap against expensive; HTTP against REST is a feature set before it is a per-call rate. Decide on the guarantee and the features you need, then check that the price follows - not the other way round.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A process must pause for a manager's approval, sometimes for days. Which execution model fits?</div>
+      <button class="q-opt">Express, since the approval happens outside it</button>
+      <button class="q-opt">Express, with the workflow restarted on approval</button>
+      <button class="q-opt">Standard, waiting on a callback token</button>
+      <button class="q-opt">Neither - approvals belong outside a workflow</button>
+      <div class="q-fb">The standard model runs up to a year and can suspend on a callback token, which is exactly the human-approval pattern. Express stops at five minutes however the approval is arranged, and restarting a workflow loses the state that made it a workflow.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What must an application do that a WebSocket API does not?</div>
+      <button class="q-opt">Store connection identifiers to push messages later</button>
+      <button class="q-opt">Authenticate each frame against the token issuer</button>
+      <button class="q-opt">Route inbound frames using its own route table</button>
+      <button class="q-opt">Terminate idle connections to control the cost</button>
+      <div class="q-fb">No subscriber registry is kept, so the application stores connection identifiers and uses the management API to push. Inbound frames are routed by route key, per-frame authentication is not required by the surface, and billing per connection-minute is a cost consideration rather than something the application must implement.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the substantive difference between the two request-response API surfaces?</div>
+      <button class="q-opt">One supports functions as targets and the other does not</button>
+      <button class="q-opt">One carries more features, the other is leaner and cheaper</button>
+      <button class="q-opt">One is regional and the other can only be edge-optimised</button>
+      <button class="q-opt">One supports private endpoints and the other supports public</button>
+      <div class="q-fb">The REST surface carries usage plans, mapping templates, a firewall attachment and canary stages, while the HTTP surface trades several of those for a lower per-call price and a native token authoriser. Both reach functions, and neither is limited to one endpoint kind in the way the other options suggest.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An insurance claim process has four steps: validate the submission in under a second, run a fraud check taking up to ten minutes, wait for a human assessor who may take three days, then pay out. Claims arrive from a mobile application, and assessors want the claim list to update live as new claims arrive. Peak submission rate is 300 per second.</p>
+      <p><b>Choose an execution model and API surfaces</b>, place each of the four steps, and name the number you would check before promising the peak rate.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Find the longest wait in the process first - it decides the execution model on its own. Then handle the live list separately, because it is not a request-response problem.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The three-day wait decides the model.</b> Only the standard execution model reaches beyond five minutes, so the claim process is a standard workflow. Billing per state transition is acceptable because the workflow has few states and each claim passes through them once.</li>
+        <li><b>Place the steps.</b> Validation is a fast task. The fraud check runs as a job the workflow waits for, since ten minutes exceeds a single function's ceiling and should not be inlined. The assessor step waits for a callback token, returned when the assessment is submitted. Payment is the final task.</li>
+        <li><b>Consider the fast path separately.</b> If sub-second validation is wanted before a claim is accepted at all, an express workflow or a plain function in front of the standard workflow is reasonable - and it must be a separate execution rather than a state inside the long one, because the two models cannot be mixed in one execution.</li>
+        <li><b>Choose the surfaces.</b> The mobile application submits over a request-response API, and the lean HTTP surface fits unless usage plans, request mapping, a firewall attachment or canary stages are required. The live assessor list is a two-way problem: either a WebSocket API, remembering that connection identifiers are yours to store, or the GraphQL service's subscriptions, which remove that bookkeeping.</li>
+        <li><b>Name the number to check.</b> The account-level request-rate throttle for the API layer in that Region, and its burst allowance. It is an account default shared with every other API in the account, so 300 per second must be checked against what is already consumed rather than against the limit in isolation.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your workflow should be standard because of the three days rather than because of the ten minutes, and your live-list answer should not be a request-response API. If you put the assessor wait in an express workflow, compare three days against five minutes.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, module 13</b> puts a model behind one of these surfaces.</li>
+    <li>Lesson 0303 covered <a href="0303-lambda-and-the-function-boundary.html">the fifteen-minute function ceiling</a> that the middle bar of this page's chart marks.</li>
+    <li>Lesson 1202 covered <a href="1202-shipping-change-gradually.html">the canary stage</a> that the REST surface carries.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two execution models still feel interchangeable, ask an agent to price one real workflow both ways using the number of state transitions it actually makes.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/step-functions/latest/dg/welcome.html">What is Step Functions</a> states the two execution models beside each other with their guarantees, durations and billing, which is the one paragraph that decides most workflow designs.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. Prices are described by shape and left to the vendor's own pricing pages.</p>
+
+  <div class="pager">
+    <a href="1203-queues-topics-and-buses.html"><span class="dir">&larr; Previous</span><span class="ttl">Queues, topics and buses</span></a>
+    <a class="nxt" href="1300-the-model-api.html"><span class="dir">Next &rarr;</span><span class="ttl">The model API</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1204 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

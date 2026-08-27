@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Egress and private access - Inside AWS</title>
+<meta name="description" content="A private subnet has two very different exits: a NAT gateway to the internet with a hard connection ceiling, and VPC endpoints to AWS services where two of them are free and the rest are not.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0702</div>
+  <h1>A private subnet has two exits and they are priced nothing alike</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>nat-gateway</code> and <code>private-endpoint</code>.
+    &middot; <a href="https://docs.aws.amazon.com/vpc/latest/userguide/nat-gateway-basics.html">NAT gateway</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>NAT gateway</b> gives a private subnet outbound-only internet access. It is <b>scoped to one Availability Zone</b> and scales from a 5 Gbps baseline towards 100 Gbps.</li>
+      <li>Its real ceiling is connections, not bandwidth: <b>55,000 simultaneous connections to one destination per IP address</b>, and it can carry up to eight addresses.</li>
+      <li>Best practice is <b>one NAT gateway per zone</b>. Sharing one across zones works and quietly makes every zone depend on the zone it lives in.</li>
+      <li><b>VPC endpoints</b> reach AWS services without the internet at all, and they come in two kinds: <b>gateway endpoints</b> for S3 and DynamoDB, which use prefix-list routes and cost nothing extra, and <b>interface endpoints</b> for everything else, billed hourly per zone plus per gigabyte.</li>
+      <li>What it costs: NAT gateways emit <b>metrics only and no per-translation log</b>, so port exhaustion is a metric you have to be watching rather than an entry you can search for afterwards.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0701&lt;br/&gt;filters that decided&lt;br/&gt;the packet may leave"] --> T["THIS PAGE&lt;br/&gt;the two doors&lt;br/&gt;it can leave through"]
+  T --> A["Joining networks up&lt;br/&gt;lesson 0703"]
+  T --> B["The front door inward&lt;br/&gt;lesson 0704"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous two pages built a private subnet and allowed traffic out of it. This page is about where "out" actually goes, and it is the page where a design that looks identical on a diagram differs by a large amount of money.
+    <b>Most traffic leaving a private subnet is headed for an AWS service, and that traffic never needs to touch the internet.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two doors, not one</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  I["An instance in a private subnet"] --> Q["Where is the destination"]
+  Q --> W["The public internet&lt;br/&gt;package repositories, third-party APIs"]
+  Q --> S["S3 or DynamoDB"]
+  Q --> O["Any other AWS service,&lt;br/&gt;or a partner's own service"]
+  W --> N["NAT gateway&lt;br/&gt;per zone, per hour, per gigabyte"]
+  S --> G["Gateway endpoint&lt;br/&gt;a prefix-list route - no extra charge"]
+  O --> E["Interface endpoint&lt;br/&gt;an interface per zone, hourly plus per gigabyte"]
+    </div>
+    <figcaption>The routing decision, drawn by destination. Gateway endpoints exist for exactly two services and are reached by a route to a prefix list rather than by an address (<a href="https://docs.aws.amazon.com/vpc/latest/privatelink/gateway-endpoints.html">gateway endpoints</a>); everything else that can be reached privately is an interface endpoint carrying an interface in each zone you enable (<a href="https://docs.aws.amazon.com/vpc/latest/privatelink/privatelink-access-aws-services.html">PrivateLink access to AWS services</a>).
+    <b>An estate reading terabytes from S3 through a NAT gateway is paying twice for a path that has a free alternative one route entry away.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the ceiling that is not bandwidth</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of simultaneous connections to a single destination through one NAT gateway: 55,000 with one IP address, 110,000 with two, 220,000 with four and 440,000 with the maximum of eight">
+      <text class="ttl" x="20" y="24">Simultaneous connections to one destination, per NAT gateway</text>
+      <line class="axis" x1="200" y1="46" x2="200" y2="250"/>
+      <rect class="m-alarm"  x="200" y="60"  width="50"  height="28"/>
+      <rect class="m-prob"   x="200" y="110" width="100" height="28"/>
+      <rect class="m-signal" x="200" y="160" width="200" height="28"/>
+      <rect class="m-stat"   x="200" y="210" width="400" height="28"/>
+      <text class="lbl-sm" x="192" y="79"  text-anchor="end">1 IP address</text>
+      <text class="lbl-sm" x="192" y="129" text-anchor="end">2 addresses</text>
+      <text class="lbl-sm" x="192" y="179" text-anchor="end">4 addresses</text>
+      <text class="lbl-sm" x="192" y="229" text-anchor="end">8 addresses - the maximum</text>
+      <text class="lbl-b" x="260" y="79">55,000</text>
+      <text class="lbl-b" x="310" y="129">110,000</text>
+      <text class="lbl-b" x="410" y="179">220,000</text>
+      <text class="lbl-b lbl-on" x="590" y="229" text-anchor="end">440,000</text>
+      <text class="lbl-sm" x="20" y="278">55,000 per destination per address as published - the multiples are arithmetic on that figure</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>default</span><span><i class="sw-prob"></i>two</span><span><i class="sw-signal"></i>four</span><span><i class="sw-stat"></i>the maximum</span></div>
+    <figcaption>The limit is <b>per destination</b>, which is why it bites hardest on the least exotic workload: thousands of instances all calling the same third-party endpoint. Adding addresses is the documented way to raise it, and eight is where that road ends.
+    <b>Bandwidth headroom tells you nothing about this ceiling - a workload can exhaust ports at a small fraction of the gateway's throughput.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  When that ceiling is reached there is <b>no log to read</b>. A NAT gateway emits metrics and no per-translation record, and port exhaustion shows up as the <b>ErrorPortAllocation</b> metric. If nothing is alarming on that metric, the failure arrives as intermittent connection errors inside applications with no network evidence anywhere.</div>
+
+  <h2>3. Zonal placement, and what sharing one costs</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Instance in zone A
+  participant B as Instance in zone B
+  participant NA as NAT gateway in zone A
+  participant X as The internet
+  A->>NA: outbound request - stays inside zone A
+  NA->>X: translated
+  B->>NA: outbound request - crosses into zone A
+  NA->>X: translated
+  Note over B,NA: zone B's egress now fails whenever zone A does
+    </div>
+    <figcaption>Why the one-per-zone rule exists. A NAT gateway is scoped to the zone it was created in, so routing another zone's subnets to it works perfectly and makes that zone's internet access depend on a zone it does not live in. The design survives an instance failure and not a zone failure, which is the failure it was built to survive.
+    <b>Sharing a NAT gateway across zones saves an hourly charge and quietly converts a zonal outage into a wider one.</b></figcaption>
+  </figure>
+
+  <p>Interface endpoints have a second property worth knowing: an <b>endpoint policy</b> attaches to the endpoint itself and filters what may be done through it, which adds a resource-side control that identity policies alone cannot express (<a href="https://docs.aws.amazon.com/vpc/latest/privatelink/vpc-endpoints-access.html">endpoint policies</a>). A NAT gateway can also be created with a <b>private connectivity type</b> when the path leads to a transit gateway rather than to the internet.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A NAT gateway is not "how a private subnet gets out". It is <b>how a private subnet reaches the public internet</b>, which is a much smaller share of most workloads' traffic than it first appears. Enumerate the destinations before sizing the gateway: the ones that turn out to be AWS services belong on endpoints, and what is left is the real internet requirement.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A fleet calling one partner API sees intermittent connection failures while NAT bandwidth sits low. What is happening?</div>
+      <button class="q-opt">The gateway is scaling from its 5 Gbps baseline</button>
+      <button class="q-opt">The subnet has run out of usable private addresses</button>
+      <button class="q-opt">The endpoint policy is rejecting some of the calls</button>
+      <button class="q-opt">The per-destination connection ceiling has been reached</button>
+      <div class="q-fb">55,000 simultaneous connections per destination per address is a limit on connections rather than throughput, so it is hit while bandwidth looks idle. Scaling from the baseline raises throughput rather than dropping connections, address exhaustion would stop instances launching, and a NAT gateway carries no endpoint policy.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which destination is reachable privately at no extra charge for the endpoint itself?</div>
+      <button class="q-opt">Secrets Manager, through an interface endpoint</button>
+      <button class="q-opt">Amazon S3, through a gateway endpoint route</button>
+      <button class="q-opt">A partner service published through PrivateLink</button>
+      <button class="q-opt">An external package repository on the internet</button>
+      <div class="q-fb">Gateway endpoints serve S3 and DynamoDB and use a prefix-list route with no extra charge. Interface endpoints, including the ones fronting a partner's own service, bill hourly per zone plus per gigabyte, and an internet destination is not reachable through any endpoint.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is the cost of routing all three zones' subnets to one NAT gateway?</div>
+      <button class="q-opt">Egress bandwidth is divided three ways between zones</button>
+      <button class="q-opt">Return traffic must be allowed by each subnet's rules</button>
+      <button class="q-opt">Losing that one zone removes egress from all three</button>
+      <button class="q-opt">The connection ceiling falls to a third per zone</button>
+      <div class="q-fb">A NAT gateway is scoped to its own zone, so every subnet routed to it inherits that zone as a dependency. The gateway does not partition its bandwidth or its connection ceiling by consuming zone, and return traffic through a NAT gateway needs no special subnet rule.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A batch platform runs 1,200 workers across three zones. Each worker reads objects from S3 continuously, writes results to DynamoDB, fetches secrets at start-up, and calls one external pricing API up to 60 times concurrently. Today every subnet routes to a single NAT gateway in the first zone, and the monthly network bill is dominated by processing charges.</p>
+      <p><b>Redesign the egress path</b>, show the arithmetic for the external API, and say which change reduces the bill and which change reduces the blast radius.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Sort the four destinations by which door each one belongs to before changing anything. Then multiply worker count by concurrent connections and compare against the published per-destination ceiling.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Sort the destinations.</b> S3 and DynamoDB are gateway endpoints. Secrets Manager is an interface endpoint. The pricing API is the only genuine internet destination, so it is the only traffic that belongs on a NAT gateway at all.</li>
+        <li><b>Find the bill.</b> The dominant cost is S3 and DynamoDB traffic being processed by the NAT gateway. Two gateway endpoints and two route entries remove that traffic from the gateway entirely at no extra endpoint charge, which is the change that reduces the bill.</li>
+        <li><b>Do the arithmetic on what remains.</b> 1,200 workers at up to 60 concurrent connections each is 72,000 connections to a single destination. One address allows 55,000, so the design is already over the ceiling and would be failing intermittently even after the endpoint change.</li>
+        <li><b>Raise the ceiling deliberately.</b> Two addresses on the gateway give 110,000, which clears 72,000 with headroom. Eight is the maximum, so record where the real ceiling now sits rather than treating the problem as solved for ever, and put an alarm on the port-allocation error metric because nothing else will tell you.</li>
+        <li><b>Reduce the blast radius separately.</b> A NAT gateway per zone, with each zone's route table pointing at its own. This costs more per hour and changes no throughput, and it is the change that stops a single zone failure removing egress from all three.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your connection figure should be 72,000 and should exceed the single-address ceiling. Your two changes should be different in kind: one removes traffic, the other removes a shared dependency. If one change did both, re-read what a gateway endpoint carries - it does not carry the pricing API.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0703-from-peering-to-a-hub.html">From peering to a hub</a></b> leaves the single VPC and joins networks to each other and to the office.</li>
+    <li>Lesson 0700 covered <a href="0700-the-interface-the-address-and-the-route.html">the route table entries</a> that both of this page's doors are selected by.</li>
+    <li>Lesson 0400 covered <a href="0400-the-object-store-and-its-classes.html">the object store</a> that most of this traffic is headed for.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two doors still look interchangeable, ask an agent to take one month of NAT processing charges and estimate how much of that traffic was going to an AWS service.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/vpc/latest/userguide/nat-gateway-basics.html">NAT gateway basics</a> states the zonal scope, the throughput range and the connection ceiling together, which is the combination that decides both how many gateways you need and how many addresses each one carries.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. Multiples of the published connection ceiling are derived here rather than quoted.</p>
+
+  <div class="pager">
+    <a href="0701-two-filters-that-both-must-pass.html"><span class="dir">&larr; Previous</span><span class="ttl">Two filters that both must pass</span></a>
+    <a class="nxt" href="0703-from-peering-to-a-hub.html"><span class="dir">Next &rarr;</span><span class="ttl">From peering to a hub</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0702 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

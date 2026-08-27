@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The front door - Inside AWS</title>
+<meta name="description" content="A request crosses a ladder of front doors - a DNS answer, an edge or an anycast address, a load balancer - and each rung answers a different question about where traffic should go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0704</div>
+  <h1>A request crosses a ladder of front doors, one rung per question</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Capability keys <code>l7-load-balancer</code>, <code>l4-load-balancer</code>, <code>gateway-load-balancer</code>, <code>global-front-door</code>, <code>cdn</code>, <code>authoritative-dns</code>, <code>private-dns</code>, <code>dns-routing-policies</code> and <code>domain-registrar</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/Introduction.html">Amazon CloudFront</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Three balancers, chosen by layer: <b>ALB</b> routes on host, path, header and query at layer 7; <b>NLB</b> works at layer 4 with static addresses per zone; <b>GWLB</b> is a transparent layer-3 entry point that puts third-party appliances inline.</li>
+      <li>Two global front doors that <b>complement rather than replace</b> each other: <b>CloudFront</b> caches and terminates at the edge, and <b>Global Accelerator</b> gives two static anycast addresses that ride the AWS backbone to healthy Regions.</li>
+      <li><b>Route 53</b> is the authoritative DNS, with <b>eight routing policies</b> that decide which answer a caller gets, and private hosted zones that give a different answer inside a VPC.</li>
+      <li>The Route 53 <b>100 percent monthly uptime SLA covers DNS queries per hosted zone</b>. Domain registration carries no SLA, which is a different product on the same console page.</li>
+      <li>What it costs: each rung has its own failure mode and its own cache, so a change at the DNS rung is not a change any caller sees until their resolver agrees.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0700 to 0703&lt;br/&gt;the network, its filters&lt;br/&gt;and how estates join"] --> T["THIS PAGE&lt;br/&gt;how a request from&lt;br/&gt;outside actually arrives"]
+  T --> A["Who the caller is&lt;br/&gt;module 08"]
+  T --> B["Edge protection&lt;br/&gt;module 11"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits, and the last page of the module. Everything before it moved traffic between things you own. This page is the inbound direction, where the caller is a stranger and every rung of the path is a place a decision is made.
+    <b>Reading an outage on a public endpoint means knowing which rung answered, because each one can fail while the others look healthy.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the ladder</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant B as A browser
+  participant R as Route 53
+  participant E as CloudFront edge
+  participant L as Application Load Balancer
+  participant T as Targets in private subnets
+  B->>R: resolve the name
+  R-->>B: an answer chosen by the routing policy
+  B->>E: request to the nearest point of presence
+  E->>E: cached - answer here, or run a function at the edge
+  E->>L: origin fetch, only on a miss
+  L->>L: match host, path, header or query to a target group
+  L->>T: forward to a healthy target
+  T-->>B: response travels back down the same ladder
+    </div>
+    <figcaption>Four rungs, four different questions: which answer, which edge, which target group, which target. Origin fetches from AWS origins carry no transfer charge, which is part of why an edge in front of an origin is usually cheaper as well as faster.
+    <b>A cache hit at the edge means three of these four rungs never run, which is also why a change at the origin is invisible until the cache lets it through.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: which balancer, and why</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["What does the traffic need"] --> H["HTTP routing on host,&lt;br/&gt;path, header or query"]
+  Q --> S["Static addresses, or TCP,&lt;br/&gt;UDP, TLS and QUIC"]
+  Q --> I["A third-party firewall&lt;br/&gt;or intrusion system inline"]
+  H --> A["Application Load Balancer&lt;br/&gt;OIDC authentication actions,&lt;br/&gt;Lambda targets, WAF at the listener"]
+  S --> N["Network Load Balancer&lt;br/&gt;an address per zone, client IP&lt;br/&gt;preserved, zonal isolation"]
+  I --> G["Gateway Load Balancer&lt;br/&gt;GENEVE tunnels to appliances,&lt;br/&gt;endpoints for cross-VPC access"]
+    </div>
+    <figcaption>The three balancers by what the traffic needs. Only the ALB understands HTTP, and that is what buys it authentication actions, Lambda targets and a WAF attachment. Only the NLB offers a static address per zone and preserves the client's address. Only the GWLB puts somebody else's appliance transparently in the path (<a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/gateway/introduction.html">Gateway Load Balancer</a>).
+    <b>A requirement for a fixed IP address settles the choice on its own, whatever the protocol above it is doing.</b></figcaption>
+  </figure>
+
+  <p>Two details decide real designs. An ALB bills hourly plus <b>capacity units</b> and defaults to <b>100 rules per listener</b>, an adjustable quota that a large host-based routing scheme reaches sooner than expected (<a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/application/introduction.html">Application Load Balancer</a>). An NLB uses <b>zonal isolation</b>: an unhealthy zone is removed from DNS rather than being balanced into (<a href="https://docs.aws.amazon.com/elasticloadbalancing/latest/network/introduction.html">Network Load Balancer</a>).</p>
+
+  <h2>3. Two global front doors that are not rivals</h2>
+
+  <div class="callout">
+  <b>CloudFront</b> is a content delivery network: hundreds of points of presence, origin access control for signed S3 origins, and two ways to run code at the edge - <b>CloudFront Functions</b> for sub-millisecond JavaScript and <b>Lambda@Edge</b> for richer Node.js or Python logic. <b>Global Accelerator</b> is two static anycast addresses that carry any protocol over the AWS backbone to healthy regional endpoints, with sub-minute failover and traffic dials (<a href="https://docs.aws.amazon.com/global-accelerator/latest/dg/what-is-global-accelerator.html">Global Accelerator</a>). Reach for the accelerator when the traffic is not HTTP - gaming over UDP, IoT, voice - or when HTTP needs fixed addresses. They are complementary, not alternatives.</div>
+
+  <h2>4. The rung above everything: DNS</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+mindmap
+  root((Eight routing policies))
+    By nothing at all
+      Simple
+    By share of traffic
+      Weighted
+    By health
+      Failover
+      Multivalue answer
+    By where the caller is
+      Latency
+      Geolocation
+      Geoproximity
+      IP-based
+    </div>
+    <figcaption>Eight policies, grouped by the question each one answers (<a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html">routing policies</a>). <b>Multivalue answer</b> returns up to eight healthy records, which is DNS-level spreading rather than load balancing, and <b>IP-based</b> steers on the caller's own CIDR rather than on an inferred location.
+    <b>Four of the eight are different theories of where a caller is, and picking between them is an argument about your users rather than about DNS.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  A <b>private hosted zone</b> gives a different answer inside an associated VPC, which is what split-view DNS means here. It requires the VPC's DNS hostnames and DNS support attributes to be enabled, and a cross-account association has to be authorised from the other side first (<a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/hosted-zones-private.html">private hosted zones</a>). A name that resolves for you and not for a colleague in another account is almost always this.</div>
+
+  <p>Registration is a separate product from resolution. The <b>Route 53 registrar</b> is ICANN-accredited, includes hosted DNS and WHOIS privacy with a registration, and inherits <b>ICANN's sixty-day transfer lock</b> after a registration or transfer - a constraint that has delayed more than one migration (<a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/registrar.html">Route 53 registrar</a>).</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  These are not competing products to choose between. They are <b>rungs, and a real system uses several at once</b>: a DNS policy chooses a Region, an edge or an accelerator carries the traffic there, a balancer chooses a target group, and a health check at each rung removes what is broken. Ask which rung a requirement belongs to before asking which service satisfies it.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A regulator requires two fixed IP addresses to allow-list for a non-HTTP protocol. Which service fits?</div>
+      <button class="q-opt">CloudFront, whose edge addresses stay stable</button>
+      <button class="q-opt">Global Accelerator, with two static anycast IPs</button>
+      <button class="q-opt">Route 53, using an IP-based routing policy</button>
+      <button class="q-opt">An ALB, with an address reserved per zone</button>
+      <div class="q-fb">Global Accelerator provides exactly two static anycast addresses and carries any protocol. CloudFront is an HTTP delivery network without a fixed pair of addresses to hand out, IP-based routing steers on the caller's address rather than publishing yours, and an ALB does not offer per-zone static addresses - that is the NLB.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A name resolves correctly from one account and not from another. What is the most likely cause?</div>
+      <button class="q-opt">The routing policy is weighted and one share is zero</button>
+      <button class="q-opt">The record was created after the resolver last cached</button>
+      <button class="q-opt">The domain is inside its sixty-day transfer lock period</button>
+      <button class="q-opt">A private hosted zone is associated with one VPC only</button>
+      <div class="q-fb">A private hosted zone answers only inside VPCs associated with it, and cross-account association needs authorisation from the other side. A weighted record with a zero share would fail everywhere, a cache miss resolves itself within the record's lifetime, and a transfer lock affects moving a domain rather than resolving it.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which requirement rules out an Application Load Balancer?</div>
+      <button class="q-opt">The backend must see each client's own address</button>
+      <button class="q-opt">Requests must be routed by path and by header</button>
+      <button class="q-opt">Sign-in must happen before traffic reaches targets</button>
+      <button class="q-opt">A web application firewall must inspect requests</button>
+      <div class="q-fb">Client IP preservation is a Network Load Balancer property. Path and header routing is exactly what layer-7 balancing is for, authentication actions at the listener are an ALB feature, and a web application firewall attaches to an ALB listener.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A company runs one web application in two Regions and a real-time voice service in three. The web application must serve static assets fast worldwide, route <code>/api</code> to one target group and everything else to another, and fail over between Regions within a minute. The voice service runs over UDP, must be allow-listed by two enterprise customers, and must never send a caller to an unhealthy Region.</p>
+      <p><b>Design the inbound path</b> for each, naming the rung each requirement lands on, and identify the one requirement that DNS alone cannot meet.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Take the requirements one at a time and label each with a rung - name, edge, balancer, target - before naming a service. The requirement DNS cannot meet is the one with a deadline measured in seconds.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Web, edge rung.</b> CloudFront in front of both Regions. Static assets are served from the point of presence, and origin fetches from AWS origins carry no transfer charge, so the edge pays for part of itself.</li>
+        <li><b>Web, balancer rung.</b> An Application Load Balancer per Region. Routing <code>/api</code> to one target group and the rest to another is path-based layer-7 routing, which is the one thing only the ALB can do. Keep an eye on the hundred-rules-per-listener default if the path list grows.</li>
+        <li><b>Web, failover rung.</b> A Route 53 failover policy with health checks removes an unhealthy Region from the answer. Note the honest limit: DNS failover is bounded by record lifetime and by whatever resolvers actually do, so "within a minute" is a hope rather than a guarantee at this rung.</li>
+        <li><b>Voice, everything at once.</b> Global Accelerator. UDP rules out CloudFront, the two enterprise allow-lists are exactly the two static anycast addresses, and the accelerator's own health checking gives sub-minute failover away from an unhealthy Region without waiting for anyone's resolver cache.</li>
+        <li><b>Name the requirement DNS cannot meet.</b> Failing over inside a minute. It is the same requirement in both systems, and only the voice design actually satisfies it - which is the argument for putting an accelerator in front of the web application too if the one-minute figure is a real commitment rather than an aspiration.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Every requirement should be labelled with a rung, and your two designs should share no services except Route 53. If you put the voice service behind CloudFront, check the protocol: a content delivery network is an HTTP product.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, module 08</b> stops asking where traffic goes and starts asking who is allowed to make the call.</li>
+    <li>Lesson 0100 covered <a href="0100-regions-zones-and-the-edge.html">the edge tier this page's CDN runs on</a>, and why it caches rather than hosts.</li>
+    <li>Module 11 covers the protection that attaches at these same rungs, including the firewall an ALB listener carries.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the ladder still feels like one thing, ask an agent to take one production hostname and say, rung by rung, what would have to fail for a user to see an error at each one.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/Route53/latest/DeveloperGuide/routing-policy.html">Choosing a routing policy</a> is the page that turns the top rung from a single default into eight deliberate options, and four of those eight are competing theories of where your users actually are.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0703-from-peering-to-a-hub.html"><span class="dir">&larr; Previous</span><span class="ttl">From peering to a hub</span></a>
+    <a class="nxt" href="0800-the-gates-an-access-decision-passes.html"><span class="dir">Next &rarr;</span><span class="ttl">The gates an access decision passes</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0704 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

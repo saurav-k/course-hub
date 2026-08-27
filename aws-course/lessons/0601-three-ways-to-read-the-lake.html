@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three ways to read the lake - Inside AWS</title>
+<meta name="description" content="Query in place with Athena, index into OpenSearch, or hold a copy in SPICE - three read paths that differ in what they charge for and in whether the data is duplicated.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Analytics &middot; Lesson 0601</div>
+  <h1>The read path you choose is the cost model you accept</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>serverless-query-engine</code>, <code>managed-search</code> and <code>bi-dashboards</code>.
+    &middot; <a href="https://docs.aws.amazon.com/athena/latest/ug/what-is.html">Amazon Athena</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Three services read the lake and they charge for three different things: <b>bytes scanned</b>, <b>capacity held</b>, and <b>people who log in</b>.</li>
+      <li><b>Athena</b> runs serverless SQL and Spark directly against S3 and bills per terabyte scanned, so <b>columnar formats and partitions are the cost control</b>, not a tuning nicety.</li>
+      <li><b>OpenSearch Service</b> is the answer when the access pattern is search rather than scan, in domains or in serverless collections of three kinds: search, time-series and vector.</li>
+      <li><b>Quick Sight</b> is the dashboard layer, with <b>SPICE</b> holding an in-memory copy so a dashboard does not re-query the source on every view.</li>
+      <li>What it costs: two of the three duplicate the data, so freshness becomes a scheduling problem rather than a property you get for free.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0600&lt;br/&gt;bytes, a catalogue&lt;br/&gt;and a grant model"] --> T["THIS PAGE&lt;br/&gt;the three engines&lt;br/&gt;that read it"]
+  T --> A["The warehouse beside it&lt;br/&gt;lesson 0602"]
+  T --> B["Filling the lake&lt;br/&gt;lessons 0603 and 0604"]
+  W["Module 06&lt;br/&gt;analytics"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page built the lake and said which layer holds meaning and which holds permission. This page is the first one that actually asks it a question.
+    <b>Every engine here reads the same objects, so the difference between them is not what they can see - it is what they charge you for looking.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: three shapes of question</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["What is the question shaped like"] --> S["Aggregate over a lot of rows&lt;br/&gt;ad hoc, occasional"]
+  Q --> F["Find matching records fast&lt;br/&gt;free text, filters, relevance"]
+  Q --> D["The same summary,&lt;br/&gt;seen by many people daily"]
+  S --> AT["Amazon Athena&lt;br/&gt;serverless SQL and Spark over S3"]
+  F --> OS["OpenSearch Service&lt;br/&gt;domains or serverless collections"]
+  D --> QS["Quick Sight&lt;br/&gt;dashboards backed by SPICE"]
+    </div>
+    <figcaption>The three read paths, chosen by the shape of the question rather than by the size of the data. Athena also federates to other stores through connectors, so a query can reach beyond S3 when it has to (<a href="https://docs.aws.amazon.com/athena/latest/ug/what-is.html">What is Amazon Athena</a>).
+    <b>The wrong path is not slow - it is expensive, because each of these three bills a different quantity and the mismatch shows up on the invoice rather than in the latency.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what a scan actually costs</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of bytes scanned for one query against a 1,200 gigabyte table: 1,200 gigabytes as row-oriented text, 120 gigabytes in a columnar format reading two of twenty columns, and 10 gigabytes when partition pruning also limits the read to one month of twelve">
+      <text class="ttl" x="20" y="24">Bytes one query scans, same table, three layouts</text>
+      <line class="axis" x1="220" y1="50" x2="220" y2="230"/>
+      <rect class="m-alarm"  x="220" y="66"  width="384" height="30"/>
+      <rect class="m-signal" x="220" y="126" width="38"  height="30"/>
+      <rect class="m-stat"   x="220" y="186" width="4"   height="30"/>
+      <text class="lbl-sm" x="212" y="86"  text-anchor="end">text rows, no partitions</text>
+      <text class="lbl-sm" x="212" y="146" text-anchor="end">columnar, no partitions</text>
+      <text class="lbl-sm" x="212" y="206" text-anchor="end">columnar and partitioned</text>
+      <text class="lbl-b lbl-on" x="594" y="86" text-anchor="end">1,200 GB</text>
+      <text class="lbl-b" x="268" y="146">120 GB</text>
+      <text class="lbl-b" x="234" y="206">10 GB</text>
+      <text class="lbl-sm" x="20" y="262">derived below from a 1,200 GB table of 20 equal columns over 12 equal months,</text>
+      <text class="lbl-sm" x="20" y="280">for a query reading 2 columns of 1 month - an illustration, not a measurement</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>whole table</span><span><i class="sw-signal"></i>column pruning</span><span><i class="sw-stat"></i>column and partition pruning</span></div>
+    <figcaption>The arithmetic, stated so you can check it: 1,200 GB &divide; 20 columns &times; 2 columns = 120 GB, then &divide; 12 months = 10 GB. Real columns and months are never equal, so treat this as the shape of the saving rather than its exact size.
+    <b>Athena bills per terabyte scanned, so file layout is not a performance detail on this engine - it is the price of every query anyone ever runs.</b></figcaption>
+  </figure>
+
+  <p>Two guardrails follow from that. <b>Workgroups</b> can enforce a per-query scan limit, which turns a runaway query into a failed one rather than an invoice, and <b>query results land in S3</b>, so the output of every query is itself an object with a lifecycle and a cost of its own.</p>
+
+  <h2>3. The paths that keep a second copy</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Data in S3, catalogued" as L
+  state "Athena - read in place, nothing copied" as A
+  state "OpenSearch - indexed into a domain or collection" as O
+  state "SPICE - an in-memory copy behind a dashboard" as S
+  state "Freshness is now a schedule you own" as F
+  [*] --> L
+  L --> A: query
+  L --> O: ingest and index
+  L --> S: refresh
+  O --> F
+  S --> F
+    </div>
+    <figcaption>Where the data physically is for each path. Athena reads the objects where they lie; the other two hold their own copy, which is exactly why they answer faster and exactly why what they answer can be stale (<a href="https://aws.amazon.com/quicksight/pricing/">SPICE</a>).
+    <b>A second copy buys latency and sells freshness, and the exchange rate is whatever your refresh interval turns out to be.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two naming traps sit on this page. <b>QuickSight is now written Quick Sight and lives inside Amazon Quick</b>, while the APIs keep their old names (<a href="https://docs.aws.amazon.com/quicksight/latest/user/welcome.html">Quick Sight welcome</a>). And OpenSearch Service still carries <b>legacy Elasticsearch OSS engines capped at 7.10</b> beside current OpenSearch 3.x, so "which engine and which major version" is a real question on an existing domain rather than a formality (<a href="https://docs.aws.amazon.com/opensearch-service/latest/developerguide/what-is.html">What is OpenSearch Service</a>).</div>
+
+  <p>OpenSearch also splits by deployment shape in a way worth holding: a <b>domain</b> is capacity you size, with UltraWarm and cold tiers for older indices, while <b>serverless collections</b> are bought in OpenSearch Compute Units that decouple indexing capacity from search capacity, and a collection is created as one of three kinds - search, time-series or vector (<a href="https://docs.aws.amazon.com/opensearch-service/latest/developerguide/serverless-overview.html">OpenSearch Serverless overview</a>).</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  These three are not tiers of the same product. They are <b>three different answers to "who is asking, how often, and how fresh must it be"</b>. An occasional deep question is cheapest read in place; a constant lookup is cheapest from an index; a summary many people open every morning is cheapest held in memory and refreshed on a schedule.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">An Athena bill is rising while query counts are flat. What is the most productive thing to change?</div>
+      <button class="q-opt">The instance size behind the workgroup running them</button>
+      <button class="q-opt">The file layout, so queries scan far fewer bytes</button>
+      <button class="q-opt">The Region, since scan rates differ across Regions</button>
+      <button class="q-opt">The catalogue, which is billed per table registered</button>
+      <div class="q-fb">Athena bills per terabyte scanned, so columnar formats and partitions are what move the number. There is no instance behind Athena to size, the cost driver is bytes rather than a per-Region rate, and registering a table is not what the query charge is measured against.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which read path holds no second copy of the data?</div>
+      <button class="q-opt">SPICE, which reads through to the source each time</button>
+      <button class="q-opt">An OpenSearch domain, which indexes lazily on read</button>
+      <button class="q-opt">A serverless collection, which shares the S3 objects</button>
+      <button class="q-opt">Athena, which queries the objects where they already are</button>
+      <div class="q-fb">Athena reads the objects in place, which is why nothing goes stale and why the cost is measured in bytes scanned. SPICE is an in-memory copy by design, and both OpenSearch shapes require the data to be ingested and indexed before it can be searched.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A team wants free-text relevance ranking over support tickets. Which service fits, and why?</div>
+      <button class="q-opt">OpenSearch Service, because the pattern is search</button>
+      <button class="q-opt">Athena, because SQL can match text with a filter</button>
+      <button class="q-opt">Quick Sight, because dashboards can rank results</button>
+      <button class="q-opt">Lake Formation, because it grants column access</button>
+      <div class="q-fb">Relevance ranking over text is the search access pattern, which is the job an index does. Athena can filter text but scans to do it and returns no ranking, a dashboard presents results rather than producing them, and Lake Formation is a permission layer rather than a query engine.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A retailer holds two years of order lines in S3 as gzipped JSON, about 900 GB, partitioned by nothing. Three demands arrive. Finance runs about five ad hoc queries a week, each touching three of forty fields for one quarter. Support needs to find an order by a customer's free-text note, in under a second, hundreds of times an hour. The board wants one page of numbers, refreshed daily, opened by about forty people each morning.</p>
+      <p><b>Assign a read path</b> to each, and for the finance case estimate the bytes scanned before and after a layout change, stating your assumptions.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Match each demand against the three questions the reframing asks: who is asking, how often, and how fresh must it be. For the arithmetic, take column pruning first and partition pruning second, and say out loud what you are assuming about even sizes.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Finance - Athena, after a layout change.</b> Five queries a week is occasional and ad hoc, which is what read-in-place is cheapest at. Nothing needs a second copy.</li>
+        <li><b>Estimate the current scan.</b> Gzipped JSON is row-oriented, so a query touching three fields still reads every field of every row it looks at, and with no partitions it looks at everything: about 900 GB per query, roughly 4.5 TB a week.</li>
+        <li><b>Estimate it after the change.</b> Assume forty fields of equal size and eight quarters of equal size, which is the assumption doing the work here. Columnar format with three of forty fields gives 900 &times; 3 &divide; 40 = 67.5 GB. Partitioning by quarter and reading one of eight gives 67.5 &divide; 8 = about 8.4 GB - a little over one percent of the original.</li>
+        <li><b>Support - OpenSearch Service.</b> Free-text lookup, hundreds an hour, under a second, is the search access pattern rather than the scan one. A serverless collection of the search kind avoids sizing a domain, and the cost of the choice is that order notes must be ingested and indexed, so the index lags the lake by however often you feed it.</li>
+        <li><b>The board - Quick Sight with SPICE.</b> One page, forty readers, daily freshness. Holding the summary in memory means forty people opening the page do not run forty queries, and a daily refresh is exactly the schedule the requirement already stated.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Three demands, three different services, and one arithmetic answer between about 1 and 2 percent of 900 GB. If your finance estimate did not fall by roughly two orders of magnitude, check that you applied both prunings - column first, then partition - rather than only one.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0602-the-warehouse-beside-the-lake.html">The warehouse beside the lake</a></b> adds the fourth engine, which owns its storage and reaches into the lake as well.</li>
+    <li>Lesson 0600 built <a href="0600-the-lake-is-three-layers.html">the catalogue these engines resolve tables through</a>, including the partitions this page turns into money.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the scan arithmetic feels too clean, ask an agent to take one real Athena query, read its bytes-scanned figure from the console, and work out what the same query would scan after a partition was added.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/athena/latest/ug/what-is.html">What is Amazon Athena</a> states the per-scan cost model and the workgroup controls together, which is the pairing that turns a cost surprise into an enforceable limit.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. The scan arithmetic is derived here from stated assumptions rather than quoted.</p>
+
+  <div class="pager">
+    <a href="0600-the-lake-is-three-layers.html"><span class="dir">&larr; Previous</span><span class="ttl">The lake is three layers</span></a>
+    <a class="nxt" href="0602-the-warehouse-beside-the-lake.html"><span class="dir">Next &rarr;</span><span class="ttl">The warehouse beside the lake</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0601 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

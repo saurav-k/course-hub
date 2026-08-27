@@ -105,6 +105,262 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0404-cold-data-and-getting-data-in.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "Two storage designs under one API",
+          "href": "lessons/0500-two-storage-designs-under-one-api.html"
+        },
+        {
+          "title": "Capacity with no instance class",
+          "href": "lessons/0501-capacity-with-no-instance-class.html"
+        },
+        {
+          "title": "DynamoDB and the partition",
+          "href": "lessons/0502-dynamodb-and-the-partition.html"
+        },
+        {
+          "title": "Two in-memory services",
+          "href": "lessons/0503-two-in-memory-services.html"
+        },
+        {
+          "title": "The purpose-built stores",
+          "href": "lessons/0504-the-purpose-built-stores.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "The lake is three layers",
+          "href": "lessons/0600-the-lake-is-three-layers.html"
+        },
+        {
+          "title": "Three ways to read the lake",
+          "href": "lessons/0601-three-ways-to-read-the-lake.html"
+        },
+        {
+          "title": "The warehouse beside the lake",
+          "href": "lessons/0602-the-warehouse-beside-the-lake.html"
+        },
+        {
+          "title": "Two ways to run a Spark job",
+          "href": "lessons/0603-two-ways-to-run-a-spark-job.html"
+        },
+        {
+          "title": "Ingest, deliver, process",
+          "href": "lessons/0604-ingest-deliver-process.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "The interface, the address and the route",
+          "href": "lessons/0700-the-interface-the-address-and-the-route.html"
+        },
+        {
+          "title": "Two filters that both must pass",
+          "href": "lessons/0701-two-filters-that-both-must-pass.html"
+        },
+        {
+          "title": "Egress and private access",
+          "href": "lessons/0702-egress-and-private-access.html"
+        },
+        {
+          "title": "From peering to a hub",
+          "href": "lessons/0703-from-peering-to-a-hub.html"
+        },
+        {
+          "title": "The front door",
+          "href": "lessons/0704-the-front-door.html"
+        }
+      ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "The gates an access decision passes",
+          "href": "lessons/0800-the-gates-an-access-decision-passes.html"
+        },
+        {
+          "title": "Machines carry no passwords",
+          "href": "lessons/0801-machines-carry-no-passwords.html"
+        },
+        {
+          "title": "Trusting an identity from outside",
+          "href": "lessons/0802-trusting-an-identity-from-outside.html"
+        },
+        {
+          "title": "Neither your staff nor your customers",
+          "href": "lessons/0803-neither-your-staff-nor-your-customers.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-secrets-and-certificates.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "Shaping the tree",
+          "href": "lessons/0900-shaping-the-tree.html"
+        },
+        {
+          "title": "Two ceilings that grant nothing",
+          "href": "lessons/0901-two-ceilings-that-grant-nothing.html"
+        },
+        {
+          "title": "The landing zone and the catalogue",
+          "href": "lessons/0902-the-landing-zone-and-the-catalogue.html"
+        },
+        {
+          "title": "Quotas, tags and what you own",
+          "href": "lessons/0903-quotas-tags-and-what-you-own.html"
+        },
+        {
+          "title": "The cost model",
+          "href": "lessons/0904-the-cost-model.html"
+        }
+      ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Three stores and no workspace",
+          "href": "lessons/1000-three-stores-and-no-workspace.html"
+        },
+        {
+          "title": "What is on and what is off",
+          "href": "lessons/1001-what-is-on-and-what-is-off.html"
+        },
+        {
+          "title": "How fast each stream arrives",
+          "href": "lessons/1002-how-fast-each-stream-arrives.html"
+        },
+        {
+          "title": "Noticing and acting",
+          "href": "lessons/1003-noticing-and-acting.html"
+        },
+        {
+          "title": "Instrumenting, and what telemetry cannot answer",
+          "href": "lessons/1004-instrumenting-and-what-telemetry-cannot-answer.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "Protection at the edge",
+          "href": "lessons/1100-protection-at-the-edge.html"
+        },
+        {
+          "title": "Inspection inside the network",
+          "href": "lessons/1101-inspection-inside-the-network.html"
+        },
+        {
+          "title": "Four detectors",
+          "href": "lessons/1102-four-detectors.html"
+        },
+        {
+          "title": "Posture and org-wide enforcement",
+          "href": "lessons/1103-posture-and-org-wide-enforcement.html"
+        },
+        {
+          "title": "Three decisions above the network",
+          "href": "lessons/1104-three-decisions-above-the-network.html"
+        }
+      ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Describing infrastructure",
+          "href": "lessons/1200-describing-infrastructure.html"
+        },
+        {
+          "title": "The pipeline",
+          "href": "lessons/1201-the-pipeline.html"
+        },
+        {
+          "title": "Shipping change gradually",
+          "href": "lessons/1202-shipping-change-gradually.html"
+        },
+        {
+          "title": "Queues, topics and buses",
+          "href": "lessons/1203-queues-topics-and-buses.html"
+        },
+        {
+          "title": "Workflows and API surfaces",
+          "href": "lessons/1204-workflows-and-api-surfaces.html"
+        }
+      ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "The model API",
+          "href": "lessons/1300-the-model-api.html"
+        },
+        {
+          "title": "Retrieval, and where vectors live",
+          "href": "lessons/1301-retrieval-and-where-vectors-live.html"
+        },
+        {
+          "title": "Agents, and the platform underneath",
+          "href": "lessons/1302-agents-and-the-platform-underneath.html"
+        },
+        {
+          "title": "Training, and the ready-made",
+          "href": "lessons/1303-training-and-the-ready-made.html"
+        }
+      ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Backup is not disaster recovery",
+          "href": "lessons/1400-backup-is-not-disaster-recovery.html"
+        },
+        {
+          "title": "The four strategies",
+          "href": "lessons/1401-the-four-strategies.html"
+        },
+        {
+          "title": "Replicating and failing over",
+          "href": "lessons/1402-replicating-and-failing-over.html"
+        },
+        {
+          "title": "Proving it",
+          "href": "lessons/1403-proving-it.html"
+        },
+        {
+          "title": "Moving in",
+          "href": "lessons/1404-moving-in.html"
+        }
+      ]
     }
   ],
   "extras": []

@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two filters that both must pass - Inside AWS</title>
+<meta name="description" content="Security groups are stateful and cannot deny; network ACLs are stateless, numbered and can - and every packet in a VPC is judged by both.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0701</div>
+  <h1>Every packet passes two filters, and only one of them can say no</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>stateful-packet-filter</code>.
+    &middot; <a href="https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html">Security groups</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>security group</b> attaches to a network interface, is <b>stateful</b>, and holds allow rules only. There is no deny rule to write.</li>
+      <li>A <b>network ACL</b> sits at the subnet edge, is <b>stateless</b>, evaluates in rule-number order, and does have deny rules.</li>
+      <li>Because the ACL is stateless, a reply is a new packet to it, so an inbound-only rule set silently breaks return traffic unless <b>ephemeral ports</b> are opened.</li>
+      <li>A security group rule can name <b>another security group</b> as its source, which is how a tiered design stops hard-coding addresses that change.</li>
+      <li>What it costs: neither filter emits a per-rule verdict log. <b>Only VPC Flow Logs record accept and reject</b>, so "which rule dropped it" is a question you answer by reasoning rather than by reading.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0700&lt;br/&gt;interfaces, subnets&lt;br/&gt;and route tables"] --> T["THIS PAGE&lt;br/&gt;the two rule sets&lt;br/&gt;every packet passes"]
+  T --> A["Egress and private access&lt;br/&gt;lesson 0702"]
+  T --> B["Edge protection&lt;br/&gt;module 11"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits. The route table decides whether a path exists at all. These two filters decide whether a packet that has a path is allowed to take it, and they are evaluated independently of each other.
+    <b>A route grants reachability, a filter grants permission, and confusing the two produces the most common wrong answer in a VPC investigation.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: one request, two filters, four crossings</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as A client
+  participant N as Network ACL - subnet edge
+  participant S as Security group - the interface
+  participant I as The instance
+  C->>N: request to port 443
+  N->>N: inbound rules, in number order - allow 443
+  N->>S: passed
+  S->>S: inbound allow rule for 443
+  S->>I: delivered
+  I->>S: the reply
+  S->>N: allowed automatically - the group is stateful
+  N->>N: OUTBOUND rules evaluated afresh - stateless
+  N->>C: only if an ephemeral-port rule exists
+    </div>
+    <figcaption>The asymmetry that causes the classic outage. The security group remembers the request and lets the reply out; the network ACL does not, so the reply is judged by the outbound rules as if it had nothing to do with the request. Both filters apply, and traffic must pass both.
+    <b>A network ACL tightened to inbound rules only will pass every request and drop every answer, which looks like an application hang rather than a network block.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  There is <b>no per-rule verdict log</b> on either filter. When a packet disappears, the only first-party record is a VPC Flow Log entry saying ACCEPT or REJECT for the flow - not which rule decided it. The managed firewall layer of module 11 does emit alert and flow logs of its own, which is one of the real reasons estates add it.</div>
+
+  <h2>2. The pattern that makes security groups worth the constraint</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  W["Web tier interfaces&lt;br/&gt;group sg-web"] --> A["App tier interfaces&lt;br/&gt;group sg-app"]
+  A --> D["Database interfaces&lt;br/&gt;group sg-db"]
+  R1["sg-app inbound rule&lt;br/&gt;allow 8080 from sg-web"] -.- A
+  R2["sg-db inbound rule&lt;br/&gt;allow 5432 from sg-app"] -.- D
+  N["No address appears&lt;br/&gt;in either rule"] -.- R2
+    </div>
+    <figcaption>Naming a security group as the source of a rule means the rule follows the membership rather than the addressing. Instances come and go, the scaling group replaces them, addresses change, and the rule keeps meaning what it meant.
+    <b>An allow-only filter is a smaller language than a firewall, and referencing groups instead of addresses is what makes the smaller language enough.</b></figcaption>
+  </figure>
+
+  <p>The network ACL earns its place where a security group cannot help: it is the only one of the two that can <b>deny</b>, and it applies to the whole subnet at once regardless of which interfaces are in it. That makes it the right instrument for a blanket exclusion - a range you never want to hear from - and a poor instrument for expressing what an application is allowed to do.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  These are not two layers of the same thing with different strengths. They answer different questions: the security group answers <b>"what may this workload talk to"</b>, and the network ACL answers <b>"what may cross this subnet's edge at all"</b>. Write application intent in groups, write blanket exclusions in ACLs, and stop trying to express one in the other.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Requests reach an instance and clients then time out waiting. Which cause fits best?</div>
+      <button class="q-opt">A network ACL with no outbound ephemeral-port rule</button>
+      <button class="q-opt">A security group missing its inbound rule for 443</button>
+      <button class="q-opt">A route table whose default route was removed</button>
+      <button class="q-opt">A security group with a deny rule for the client</button>
+      <div class="q-fb">A stateless ACL judges the reply on its outbound rules, so an inbound-only rule set delivers requests and drops answers, which reads as a timeout. A missing inbound group rule would stop the request arriving at all, a missing route would stop it earlier still, and security groups have no deny rule to write.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does referencing a security group as a rule source beat listing addresses?</div>
+      <button class="q-opt">Group references are evaluated before address rules</button>
+      <button class="q-opt">Group references survive a change of Availability Zone</button>
+      <button class="q-opt">Membership changes as instances are replaced, and rules do not</button>
+      <button class="q-opt">Address rules are limited to a single subnet each time</button>
+      <div class="q-fb">Scaling groups replace instances and their addresses, so a rule written against membership keeps meaning what it meant. Rules are not ordered by kind in a security group, zone changes are not what breaks address rules, and an address rule can name any CIDR rather than one subnet.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A single address range must be blocked for everything in a subnet. Which instrument fits?</div>
+      <button class="q-opt">A security group deny rule on every interface</button>
+      <button class="q-opt">A network ACL deny rule at the subnet edge</button>
+      <button class="q-opt">A route table entry pointing the range nowhere</button>
+      <button class="q-opt">A security group rule referencing the source group</button>
+      <div class="q-fb">Denying is exactly what a network ACL is for, and it covers the whole subnet at once. Security groups carry no deny rule at all, a route change affects reachability rather than permission and is easily undone by a more specific route, and group references express what is allowed rather than what is blocked.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>An application tier in a private subnet must accept traffic on port 8080 from the web tier only, reach a PostgreSQL database on 5432, and download packages from the internet through a NAT gateway. Security asks for one hostile address range to be blocked estate-wide. The team is about to write everything as security-group rules with explicit address ranges.</p>
+      <p><b>Write the rule set</b> across both filters, saying which rule goes where and why, and name the rule the team's plan would have got wrong.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Sort the four requirements into "what this workload may talk to" and "what may cross this subnet at all". Then check each direction of each requirement, remembering which filter forgets the request by the time the reply arrives.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Inbound to the application tier - a security group rule.</b> Allow 8080 with the web tier's security group as the source. No address appears, so the rule survives every replacement of a web instance.</li>
+        <li><b>Outbound to the database - a security group rule on each side.</b> Allow 5432 outbound from the application group, and inbound on the database group with the application group as the source. Both halves are needed because the two interfaces have separate groups, and neither needs a return rule because groups are stateful.</li>
+        <li><b>Package downloads - a security group outbound rule plus a route.</b> Allow 443 outbound to the internet. The reply comes back automatically. What actually makes this work is the subnet's route to the NAT gateway, which is a lesson 0700 concern rather than a filter one.</li>
+        <li><b>The estate-wide block - a network ACL deny rule.</b> It is the only filter of the two with a deny, and applying it at the subnet edge covers every interface including ones nobody has created yet. Put it at a low rule number so it is evaluated before any broader allow.</li>
+        <li><b>Name the mistake.</b> The blocked range. The team planned to express it in security groups, which have no deny rule, so the closest they could get is narrowing every allow rule to exclude that range - many rules, each of which someone can widen later. And if they add any ACL rules at all, they must remember the outbound ephemeral-port rule, or the package downloads in step three will hang rather than fail.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should contain exactly one network ACL rule and several security group rules, and no address literals except the hostile range itself. If you wrote a deny rule in a security group, that language does not exist.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0702-egress-and-private-access.html">Egress and private access</a></b> follows the outbound path this page allowed, and finds two very different price tags on it.</li>
+    <li>Lesson 0700 covered <a href="0700-the-interface-the-address-and-the-route.html">the interfaces these groups attach to</a>, and the routes that decide reachability.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the stateless behaviour still feels theoretical, ask an agent to take one real network ACL and say, rule by rule, what would happen to the reply of an outbound HTTPS request.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/vpc/latest/userguide/vpc-security-groups.html">Security groups</a> is the page that states the allow-only design and the group-as-source reference together, which is the pairing that makes the missing deny rule tolerable rather than merely awkward.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0700-the-interface-the-address-and-the-route.html"><span class="dir">&larr; Previous</span><span class="ttl">The interface, the address and the route</span></a>
+    <a class="nxt" href="0702-egress-and-private-access.html"><span class="dir">Next &rarr;</span><span class="ttl">Egress and private access</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0701 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

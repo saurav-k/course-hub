@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ingest, deliver, process - Inside AWS</title>
+<meta name="description" content="Holding a stream, delivering it somewhere and computing over it are three services on AWS, and the shard is the unit that decides how many consumers can read at full speed.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Analytics &middot; Lesson 0604</div>
+  <h1>Holding a stream, delivering it, and computing over it are three services</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>stream-ingest</code> and <code>stream-analytics</code>.
+    &middot; <a href="https://docs.aws.amazon.com/streams/latest/dev/service-sizes-and-limits.html">Kinesis Data Streams</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Kinesis Data Streams</b> holds records. Its unit is the <b>shard</b>: 1 MB per second or 1,000 records per second in, and 2 MB per second out shared across up to five read calls a second.</li>
+      <li>Adding consumers does not add read bandwidth. <b>Enhanced fan-out</b> does, giving each consumer its own dedicated 2 MB per second.</li>
+      <li><b>Amazon Data Firehose</b> delivers rather than holds: S3, Redshift, OpenSearch, Iceberg tables and third-party endpoints, converting to Parquet or ORC and partitioning on the way.</li>
+      <li><b>MSK</b> is managed Kafka for estates that want Kafka's own semantics, in a provisioned form with Express brokers or a serverless form that accepts <b>IAM authentication only</b>.</li>
+      <li><b>Managed Service for Apache Flink</b> is the compute: windowed SQL, the DataStream and Table APIs, checkpointed state and exactly-once sinks, bought in Kinesis Processing Units.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0603&lt;br/&gt;batch engines, sized&lt;br/&gt;by the job"] --> T["THIS PAGE&lt;br/&gt;streaming, sized by&lt;br/&gt;the shard and the consumer"]
+  T --> A["Queues and events&lt;br/&gt;module 12"]
+  T --> B["Telemetry as a stream&lt;br/&gt;module 10"]
+  W["Module 06&lt;br/&gt;analytics"] -.- T
+    </div>
+    <figcaption>Where this sits, and the last page of the module. A batch job is sized by how much work it has; a stream is sized by how fast records arrive and how many things want to read them, which are two independent numbers.
+    <b>The mistake this page exists to prevent is sizing a stream for its producers and then discovering the consumers were the constraint.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: three jobs, three services</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["Records arriving continuously"] --> H["HOLD - a durable, replayable log"]
+  H --> K["Kinesis Data Streams&lt;br/&gt;shards, or on-demand capacity"]
+  H --> M["Amazon MSK&lt;br/&gt;managed Apache Kafka"]
+  R --> D["DELIVER - land them somewhere else"]
+  D --> F["Amazon Data Firehose&lt;br/&gt;S3, Redshift, OpenSearch, Iceberg"]
+  H --> C["COMPUTE - windows, joins, state"]
+  C --> FL["Managed Service for Apache Flink"]
+    </div>
+    <figcaption>The three jobs, and which service does each. Firehose is drawn from the records rather than from the log on purpose: it is a delivery stream, so it takes data and lands it, and it is not where you go to replay yesterday (<a href="https://docs.aws.amazon.com/firehose/latest/dev/what-is-this-service.html">What is Amazon Data Firehose</a>).
+    <b>Reach for the log when something might need to read the records again, and for delivery when nothing will.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what one shard is worth</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of Kinesis shard bandwidth: one megabyte per second of ingest, two megabytes per second of shared read across all standard consumers, half a megabyte per second each when four consumers share that read, and two megabytes per second each with enhanced fan-out">
+      <text class="ttl" x="20" y="24">One shard, in megabytes per second</text>
+      <line class="axis" x1="230" y1="46" x2="230" y2="250"/>
+      <rect class="m-signal" x="230" y="56"  width="150" height="26"/>
+      <rect class="m-stat"   x="230" y="106" width="300" height="26"/>
+      <rect class="m-alarm"  x="230" y="156" width="75"  height="26"/>
+      <rect class="m-gold"   x="230" y="206" width="300" height="26"/>
+      <text class="lbl-sm" x="222" y="74"  text-anchor="end">write into the shard</text>
+      <text class="lbl-sm" x="222" y="124" text-anchor="end">shared read, all consumers</text>
+      <text class="lbl-sm" x="222" y="174" text-anchor="end">each of four sharing it</text>
+      <text class="lbl-sm" x="222" y="224" text-anchor="end">each, with enhanced fan-out</text>
+      <text class="lbl-b" x="390" y="74">1 MB/s or 1,000 records/s</text>
+      <text class="lbl-b lbl-on" x="520" y="124" text-anchor="end">2 MB/s total</text>
+      <text class="lbl-b" x="315" y="174">0.5 MB/s - derived by division</text>
+      <text class="lbl-b lbl-on" x="520" y="224" text-anchor="end">2 MB/s dedicated</text>
+      <text class="lbl-sm" x="20" y="278">shard rates as published in the stream limits reference - the four-way split is arithmetic</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>ingest</span><span><i class="sw-stat"></i>shared read</span><span><i class="sw-alarm"></i>a consumer's share</span><span><i class="sw-gold"></i>dedicated read</span></div>
+    <figcaption>Read capacity is a property of the shard, not of the consumer, until you pay for enhanced fan-out. The shared 2 MB per second is also spread across at most five read calls a second, so polling frequency and payload size trade against each other.
+    <b>Four consumers on a standard stream each get a quarter of the read bandwidth - the second consumer you add is the one that slows down the first.</b></figcaption>
+  </figure>
+
+  <p>Two more numbers shape designs here. A single record may be up to <b>10 MiB</b> before encoding, which is large enough that a stream is occasionally used for payloads it should not be. And <b>retention runs from 24 hours to 365 days</b>, charged first as extra shard-hours and then per gigabyte-month, which turns "keep it just in case" into a line on the bill.</p>
+
+  <h2>3. Delivering, and computing</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Producers
+  participant F as Amazon Data Firehose
+  participant L as A Lambda transform
+  participant S as S3, as Parquet
+  P->>F: records
+  F->>L: batch for transformation
+  L-->>F: cleaned records
+  F->>F: convert to Parquet or ORC
+  F->>S: write into a dynamic partition path
+  Note over F,S: no cluster, no consumer to run - the delivery stream is the pipeline
+    </div>
+    <figcaption>A delivery stream doing the three things that would otherwise be a job of their own: transform, convert and partition. The conversion is what makes lesson 0601's scan arithmetic work, so choosing Parquet here is the same decision as choosing it there (<a href="https://docs.aws.amazon.com/firehose/latest/dev/what-is-this-service.html">Amazon Data Firehose</a>).
+    <b>Landing raw JSON in the lake because it was easiest at ingest is paid for by every query anyone runs afterwards.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Both streaming services carry a rename or a retirement worth knowing. <b>Kinesis Data Firehose is now Amazon Data Firehose</b>, and <b>Kinesis Data Analytics is now Managed Service for Apache Flink</b>, whose <b>legacy SQL application type has been retired</b> - new work uses Flink SQL, Java, Python or Scala, with capacity bought in Kinesis Processing Units and a Studio notebook mode for interactive development (<a href="https://docs.aws.amazon.com/managed-flink/latest/java/what-is.html">Managed Service for Apache Flink</a>).</div>
+
+  <p>MSK is the alternative to all of this for an estate that wants Kafka itself: a provisioned form whose <b>Express brokers</b> are claimed at three times the throughput per broker and twenty times faster scaling, and a serverless form which accepts <b>IAM authentication only</b> - a constraint that decides the choice outright for a client that cannot use it (<a href="https://docs.aws.amazon.com/msk/latest/developerguide/serverless.html">MSK Serverless</a>).</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A stream is not a queue with history. It is <b>a sized pipe with a stated read budget</b>, and every consumer you attach spends from that budget unless you buy each one its own. Design the consumer list first: it is the number that decides both the shard count and whether enhanced fan-out is optional.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A third consumer is added to a Kinesis stream and the two existing ones begin to lag. Why?</div>
+      <button class="q-opt">Each consumer must acknowledge before the next reads</button>
+      <button class="q-opt">Ingest capacity is shared with read capacity per shard</button>
+      <button class="q-opt">Standard consumers share one 2 MB per second read budget</button>
+      <button class="q-opt">Retention beyond 24 hours slows every read on the shard</button>
+      <div class="q-fb">A shard's 2 MB per second of read capacity is shared across standard consumers, so a third reader takes a share from the first two. Consumers do not block one another by acknowledgement, ingest capacity is stated separately from read capacity, and retention length changes cost rather than read speed.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Records must land in S3 as Parquet in partitioned paths, with nothing to replay later. Which service fits?</div>
+      <button class="q-opt">Firehose, which converts and partitions on delivery</button>
+      <button class="q-opt">Kinesis Data Streams, whose retention holds them</button>
+      <button class="q-opt">Managed Flink, which writes exactly once to sinks</button>
+      <button class="q-opt">MSK Serverless, which keeps Kafka topics for you</button>
+      <div class="q-fb">A delivery stream converts to Parquet or ORC and writes into dynamic partitions, which is precisely the requirement, and nothing needs replaying. The two log services exist to be replayed, which the requirement says is unnecessary, and Flink is compute rather than a delivery path.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A Kafka client cannot use IAM credentials. What does that rule out?</div>
+      <button class="q-opt">MSK entirely, since the service is IAM-authenticated</button>
+      <button class="q-opt">MSK Serverless, which supports IAM auth only</button>
+      <button class="q-opt">Express brokers, which require IAM for scaling</button>
+      <button class="q-opt">Glue Schema Registry, which needs IAM to resolve</button>
+      <div class="q-fb">The serverless form of MSK accepts IAM authentication only, so a client that cannot use it needs the provisioned form. MSK as a whole is not ruled out, Express brokers are a provisioned broker type rather than an authentication mode, and the schema registry is not what the client authenticates against to produce or consume.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A telemetry pipeline takes 6 MB per second of device records at peak. Four consumers read it: a fraud detector needing records within a second, a lake loader, a dashboard feed, and a replay tool used during incidents that reads the last three days as fast as it can.</p>
+      <p><b>Size the stream</b> in shards, decide which consumers need dedicated read capacity, and name the one consumer that probably should not be on this stream at all.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Do the write side first, from the ingest rate alone. Then check the read side against the same shard count, remembering that the shared budget is per shard and is divided among the standard consumers rather than granted to each.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Size for ingest.</b> A shard takes 1 MB per second, so 6 MB per second needs at least six shards, assuming the partition key spreads records evenly. Uneven keys need more, exactly as in lesson 0502.</li>
+        <li><b>Check the shared read budget.</b> Six shards give 12 MB per second of shared read in total. Three standard consumers each reading the full 6 MB per second stream would want 18 MB per second between them, which is more than the shard count provides.</li>
+        <li><b>Give the latency-sensitive consumer its own capacity.</b> The fraud detector needs records within a second and cannot afford to queue behind the others, so it gets enhanced fan-out and its own dedicated 2 MB per second per shard.</li>
+        <li><b>Decide the rest.</b> With the fraud detector off the shared budget, the lake loader and dashboard feed share 12 MB per second across six shards. That fits, but with little headroom, so either a seventh shard or a second enhanced-fan-out consumer is the cheaper insurance depending on which consumer is more sensitive to lag.</li>
+        <li><b>Name the odd one out.</b> The replay tool. It reads three days of history as fast as it can, which is a burst that competes with live consumers for the same shared budget at exactly the moment - an incident - when the live consumers matter most. Land the records in the lake through a delivery stream and let the replay tool read objects from S3, where its bandwidth is nobody else's problem.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your shard count should be at least six and driven by ingest, and your answer should move exactly one consumer off the stream for a reason about contention rather than about cost. If you sized the stream from the number of consumers, you did the read side first and the write side never constrained anything.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, module 07</b> turns to the network every service on this page has been quietly assuming.</li>
+    <li>Lesson 0601 explained <a href="0601-three-ways-to-read-the-lake.html">why the Parquet conversion on delivery matters</a> to every query afterwards.</li>
+    <li>Lesson 0502 covered <a href="0502-dynamodb-and-the-partition.html">the other place an uneven key wrecks a capacity calculation</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the read budget still feels generous, ask an agent to list every consumer attached to one real stream, including the ones nobody remembers adding, and divide 2 MB per second by that count.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/streams/latest/dev/service-sizes-and-limits.html">Kinesis Data Streams quotas and limits</a> states the write rate, the read rate, the call budget and the record size on one page, and every sizing argument on this page is arithmetic over those four numbers.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. Divisions of a shard's stated budget are derived here rather than quoted.</p>
+
+  <div class="pager">
+    <a href="0603-two-ways-to-run-a-spark-job.html"><span class="dir">&larr; Previous</span><span class="ttl">Two ways to run a Spark job</span></a>
+    <a class="nxt" href="0700-the-interface-the-address-and-the-route.html"><span class="dir">Next &rarr;</span><span class="ttl">The interface, the address and the route</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0604 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

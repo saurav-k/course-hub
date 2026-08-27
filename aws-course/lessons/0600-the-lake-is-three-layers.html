@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The lake is three layers - Inside AWS</title>
+<meta name="description" content="A data lake on AWS is object storage plus two layers that are not storage at all: a catalogue that says what the objects mean, and a grant model that decides who may read which columns.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Analytics &middot; Lesson 0600</div>
+  <h1>A data lake is a bucket, a catalogue and a grant model</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>data-lake</code>, <code>data-catalog</code> and <code>clean-rooms</code>.
+    &middot; <a href="https://aws.amazon.com/lake-formation/">AWS Lake Formation</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The bytes live in S3, and that is the least interesting layer. What makes a bucket a lake is <b>a catalogue that says what the objects mean</b> and <b>a grant model over that catalogue</b>.</li>
+      <li>The <b>Glue Data Catalog</b> is the Hive-compatible metadata layer every engine here reads: Athena, Redshift Spectrum, EMR and Glue ETL all resolve tables through it.</li>
+      <li><b>Lake Formation</b> grants access in database terms - tables, columns, rows and tags - rather than in object terms, and it does it on catalogue objects rather than on the bucket.</li>
+      <li><b>DataZone</b> sits above both as a business catalogue with publish and subscribe workflows, and it neither stores data nor runs queries.</li>
+      <li>What it costs: the catalogue is <b>Region-scoped and does not replicate</b>, and cross-account access runs through Lake Formation and resource sharing rather than through plain IAM.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Module 05&lt;br/&gt;databases that own&lt;br/&gt;their own storage"] --> T["THIS PAGE&lt;br/&gt;storage that many engines&lt;br/&gt;share, and what governs it"]
+  T --> A["Reading it, lesson 0601"]
+  T --> B["The warehouse beside it&lt;br/&gt;lesson 0602"]
+  T --> C["Filling it, lessons 0603 and 0604"]
+  W["Module 06&lt;br/&gt;analytics"] -.- T
+    </div>
+    <figcaption>Where this sits, and how analytics differs from the last module. A database owns its storage and guards it; a lake is storage that many engines read at once, so the guarding has to happen somewhere else.
+    <b>Everything in this module reads the same objects. This page is about the two layers that make that safe rather than merely possible.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: three layers, only one of them storage</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  S["S3 objects&lt;br/&gt;Parquet, JSON, CSV - just bytes"] --> G["Glue Data Catalog&lt;br/&gt;databases, tables, columns, partitions"]
+  G --> L["Lake Formation&lt;br/&gt;grants on tables, columns, rows and tags"]
+  L --> E1["Athena"]
+  L --> E2["Redshift Spectrum"]
+  L --> E3["EMR"]
+  L --> E4["Glue ETL"]
+  D["DataZone&lt;br/&gt;publish, discover, request, approve"] -.- G
+    </div>
+    <figcaption>The stack, and where each engine attaches. Lake Formation centralises permissions on <b>Glue Data Catalog objects</b>, which is why one grant can reach every engine at once (<a href="https://aws.amazon.com/lake-formation/">Lake Formation</a>). DataZone is drawn to the side deliberately: it publishes and governs discovery of Glue and Redshift assets, and it neither stores data nor executes a query (<a href="https://docs.aws.amazon.com/datazone/latest/userguide/what-is-datazone.html">What is DataZone</a>).
+    <b>Grant on the catalogue and every engine inherits it. Grant on the bucket and you have granted whole files to whoever asks.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what happens when a query arrives</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as An analyst
+  participant E as A query engine
+  participant C as Glue Data Catalog
+  participant L as Lake Formation
+  participant S as S3
+  U->>E: select two columns from a table
+  E->>C: where does this table live and what columns does it have
+  C-->>E: location, schema and partitions
+  E->>L: may this principal read these columns
+  L-->>E: allowed columns and row filters
+  E->>S: read only the objects the partitions require
+  S-->>E: bytes
+  E-->>U: rows
+    </div>
+    <figcaption>One query, four services. The catalogue answers <i>what and where</i>; Lake Formation answers <i>how much of it</i>; S3 only ever answers <i>here are the bytes</i>. The partition information in the catalogue is also what stops the engine reading the whole table, which lesson 0601 turns into money.
+    <b>S3 has no idea a column exists, so column-level security in a lake is always a property of the layers above the bucket.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two limits shape lake designs and neither is obvious from a diagram. Glue Data Catalogs are <b>Region-scoped and do not replicate across Regions</b>, so a multi-Region lake has as many catalogues as Regions and something has to keep them in step. And cross-account access flows through <b>Lake Formation permissions and Resource Access Manager sharing</b> rather than through a plain IAM policy, so the bucket policy you were about to write is the wrong instrument (<a href="https://aws.amazon.com/glue/">AWS Glue</a>).</div>
+
+  <h2>3. Sharing outside the organisation</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Each party keeps its own tables in its own account" as O
+  state "A collaboration with agreed analysis rules" as C
+  state "An analysis template - the only query shape allowed" as T
+  state "Results, optionally with differential privacy applied" as R
+  [*] --> O
+  O --> C: join the collaboration
+  C --> T: rules constrain what may be asked
+  T --> R: run
+  R --> O: nobody's raw rows moved
+    </div>
+    <figcaption>AWS Clean Rooms, drawn as the property that matters: <b>it is not a data store</b>. Tables stay in the accounts that own them, and collaborators may only run queries that the agreed analysis rules and templates permit, with differential privacy available as an output control (<a href="https://docs.aws.amazon.com/clean-rooms/latest/userguide/what-is.html">What is AWS Clean Rooms</a>).
+    <b>Lake Formation governs access inside one organisation's catalogue. Clean Rooms governs a question asked across organisations that do not trust each other with the rows.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  "We put it in S3" describes a storage decision and no more. A lake exists when <b>the meaning of the objects and the right to read them are both written down somewhere an engine can consult</b>. Skip either layer and you have not built a lake, you have built a directory that several teams read by convention.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An analyst must see every row of a table but only four of its twelve columns. Where is that expressed?</div>
+      <button class="q-opt">In the bucket policy on the S3 prefix holding it</button>
+      <button class="q-opt">In the object metadata written by the ETL job</button>
+      <button class="q-opt">In a Lake Formation grant on the catalogue table</button>
+      <button class="q-opt">In an identity policy naming each column as ARN</button>
+      <div class="q-fb">Lake Formation grants are expressed on Glue Data Catalog objects in table and column terms, which is the only layer that knows a column exists. S3 sees whole objects, object metadata is not consulted for authorisation, and IAM has no column-shaped resource to name.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A lake is being extended into a second Region. What follows for the Glue Data Catalog?</div>
+      <button class="q-opt">A second catalogue exists, since catalogues do not replicate</button>
+      <button class="q-opt">The catalogue follows the data once buckets are replicated</button>
+      <button class="q-opt">The catalogue becomes global as soon as two Regions exist</button>
+      <button class="q-opt">The catalogue moves to the Region holding the most data</button>
+      <div class="q-fb">Catalogues are Region-scoped and do not replicate, so the second Region gets its own and keeping the two consistent becomes your problem. Bucket replication moves objects and not metadata, and nothing about a second Region promotes or relocates a catalogue.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Two companies want a joint audience analysis without either seeing the other's rows. Which service is built for that?</div>
+      <button class="q-opt">DataZone, which approves subscriptions to assets</button>
+      <button class="q-opt">Lake Formation, granting the partner's principals</button>
+      <button class="q-opt">Glue Data Catalog, shared across the two accounts</button>
+      <button class="q-opt">Clean Rooms, where the tables never leave the owner</button>
+      <div class="q-fb">Clean Rooms is the multi-party form: tables stay with their owners and only rule-constrained queries run. DataZone governs discovery and approval inside an organisation's own estate, and both Lake Formation grants and a shared catalogue end with one party's principals reading the other party's rows, which is exactly what the requirement forbids.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A company keeps six years of clickstream data in one S3 bucket. Every team has read access to the bucket through an identity policy. Three things are now being asked for at once: analysts in a different account need one table, the privacy team needs the email column hidden from everyone outside marketing, and a product manager wants to find out what tables exist without asking an engineer.</p>
+      <p><b>Say which layer answers each request</b>, and name the single change to the current setup that has to happen before any of the three is possible.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Write down which layer knows about each object in the requests: a bucket, a table, a column, an asset description. The prerequisite is the layer that none of the three requests can be expressed in.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Name the prerequisite first.</b> Nothing here is expressible today, because there is no catalogue. A bucket with an identity policy has no tables, no columns and no assets - so the first change is registering the data in the Glue Data Catalog so the other layers have something to point at.</li>
+        <li><b>Cross-account access - Lake Formation plus resource sharing.</b> Not a bucket policy. Cross-account catalogue access flows through Lake Formation permissions and Resource Access Manager sharing, which is also what keeps the grant to one table rather than to the prefix.</li>
+        <li><b>Hiding the email column - a Lake Formation column grant.</b> The grant is made on the catalogue table and every engine that resolves the table through the catalogue inherits it. Tag-based access control is worth reaching for here if the same rule applies to many tables, so that new tables inherit the rule rather than needing a new grant each time.</li>
+        <li><b>Discovery for the product manager - DataZone.</b> A business catalogue with publish and subscribe workflows is what lets a non-engineer find an asset and request access through an approval rather than through a ticket. Remember that it stores nothing and runs nothing, so it is a layer over the catalogue rather than a replacement for it.</li>
+        <li><b>Then remove what made the requests impossible.</b> The blanket bucket read for every team. While it exists, a column grant is advisory: anyone can bypass the catalogue and read the underlying objects directly.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should name three different layers for the three requests, and the prerequisite should be the catalogue rather than any of the three. If your last step did not remove the direct bucket access, the column-level rule you just designed does not actually hide anything.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0601-three-ways-to-read-the-lake.html">Three ways to read the lake</a></b> puts engines on top of this stack, and finds that the read path chooses the cost model.</li>
+    <li>Lesson 0400 covered <a href="0400-the-object-store-and-its-classes.html">the storage layer underneath</a>, including the classes a lake's older partitions belong in.</li>
+    <li>Lesson 0401 covered <a href="0401-the-bucket-types.html">the bucket that maintains Iceberg tables</a>, which moves part of this page's table maintenance into storage.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the three layers still feel like one thing, ask an agent to take a real bucket and say, for each team with access, whether removing that access would break a query or only break a habit.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://aws.amazon.com/lake-formation/">AWS Lake Formation</a> is the page that states the permission model in database terms, and reading it is what breaks the habit of reaching for a bucket policy when the requirement is about a column.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0504-the-purpose-built-stores.html"><span class="dir">&larr; Previous</span><span class="ttl">The purpose-built stores</span></a>
+    <a class="nxt" href="0601-three-ways-to-read-the-lake.html"><span class="dir">Next &rarr;</span><span class="ttl">Three ways to read the lake</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0600 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
