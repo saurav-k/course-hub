@@ -275,6 +275,31 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/purview/information-protection>
 - <https://learn.microsoft.com/en-us/azure/sentinel/overview>
 
+**Module 12 - Delivery and integration**
+
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/deployment-modes>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-stacks>
+- <https://learn.microsoft.com/en-us/azure/governance/machine-configuration/>
+- <https://learn.microsoft.com/en-us/azure/devops/pipelines/get-started/what-is-azure-pipelines>
+- <https://learn.microsoft.com/en-us/azure/devops/artifacts/overview>
+- <https://learn.microsoft.com/en-us/azure/app-service/deploy-staging-slots>
+- <https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview>
+- <https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-queues-topics-subscriptions>
+- <https://learn.microsoft.com/en-us/azure/event-grid/overview>
+- <https://learn.microsoft.com/en-us/azure/iot-hub/iot-concepts-and-iot-hub>
+- <https://learn.microsoft.com/en-us/azure/api-management/api-management-key-concepts>
+- <https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-app-configuration/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-signalr/signalr-overview>
+
+Two entries in this module are labelled third party at the point of use, because
+they are not vendor-published: the in-code infrastructure ecosystems, and the
+community characterisation of how far a provider lags a new API version. The Azure
+Service Operator is Microsoft-published open source rather than a managed service,
+and lesson 1200 says so.
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory

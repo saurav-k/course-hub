@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shipping change - Inside Azure</title>
+<meta name="description" content="A pipeline reaches Azure by federation rather than by holding a secret, and a release is rolled back by shifting weight or swapping back rather than by deploying the old version again.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Delivery and integration &middot; Lesson 1202</div>
+  <h1>The pipeline holds no secret, and the rollback is a gesture rather than a deployment</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>iac-deployment</code>, rows <code>cicd-pipeline</code>, <code>artifact-registry</code> and <code>progressive-delivery</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/app-service/deploy-staging-slots">Deployment slots</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Both first-party pipeline products reach Azure through <b>workload identity federation</b>, so neither stores a credential for the estate.</li>
+      <li><b>Azure Artifacts</b> is the package feed, with upstream sources caching public registries; container images live in the registry from lesson 0302.</li>
+      <li>Three progressive-delivery rails exist natively: a <b>slot swap</b>, <b>weighted revisions</b>, and <b>weight overrides at the global edge</b>.</li>
+      <li>A swap <b>switches routing rules between slots</b> - it is not an address flip - and the instances swapped out are <b>recycled</b>, abandoning anything long-running they were holding.</li>
+      <li>Slots also route by <b>percentage</b>, so weighted release is not a reason to change hosting tier on its own.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["A deployment, with a mode&lt;br/&gt;and a preview - lesson 1201"] --> T["THIS PAGE&lt;br/&gt;getting it into production,&lt;br/&gt;and back out again"]
+  T --> A["Messages between the pieces&lt;br/&gt;lesson 1203"]
+  T --> B["Recovery when a release&lt;br/&gt;is not the problem&lt;br/&gt;module 14"]
+  W["Module 12&lt;br/&gt;delivery and integration"] -.- T
+    </div>
+    <figcaption>Where this sits. The two previous pages produced a change that is described and previewed. This page is the delivery system around it, and it ends on rollback because a release mechanism with no cheap reverse gear is a release mechanism nobody uses at the moment they most need to.
+    <b>Judge a delivery design by its rollback gesture: if reverting means deploying the previous version again, the design has not finished.</b></figcaption>
+  </figure>
+
+  <h2>A pipeline that holds nothing worth stealing</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant J as A pipeline job
+  participant IDP as The pipeline provider as an issuer
+  participant M as The Microsoft identity platform
+  participant ARM as Resource Manager
+  J->>IDP: a token for this job, naming the repository and the branch or environment
+  IDP-->>J: a signed assertion
+  J->>M: exchange it against the configured federated credential
+  M-->>J: an Azure access token
+  J->>ARM: deploy - and the waterfall from lesson 0801 decides what it may do
+  Note over J,M: nothing is stored - the trust is a description of acceptable tokens
+    </div>
+    <figcaption>The same mechanism lesson 0803 built, applied to delivery. Both first-party products support it: the hosted pipeline service connects this way, and so does the repository-hosted one. The subject naming the repository and the branch is what makes the credential specific rather than a key to the whole estate.
+    <b>Because nothing is stored, a compromised pipeline definition cannot leak a credential - and the case-sensitivity warning from lesson 0803 applies here exactly as it did there.</b></figcaption>
+  </figure>
+
+  <p>Around the deployment sits the ordinary machinery: <b>self-hosted agents</b> where a build must run inside your own network, and <b>environments with approvals</b> where a human has to see the preview from lesson 1201 before an apply. Packages come from <b>Azure Artifacts</b>, whose upstream sources aggregate and cache public registries behind one feed with its own permissions - which is what makes a build reproducible when a public package disappears.</p>
+
+  <h2>Three rails, three rollback gestures</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  REL["A release"] --> R1["Slot swap&lt;br/&gt;deploy to a staging slot, warm it up, swap"]
+  REL --> R2["Weighted revisions&lt;br/&gt;a new revision takes a percentage of traffic"]
+  REL --> R3["Weight override at the global edge&lt;br/&gt;send a share of traffic to a different origin"]
+  R1 --> B1["Rollback - swap back"]
+  R2 --> B2["Rollback - shift the weight to the previous revision"]
+  R3 --> B3["Rollback - change the weights again"]
+  R1 --> ALSO["Slots also route by percentage,&lt;br/&gt;so weighted release is available here too"]
+    </div>
+    <figcaption>Three native ways to release gradually, each with a reverse that is a configuration change rather than a build. The last node is the one that changes decisions: <b>percentage routing exists on slots</b> as well as on revisions, so "we need canary weighting" is not by itself a reason to move a workload to a different hosting model.
+    <b>Every rollback here is a routing change, which is why all three are measured in seconds and none of them needs the previous artefact to be rebuilt.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  <b>A swap is a switch of routing rules between two slots</b>, not a change of address. The consequence is that both slots keep existing and the one that was in production becomes the staging slot, which is what makes swapping back instant. It also means anything that identified the deployment by address is unaffected, because no address moved.</div>
+
+  <h2>What a swap does that surprises people</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant OPS as A release
+  participant STG as The staging slot
+  participant PRD as The production slot
+  participant WRK as Long-running work in progress
+  OPS->>STG: deploy the new build
+  STG->>STG: warm up before any traffic arrives
+  OPS->>PRD: swap
+  Note over STG,PRD: routing rules switch - the old production instances are now the staging slot
+  PRD->>WRK: those instances are recycled afterwards
+  WRK-->>PRD: anything long-running they were holding is abandoned
+  Note over OPS,PRD: sticky settings follow the slot rather than the code, so check which settings are marked
+    </div>
+    <figcaption>Two behaviours worth knowing before the first production swap. The <b>warm-up</b> is why a swap does not send traffic to a cold instance. The <b>recycle</b> is the trap: work in flight on the instances that leave production does not survive, so a workload holding long operations needs to drain rather than assume a swap is transparent.
+    <b>Sticky settings are configuration marked as belonging to the slot rather than the deployment, so they stay behind on a swap - which is either exactly what you wanted or a very confusing outage.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Guardrails ride this same pipeline. Lesson 0901's policy-as-code repository is deployed by the machinery on this page, with the same review and the same approval gates - and its <b>audit-then-deny ramp is the policy equivalent of a weighted release</b>. An organisation that builds a careful delivery system for applications and applies governance by hand in a portal has built the mechanism and then declined to use it where it matters most.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What actually happens during a slot swap?</div>
+      <button class="q-opt">The production address is reassigned to the staging slot's instances</button>
+      <button class="q-opt">The staging build is redeployed onto the production instances in place</button>
+      <button class="q-opt">Routing rules switch between the slots, and both slots keep existing</button>
+      <button class="q-opt">The staging slot is promoted and the previous production slot is deleted</button>
+      <div class="q-fb">A swap switches routing between two slots that both continue to exist, which is what makes swapping back instant. The first describes an address flip. The second describes a redeployment. The fourth deletes the thing you would roll back to.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A workload holds long-running operations. What must be planned before swapping?</div>
+      <button class="q-opt">Draining that work, because the swapped-out instances are recycled</button>
+      <button class="q-opt">Extending warm-up, because it runs after traffic has already moved</button>
+      <button class="q-opt">Removing sticky settings, because they block the swap from completing</button>
+      <button class="q-opt">Scaling the staging slot up, because it inherits no capacity on swap</button>
+      <div class="q-fb">The instances that leave production are recycled and abandon what they were holding. The second inverts warm-up, which happens before traffic. The third and fourth invent behaviours - sticky settings do not block a swap and capacity is not lost by it.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A team wants percentage-based canary releases and proposes moving from an application service to a container service for it. What should be pointed out?</div>
+      <button class="q-opt">Percentage routing needs the global edge, so neither option provides it</button>
+      <button class="q-opt">Slots already route by percentage, so the move is not needed for that</button>
+      <button class="q-opt">Revisions cannot take a percentage, only a single active revision at a time</button>
+      <button class="q-opt">Canary releases need a separate deployment product on either platform</button>
+      <div class="q-fb">Percentage routing is available on slots as well as on revisions, so weighting is not a reason to move. The first denies a documented capability. The third is wrong - revisions take weighted percentages. The fourth invents a product requirement.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A team ships a web application from a pipeline that authenticates using a client secret stored in the pipeline's secret store, deploys straight over production, and rolls back by redeploying the previous build - which takes about twenty minutes. The application processes uploads that can take several minutes each. They want faster rollback, no stored credential, and a way to expose a release to a small share of users first.</p>
+      <p><b>Redesign it</b>: name the change for each requirement, and say what the upload behaviour forces them to add.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Take the three requirements in order and name a mechanism for each. Then read the upload detail against what happens to instances that leave production.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Remove the stored credential.</b> Configure workload identity federation for the pipeline, with a subject naming the repository and the branch or environment. Nothing is stored, and the pipeline's access is decided by role assignments as usual.</li>
+        <li><b>Check the case.</b> Matching is case-sensitive end to end, so verify every value in the federated credential against what the pipeline actually presents - a mismatch here fails with nothing obviously wrong.</li>
+        <li><b>Make rollback cheap.</b> Deploy to a staging slot, warm it up, and swap. Rollback becomes a swap back rather than a twenty-minute rebuild, because both slots still exist.</li>
+        <li><b>Expose the release gradually.</b> Slots route by percentage, so a small share of traffic can go to the new slot before the swap. No change of hosting model is required for this.</li>
+        <li><b>Read the upload behaviour.</b> The instances that leave production on a swap are recycled, and anything they were holding is abandoned. An upload taking several minutes is exactly that kind of work.</li>
+        <li><b>Add what that forces.</b> A drain step: stop accepting new uploads on the outgoing instances and let in-flight work complete before swapping, or make the work resumable so an abandoned attempt is retried rather than lost. Without one of the two, the faster rollback comes with a new failure mode.</li>
+        <li><b>Check the sticky settings.</b> Settings marked as belonging to the slot stay behind on a swap. Confirm which are marked before the first swap rather than discovering it when production picks up a staging connection string, or fails to.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your redesign should make rollback a configuration change and should add exactly one behaviour that was not asked for. If the upload handling was not mentioned, the swap has quietly introduced a way to lose work.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1203-messages-events-and-the-three-that-get-confused.html">messages, events and the three that get confused</a></b> is how the components a pipeline ships actually talk to each other.</li>
+    <li><b>Lesson 0304</b> introduced slots and the swap from the hosting side, and lesson 0302 introduced revisions and weights.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the rollback argument feels obvious, ask an agent how long each of the three rails takes to reverse, and compare that with a redeploy. The gap is the whole reason these primitives exist.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/app-service/deploy-staging-slots">staging slots</a> page carefully, including the sticky-settings and swap-behaviour sections. Almost every surprising thing about a production swap is documented there and read by nobody until afterwards.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="1201-a-deployment-is-an-object.html"><span class="dir">&larr; Previous</span><span class="ttl">A deployment is an object</span></a>
+    <a class="nxt" href="1203-messages-events-and-the-three-that-get-confused.html"><span class="dir">Next &rarr;</span><span class="ttl">Messages, events and the three that get confused</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 1202 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

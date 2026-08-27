@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A deployment is an object - Inside Azure</title>
+<meta name="description" content="Deployment modes decide what a template does to resources it does not mention, a preview shows it before it happens, and a deployment stack turns the whole thing into an object with a lifetime and teeth.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Delivery and integration &middot; Lesson 1201</div>
+  <h1>What a template does to the resources it does not mention</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Capability area <code>iac-deployment</code> and <code>governance-policy</code>, rows <code>native-iac-template</code> and <code>deployment-stacks</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-stacks">Deployment stacks</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A deployment runs in one of two modes. <b>Incremental is the default</b> and leaves unmentioned resources alone. <b>Complete deletes them</b>, and it is the most destructive default anybody can change by accident.</li>
+      <li>Complete mode is <b>being wound down</b>, with deletions pointed at deployment stacks instead.</li>
+      <li><b>What-if</b> previews the changes a deployment would make before it makes them, which is the rehearsal step this course keeps arguing for.</li>
+      <li><b>Template specs</b> publish an approved template as a resource, so a team consumes a version rather than a copied file.</li>
+      <li>A <b>deployment stack</b> makes a deployment an object: it knows which resources it manages, it can delete them together, and its deny settings <b>block even an Owner</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The languages that describe&lt;br/&gt;infrastructure - lesson 1200"] --> T["THIS PAGE&lt;br/&gt;the deployment itself:&lt;br/&gt;its mode, its preview, its lifetime"]
+  T --> A["Getting it through a pipeline&lt;br/&gt;lesson 1202"]
+  T --> B["Guardrails it can enforce&lt;br/&gt;module 09"]
+  W["Module 12&lt;br/&gt;delivery and integration"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page chose a language. This page is about the submission itself, which turns out to carry two decisions people rarely make deliberately: what happens to resources the template does not mention, and whether the deployment leaves anything behind that remembers it.
+    <b>A deployment stack is the difference between "we ran a template once" and "these resources belong to this deployment", and that difference is what makes clean-up and protection possible.</b></figcaption>
+  </figure>
+
+  <h2>Two modes, and one of them deletes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  D["A template deployment"] --> M{"Mode"}
+  M -->|"incremental - the default"| INC["Resources in the template are created or updated&lt;br/&gt;- resources not mentioned are left alone"]
+  M -->|"complete"| COM["Resources in the template are created or updated&lt;br/&gt;- resources not mentioned are DELETED"]
+  COM --> RISK["A partial template applied in complete mode&lt;br/&gt;removes everything it omitted"]
+  COM --> WIND["Being wound down, with deletion&lt;br/&gt;handled by deployment stacks instead"]
+    </div>
+    <figcaption>The two modes, and why one of them is famous. Complete mode is a legitimate way to make a scope match a template exactly, and it is also how a template that was only meant to add one resource deletes everything else in the group. The vendor's direction of travel is to take deletion out of the mode and put it in the stack, where it is explicit.
+    <b>Read the mode before reading the template: the same file does two completely different things depending on which one is set.</b></figcaption>
+  </figure>
+
+  <h2>Seeing it before it happens</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as A pipeline
+  participant WI as What-if
+  participant ARM as Resource Manager
+  participant R as The resources
+  P->>WI: preview this deployment
+  WI->>ARM: compare the template with what exists
+  ARM-->>WI: creates, modifies, deletes and no-changes
+  WI-->>P: the diff, before anything happens
+  P->>P: an approval gate reads the diff
+  P->>ARM: apply
+  ARM->>R: make the changes
+  Note over WI,P: the diff is the artefact a reviewer approves - not the template
+    </div>
+    <figcaption>The preview step, drawn as part of a pipeline because that is where it earns its keep. A reviewer reading a template is guessing at its effect on this particular scope; a reviewer reading the diff is looking at the effect itself, including the deletions.
+    <b>Put the preview in front of the approval gate rather than in front of the author - it is a control, not a convenience.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  <b>A template spec is a template published as a resource.</b> That changes how it is consumed: a team references an approved, versioned spec rather than copying a file into their own repository, so an improvement reaches consumers and a copy does not silently rot. It is one of the two paths the vendor names for estates leaving the retired blueprint product behind, and it is the one for reusable content rather than for lifecycle.</div>
+
+  <h2>The stack, and what it can refuse</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  Created: Stack created - it records the resources it manages
+  Managed: Managing - the stack knows what belongs to it
+  Removed: A resource is dropped from the template
+  Detached: Detached - left in place, no longer managed
+  DeletedRes: Deleted with the stack
+  [*] --> Created
+  Created --> Managed
+  Managed --> Removed
+  Removed --> Detached: the configured behaviour is to detach
+  Removed --> DeletedRes: the configured behaviour is to delete
+  Managed --> DeletedRes: the whole stack is deleted, and takes its resources
+  note right of Managed
+    deny settings on the stack create
+    platform deny assignments - blocking
+    write or delete even for an Owner
+  end note
+    </div>
+    <figcaption>The lifecycle that makes a deployment an object. Two behaviours matter most. <b>Delete at scale</b>: deleting the stack removes everything it manages, which is what makes a temporary environment genuinely disposable. And <b>deny settings</b>, which materialise as the platform-created deny assignments from lesson 0801 - the only mechanism on Azure that stops an Owner.
+    <b>What happens to a resource dropped from the template is a configured choice, so decide between detach and delete deliberately rather than discovering it during a refactor.</b></figcaption>
+  </figure>
+
+  <p>Stacks work at <b>resource group, subscription and management group scope</b>, so the same mechanism protects a single environment or a whole platform layer. Lesson 0801 described the deny assignment's own properties - it can be set not to apply to child scopes, it can exclude named principals, and it can be expressed against everyone in the directory - and those are the dials that make a protected stack usable rather than merely rigid.</p>
+
+  <div class="callout warn">
+  The <b>blueprint product is retired</b>, having never left preview, and the vendor names two successors: deployment stacks for lifecycle and protection, and template specs for reusable approved content. An estate still holding blueprints is on a migration path with a published end, and this course deliberately links the vendor's retirement material rather than restating its dates.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A template containing one storage account is deployed to a resource group in complete mode. What happens?</div>
+      <button class="q-opt">The storage account is created and the other resources are left alone</button>
+      <button class="q-opt">The deployment is refused, because the template covers only part of it</button>
+      <button class="q-opt">The other resources are detached from the deployment but remain in place</button>
+      <button class="q-opt">The other resources in that group are deleted, because they are not listed</button>
+      <div class="q-fb">Complete mode makes the scope match the template, so anything not mentioned is removed. The first describes incremental mode. The second invents a safety refusal. The third borrows the detach behaviour, which belongs to a stack rather than to a mode.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does the preview belong in front of the approval gate?</div>
+      <button class="q-opt">Because the pipeline cannot apply a template that has not been previewed</button>
+      <button class="q-opt">Because a reviewer approving the diff sees the effect rather than the intent</button>
+      <button class="q-opt">Because the preview locks the scope so no other deployment can change it</button>
+      <button class="q-opt">Because approval gates can only be attached to preview operations, not applies</button>
+      <div class="q-fb">The diff is the effect on this scope, including deletions, which a template alone does not show. The first invents a prerequisite. The third invents locking. The fourth invents a restriction on where gates can go.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is unusual about a deployment stack's deny settings?</div>
+      <button class="q-opt">They create platform deny assignments, which block even an Owner</button>
+      <button class="q-opt">They are the only policy effect that can be applied at stack scope</button>
+      <button class="q-opt">They prevent the stack itself from being deleted once it is created</button>
+      <button class="q-opt">They apply role assignments that remove permissions from principals</button>
+      <div class="q-fb">Deny assignments short-circuit the authorisation waterfall, which is why an Owner is stopped. The second confuses them with policy effects. The third overstates the protection. The fourth contradicts lesson 0801 - role assignments only ever add.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A platform team must deliver three things. Temporary test environments should be creatable and removable cleanly, leaving nothing behind. A shared networking layer must survive an administrator deleting it by mistake, including a subscription Owner. And a set of approved templates should be reusable across eight application teams without each team copying files. The team currently deploys with a pipeline that applies templates in complete mode to keep environments tidy.</p>
+      <p><b>Design it</b>: name the mechanism for each requirement, and say what you would change about the current pipeline.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Two of the three requirements are about a deployment's lifetime and one is about distribution. Then ask what complete mode is being used for, and whether something else does that job with less risk.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Temporary environments.</b> A deployment stack. It records the resources it manages, and deleting the stack removes them together - which is exactly "leave nothing behind" without anybody maintaining a teardown script.</li>
+        <li><b>Protect the networking layer.</b> A deployment stack again, this time with deny settings. Those materialise as platform deny assignments, and they are the only mechanism that stops an Owner. Choose the scope deliberately: stacks work at resource group, subscription and management group level.</li>
+        <li><b>Tune the protection so it stays usable.</b> The deny assignment can exclude named principals and can be set not to apply to child scopes, so the platform team's own automation can still operate while everybody else is blocked.</li>
+        <li><b>Distribute the approved templates.</b> Template specs. Each team references an approved, versioned spec rather than copying a file, so an improvement reaches all eight and no copy silently diverges.</li>
+        <li><b>Change the pipeline's mode.</b> Complete mode is being used to keep environments tidy, which is precisely the job stacks now do explicitly - and complete mode does it by deleting anything the template omits, on every apply. Move to incremental and let the stack handle removal.</li>
+        <li><b>Add the preview.</b> Put what-if in front of the approval gate so a reviewer sees creates, modifications and deletions for the real scope. That is worth doing regardless of mode, and it is what would have caught a complete-mode accident before it happened.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two of your three answers should be the same mechanism configured differently, and the pipeline change should remove a deletion behaviour rather than add one. If complete mode survived, the tidiness it provides is now being provided twice.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1202-shipping-change.html">shipping change</a></b> puts these deployments into a pipeline that holds no secrets and can roll a release back.</li>
+    <li><b>Lesson 0801</b> is where deny assignments were introduced as the platform's only subtraction, and this page is where they actually come from.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If detach against delete still feels arbitrary, ask an agent what should happen when a resource is refactored out of one stack and into another. The answer is detach, and knowing that is what stops a refactor becoming an outage.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-stacks">deployment stacks</a> documentation and the <a href="https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/deployment-modes">deployment modes</a> page beside it. The second explains what the first is replacing, which makes both easier to hold.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. Retirement dates are deliberately not restated; the vendor's own page is the live authority.</p>
+
+  <div class="pager">
+    <a href="1200-four-ways-to-describe-infrastructure.html"><span class="dir">&larr; Previous</span><span class="ttl">Four ways to describe infrastructure</span></a>
+    <a class="nxt" href="1202-shipping-change.html"><span class="dir">Next &rarr;</span><span class="ttl">Shipping change</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 1201 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

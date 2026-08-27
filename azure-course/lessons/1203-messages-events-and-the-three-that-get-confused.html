@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Messages, events and the three that get confused - Inside Azure</title>
+<meta name="description" content="A broker, an event router and a stream ingester have similar names and opposite designs, and the question that separates them is who pulls and whether the message rate is the reason the service exists.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Delivery and integration &middot; Lesson 1203</div>
+  <h1>Three services, similar names, opposite designs</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>integration-messaging</code>, rows <code>message-queue</code>, <code>pub-sub</code> and <code>event-bus</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview">Azure Service Bus</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Service Bus is the broker</b>: queues and topics with sessions for ordering, dead-lettering, transactions and duplicate detection.</li>
+      <li><b>Event Grid is a router</b>: it <b>pushes</b> discrete events to handlers with filtering and retries, and dead-letters to storage on failure.</li>
+      <li><b>Event Hubs is the stream ingester</b> from lesson 0603, where the message rate is the reason the service exists.</li>
+      <li>The discriminator to carry: <b>who pulls, and whether volume is the point</b>. Facts that are pushed, work that is pulled, telemetry that is streamed.</li>
+      <li><b>Storage queues</b> remain as the small, cheap primitive with an older feature set. New designs pick the broker unless the case is genuinely trivial.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Components shipped by a pipeline&lt;br/&gt;lesson 1202"] --> T["THIS PAGE&lt;br/&gt;how those components&lt;br/&gt;talk to each other"]
+  T --> A["APIs and workflows on top&lt;br/&gt;lesson 1204"]
+  T --> B["The stream ingester met earlier&lt;br/&gt;lesson 0603"]
+  W["Module 12&lt;br/&gt;delivery and integration"] -.- T
+    </div>
+    <figcaption>Where this sits. The module has shipped components; this page is the plumbing between them. It exists as its own lesson because the three products here are the most-confused trio in the Azure catalogue, and picking wrongly is expensive to reverse once producers and consumers are written against it.
+    <b>Every one of the three is correct for something and wrong for the other two, so the choice is a question about the traffic rather than a preference.</b></figcaption>
+  </figure>
+
+  <h2>The discriminator, drawn once</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q1{"What is being sent"} -->|"a unit of work&lt;br/&gt;somebody must do"| SB["Service Bus&lt;br/&gt;the consumer pulls&lt;br/&gt;queues and topics"]
+  Q1 -->|"a discrete fact&lt;br/&gt;something happened"| EG["Event Grid&lt;br/&gt;the service pushes&lt;br/&gt;to a handler"]
+  Q1 -->|"telemetry, at a rate that&lt;br/&gt;is itself the requirement"| EH["Event Hubs&lt;br/&gt;lesson 0603"]
+  SB --> SB1["Ordering per session, dead-lettering,&lt;br/&gt;transactions, duplicate detection"]
+  EG --> EG1["Filtering, retries,&lt;br/&gt;dead-letter to storage on failure"]
+  EH --> EH1["Units of throughput,&lt;br/&gt;a Kafka endpoint, archival capture"]
+    </div>
+    <figcaption>One question with three answers. The middle branch is the one people place wrongly: an event is a small statement that something happened, delivered to whoever registered an interest, and it is not a work item somebody has to complete. Sending work through the router loses the broker's guarantees; sending facts through the broker makes every interested party a consumer you have to manage.
+    <b>Ask who initiates delivery - if the service pushes, it is the router; if the consumer pulls, it is the broker.</b></figcaption>
+  </figure>
+
+  <h2>What the broker gives you that nothing else does</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as A producer
+  participant Q as A queue
+  participant C as A consumer
+  participant DL as The dead-letter queue
+  P->>Q: send, with a session identifier and a duplicate-detection window
+  C->>Q: receive under peek-lock
+  Note over C,Q: the message is invisible to others but not yet removed
+  C->>C: do the work
+  alt success
+    C->>Q: complete - now it is gone
+  else repeated failure
+    Q->>DL: dead-letter it, for inspection rather than loss
+  end
+  Note over P,C: sessions preserve order per session identifier, not across the whole queue
+    </div>
+    <figcaption>Peek-lock is the property that makes a broker a broker: a consumer that crashes mid-work has not consumed the message, because completion is a separate step. The alternative mode removes the message on receipt, which is faster and loses work on a crash.
+    <b>Ordering is per session rather than across the queue, so a design needing strict order must decide what its session identifier is - and that choice bounds parallelism exactly as a partition key does.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  <b>Topics are the same broker with filtered subscriptions.</b> A publisher writes once, and each subscription applies its own filter expressed in an SQL-like language to decide what it receives. That is publish-subscribe with the broker's guarantees intact - so fan-out does not have to mean giving up dead-lettering and ordering. Subscription counts and filter complexity are bounded per namespace, so a design fanning out very widely should check those limits before committing.</div>
+
+  <h2>The router's own shape</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  SRC["Sources"] --> EG["Event Grid"]
+  SYS["System topics&lt;br/&gt;platform lifecycle events&lt;br/&gt;- a blob was written, a resource changed"] --> EG
+  EG --> F["Filtering, so a handler receives&lt;br/&gt;only what it asked for"]
+  EG --> H["More than twenty handler types"]
+  EG --> R["Retries on failure"]
+  R --> DLQ["Dead-letter to a storage container&lt;br/&gt;when delivery keeps failing"]
+  EG --> MQ["An MQTT broker for client-to-client&lt;br/&gt;publish and subscribe"]
+    </div>
+    <figcaption>The router, and the feature that makes it structural rather than optional: <b>system topics</b> emit platform lifecycle events, so "when a blob is written, run this" is a subscription rather than a polling loop. Its delivery is push with retries, and a handler that keeps failing sends the event to a storage container rather than dropping it.
+    <b>The failure path is the design detail worth checking - a push router's dead-letter destination is a storage container you must create and read, not a queue the service keeps for you.</b></figcaption>
+  </figure>
+
+  <p>Two smaller members complete the family. <b>Storage queues</b> are the older, minimal primitive - cheap and simple, with a feature set from an earlier era - and the corpus is direct that new designs choose the broker unless the case is genuinely trivial. And <b>IoT Hub</b> is the device-facing broker: per-device identity, device twins holding state, and two-way communication including cloud-to-device messages and direct methods, which is what separates it from a one-way telemetry pipe.</p>
+
+  <div class="callout warn">
+  Tier choice on the broker is a networking decision as well as a capacity one. The <b>premium namespace</b> is what brings isolated capacity, virtual network integration and customer-managed keys - so a requirement from lesson 0703 or lesson 0804 lands on the tier rather than on a separate feature. A design that specifies "Service Bus, private" and picks the standard tier has specified two things that do not go together.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An order must be processed exactly once by one of several workers, and retried if a worker crashes. Which service?</div>
+      <button class="q-opt">The event router, delivering the order to a worker with retries on failure</button>
+      <button class="q-opt">The stream ingester, with workers reading from their own partitions</button>
+      <button class="q-opt">The broker, where peek-lock leaves the message until it is completed</button>
+      <button class="q-opt">A storage queue, whose smaller feature set is sufficient for one order</button>
+      <div class="q-fb">Peek-lock is exactly this requirement: a crashed consumer has not completed, so the work returns. The first pushes a work item through a fact router. The second is for volume rather than work distribution. The fourth is the minimal primitive the corpus steers new designs away from.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is the practical discriminator between the router and the broker?</div>
+      <button class="q-opt">Who initiates delivery - the service pushes, or the consumer pulls</button>
+      <button class="q-opt">Whether the payload is JSON, since one of the two requires it</button>
+      <button class="q-opt">Whether the destination is inside Azure or outside the platform</button>
+      <button class="q-opt">Whether the sender expects a response back on the same channel</button>
+      <div class="q-fb">Push against pull is the property that decides the design. The second invents a format constraint. The third invents a locality constraint. The fourth describes a request-response pattern that neither product is.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A design says "Service Bus, reachable only from our network". What does that require?</div>
+      <button class="q-opt">A topic rather than a queue, since only topics support network rules</button>
+      <button class="q-opt">A session identifier on every message, which scopes delivery to a network</button>
+      <button class="q-opt">Storage queues instead, since they inherit the storage account's rules</button>
+      <button class="q-opt">The premium namespace, which is what brings virtual network integration</button>
+      <div class="q-fb">Network integration, isolated capacity and customer-managed keys are premium-tier properties. The first and second attach networking to messaging constructs that have nothing to do with it. The third swaps the product to solve a tier question.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A photo service has four flows. A user uploads an image and a thumbnail must be generated. Three internal teams each want to know when a new user registers, and each cares about a different subset. Device sensors in the company's warehouses report readings several thousand times a second. And a nightly billing run must process each account exactly once, in order per account, with failures kept for inspection rather than lost. A proposal uses one Service Bus queue for everything.</p>
+      <p><b>Route each flow</b>: name the service and the feature that decides it, and say what the proposal loses on the flow it fits worst.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask of each flow whether it is a fact, a unit of work, or telemetry at a rate. Two of the four are facts and two are not - and one of the facts has a shortcut most designs miss.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The thumbnail flow.</b> A blob being written is a platform lifecycle event, and the router's system topics emit exactly that. So this is a subscription rather than an upload handler that also enqueues a message - which removes a component from the design entirely.</li>
+        <li><b>The registration flow.</b> Three interested parties, each wanting a different subset, is filtered publish-subscribe. The broker's topics give each subscription its own filter while keeping dead-lettering and ordering, so this is a topic with three subscriptions rather than three queues the producer has to know about.</li>
+        <li><b>The sensor flow.</b> Several thousand readings a second is a rate requirement, which is the stream ingester from lesson 0603. If the sensors are managed devices with identities and state, the device-facing broker is the front door and it routes onward.</li>
+        <li><b>The billing flow.</b> A unit of work, processed exactly once, in order per account, with failures retained. That is a queue with <b>sessions</b> keyed on the account, <b>peek-lock</b> so a crash returns the work, and <b>dead-lettering</b> so failures are inspectable.</li>
+        <li><b>Say what the proposal loses.</b> The sensor flow is where a single queue fails worst. A broker queue is not designed for that rate, and pushing telemetry through it costs the throughput model, the archival capture and the protocol endpoint that make the ingester the right answer.</li>
+        <li><b>Note the second loss.</b> The thumbnail flow through a queue means writing and operating a producer that the platform would have supplied for free through a system topic - work that exists only because the wrong product was chosen.</li>
+        <li><b>State the final shape.</b> A system topic subscription for thumbnails, a broker topic with three filtered subscriptions for registrations, the stream ingester for sensors, and a session-enabled broker queue for billing. Four flows, three products, and one of them used twice in two different shapes.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your answer should use the broker twice in two different shapes and should remove at least one component the proposal implied. If all four flows landed on one product, the push-against-pull question has not been asked.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1204-apis-workflows-and-what-is-not-a-product.html">APIs, workflows and what is not a product</a></b> puts a front door on these components and orchestrates them.</li>
+    <li><b>Lesson 0603</b> is the stream ingester in full, including its units and its archival path.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the trio still blurs, ask an agent to write one sentence for each describing what is lost by using the other two instead. Six sentences, and the shape of the decision falls out of them.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/event-grid/overview">Event Grid overview</a> immediately after the <a href="https://learn.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview">Service Bus overview</a>. Read in that order, the push-against-pull difference is unmissable, and it is the thing most often got wrong.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. Subscription and filter limits are named without figures; the vendor's limits table is the live authority.</p>
+
+  <div class="pager">
+    <a href="1202-shipping-change.html"><span class="dir">&larr; Previous</span><span class="ttl">Shipping change</span></a>
+    <a class="nxt" href="1204-apis-workflows-and-what-is-not-a-product.html"><span class="dir">Next &rarr;</span><span class="ttl">APIs, workflows and what is not a product</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 1203 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

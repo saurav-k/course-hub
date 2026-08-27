@@ -275,6 +275,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1103-detection-and-response.html"
         }
       ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Four ways to describe infrastructure",
+          "href": "lessons/1200-four-ways-to-describe-infrastructure.html"
+        },
+        {
+          "title": "A deployment is an object",
+          "href": "lessons/1201-a-deployment-is-an-object.html"
+        },
+        {
+          "title": "Shipping change",
+          "href": "lessons/1202-shipping-change.html"
+        },
+        {
+          "title": "Messages, events and the three that get confused",
+          "href": "lessons/1203-messages-events-and-the-three-that-get-confused.html"
+        },
+        {
+          "title": "APIs, workflows and what is not a product",
+          "href": "lessons/1204-apis-workflows-and-what-is-not-a-product.html"
+        }
+      ]
     }
   ],
   "extras": []

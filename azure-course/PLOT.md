@@ -101,9 +101,18 @@ is wrong and it gets fixed before anything new is added.
 | 1102 | Knowing how exposed you are |
 | 1103 | Detection and response |
 
+**Module 12 - Delivery and integration**
+
+| Lesson | Title |
+| 1200 | Four ways to describe infrastructure |
+| 1201 | A deployment is an object |
+| 1202 | Shipping change |
+| 1203 | Messages, events and the three that get confused |
+| 1204 | APIs, workflows and what is not a product |
+
 ## Planned, in order
 
-Modules 12 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Modules 13 and 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -137,7 +146,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 12 to 14**, none started. New numbers go at the end of the
+- **Modules 13 and 14**, neither started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a
