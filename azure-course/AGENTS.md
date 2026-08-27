@@ -9,7 +9,8 @@ This file adds only what is true of this course and nowhere else.
 
 The deep Azure course of the Cloud Architecture category: one platform walked end
 to end as a connected design, from its account hierarchy (subscriptions under a tenant and management-group tree) to the
-services built on it. A shell at present; `PLOT.md` holds the fourteen-module plan.
+services built on it. Modules 01 to 04 are written; `PLOT.md` holds the full
+fourteen-module plan and is the authority for what is written and what is reserved.
 
 ## Read before you write
 
@@ -32,3 +33,10 @@ In this order: [`MISSION.md`](MISSION.md), [`NOTES.md`](NOTES.md),
 
 Cross-cloud comparison - [Comparing the Four Clouds](../cloud-comparison-course/index.html)
 owns it. `MISSION.md` owns the full list and the reasons.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.

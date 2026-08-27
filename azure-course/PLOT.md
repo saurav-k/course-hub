@@ -41,6 +41,8 @@ is wrong and it gets fixed before anything new is added.
 
 ## Planned, in order
 
+Modules 05 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
 and watched, how change ships, and finally how it survives failure.
@@ -73,9 +75,10 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
+- **Modules 05 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
-- **Reference: glossary of Azure terms**, linked from every lesson foot once the
-  first lessons exist. Not written yet.
+- **Reference: glossary of Azure terms**, linked from every lesson foot once it
+  exists. Not written yet, so no lesson links it and no lesson spine carries a
+  Glossary entry.
 
 No module opens for writing until its topics are covered by verified research.

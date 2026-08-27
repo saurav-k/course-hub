@@ -17,11 +17,155 @@ use.
 The course records what it rests on with the date it was read, so a refresh chases
 only what changed:
 
-- Verified per-cloud inventory for Azure: not yet complete. Lessons are written
-  only from material whose verification is recorded here first.
-- When verification lands, its read date and scope are recorded beside this line.
+- **Verified per-cloud inventory for Azure: complete.** Snapshot date **2026-08-26**.
+  Scope: 184 service rows across 24 capability domains, 25 recorded absences, and a
+  deep-dive report covering tenancy, telemetry, machine-to-machine authentication,
+  deployment, networking and certification structure.
+  The inventory passed original research, two independent audits on different models,
+  a corrections pass, a reconciliation against the shared capability taxonomy, and a
+  repair pass. Every claim in it traces to a vendor page fetched and read during that
+  work, and the corrections are recorded case by case with the page that confirmed each.
+- **Modules 01 to 04 were written only from that inventory.** No claim on any lesson
+  page originates anywhere else. Where the inventory did not cover something a lesson
+  wanted to say, the lesson does not say it, and the omission is listed under `## Gaps`
+  below rather than filled from memory.
+
+## The pages the written lessons rest on
+
+Every link below is cited from at least one lesson page, and every one of them is a
+page the verified inventory records as fetched and read.
+
+**Module 01 - The lay of the land**
+
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/management-groups/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/policy/overview>
+- <https://learn.microsoft.com/en-us/azure/role-based-access-control/overview>
+- <https://learn.microsoft.com/en-us/azure/role-based-access-control/deny-assignments>
+- <https://learn.microsoft.com/en-us/azure/role-based-access-control/role-definitions>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/tag-resources>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/azure-subscription-service-limits>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-resource-manager/bicep/deployment-stacks>
+- <https://learn.microsoft.com/en-us/azure/governance/resource-graph/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/blueprints/overview>
+- <https://learn.microsoft.com/en-us/azure/governance/machine-configuration/>
+- <https://learn.microsoft.com/en-us/azure/reliability/availability-zones-overview>
+- <https://learn.microsoft.com/en-us/azure/storage/common/storage-redundancy>
+- <https://learn.microsoft.com/en-us/azure/service-health/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/activity-log>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/logs/log-analytics-workspace-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/app/app-insights-overview>
+- <https://learn.microsoft.com/en-us/entra/fundamentals/whatis>
+- <https://learn.microsoft.com/en-us/azure/azure-arc/overview>
+- <https://learn.microsoft.com/en-us/azure/data-explorer/>
+- <https://learn.microsoft.com/en-us/azure/cosmos-db/>
+- <https://learn.microsoft.com/en-us/azure/azure-sql/database/sql-database-paas-overview>
+- <https://learn.microsoft.com/en-us/azure/ai-foundry/openai/overview>
+- <https://learn.microsoft.com/en-us/azure/redis/>
+- <https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview>
+- <https://learn.microsoft.com/en-us/fabric/data-warehouse/>
+- <https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview>
+- <https://learn.microsoft.com/en-us/azure/network-watcher/vnet-flow-logs-overview>
+- <https://learn.microsoft.com/en-us/azure/mysql/>
+- <https://learn.microsoft.com/en-us/azure/load-balancer/load-balancer-overview>
+- <https://learn.microsoft.com/en-us/azure/logic-apps/logic-apps-overview>
+- <https://learn.microsoft.com/en-us/azure/dms/>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview>
+- <https://learn.microsoft.com/en-us/azure/key-vault/general/overview>
+
+**Module 02 - Compute**
+
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/>
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/sizes-gpu>
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/disks-types>
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/dedicated-hosts>
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/spot-vms>
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/shared-image-galleries>
+- <https://learn.microsoft.com/en-us/azure/virtual-machines/workloads/sap/get-started>
+- <https://learn.microsoft.com/en-us/azure/virtual-machine-scale-sets/>
+- <https://learn.microsoft.com/en-us/azure/confidential-computing/>
+- <https://learn.microsoft.com/en-us/azure/batch/>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-network-interface>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/network-security-group-how-it-works>
+- <https://learn.microsoft.com/en-us/azure/bastion/bastion-overview>
+- <https://learn.microsoft.com/en-us/entra/identity/devices/howto-vm-sign-in-azure-ad-linux>
+- <https://learn.microsoft.com/en-us/entra/identity/managed-identities-azure-resources/overview>
+
+**Module 03 - Containers and serverless**
+
+- <https://learn.microsoft.com/en-us/azure/aks/>
+- <https://learn.microsoft.com/en-us/azure/aks/monitor-aks>
+- <https://learn.microsoft.com/en-us/azure/aks/istio-about>
+- <https://learn.microsoft.com/en-us/azure/aks/csi-secrets-store-driver>
+- <https://learn.microsoft.com/en-us/azure/kubernetes-fleet/overview>
+- <https://learn.microsoft.com/en-us/azure/backup/azure-kubernetes-service-backup-overview>
+- <https://learn.microsoft.com/en-us/entra/workload-id/workload-identity-federation>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/metrics/prometheus-metrics-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-monitor/vm/vminsights-overview>
+- <https://learn.microsoft.com/en-us/azure/container-apps/>
+- <https://learn.microsoft.com/en-us/azure/container-instances/>
+- <https://learn.microsoft.com/en-us/azure/container-registry/>
+- <https://learn.microsoft.com/en-us/azure/azure-functions/>
+- <https://learn.microsoft.com/en-us/azure/app-service/>
+- <https://learn.microsoft.com/en-us/azure/app-service/deploy-staging-slots>
+- <https://learn.microsoft.com/en-us/azure/static-web-apps/>
+- <https://learn.microsoft.com/en-us/azure/spring-apps/basic-standard/retirement-announcement>
+
+**Module 04 - Storage**
+
+- <https://learn.microsoft.com/en-us/azure/storage/blobs/>
+- <https://learn.microsoft.com/en-us/azure/storage/blobs/access-tiers-overview>
+- <https://learn.microsoft.com/en-us/azure/storage/blobs/data-lake-storage-introduction>
+- <https://learn.microsoft.com/en-us/azure/storage/files/>
+- <https://learn.microsoft.com/en-us/azure/storage/file-sync/file-sync-introduction>
+- <https://learn.microsoft.com/en-us/azure/storage/elastic-san/>
+- <https://learn.microsoft.com/en-us/azure/azure-netapp-files/>
+- <https://learn.microsoft.com/en-us/azure/databox/>
+- <https://learn.microsoft.com/en-us/azure/storage-mover/service-overview>
+- <https://learn.microsoft.com/en-us/azure/backup/backup-introduction-to-azure-backup>
+- <https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview>
+- <https://learn.microsoft.com/en-us/entra/identity/domain-services/overview>
 
 ## Gaps
 
-- No vendor page had been fetched at the time this shell was created, so no specific
-  documentation URL carries a read date yet.
+Things a written lesson wanted to say and did not, because the verified inventory
+does not carry them. Each is a candidate for the next research pass, and none of
+them was filled from memory.
+
+- **How a generalised image differs from a specialised one in preparation.** Lesson
+  0202 names the fork and points at the Compute Gallery page rather than restating a
+  procedure the inventory does not record.
+- **What the letters inside a virtual-machine size name mean beyond the family
+  letter.** The inventory records the family letters and the presence of generation
+  suffixes such as `Dav5`, and no decoding table. Lesson 0200 says so and links the
+  vendor catalogue as the live authority.
+- **Per-type performance ceilings for managed disks**, and per-share figures for
+  Azure Files. Lesson 0402 teaches which types decouple performance from capacity
+  and quotes no numbers, because the inventory quotes none.
+- **Whether Flexible scale-set orchestration supports the scheduled and predictive
+  autoscale profiles.** The inventory documents those against Uniform mode only, so
+  lesson 0203 states exactly that and draws no conclusion about Flexible.
+- **How much faster high-priority blob rehydration is.** The inventory records that
+  it is faster and billed extra, with the standard figure at up to fifteen hours.
+  Lesson 0401 shows the fifteen-hour bar and annotates the faster option without a
+  number.
+- **Concurrency and quota figures for Container Apps and for Azure Functions hosting
+  plans.** Lesson 0303 teaches the plans as capabilities because the inventory
+  records capabilities and not limits here.
+- **Current availability of Azure Data Box Gateway.** The inventory flags it for
+  re-checking, so lesson 0403 teaches the appliance family and does not assert the
+  gateway's status.
+- **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
+  links one and no lesson spine carries a Glossary entry.
+
+## Derived figures
+
+Two charts in these modules are arithmetic done in the course rather than a number
+taken from a vendor page, and both say so in their own figcaption:
+
+- Lesson 0201's per-machine share of a dedicated host price, which is one divided by
+  the number of machines packed onto the host.
+- Lesson 0403's network transfer times for 800 terabytes at three sustained rates,
+  with the fully-sustained-link assumption named in the caption and repeated as a
+  warning in the prose.
