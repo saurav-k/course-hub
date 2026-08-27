@@ -127,6 +127,24 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview>
 - <https://learn.microsoft.com/en-us/entra/identity/domain-services/overview>
 
+**Module 05 - Databases**
+
+- <https://learn.microsoft.com/en-us/azure/azure-sql/database/sql-database-paas-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-sql/managed-instance/sql-managed-instance-paas-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-sql/database/serverless-tier-overview>
+- <https://learn.microsoft.com/en-us/azure/postgresql/>
+- <https://learn.microsoft.com/en-us/azure/mysql/>
+- <https://learn.microsoft.com/en-us/azure/cosmos-db/>
+- <https://learn.microsoft.com/en-us/azure/documentdb/overview>
+- <https://learn.microsoft.com/en-us/azure/cosmos-db/gremlin/overview>
+- <https://learn.microsoft.com/en-us/azure/redis/>
+- <https://learn.microsoft.com/en-us/azure/azure-cache-for-redis/cache-overview>
+- <https://learn.microsoft.com/en-us/azure/data-explorer/>
+- <https://learn.microsoft.com/en-us/azure/confidential-ledger/overview>
+- <https://learn.microsoft.com/en-us/fabric/graph/overview>
+- <https://learn.microsoft.com/en-us/sql/relational-databases/graphs/sql-graph-overview>
+- <https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
@@ -156,6 +174,16 @@ them was filled from memory.
 - **Current availability of Azure Data Box Gateway.** The inventory flags it for
   re-checking, so lesson 0403 teaches the appliance family and does not assert the
   gateway's status.
+- **Any figure for what an operation costs in request units, and any sizing table
+  for DTU or vCore.** The inventory records these as capacity abstractions and quotes
+  no numbers, so lessons 0501 and 0502 teach the mechanism and quote none either.
+- **The contents of the MongoDB vCore feature-parity matrix.** The inventory records
+  that the matrix exists and should be checked before a migration. Lesson 0502 says
+  exactly that and reproduces nothing from it.
+- **How Cosmos DB throughput is distributed across physical partitions.** The
+  inventory names the partition key as the core design decision without describing
+  the division mechanism, so lesson 0502 argues from access patterns rather than from
+  a partition-throughput rule.
 - **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
   links one and no lesson spine carries a Glossary entry.
 
