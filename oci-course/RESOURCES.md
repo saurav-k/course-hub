@@ -244,6 +244,15 @@ from and the date it was read.
 - [Language](https://www.oracle.com/artificial-intelligence/language/) - sentiment, entity extraction, key phrases, translation and classification. Vendor product page rather than documentation.
 - [Document Understanding](https://docs.oracle.com/en-us/iaas/Content/document-understanding/using/home.htm) - key-value extraction from documents with prebuilt models, sharing its character recognition with Vision.
 
+### Module 14 - Resilience and migration
+
+- [Full Stack Disaster Recovery](https://docs.oracle.com/en-us/iaas/disaster-recovery/index.html) - protection groups paired across regions, the member types, the generated switchover, failover and drill plans, and prechecks.
+- [Disaster recovery terminology](https://docs.oracle.com/en-us/iaas/disaster-recovery/doc/disaster-recovery-terminology.html) - the drill defined against switchover and failover, and the isolated replica it produces.
+- [Using replication](https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/usingreplication.htm) - bucket replication policies, and the per-service pattern that block volumes, file systems and key-value tables follow.
+- [Scheduling volume backups](https://docs.oracle.com/en-us/iaas/Content/Block/Tasks/schedulingvolumebackups.htm) - backup policy tiers, cross-region backup copies, and volume groups for a consistent multi-volume snapshot.
+- [Oracle Cloud Migrations](https://docs.oracle.com/en-us/iaas/Content/cloud-migration/home.htm) - discovery agents, inventory and assessment dashboards, and migration waves for virtual machines.
+- [OCI best practices framework](https://docs.oracle.com/en/solutions/oci-best-practices/index.html) - the five published pillars, as documentation to review against rather than an automated review tool.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

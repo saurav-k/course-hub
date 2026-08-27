@@ -128,9 +128,18 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 1302 | Agents, knowledge bases and the conversation layer |
 | 1303 | Training your own, and the ladder of pretrained services |
 
+**Module 14 - Resilience and migration**
+
+| Lesson | Title |
+| 1400 | What a recovery plan is made of |
+| 1401 | The drill is the product |
+| 1402 | Replication is per service, and the plan is what ties it together |
+| 1403 | Moving workloads in |
+
 ## Planned, in order
 
-Fourteen modules, following the platform the way a first architecture meets it:
+All fourteen modules below are now written. The table stays as the record of
+why this order and no other. Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
 and watched, how change ships, and finally how it survives failure.
 
@@ -162,8 +171,8 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **Nothing in the module plan remains unwritten.** New numbers go at the end of a
+  module's own sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of OCI terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
 

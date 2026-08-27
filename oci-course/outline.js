@@ -323,6 +323,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1303-training-your-own-and-the-ladder.html"
         }
       ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "What a recovery plan is made of",
+          "href": "lessons/1400-what-a-recovery-plan-is-made-of.html"
+        },
+        {
+          "title": "The drill is the product",
+          "href": "lessons/1401-the-drill-is-the-product.html"
+        },
+        {
+          "title": "Replication is per service, and the plan is what ties it together",
+          "href": "lessons/1402-replication-is-per-service.html"
+        },
+        {
+          "title": "Moving workloads in",
+          "href": "lessons/1403-moving-workloads-in.html"
+        }
+      ]
     }
   ],
   "extras": []

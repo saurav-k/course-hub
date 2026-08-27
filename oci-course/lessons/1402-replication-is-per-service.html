@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Replication is per service, and the plan is what ties it together - Inside OCI</title>
+<meta name="description" content="Buckets, block volumes, file systems and key-value tables each replicate through their own mechanism, backup policies schedule copies with their own tiers, and the recovery plan is the only thing that orders them.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE OCI</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 14 &middot; Resilience and migration &middot; Lesson 1402</div>
+  <h1>Every service replicates on its own terms, so ordering the cutover is the only thing left to design</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Capability area <code>resilience-migration</code>, matrix rows <code>cross-region-replication</code> and <code>backup-service</code>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>There is <b>no single platform-wide replication switch</b>. A bucket has a replication policy, a block volume has a replica, a file system has its own replication, and a key-value table has global tables.</li>
+      <li>All of them are <b>asynchronous</b>, which means the standby is behind by an amount that depends on the service and the load.</li>
+      <li><b>Backup policies are the other half</b>: scheduled copies with predefined tiers, and cross-region copies of those backups.</li>
+      <li>A <b>volume group</b> is what makes a multi-volume snapshot consistent, and without one a machine with two volumes has two unrelated point-in-time copies.</li>
+      <li>The recovery plan of lesson 1400 is what <b>orders these mechanisms into one cutover</b>. On their own they are several independent copies with no agreed moment.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The drill, and what&lt;br/&gt;resilience testing means"] --> T["THIS PAGE&lt;br/&gt;per-service replication&lt;br/&gt;and the ordering above it"]
+  T --> N1["Moving workloads in"]
+  T --> N2["Storage copy mechanisms,&lt;br/&gt;lesson 0404"]
+  W["Resilience and migration&lt;br/&gt;this module"] -.- T
+    </div>
+    <figcaption>Where this sits. Lesson 0404 introduced the storage copy mechanisms one service at a time. This page is the same mechanisms seen from above, as inputs to a recovery rather than as features of a store.
+    <b>The change of viewpoint is the lesson: individually these are backup features, and together they are either a recovery or a collection of unrelated copies.</b></figcaption>
+  </figure>
+
+  <h2>The mental model: one mechanism per service</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  W["One workload"] --> B["A bucket&lt;br/&gt;a replication policy to another bucket"]
+  W --> V["Block volumes&lt;br/&gt;replicas in another domain or region"]
+  W --> F["A file system&lt;br/&gt;its own replication"]
+  W --> N["A key-value table&lt;br/&gt;global tables across regions"]
+  W --> D["A database&lt;br/&gt;its own standby arrangement"]
+  B -.- A["all asynchronous"]
+  V -.- A
+  F -.- A
+    </div>
+    <figcaption><a href="https://docs.oracle.com/en-us/iaas/Content/Object/Tasks/usingreplication.htm">Replication</a> is configured on each service separately, because each one knows how to copy its own data and nothing else does.
+    <b>Five mechanisms with five configurations means five places where somebody could have forgotten, which is precisely what the protection group membership check catches.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: asynchronous means the standby is behind</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant App as The application
+  participant P as The primary copy
+  participant S as The standby copy
+  App->>P: a write is acknowledged
+  P-->>S: replicated afterwards
+  App->>P: another write, acknowledged
+  Note over P,S: the standby is behind by an amount that varies
+  Note over App,S: a failover at this moment loses whatever has not arrived
+    </div>
+    <figcaption>Asynchronous replication acknowledges the write before the copy exists elsewhere, which is what keeps it fast. The gap is real and it changes with load.
+    <b>Whatever has not replicated at the moment of an unplanned failover is lost, and that is the difference between a switchover and a failover expressed as data rather than as procedure.</b></figcaption>
+  </figure>
+
+  <h2>The mechanism: what makes a multi-volume copy consistent</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Separate: two volumes, backed up independently
+  Separate --> Inconsistent: each snapshot is taken at its own moment
+  [*] --> Grouped: the two volumes are in a volume group
+  Grouped --> Consistent: one snapshot covers both at one moment
+  Inconsistent --> [*]: a restore may mix two points in time
+  Consistent --> [*]: a restore is one coherent moment
+    </div>
+    <figcaption><a href="https://docs.oracle.com/en-us/iaas/Content/Block/Tasks/schedulingvolumebackups.htm">Backup policies</a> schedule copies with predefined tiers, and a volume group is what makes a multi-volume snapshot cover one moment. Backups can also be copied to another region.
+    <b>A database whose data and log volumes were snapshotted seconds apart may restore into a state that never existed, and the volume group is the entire remedy.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Replication gives you <b>copies</b>. A recovery needs <b>a moment</b>: a point at which every part of the workload agrees about what happened. Volume groups supply that moment within a machine, and the recovery plan supplies the ordering across the workload. Neither comes from the replication itself.</div>
+
+  <div class="callout warn">
+  Lesson 0404 recorded that a restore forks rather than rewinds: recovering from a backup produces a new volume or a new instance rather than returning the original to an earlier state. That property matters more here than it did there, because a failover plan that assumes resources are restored in place will find itself with new resources, new identifiers and anything that referenced the old ones pointing at nothing.</div>
+
+  <h2>The trade-off: synchronous safety is not on this menu</h2>
+
+  <p>Every mechanism on this page is asynchronous, which is what makes writes fast and what makes cross-region replication practical at all. The price is a recovery point that is not zero and not fixed: it is however far behind the standby happens to be when the primary stops.</p>
+
+  <p>Where a workload genuinely cannot lose recent writes, the answer is at the database layer with its own standby arrangement rather than at the storage layer, and the honest design step is to state the acceptable loss as a number before choosing mechanisms rather than after. A drill will not reveal this, because a drill is orderly and an unplanned failover is not.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How is cross-region replication turned on for a workload?</div>
+      <button class="q-opt">Once, at the tenancy, covering everything it contains</button>
+      <button class="q-opt">Per service, with each one configured separately</button>
+      <button class="q-opt">By the recovery plan, which enables it for members</button>
+      <button class="q-opt">Automatically for anything inside a protection group</button>
+      <div class="q-fb">Each service replicates through its own mechanism and each is configured on its own. The first invents a platform-wide switch. The third and fourth give the recovery plan a job it does not have: it orders and validates rather than configuring the copies.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Two volumes on one machine are backed up without a volume group. What is the risk?</div>
+      <button class="q-opt">Only one of the two volumes is actually backed up</button>
+      <button class="q-opt">The backups cannot be copied to another region</button>
+      <button class="q-opt">The restore produces volumes that cannot be attached</button>
+      <button class="q-opt">The two snapshots are from different moments in time</button>
+      <div class="q-fb">Without a group, each snapshot is taken at its own moment and a restore may mix two points in time. The first and second invent limitations that do not exist. The third invents a failure that would at least be obvious, which this one is not.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does asynchronous replication mean for an unplanned failover?</div>
+      <button class="q-opt">The failover cannot proceed until replication catches up</button>
+      <button class="q-opt">The standby holds exactly the data the primary held</button>
+      <button class="q-opt">Whatever had not yet replicated is lost at that moment</button>
+      <button class="q-opt">The lost writes are replayed once the primary returns</button>
+      <div class="q-fb">Asynchronous means acknowledged before copied, so the unreplicated tail is lost. The first invents a blocking behaviour. The second describes synchronous replication. The fourth invents a replay that would require the primary to be reachable, which a failover assumes it is not.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A workload has a bucket of customer uploads, four instances each with a data volume and a log volume, a shared file system, and a database. The team has enabled bucket replication and configured volume backups on a schedule, and believes the workload is protected across regions. They have not created a volume group and have not built a protection group.</p>
+      <p><b>List</b> what is protected, what is not, and what a restore of the current backups would actually give them.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Go component by component and ask which mechanism covers it. Then look separately at the two volumes per machine and ask what moment each snapshot represents. Finally, remember what a restore produces rather than what it repairs.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The bucket.</b> Protected across regions by its replication policy, asynchronously, so the destination is behind by some amount.</li>
+        <li><b>The volumes.</b> Backed up on a schedule, but backups are not the same as a cross-region copy unless the copy is configured. Check whether the schedule includes copying to another region.</li>
+        <li><b>The file system and the database.</b> Not covered by either mechanism mentioned. Each has its own replication, and neither was configured. These are the gaps.</li>
+        <li><b>What a restore gives them.</b> New volumes rather than repaired ones, and for each machine two snapshots taken at slightly different moments because there is no volume group. A database restored from a data volume and a log volume seconds apart may not start.</li>
+        <li><b>The first three fixes, in order.</b> Put each machine's volumes in a volume group so a snapshot covers one moment. Configure the file system and database replication. Then build the protection group, so that the membership check names anything still missing.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> At least two components should turn out to be unprotected, and the volume backups should turn out to be inconsistent rather than absent. If everything looked covered, count the components against the mechanisms they configured.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent which instances have more than one attached volume and whether those volumes sit in a volume group. Every machine on that list without a group has backups that look complete and restore to a moment that never happened.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://docs.oracle.com/en-us/iaas/Content/Block/Tasks/schedulingvolumebackups.htm">Scheduling volume backups</a>. It carries the policy tiers, the cross-region copy and the volume group, and the volume group paragraph is the one that turns a set of backups into a restorable machine.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified OCI inventory behind this course, each fact linked to the Oracle page it was read from. Read dates are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="1401-the-drill-is-the-product.html"><span class="dir">&larr; Previous</span><span class="ttl">The drill is the product</span></a>
+    <a class="nxt" href="1403-moving-workloads-in.html"><span class="dir">Next &rarr;</span><span class="ttl">Moving workloads in</span></a>
+  </div>
+
+  <footer><p>Inside OCI &middot; Lesson 1402 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
