@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bigtable and Firestore - Inside Google Cloud</title>
+<meta name="description" content="Two non-relational stores with opposite centres of gravity: a wide-column store with single-row transactions, and a document store with modes, and the time-series row that has no product.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Databases &middot; Lesson 0502</div>
+  <h1>Bigtable trades transaction scope for scale, and Firestore does the reverse</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capabilities <code>nosql-keyvalue</code>, <code>nosql-document</code> and <code>timeseries-database</code>. Sourced from
+    <a href="https://cloud.google.com/bigtable/docs/overview">Bigtable</a> and
+    <a href="https://cloud.google.com/firestore/docs">Firestore</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Bigtable</b> is a wide-column store at petabyte scale. Its three shaping constraints: <b>single-row transactions only</b>, <b>eventually consistent replication</b>, and an <b>HBase-compatible</b> interface.</li>
+      <li><b>Firestore</b> is a serverless document store with two modes - <b>Native mode</b> with live sync and offline support, and <b>Datastore mode</b>.</li>
+      <li>Firestore carries <b>multi-region strong consistency options</b>, <b>point-in-time recovery</b> and <b>TTL policies</b>, which are the properties an application database usually asks for.</li>
+      <li>Firestore's <b>MongoDB compatibility is an interface layer</b>, not a MongoDB engine. Read it as an interface promise and check the surface you actually use.</li>
+      <li>There is <b>no dedicated managed time-series database</b>. Google's documented pattern is <b>Bigtable</b> for time series.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous pages&lt;br/&gt;the relational tier&lt;br/&gt;and Spanner"] --> T["THIS PAGE&lt;br/&gt;the two stores that&lt;br/&gt;give up the relational&lt;br/&gt;contract on purpose"]
+  T --> N["What it enables&lt;br/&gt;the cache tier, and&lt;br/&gt;knowing which store&lt;br/&gt;a workload belongs in"]
+  W["Module 05&lt;br/&gt;Databases"] -.- T
+    </div>
+    <figcaption>Where this sits. The first two pages kept the relational contract and argued about where the database lives. This page is about the two stores that drop parts of that contract deliberately, and about what each one buys with it.
+    <b>Both of these are chosen for what they give up, so a design that cannot name what it gave up has not finished choosing.</b></figcaption>
+  </figure>
+
+  <h2>1. Two stores, two centres of gravity</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  NR["Non-relational stores"] --> BT["Bigtable&lt;br/&gt;wide-column, petabyte scale&lt;br/&gt;single-row transactions only&lt;br/&gt;eventually consistent replication&lt;br/&gt;HBase-compatible"]
+  NR --> FS["Firestore&lt;br/&gt;serverless document store&lt;br/&gt;Native mode or Datastore mode&lt;br/&gt;multi-region strong consistency options&lt;br/&gt;point-in-time recovery and TTL policies"]
+  BT --> TS["Google's documented&lt;br/&gt;time-series pattern"]
+  FS --> MC["MongoDB-compatible&lt;br/&gt;interface layer"]
+  FS --> LS["Live sync and offline&lt;br/&gt;support in Native mode"]
+    </div>
+    <figcaption>The two products with the properties that decide between them. Bigtable's list is mostly constraints and Firestore's is mostly application conveniences, which is the honest summary of what each is for.
+    <b>Bigtable is a scale decision and Firestore is an application-shape decision, so the two are rarely genuine alternatives for the same workload.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/bigtable/docs/overview">Bigtable</a> earns its scale by keeping the write path narrow, and the narrowness is visible in its contract. <a href="https://cloud.google.com/firestore/docs">Firestore</a> spends its effort on what an application needs from a database that is not a spreadsheet of rows - recovery to a point in time, expiry of documents, and a client that keeps working while the network does not.</p>
+
+  <h2>2. The constraint that decides most Bigtable designs</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant App as Application
+  participant BT as Bigtable
+  App->>BT: atomic update inside one row
+  BT-->>App: committed as one unit
+  App->>BT: update two rows as one unit
+  BT-->>App: not offered - transactions are single-row
+  App->>App: model the invariant inside one row instead
+  Note over App,BT: Replication between clusters is eventually consistent
+    </div>
+    <figcaption>The single-row transaction limit, drawn as the exchange an application actually has. There is no failure here to handle - the operation simply is not offered, so the invariant has to move into the row design before any code is written.
+    <b>Bigtable pushes schema decisions earlier than a relational database does, because the row key and the row boundary are where correctness is decided rather than where performance is tuned.</b></figcaption>
+  </figure>
+
+  <p>Eventually consistent replication is the second half of the same bargain. A Bigtable design that spans clusters accepts that a read served by one cluster may not yet reflect a write accepted by another, and it either tolerates that or it routes reads and writes to the same place. The HBase-compatible interface is the third property, and it is the one that makes an existing HBase workload a lift rather than a rewrite.</p>
+
+  <div class="callout warn">
+    Firestore's <b>MongoDB compatibility is an interface layer</b> on Firestore, not a MongoDB engine. The distinction is the difference between "your driver connects" and "your database behaves the same", and only the first is what is offered. Check the specific surface a workload depends on against the <a href="https://cloud.google.com/firestore/docs">Firestore documentation</a> before treating a MongoDB migration as a configuration change.
+  </div>
+
+  <h2>3. The time-series row, and why it is a gap rather than a Bigtable row</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q["A time-series requirement&lt;br/&gt;high-rate ordered writes,&lt;br/&gt;range reads over a window"] --> N["No dedicated managed&lt;br/&gt;time-series product"]
+  N --> P["Google's documented pattern&lt;br/&gt;Bigtable, with time in the row key"]
+  N --> M["Cloud Monitoring's own store&lt;br/&gt;is internal to the service&lt;br/&gt;and not a database you write to"]
+    </div>
+    <figcaption>How the time-series row resolves. The capability is reachable, the vendor documents the pattern, and what is missing is the product that would have supplied the retention policy, the downsampling and the query language as features rather than as design work.
+    <b>Recording this as a gap rather than as a Bigtable row is deliberate - the difference between a pattern and a product is the work you still have to do, and pretending otherwise hides it from an estimate.</b></figcaption>
+  </figure>
+
+  <p>Cloud Monitoring does hold a time-series store, and module 10 covers it, but it is internal to the observability service rather than a database an application writes into. The one product that looked like a counter-example, the Timeseries Insights API, is retired.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Choose between these two by asking what the application does with a key. If it <b>reads and writes one entity at a time at enormous rate</b>, and the invariant fits inside that entity, it is a Bigtable shape. If it wants <b>documents, recovery, expiry and a client that survives a lost network</b>, it is a Firestore shape. If the answer is "both", the requirement has not been split yet.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">An application must update two related records as one atomic unit at very high write rates. What does Bigtable's contract say?</div>
+      <button class="q-opt">It commits both, because a table write is atomic across rows</button>
+      <button class="q-opt">It commits both, but only inside a single cluster of the two</button>
+      <button class="q-opt">It rejects the write, and a retry loop resolves the conflict</button>
+      <button class="q-opt">It offers single-row transactions, so the design must adapt</button>
+      <div class="q-fb">Transactions are single-row, so the invariant is moved into one row at design time. The first two invent a cross-row guarantee that is not offered. The third describes an error path, but there is no failure to retry - the operation is simply not part of the contract.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the accurate reading of Firestore's MongoDB compatibility?</div>
+      <button class="q-opt">A MongoDB engine that Google operates under the Firestore name</button>
+      <button class="q-opt">An interface layer on Firestore, so behaviour still needs checks</button>
+      <button class="q-opt">A migration tool that converts collections into Firestore ones</button>
+      <button class="q-opt">A driver shipped by Google that speaks the Firestore protocol</button>
+      <div class="q-fb">It is an interface layer on Firestore, which makes a driver connect without making the database behave identically. The first is the over-reading that turns a migration estimate wrong. The third and fourth describe a migration tool and a client library, neither of which is what compatibility means here.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does the verified inventory record for the time-series capability on Google Cloud?</div>
+      <button class="q-opt">Cloud Monitoring's store is the managed time-series database</button>
+      <button class="q-opt">Firestore is the pattern, because documents carry timestamps</button>
+      <button class="q-opt">No dedicated product, and Bigtable is the documented pattern</button>
+      <button class="q-opt">Bigtable holds the row, so the capability is fully productised</button>
+      <div class="q-fb">The row is a gap with a documented pattern behind it, which is a weaker claim than a product and is recorded that way on purpose. The first names a store that is internal to the observability service. The second is not the documented pattern. The fourth is the collapse the inventory explicitly declined to make.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A fleet-telemetry platform ingests one reading per vehicle per second from a large fleet, and keeps a year of it for range queries over a vehicle and a time window. A separate mobile application shows drivers their own trip history, works on a train with no signal, and must let a support agent restore a driver's records to how they looked before a bad bulk edit.</p>
+      <p><b>Place</b> each of the two workloads, <b>justify</b> each placement with one property, and <b>name</b> the part of the first workload that is design work rather than a product feature.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The first workload names a shape the inventory records as a gap. The second names three properties that appear in exactly one product's list on this page.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Place the telemetry.</b> High-rate ordered writes with range reads over a window is a time-series shape, and the documented pattern for it is Bigtable. Its scale is the property that justifies it, and the single-row transaction limit costs nothing here because each reading is independent.</li>
+        <li><b>Place the mobile application.</b> Offline operation on a train is Native-mode live sync and offline support. Restoring records to a previous state is point-in-time recovery. Both properties are Firestore's, so the placement is settled by two independent requirements rather than by preference.</li>
+        <li><b>Name the design work.</b> Because there is no dedicated time-series product, the row key that puts a vehicle and a time in an order that makes range reads cheap is yours to design, and so is the expiry of data past a year. In a time-series product those would be a schema setting and a retention policy.</li>
+        <li><b>Check what neither placement needs.</b> Nothing here asks for a transaction spanning two entities, which is why no part of this reaches back to the relational pages.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Each placement should rest on a property named on this page rather than on "NoSQL is fast". If your telemetry answer treated Bigtable as a time-series product, re-read the third figure - the missing piece is exactly the row-key and retention work you have to do yourself.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If a workload seems to want both stores, ask an agent to list the operations that must be atomic and the largest object each one touches. When the atomic operations all fit inside one entity you are in Bigtable territory, and when they do not, you are being told which product to use.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/bigtable/docs/overview">The Bigtable overview</a> is where the wide-column model, the transaction scope and the replication behaviour are documented, and it is the page a time-series design should be read against. <a href="https://cloud.google.com/firestore/docs">The Firestore documentation</a> covers the two modes, the recovery and expiry features, and the compatibility layer.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0501-spanner.html"><span class="dir">&larr; Previous</span><span class="ttl">Spanner, and the rows it quietly fills</span></a>
+    <a class="nxt" href="0503-memorystore.html"><span class="dir">Next &rarr;</span><span class="ttl">Memorystore and the cache tier</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0502 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

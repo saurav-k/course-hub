@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Machine identity without keys - Inside Google Cloud</title>
+<meta name="description" content="A workload runs as a service account and collects short-lived tokens from the metadata server. Outside workloads are trusted by federation, and the IAM binding on the target is the trust document.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Identity and access &middot; Lesson 0802</div>
+  <h1>A workload's identity is attached to it, and no key is issued</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Capabilities <code>workload-identity</code>, <code>workload-identity-federation</code>, <code>cross-account-assumption</code>, <code>short-lived-credentials</code> and <code>agent-identity</code>. Sourced from
+    <a href="https://cloud.google.com/iam/docs/service-account-overview">service accounts</a> and
+    <a href="https://cloud.google.com/iam/docs/workload-identity-federation">Workload Identity Federation</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A virtual machine, a Cloud Run revision or a GKE workload <b>runs as a service account</b>. Client libraries collect <b>short-lived tokens from the metadata server</b>, so there is no key material on the machine.</li>
+      <li><b>Impersonation</b> is the cross-boundary equivalent of assuming a role: <code>roles/iam.serviceAccountTokenCreator</code> lets one principal mint short-lived credentials for a service account.</li>
+      <li>The grant <b>is</b> the trust. There is no separate trust document per resource - an IAM binding on the target naming the foreign identity is the whole arrangement.</li>
+      <li><b>Workload Identity Federation</b> trusts an external system - AWS, any OIDC issuer, SAML or X.509 - through a <b>pool and a provider</b> with <b>attribute mapping</b> and an <b>attribute condition</b>. No long-lived secret crosses the boundary.</li>
+      <li>Service account keys exist and Google's guidance is to <b>avoid them entirely</b>. There is also <b>no distinct agent identity object</b> - agents run as ordinary service accounts.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous pages&lt;br/&gt;how a request from&lt;br/&gt;a principal is judged,&lt;br/&gt;and bounded"] --> T["THIS PAGE&lt;br/&gt;where a machine's&lt;br/&gt;principal comes from&lt;br/&gt;in the first place"]
+  T --> N["What it enables&lt;br/&gt;the human directories,&lt;br/&gt;and the keys and&lt;br/&gt;secrets beneath them"]
+  W["Module 08&lt;br/&gt;Identity and access"] -.- T
+    </div>
+    <figcaption>Where this sits. Two pages have judged requests without asking who was making them. This page answers that for everything that is not a person, which is most of the traffic in any real estate.
+    <b>The design goal on this platform is stated plainly by its own documentation - identities are trusted by policy, and never by a copied secret.</b></figcaption>
+  </figure>
+
+  <h2>1. Attached, so nothing has to be distributed</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant W as Your code on a VM, Cloud Run or GKE
+  participant M as The metadata server
+  participant API as A Google Cloud API
+  W->>M: the client library asks for a token
+  M-->>W: a short-lived OAuth token for the attached service account
+  W->>API: call, presenting that token
+  API-->>W: the evaluation chain from lesson 0800 decides
+  Note over W,M: No key file was deployed, and nothing to rotate
+    </div>
+    <figcaption>The exchange that removes secret distribution from the problem. The identity is a property of where the code runs, so it arrives with the deployment rather than being packaged into it.
+    <b>The security win is not that the token is short-lived - it is that no long-lived thing ever existed to be leaked, committed or copied to a laptop.</b></figcaption>
+  </figure>
+
+  <p>On GKE the mapping is explicit: a Kubernetes service account is mapped to a Google service account, so a pod inherits an identity the same way. Two hardening notes come with this. The <b>default compute service account</b> should be disabled in hardened designs, and service account <b>keys</b> exist but the vendor's guidance is to avoid them entirely.</p>
+
+  <h2>2. Impersonation, and where the trust is written</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["A principal in project A"] -->|"holds roles/iam.&lt;br/&gt;serviceAccountTokenCreator&lt;br/&gt;on the target"| SA["A service account in project B"]
+  SA -->|"short-lived credentials&lt;br/&gt;minted for it"| R["Resources project B's&lt;br/&gt;service account may reach"]
+  N["The binding on the target&lt;br/&gt;IS the trust document -&lt;br/&gt;there is no second object"] -.- SA
+    </div>
+    <figcaption>The cross-boundary pattern. A principal that may create tokens for a service account can act as it, which is how work crosses a project or organisation line without a shared secret.
+    <b>Because the trust lives in a binding on the target, the audit question is always "who holds token-creator on this service account" - and it is answerable without hunting for a separate trust policy.</b></figcaption>
+  </figure>
+
+  <h2>3. Trusting a workload that is not here</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant CI as An external workload - CI system, AWS, any OIDC issuer
+  participant P as Workload identity pool and provider
+  participant STS as The token exchange
+  participant SA as A service account
+  participant API as A Google Cloud API
+  CI->>P: present the external token
+  P->>P: attribute mapping, then the attribute condition gates entry
+  P->>STS: exchange for a federated token
+  STS->>SA: impersonate the service account
+  SA->>API: call with a short-lived Google token
+  Note over CI,P: No long-lived secret ever crosses the boundary
+    </div>
+    <figcaption><a href="https://cloud.google.com/iam/docs/workload-identity-federation">Workload Identity Federation</a> as an exchange. The pool holds the trust in the provider's configuration, the attribute mapping turns claims from the external token into principal attributes, and the attribute condition is the gate.
+    <b>The attribute condition is the security control on this page - without one, every workload the external issuer will vouch for is trusted, not only yours.</b></figcaption>
+  </figure>
+
+  <div class="code-cap">Terraform &middot; the provider shape, from the research behind this course</div>
+  <pre><code>resource "google_iam_workload_identity_pool_provider" "github" {
+  workload_identity_pool_id          = google_iam_workload_identity_pool.pool.workload_identity_pool_id
+  workload_identity_pool_provider_id = "github"
+  attribute_mapping = {
+    "google.subject"       = "assertion.sub"
+    "attribute.repository" = "assertion.repository"
+  }
+  attribute_condition = "assertion.repository == \"org/repo\""
+  oidc { issuer_uri = "https://token.actions.githubusercontent.com" }
+}
+</code></pre>
+
+  <p>Read the last two settings together. The mapping makes the external repository name available as an attribute; the condition refuses everything that is not that repository. Supported provider kinds are AWS, any OIDC issuer, SAML and X.509.</p>
+
+  <h2>4. Short-lived credentials, and the row with no object</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  SLC["Short-lived credentials"] --> MS["Metadata server tokens&lt;br/&gt;for attached identities"]
+  SLC --> IC["IAM Credentials API&lt;br/&gt;generateAccessToken, signJwt,&lt;br/&gt;generateIdToken"]
+  SLC --> OID["OIDC identity tokens&lt;br/&gt;from a service account"]
+  AG["An agent identity object&lt;br/&gt;with its own lifecycle and&lt;br/&gt;a human sponsor"] -.- NO["No such object here -&lt;br/&gt;agents run as ordinary&lt;br/&gt;service accounts"]
+    </div>
+    <figcaption>Every credential path on this page ends in something temporary, and the dashed pair is the recorded absence. Agents are not modelled as a distinct principal type, so their lifecycle and their human sponsorship are not tracked separately by the platform.
+    <b>An estate that runs agents therefore tracks who owns each agent's service account itself, because nothing in IAM records that relationship for it.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    The verified inventory records <b>downscoped access tokens</b>, narrowed with a credential access boundary, and flags the current API surface as needing confirmation. Nothing about their shape is stated here. Check the <a href="https://cloud.google.com/iam/docs/create-short-lived-credentials-direct">short-lived credentials documentation</a> before a design depends on them.
+  </div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Three questions cover every machine-to-machine case here. <b>Does the code run on Google Cloud?</b> Attach a service account and stop. <b>Does it run somewhere else?</b> Federate, and put the security in the attribute condition. <b>Does one identity need to act as another?</b> Grant token-creator on the target, because the binding on the target is the trust. A service account key is not the answer to any of the three.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Where does a Cloud Run revision get credentials for a Google Cloud API?</div>
+      <button class="q-opt">From a key file mounted as a secret at the container's start-up</button>
+      <button class="q-opt">From the metadata server, as short-lived tokens for its identity</button>
+      <button class="q-opt">From an environment variable holding a long-lived bearer token</button>
+      <button class="q-opt">From a federated exchange, since serverless has no attached identity</button>
+      <div class="q-fb">The revision runs as a service account and the libraries collect short-lived tokens from the metadata server. The first and third describe the secret distribution this design removes. The fourth denies attached identity for a runtime that has it - federation is for workloads outside the platform.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Where is the trust recorded when a principal in one project acts as a service account in another?</div>
+      <button class="q-opt">In a trust policy on the source project naming the target account</button>
+      <button class="q-opt">In the workload identity pool that both projects are attached to</button>
+      <button class="q-opt">In an IAM binding on the target service account - the binding is it</button>
+      <button class="q-opt">In an organisation policy constraint permitting the impersonation</button>
+      <div class="q-fb">There is no separate trust document - the token-creator binding on the target service account is the trust. The first imports a two-document model from elsewhere. The second names federation, which is for external workloads. The fourth confuses the guardrail axis with the identity axis.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">In a federation provider, which setting actually stops an unintended external workload?</div>
+      <button class="q-opt">The issuer URI, which pins the identity provider being trusted</button>
+      <button class="q-opt">The attribute mapping, which turns token claims into attributes</button>
+      <button class="q-opt">The pool identifier, which scopes the trust to one pool of workloads</button>
+      <button class="q-opt">The attribute condition, which refuses everything it does not match</button>
+      <div class="q-fb">The condition is the gate; without it, every workload the issuer vouches for is trusted. The first narrows the issuer but not which of its workloads. The second makes claims available and decides nothing. The third names the container rather than the control.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A build pipeline runs outside Google Cloud and must deploy into two projects. The current arrangement stores a downloaded service account key in the pipeline's secret store, and the same key is used for both projects. A reviewer asks for a design with no long-lived secret and with each project's access separately revocable.</p>
+      <p><b>Replace</b> the key, <b>say</b> what the security of the new design rests on, <b>design</b> the two-project access, and <b>state</b> what the platform will not track for you.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The first move is named in the one-minute version. The second project is not a second pool - look at what the trust document actually is.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Replace the key.</b> Workload Identity Federation. A pool and a provider trust the pipeline's OIDC issuer, its token is exchanged, and the exchanged token is used to impersonate a service account. No long-lived secret is stored anywhere.</li>
+        <li><b>Name what the security rests on.</b> The attribute condition. The issuer will vouch for many workloads, so the condition that pins the repository, the branch or the equivalent claim is what separates your pipeline from everybody else's on the same issuer. A provider without one trusts far more than it looks like it does.</li>
+        <li><b>Design the two projects.</b> One service account per project, and the pipeline's federated principal granted token-creator on each. Each project's access is then a binding on its own service account, so revoking one is a single binding removal and does not touch the other.</li>
+        <li><b>Reject the shortcut.</b> One shared service account with roles in both projects would work and would make the two revocations one, which is exactly what the reviewer asked to avoid.</li>
+        <li><b>State what is not tracked.</b> If any of this runs an agent, note that there is no distinct agent identity object - it is an ordinary service account - so the record of which human sponsors it lives in your own documentation.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your design should contain zero stored credentials and two independently removable bindings. If revoking one project's access would also have removed the other's, the two projects are sharing a service account.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If a repository contains a service account key, ask an agent which of the three cases the workload is in - on the platform, outside it, or acting as another identity. All three have a keyless answer, so the key is evidence of a design that predates one of them.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/iam/docs/workload-identity-federation">The Workload Identity Federation documentation</a> covers pools, providers, attribute mapping and conditions, and it is the page a keyless pipeline is built from. <a href="https://cloud.google.com/iam/docs/service-account-overview">The service account overview</a> covers attached identities and the guidance on keys.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0801-boundaries-and-privileged-access.html"><span class="dir">&larr; Previous</span><span class="ttl">Boundaries and privileged access</span></a>
+    <a class="nxt" href="0803-two-kinds-of-human.html"><span class="dir">Next &rarr;</span><span class="ttl">Two kinds of human, two directories</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0802 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

@@ -101,6 +101,258 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0404-where-the-storage-menu-stops.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Databases",
+      "lessons": [
+        {
+          "title": "The managed relational tier",
+          "href": "lessons/0500-managed-relational.html"
+        },
+        {
+          "title": "Spanner, and the rows it quietly fills",
+          "href": "lessons/0501-spanner.html"
+        },
+        {
+          "title": "Bigtable and Firestore",
+          "href": "lessons/0502-bigtable-and-firestore.html"
+        },
+        {
+          "title": "Memorystore and the cache tier",
+          "href": "lessons/0503-memorystore.html"
+        },
+        {
+          "title": "Moving a database in",
+          "href": "lessons/0504-moving-a-database-in.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "BigQuery, the warehouse and the query engine",
+          "href": "lessons/0600-bigquery.html"
+        },
+        {
+          "title": "BigLake and the lakehouse",
+          "href": "lessons/0601-biglake-and-the-lakehouse.html"
+        },
+        {
+          "title": "Dataflow and the streaming row",
+          "href": "lessons/0602-dataflow-and-streaming.html"
+        },
+        {
+          "title": "A recurring Spark job is two decisions",
+          "href": "lessons/0603-spark-and-the-orchestrator.html"
+        },
+        {
+          "title": "Governing and reading the data",
+          "href": "lessons/0604-governing-and-reading-the-data.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "Subnets and the address plan",
+          "href": "lessons/0700-subnets-and-addresses.html"
+        },
+        {
+          "title": "Routing, egress and the firewall",
+          "href": "lessons/0701-routing-egress-and-the-firewall.html"
+        },
+        {
+          "title": "Three private paths to a managed service",
+          "href": "lessons/0702-three-private-paths.html"
+        },
+        {
+          "title": "Joining networks",
+          "href": "lessons/0703-joining-networks.html"
+        },
+        {
+          "title": "Reaching the ground",
+          "href": "lessons/0704-reaching-the-ground.html"
+        },
+        {
+          "title": "The edge, and one anycast front door",
+          "href": "lessons/0705-the-edge.html"
+        }
+      ]
+    },
+    {
+      "n": "08",
+      "title": "Identity and access",
+      "lessons": [
+        {
+          "title": "The IAM evaluation chain",
+          "href": "lessons/0800-the-evaluation-chain.html"
+        },
+        {
+          "title": "Boundaries and privileged access",
+          "href": "lessons/0801-boundaries-and-privileged-access.html"
+        },
+        {
+          "title": "Machine identity without keys",
+          "href": "lessons/0802-machine-identity.html"
+        },
+        {
+          "title": "Two kinds of human, two directories",
+          "href": "lessons/0803-two-kinds-of-human.html"
+        },
+        {
+          "title": "Keys, secrets and certificates",
+          "href": "lessons/0804-keys-and-secrets.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "The landing zone",
+          "href": "lessons/0900-the-landing-zone.html"
+        },
+        {
+          "title": "Labels, tags and quotas",
+          "href": "lessons/0901-labels-tags-and-quotas.html"
+        },
+        {
+          "title": "Seeing and proving the estate",
+          "href": "lessons/0902-seeing-the-estate.html"
+        },
+        {
+          "title": "The bill, and where its detail lives",
+          "href": "lessons/0903-the-bill.html"
+        },
+        {
+          "title": "Paying less on purpose",
+          "href": "lessons/0904-paying-less-on-purpose.html"
+        }
+      ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Where a log lands and how long it stays",
+          "href": "lessons/1000-where-a-log-lands.html"
+        },
+        {
+          "title": "The four audit streams",
+          "href": "lessons/1001-the-four-audit-streams.html"
+        },
+        {
+          "title": "The streams that are off until you turn them on",
+          "href": "lessons/1002-streams-that-are-off.html"
+        },
+        {
+          "title": "Metrics, agents and three retention schedules",
+          "href": "lessons/1003-metrics-and-retention.html"
+        },
+        {
+          "title": "Traces, profiles and being told",
+          "href": "lessons/1004-being-told.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "The perimeter and the proxy",
+          "href": "lessons/1100-the-perimeter-and-the-proxy.html"
+        },
+        {
+          "title": "Stopping a request at the edge and in the fabric",
+          "href": "lessons/1101-stopping-a-request.html"
+        },
+        {
+          "title": "Threat detection and posture",
+          "href": "lessons/1102-findings.html"
+        },
+        {
+          "title": "Scanning what you build, classifying what you hold",
+          "href": "lessons/1103-scanning-and-classifying.html"
+        }
+      ]
+    },
+    {
+      "n": "12",
+      "title": "Delivery and integration",
+      "lessons": [
+        {
+          "title": "Infrastructure as code here",
+          "href": "lessons/1200-infrastructure-as-code.html"
+        },
+        {
+          "title": "The pipeline, and the gate in it",
+          "href": "lessons/1201-the-pipeline.html"
+        },
+        {
+          "title": "Four shapes of message",
+          "href": "lessons/1202-four-shapes-of-message.html"
+        },
+        {
+          "title": "Orchestration and scheduling",
+          "href": "lessons/1203-orchestration-and-scheduling.html"
+        },
+        {
+          "title": "APIs at the front",
+          "href": "lessons/1204-apis-at-the-front.html"
+        }
+      ]
+    },
+    {
+      "n": "13",
+      "title": "AI and ML",
+      "lessons": [
+        {
+          "title": "Models you did not train",
+          "href": "lessons/1300-models-you-did-not-train.html"
+        },
+        {
+          "title": "Training your own",
+          "href": "lessons/1301-training-your-own.html"
+        },
+        {
+          "title": "Vectors and retrieval",
+          "href": "lessons/1302-vectors-and-retrieval.html"
+        },
+        {
+          "title": "Agents, and the names that keep moving",
+          "href": "lessons/1303-agents-and-the-names.html"
+        }
+      ]
+    },
+    {
+      "n": "14",
+      "title": "Resilience and migration",
+      "lessons": [
+        {
+          "title": "Three things called backup",
+          "href": "lessons/1400-three-things-called-backup.html"
+        },
+        {
+          "title": "Replication and the recovery point",
+          "href": "lessons/1401-replication-and-recovery-points.html"
+        },
+        {
+          "title": "Moving workloads in",
+          "href": "lessons/1402-moving-workloads-in.html"
+        },
+        {
+          "title": "Judging the design",
+          "href": "lessons/1403-judging-the-design.html"
+        }
+      ]
     }
   ],
   "extras": []

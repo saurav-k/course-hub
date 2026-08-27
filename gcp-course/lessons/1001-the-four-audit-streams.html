@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The four audit streams - Inside Google Cloud</title>
+<meta name="description" content="Cloud Audit Logs emit four kinds of record. Two are always on and free, one is off until you enable it per service, and one is always generated, billed, and expires in thirty days.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1001</div>
+  <h1>Four audit streams, and the one you want history of expires first</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">9 min</span>
+    Capabilities <code>control-plane-audit-log</code>, <code>data-plane-access-log</code>, <code>policy-denied-audit-log</code> and <code>access-transparency-logs</code>. Sourced from
+    <a href="https://cloud.google.com/logging/docs/audit">the audit logs overview</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Admin Activity</b> and <b>System Event</b> logs are <b>always on, cannot be disabled, and are free</b>. They land in <b>_Required</b> for <b>400 days</b>.</li>
+      <li><b>Data Access</b> logs are <b>off by default</b> for all services except some BigQuery logs. They are enabled per service in the IAM audit configuration, and once enabled they are <b>billed as normal ingestion</b>.</li>
+      <li><b>Policy Denied</b> logs are <b>always generated and cannot be disabled</b>, and they are <b>billed</b> and land in <b>_Default</b> - not in _Required. An exclusion filter can stop the storage but not the generation.</li>
+      <li><b>Access Transparency</b> records actions by Google's own personnel on your content, and it is on when the organisation holds a <b>Standard, Enhanced or Premium support level</b>.</li>
+      <li>Audit entries are <b>immutable</b>, and they arrive in <b>seconds</b>. What they do not capture is a longer list than people expect.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous page&lt;br/&gt;the router, the two&lt;br/&gt;buckets and what&lt;br/&gt;each one keeps"] --> T["THIS PAGE&lt;br/&gt;the four streams&lt;br/&gt;that record who&lt;br/&gt;did what"]
+  T --> N["What it enables&lt;br/&gt;the network and&lt;br/&gt;service streams,&lt;br/&gt;which are all off"]
+  W["Module 10&lt;br/&gt;Observability and audit"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page taught the buckets; this page is the one place where which bucket a stream lands in decides whether an investigation is possible a year later.
+    <b>Three properties tell these four streams apart - can it be turned off, is it billed, and where does it land - and every design mistake in this area comes from assuming all four answer the same way.</b></figcaption>
+  </figure>
+
+  <h2>1. The four, side by side</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+quadrantChart
+  title Can it be disabled, and is it billed
+  x-axis "Free" --> "Billed"
+  y-axis "Enabled by you" --> "Always generated"
+  quadrant-1 Always on and billed
+  quadrant-2 Always on and free
+  quadrant-3 Opt in and free
+  quadrant-4 Opt in and billed
+  Admin Activity: [0.15, 0.9]
+  System Event: [0.15, 0.75]
+  Access Transparency: [0.2, 0.62]
+  Policy Denied: [0.82, 0.85]
+  Data Access: [0.82, 0.2]
+    </div>
+    <figcaption>The four streams placed on the two axes that matter operationally. Access Transparency sits slightly lower because it is on when the organisation holds a supported service level rather than unconditionally.
+    <b>The upper-right corner is the one nobody expects: a stream that is always generated and always billed, so it appears on the invoice whether or not anyone decided to collect it.</b></figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>Stream</th><th>On by default</th><th>Bucket</th><th>Retention</th><th>Billed</th></tr></thead>
+    <tbody>
+      <tr><td>Admin Activity</td><td>always, cannot be disabled</td><td>_Required</td><td>400 days, fixed</td><td>no</td></tr>
+      <tr><td>System Event</td><td>always, cannot be disabled</td><td>_Required</td><td>400 days, fixed</td><td>no</td></tr>
+      <tr><td>Access Transparency</td><td>with a supported service level</td><td>_Required</td><td>400 days, fixed</td><td>no</td></tr>
+      <tr><td>Policy Denied</td><td>always generated, storage excludable</td><td>_Default</td><td>30 days by default</td><td>yes</td></tr>
+      <tr><td>Data Access</td><td>off, except some BigQuery logs</td><td>_Default</td><td>30 days by default</td><td>yes</td></tr>
+    </tbody>
+  </table>
+
+  <h2>2. The stream that records a refusal, and forgets it soonest</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant P as A principal
+  participant S as A service
+  participant PD as Policy Denied audit log
+  participant D as _Default bucket
+  P->>S: a call a security policy forbids
+  S-->>P: refused
+  S->>PD: record the refusal - this cannot be disabled
+  PD->>D: stored in _Default, billed, 30 days by default
+  Note over PD,D: An exclusion filter stops the storage and not the generation
+    </div>
+    <figcaption>The path a refusal takes. Deny-policy blocks and service-perimeter blocks are recorded here, so this is the stream that answers "did somebody try, and were they stopped".
+    <b>It is the security stream with the shortest memory by default, so an estate that wants a year of attempted-and-refused access has to route it to a longer bucket deliberately - and raising retention is itself a billed change.</b></figcaption>
+  </figure>
+
+  <p>Two properties of this stream repay attention. It cannot be turned off, so it is on the bill whether or not the estate reads it; and it lands in <b>_Default</b> rather than _Required, because the required bucket's filter covers only the activity, system event and access transparency log identifiers.</p>
+
+  <h2>3. The stream that is off, and what that means</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Off: Data Access logging, the default for almost every service
+  Off --> Enabled: enable it per service in the IAM audit configuration
+  Enabled --> Recording: reads and non-config writes are recorded
+  Recording --> Billed: storage is charged as normal ingestion
+  Off --> Blind: nobody can answer who read this
+  note right of Blind
+    The gap is retrospective -
+    enabling it today records
+    nothing about yesterday
+  end note
+    </div>
+    <figcaption>The Data Access lifecycle, drawn because the default is the surprising part. <a href="https://cloud.google.com/logging/docs/audit/configure-data-access">Enabling it</a> is a per-service decision in the IAM audit configuration, and some BigQuery logs are the documented exception that is on already.
+    <b>Every estate discovers this during an incident rather than during a design review, and by then the answer to "who read the data" is a fact about the past that was never recorded.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    What the audit streams do <b>not</b> capture is a longer list than people expect: data reads on most services, unless Data Access is enabled for that service; anything happening <b>inside</b> your virtual machines; application payloads; and DNS responses served from a cache. The entries that are written are <b>immutable</b>, and they arrive in seconds - the limits here are about coverage, not about trust or delay.
+  </div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Ask three questions of any audit requirement. <b>Is the evidence in a free stream</b> - if so, 400 days already exist and there is nothing to build. <b>Is it in Data Access</b> - if so, it is not being recorded right now and enabling it fixes only the future. <b>Is it a refusal</b> - if so, it exists, it is already costing money, and it disappears in thirty days unless somebody routes it.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which statement about Policy Denied audit logs is correct?</div>
+      <button class="q-opt">They are free and land in _Required alongside the other always-on logs</button>
+      <button class="q-opt">They are off by default and enabled per service like Data Access logs</button>
+      <button class="q-opt">They cannot be excluded at all, since generation and storage are one</button>
+      <button class="q-opt">They are always generated and billed, and land in _Default for 30 days</button>
+      <div class="q-fb">Always generated, billed as normal log storage, and in _Default rather than _Required. The first is the assumption that makes estates lose them. The second confuses this stream with Data Access. The third is nearly right - generation cannot be disabled, but an exclusion filter does stop the storage.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">An incident review asks who read a sensitive table last month. Data Access logging was never enabled. What is the answer?</div>
+      <button class="q-opt">Enable it now, since the service backfills the previous thirty days</button>
+      <button class="q-opt">The records do not exist - enabling it today records only the future</button>
+      <button class="q-opt">Admin Activity logs have it, since a read is a call to the service</button>
+      <button class="q-opt">Access Transparency has it, since it records every access to content</button>
+      <div class="q-fb">The gap is retrospective and nothing recovers it. The first invents a backfill. The third confuses configuration-changing calls with data reads, which is the split that defines these two streams. The fourth records access by Google personnel, not by your own principals.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which of these is genuinely outside every audit stream?</div>
+      <button class="q-opt">A configuration change made from the command line, not the console</button>
+      <button class="q-opt">A request refused because a service perimeter forbade the call</button>
+      <button class="q-opt">A process started by an administrator inside your virtual machine</button>
+      <button class="q-opt">An action taken by Google personnel on your content under support</button>
+      <div class="q-fb">Audit logs record calls to Google Cloud APIs, so what happens inside your own machines is not covered - the Ops Agent from lesson 1003 is what collects that. The first is Admin Activity regardless of the tool used. The second is Policy Denied. The fourth is Access Transparency.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>A regulator requires three things for a two-year period: a record of every configuration change, a record of every read of one particular dataset, and a record of every access attempt that was refused by a security control. The organisation has an organisation-level view of its logs and a modest logging budget.</p>
+      <p><b>Work out</b> for each requirement whether the evidence exists today, <b>design</b> what is missing, and <b>identify</b> the requirement that cannot be satisfied retrospectively at all.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>One requirement is nearly free but the period is longer than the free retention. One is already costing money and is about to expire. One does not exist yet in any form.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Configuration changes.</b> Admin Activity, always on and free, kept 400 days in _Required. That is more than a year and less than two, so the requirement is met for the recent past and needs a sink to a longer-retention destination for the rest. The stream itself costs nothing; the copy you keep does.</li>
+        <li><b>Reads of the dataset.</b> Data Access logging, which is off for almost every service. It must be enabled for that service in the IAM audit configuration, and once enabled it is billed as normal ingestion - so scope it to the one service rather than turning it on everywhere.</li>
+        <li><b>Refused attempts.</b> Policy Denied. These are already being generated and already being billed, and they land in _Default at 30 days. Route them with a sink into a log bucket in a project and raise that bucket's retention, remembering that above a project the default bucket cannot be extended.</li>
+        <li><b>Identify what cannot be recovered.</b> The reads. Admin Activity and Policy Denied both exist today, so the only question for them is where the copies go. Data Access records nothing about the period before it was enabled, so two years of read history simply cannot be produced.</li>
+        <li><b>Control the cost.</b> Scope the Data Access configuration to the single service, and filter the Policy Denied sink to the resources in scope rather than routing every refusal in the estate.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two of the three requirements should have been about moving evidence that already exists, and exactly one should be unrecoverable. If your Policy Denied answer raised retention on an organisation-level bucket, re-read the previous lesson - that bucket is fixed at thirty days.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask an agent one question at design time rather than at incident time: for each service holding sensitive data, is Data Access logging enabled today. The answer is a list, it takes minutes, and it is the difference between an incident review that has evidence and one that has a theory.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/logging/docs/audit">The audit logs overview</a> describes all four stream types, which are free, which can be disabled and where each lands. <a href="https://cloud.google.com/logging/docs/audit/configure-data-access">Configuring Data Access logs</a> is the page to work from when enabling the one that is off.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="1000-where-a-log-lands.html"><span class="dir">&larr; Previous</span><span class="ttl">Where a log lands and how long it stays</span></a>
+    <a class="nxt" href="1002-streams-that-are-off.html"><span class="dir">Next &rarr;</span><span class="ttl">The streams that are off until you turn them on</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 1001 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
