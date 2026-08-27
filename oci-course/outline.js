@@ -253,6 +253,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1004-getting-telemetry-out.html"
         }
       ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "Two firewalls at two layers, and where each one attaches",
+          "href": "lessons/1100-two-firewalls-at-two-layers.html"
+        },
+        {
+          "title": "A fourth check on every packet",
+          "href": "lessons/1101-a-fourth-check-on-every-packet.html"
+        },
+        {
+          "title": "Finding what is wrong: posture, vulnerabilities and intelligence",
+          "href": "lessons/1102-finding-what-is-wrong.html"
+        },
+        {
+          "title": "Reaching a private host, and copying the traffic",
+          "href": "lessons/1103-reaching-a-private-host.html"
+        }
+      ]
     }
   ],
   "extras": []

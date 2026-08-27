@@ -103,6 +103,14 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 1003 | Traces, synthetics and the agent |
 | 1004 | Getting telemetry out, and where it can go |
 
+**Module 11 - Security services**
+
+| Lesson | Title |
+| 1100 | Two firewalls at two layers, and where each one attaches |
+| 1101 | A fourth check on every packet |
+| 1102 | Finding what is wrong: posture, vulnerabilities and intelligence |
+| 1103 | Reaching a private host, and copying the traffic |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

@@ -204,6 +204,19 @@ from and the date it was read.
 - [Connector Hub](https://docs.oracle.com/en-us/iaas/Content/connector-hub/overview.htm) - the source and target matrix, the filter and function tasks, the batching settings and the automatic deactivation of a continuously failing connector.
 - [Dashboards](https://docs.oracle.com/en-us/iaas/Content/Dashboards/home.htm) - console-native widgets over metrics and logs, scoped per compartment.
 
+### Module 11 - Security services
+
+- [Web Application Firewall](https://www.oracle.com/security/cloud-security/web-application-firewall/) - the standard rule set, edge and regional enforcement, bot management and reputation feeds. Vendor product page rather than documentation.
+- [Web application firewall logs](https://docs.oracle.com/en-us/iaas/Content/WAF/Tasks/logs.htm) - the seven-day service-side retention and the optional direct delivery to a standard-tier bucket, with the archive tier unsupported.
+- [Network Firewall](https://www.oracle.com/cloud/networking/network-firewall/) - the managed next-generation appliance, its autoscaling, hub placement and integration with transit routing. Vendor product page rather than documentation.
+- [Zero Trust Packet Routing](https://docs.oracle.com/en-us/iaas/Content/zero-trust-packet-routing/overview.htm) - attribute-based intent policy layered over routing and the rule sets, the three-attribute limit, and the ingress paths it does not police.
+- [Cloud Guard](https://docs.oracle.com/en-us/iaas/Content/cloud-guard/home.htm) - detectors, problems, responder recipes and the reporting region that aggregates scans.
+- [Vulnerability Scanning](https://www.oracle.com/security/cloud-security/vulnerability-scanning-service/) - agent-based host scans on a daily or weekly schedule, registry image scanning on push, and the agentless port-scan fallback. Vendor product page rather than documentation.
+- [Threat Intelligence](https://docs.oracle.com/en-us/iaas/Content/threat-intel/home.htm) - curated reputation data, browsable and joinable against flow and firewall logs, feeding the detectors.
+- [Data Safe](https://docs.oracle.com/en-us/iaas/data-safe/index.html) - sensitive data discovery and classification, user assessment, database activity collection and masking, for registered targets.
+- [Bastion](https://docs.oracle.com/en-us/iaas/Content/Bastion/Concepts/bastionoverview.htm) - time-boxed brokered sessions into private subnets, the maximum session lifetime and the client address allowlist, and the documented position that no native remote-access VPN is offered.
+- [Traffic mirroring](https://docs.oracle.com/en-us/iaas/Content/Network/Tasks/vtap.htm) - copying from a card, subnet or balancer to a collector fleet behind a network load balancer, with capture filters.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover
