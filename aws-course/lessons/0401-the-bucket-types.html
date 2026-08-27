@@ -1,0 +1,184 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The bucket types - Inside AWS</title>
+<meta name="description" content="S3 is no longer one kind of bucket: alongside the general-purpose bucket there is a single-zone low-latency type, a type that understands Iceberg tables, and a type that stores vectors.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0401</div>
+  <h1>S3 stopped being one kind of bucket, and each new type absorbs a job from above it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability keys <code>object-storage-highperf</code>, <code>object-storage-tables</code> and <code>vector-store</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-bucket-high-performance.html">S3 Express One Zone</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>"A bucket" now names several different objects. The <b>general-purpose bucket</b> from the last lesson is one of them.</li>
+      <li>A <b>directory bucket</b> holds the S3 Express One Zone class: single zone, consistent single-digit millisecond latency, and up to ten times faster than Standard.</li>
+      <li>A <b>table bucket</b> stores Apache Iceberg tables natively and maintains them, so compaction stops being a job your pipeline runs.</li>
+      <li>A <b>vector bucket</b> stores and queries embeddings with strongly consistent writes, which is why the storage service now appears in AI architectures.</li>
+      <li>What it costs: each type is a different surface. The fast one <b>authenticates by session</b> rather than per request, and the vector one keeps public access blocked with no way to relax it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0400&lt;br/&gt;one object store,&lt;br/&gt;one class ladder"] --> T["THIS PAGE&lt;br/&gt;four bucket types, each&lt;br/&gt;absorbing a job from above"]
+  T --> A["Latency-bound work that&lt;br/&gt;used to need a cache"]
+  T --> B["Lakehouse tables, module 06"]
+  T --> C["Vector retrieval, module 13"]
+  W["Module 04&lt;br/&gt;storage"] -.- T
+    </div>
+    <figcaption>Where this sits. The last lesson treated S3 as one uniform key-value store. This one shows the three specialised types AWS added on top of it, each taking over a job that used to live in a layer above the storage.
+    <b>The pattern is the same every time - work that a pipeline or a cache used to do has been pushed down into the bucket.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: same service, four surfaces</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  S3["Amazon S3"] --> GP["General-purpose bucket&lt;br/&gt;the classic key-addressed store&lt;br/&gt;with the whole class ladder"]
+  S3 --> DB["Directory bucket&lt;br/&gt;S3 Express One Zone&lt;br/&gt;- one zone, lowest latency"]
+  S3 --> TB["Table bucket&lt;br/&gt;Iceberg tables, maintained&lt;br/&gt;by the service"]
+  S3 --> VB["Vector bucket&lt;br/&gt;embeddings, queried directly"]
+  DB --> J1["Absorbs: a cache in front of storage"]
+  TB --> J2["Absorbs: table maintenance in a pipeline"]
+  VB --> J3["Absorbs: a separate vector database"]
+    </div>
+    <figcaption>One service, four surfaces, and the job each of the newer three took over. The general-purpose bucket keeps the storage classes and lifecycle rules from lesson 0400; the others do not simply inherit them.
+    <b>Choosing a type is choosing an API and a set of rules, not just a performance tier on the same bucket.</b></figcaption>
+  </figure>
+
+  <h2>2. The fast one, and what it asks of you</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Your application
+  participant D as Directory bucket
+  A-&gt;&gt;D: create a session once
+  D--&gt;&gt;A: a session token for the requests that follow
+  A-&gt;&gt;D: many reads and writes, on that session
+  D--&gt;&gt;A: consistent single-digit millisecond responses
+  Note over A,D: keep the compute in the same zone as the bucket
+    </div>
+    <figcaption>A directory bucket authenticates once per session rather than signing every request, which is part of how it reaches its latency target (<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/directory-bucket-high-performance.html">S3 Express One Zone</a>). It publishes a 99.95 per cent availability commitment and stores data in a single zone.
+    <b>The latency is only real if the compute is in the same zone, so this type turns a storage choice into a placement decision.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  The single-zone trade from lesson 0400 comes back here in a different costume. One Zone-IA gives up redundancy to be <b>cheaper</b>; a directory bucket gives up the same redundancy to be <b>faster</b>. Same sacrifice, two different reasons, and the same question in both cases: what happens to this workload if that one zone is unavailable?</div>
+
+  <h2>3. The one that understands tables</h2>
+
+  <p>A <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-tables.html">table bucket</a> stores Apache Iceberg tables as tables rather than as opaque files, and it performs the maintenance those tables need - compaction in particular - on its own. Its catalogue federates into the Glue Data Catalog, so query engines find the tables without a separate registration step (<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-tables-integrating-aws.html">integrating S3 Tables with AWS analytics</a>). A related capability writes object metadata into Iceberg tables automatically, so a bucket's own contents become queryable (<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/metadata-tables-overview.html">S3 Metadata tables</a>).</p>
+
+  <p>Module 06 is where the analytics side of that belongs. What matters for a storage decision is narrower: the compaction job that a lakehouse pipeline normally owns has moved into the storage service.</p>
+
+  <h2>4. The one that stores vectors</h2>
+
+  <p>A <a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors.html">vector bucket</a> stores and queries embeddings with strongly consistent writes, under its own API namespace, and public access is blocked on it with no option to change that (<a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-vectors-buckets.html">vector buckets</a>). It is one of several places AWS will store vectors, and Module 13 is where that comparison belongs.</p>
+
+  <div class="callout warn">
+  Do not read these types as tiers of one bucket. They are separate surfaces with separate rules, and an assumption carried across from the general-purpose bucket - a storage class, a lifecycle rule, a public-access setting - may simply not apply. When a design names a bucket, make it name the type as well.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does a directory bucket ask of the workload that a general-purpose bucket does not?</div>
+      <button class="q-opt">That every object carries an explicit storage class</button>
+      <button class="q-opt">That lifecycle rules be defined before the first write</button>
+      <button class="q-opt">That objects be written through a queue, not directly</button>
+      <button class="q-opt">That the compute sit in the same zone as the bucket</button>
+      <div class="q-fb">A directory bucket holds data in one zone and reaches its latency target only when the compute is co-located there, so the storage choice becomes a placement decision. Storage classes and lifecycle rules belong to the general-purpose bucket's model, and nothing about this type requires writing through a queue.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which job does a table bucket take over from the layer above it?</div>
+      <button class="q-opt">Query planning, which moves into the storage layer</button>
+      <button class="q-opt">Table maintenance, compaction in particular</button>
+      <button class="q-opt">Access control, replacing bucket-level permissions</button>
+      <button class="q-opt">Schema design, which the service infers for you</button>
+      <div class="q-fb">A table bucket stores Iceberg tables natively and maintains them, so compaction stops being a pipeline job. Query planning stays with the engine, access control is not replaced, and nothing infers a schema on your behalf - each of those would be a much larger claim than the service makes.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A team wants a vector bucket reachable directly from the public internet. What is the position?</div>
+      <button class="q-opt">Public access is blocked and cannot be relaxed</button>
+      <button class="q-opt">Public access is off by default and can be enabled</button>
+      <button class="q-opt">Public access needs a bucket policy that allows it</button>
+      <button class="q-opt">Public access works once a website endpoint exists</button>
+      <div class="q-fb">Block Public Access is always on for a vector bucket, so the requirement cannot be met by configuration and the design has to put something in front of it. The three wrong options each describe how a general-purpose bucket behaves, which is exactly the assumption this bucket type does not honour.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A team is designing a retrieval system. It ingests documents, stores the originals for years, keeps a working set that an inference service reads thousands of times a second at very low latency, holds embeddings for similarity search, and publishes a daily analytics table that a query engine reads.</p>
+      <p><b>Assign a bucket type</b> to each of the four jobs, and name for each the specific property that decided it. Then say which single assignment adds a new availability risk and what you would do about it.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Four jobs, four types. Then look back at which of the four types stores its data in one zone.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Originals: a general-purpose bucket.</b> The deciding property is a long life with rare reads, which is exactly what the storage-class ladder and lifecycle rules from lesson 0400 exist for. None of the newer types offers that ladder.</li>
+        <li><b>Working set: a directory bucket.</b> The deciding property is thousands of very low latency reads a second. This is the type that publishes consistent single-digit millisecond latency, and the design must place the inference compute in the same zone to get it.</li>
+        <li><b>Embeddings: a vector bucket.</b> The deciding property is similarity search over embeddings with consistent writes. Note that public access is blocked with no way to relax it, so anything outside the account reaches it through a service you put in front.</li>
+        <li><b>Analytics table: a table bucket.</b> The deciding property is that a query engine reads it as a table. The service maintains the Iceberg table itself and the catalogue federates into the Glue Data Catalog, so the daily pipeline no longer owns compaction or registration.</li>
+        <li><b>Name the new risk and answer it.</b> The directory bucket stores in a single zone, so losing that zone takes the working set with it. Because the working set is derived from the originals, the answer is a documented rebuild path rather than replication: measure how long repopulating it takes and treat that number as the recovery time for the fast path.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Each job should map to a different type, and the only availability risk should sit on the derived data rather than on the originals. If your answer put the originals in the single-zone type because it was fastest, you have put the one irreplaceable copy on the one surface that accepts losing a zone.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0402-block-storage-bound-to-a-zone.html">Block storage, bound to a zone</a></b> leaves object storage for the volume an instance actually boots from and writes to.</li>
+    <li><b>Module 06</b> takes table buckets into the lakehouse, and <b>Module 13</b> takes vector buckets into retrieval.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the types blur together, ask an agent to write the one sentence each type would put on its own front page - what it is for and what it gives up - and to refuse to mention performance numbers in any of them.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AmazonS3/latest/userguide/s3-tables.html">S3 Tables</a> is the clearest illustration of the pattern on this page: read it and watch a job that used to be a scheduled pipeline become a property of the bucket.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0400-the-object-store-and-its-classes.html"><span class="dir">&larr; Previous</span><span class="ttl">The object store and its classes</span></a>
+    <a class="nxt" href="0402-block-storage-bound-to-a-zone.html"><span class="dir">Next &rarr;</span><span class="ttl">Block storage, bound to a zone</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0401 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

@@ -79,6 +79,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0304-above-the-container.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "The object store and its classes",
+          "href": "lessons/0400-the-object-store-and-its-classes.html"
+        },
+        {
+          "title": "The bucket types",
+          "href": "lessons/0401-the-bucket-types.html"
+        },
+        {
+          "title": "Block storage, bound to a zone",
+          "href": "lessons/0402-block-storage-bound-to-a-zone.html"
+        },
+        {
+          "title": "Shared file systems",
+          "href": "lessons/0403-shared-file-systems.html"
+        },
+        {
+          "title": "Cold data and getting data in",
+          "href": "lessons/0404-cold-data-and-getting-data-in.html"
+        }
+      ]
     }
   ],
   "extras": []

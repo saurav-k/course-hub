@@ -37,5 +37,16 @@ at the depth a lesson needs:
   partition and spread strategies exist and that Dedicated Hosts cannot be used inside
   a placement group, but not the per-strategy restrictions. Lesson 0202 teaches the
   three strategies by name and points at the vendor page for the detail.
+- **EC2 billing granularity.** The inventory records per-second billing with a
+  sixty-second minimum in a service row's notes, but names no specific vendor page
+  as the source for it, so no lesson states it.
 - **List prices anywhere.** Cost *shape* is taught and prices are linked, per
   `MISSION.md`.
+
+## How a lesson cites
+
+The inventory holds two kinds of source and lessons use both the same way:
+`references.md` names the page a specific detail was read from, and each
+`services.json` row's `doc_url` is the vendor page for that service. A lesson
+links whichever of the two actually carries the claim, and never a page the
+inventory does not record as fetched.

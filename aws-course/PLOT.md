@@ -32,6 +32,15 @@ is wrong and it gets fixed before anything new is added.
 | 0303 | Lambda and the function boundary | working |
 | 0304 | Above the container | working |
 
+### Module 04 - Storage
+
+| Lesson | Title | Rung |
+| 0400 | The object store and its classes | working |
+| 0401 | The bucket types | working |
+| 0402 | Block storage, bound to a zone | working |
+| 0403 | Shared file systems | working |
+| 0404 | Cold data and getting data in | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:

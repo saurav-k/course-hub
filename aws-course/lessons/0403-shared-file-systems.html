@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared file systems - Inside AWS</title>
+<meta name="description" content="AWS answers shared file storage twice - one elastic NFS service of its own, and a family of four third-party engines - and the fastest of those four is the only one that is single-zone.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Storage &middot; Lesson 0403</div>
+  <h1>Shared file storage is two answers on AWS, and one of them is four products</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">6 min</span>
+    Capability key <code>file-storage</code>.
+    &middot; <a href="https://docs.aws.amazon.com/efs/latest/ug/whatisefs.html">Amazon EFS</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Block storage attaches to one machine and object storage is reached by key. A shared file system is the third shape: <b>many machines reading and writing one directory tree</b>.</li>
+      <li><b>EFS</b> is the AWS-built answer: elastic NFS with no capacity to provision, and lifecycle tiering that moves cold files into cheaper classes.</li>
+      <li><b>FSx</b> is not one product. It is a family of <b>four managed third-party engines</b>, and choosing between them is choosing a file system, not a tier.</li>
+      <li>The engines are picked by protocol and workload: Windows sharing with directory integration, enterprise NAS features, an open-source general engine, and a parallel engine for high-performance computing.</li>
+      <li>What it costs: the highest-throughput engine is <b>the only one of the four that is single-zone</b>, and its availability commitment is visibly lower than the rest.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0402&lt;br/&gt;a volume attached&lt;br/&gt;to one machine"] --> T["THIS PAGE&lt;br/&gt;one directory tree,&lt;br/&gt;many machines at once"]
+  T --> A["Cold data and getting&lt;br/&gt;data in, lesson 0404"]
+  T --> B["Container workloads that&lt;br/&gt;need a shared volume"]
+  T --> C["High-performance computing&lt;br/&gt;that reads from a bucket"]
+  W["Module 04&lt;br/&gt;storage"] -.- T
+    </div>
+    <figcaption>Where this sits. The module has covered storage reached by key and storage attached to one host. This is the case neither of them serves: concurrent shared access to the same paths, with file semantics.
+    <b>Reach for a shared file system only when the requirement genuinely says many writers - it is the most expensive of the three shapes to run and the easiest to reach for out of habit.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: your own engine, or somebody else's</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["Many machines, one directory tree"] --> E["Amazon EFS&lt;br/&gt;NFS, elastic, AWS-built"]
+  Q --> F["Amazon FSx&lt;br/&gt;a managed third-party engine"]
+  F --> W["Windows File Server&lt;br/&gt;SMB with directory integration"]
+  F --> N["NetApp ONTAP&lt;br/&gt;enterprise NAS features"]
+  F --> Z["OpenZFS&lt;br/&gt;an open-source general engine"]
+  F --> L["Lustre&lt;br/&gt;parallel, for high-performance computing,&lt;br/&gt;linked to an S3 bucket"]
+    </div>
+    <figcaption>Two answers, and the second is a family. EFS is the right default when the requirement is simply "shared, over NFS, and elastic". FSx is the answer when the requirement names a protocol, a feature set or a performance class that belongs to a particular file system (<a href="https://aws.amazon.com/fsx/when-to-choose-fsx/">choosing an FSx engine</a>).
+    <b>If a requirement names SMB, a directory service, snapshots in a specific engine's format, or parallel throughput, it has already chosen FSx and which engine.</b></figcaption>
+  </figure>
+
+  <p>The parallel engine has one property the others do not: it links to an S3 bucket, so a computation can read a data set out of object storage at file-system speed and write results back. That link is usually the reason it is chosen, ahead of the raw throughput figure.</p>
+
+  <h2>2. The mechanism: EFS moves cold files on its own</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Standard - hot, read now" as ST
+  state "Infrequent Access - cheaper per byte" as IA
+  state "Archive - coldest, needs the elastic mode" as AR
+  [*] --> ST
+  ST --> IA: no access for the configured period
+  IA --> AR: still no access, on the same rule
+  IA --> ST: a read brings the file back
+  AR --> ST: a read brings the file back
+    </div>
+    <figcaption><a href="https://docs.aws.amazon.com/efs/latest/ug/lifecycle-management-efs.html">EFS lifecycle management</a> tiers a file by how long it has gone unread, and the transition periods are configurable from as little as a day after last access. Reading a tiered file brings it back. The coldest class has a prerequisite: it needs the elastic throughput mode and the general-purpose performance mode.
+    <b>Unlike object storage, the tiering decision here is per file and is driven by access rather than by a rule you write about age.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Object storage tiers on <b>a rule you wrote about time</b>; this file system tiers on <b>what the workload actually read</b>. That difference is why one of them needs you to know the access pattern in advance and the other does not, and it is a fair way to decide which fits a data set nobody has measured.</div>
+
+  <h2>3. What it costs: the asymmetry inside the family</h2>
+
+  <p>The four engines are not equally available, and the gap is the opposite way round from what people assume. Three of them are multi-zone deployments with a <span class="keynum">99.99</span> per cent availability commitment. The parallel high-performance engine is <b>single-zone</b>, with a <span class="keynum">99.5</span> per cent commitment.</p>
+
+  <div class="callout warn">
+  That means the fastest file system in the family is the one whose data does not survive the loss of its zone. It is the correct choice for a scratch working set that is reloaded from a bucket, and the wrong choice for anything that is the only copy. Because the engine is chosen for throughput, this is the trade most often made without being noticed.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A requirement says Windows clients must access the share over SMB with directory-based permissions. What does that select?</div>
+      <button class="q-opt">EFS, mounted over NFS by the Windows clients</button>
+      <button class="q-opt">EFS, with the elastic throughput mode enabled</button>
+      <button class="q-opt">FSx for Lustre, the highest-throughput engine</button>
+      <button class="q-opt">FSx for Windows File Server, an SMB engine</button>
+      <div class="q-fb">The requirement names a protocol and a directory integration, and one engine in the family is built for exactly that. EFS is an NFS service, so neither of its options answers an SMB requirement. The parallel engine is for high-performance computing and speaks a different protocol entirely.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which FSx engine is single-zone, and what follows from that?</div>
+      <button class="q-opt">Lustre - so losing its zone loses the file system</button>
+      <button class="q-opt">OpenZFS - so it needs snapshots more than others</button>
+      <button class="q-opt">NetApp ONTAP - so it replicates on its own</button>
+      <button class="q-opt">Windows File Server - so it needs a standby</button>
+      <div class="q-fb">The parallel engine is the single-zone one, with a visibly lower availability commitment than the other three, which are multi-zone. That makes it right for a reloadable working set and wrong for a sole copy. The other three engines are the multi-zone ones, which is what makes each distractor sound reasonable.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What drives an EFS file into a colder storage class?</div>
+      <button class="q-opt">A lifecycle rule counting days since it was created</button>
+      <button class="q-opt">A quota being reached on the hot storage class</button>
+      <button class="q-opt">An explicit call from the application that owns it</button>
+      <button class="q-opt">A configured period passing with no access to it</button>
+      <div class="q-fb">Tiering here is driven by time since the file was last read, configurable from as little as a day, and a read brings the file back. Age since creation is how object-storage lifecycle rules work, which is exactly the habit to unlearn. No quota triggers it and no application call is needed.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A genomics group runs analysis jobs across two hundred instances. Every job reads a reference data set of several terabytes that already lives in an S3 bucket, writes intermediate files that all the instances share, and produces a final result that must be kept for seven years. A separate finance team on the same account needs a Windows share for a legacy reporting tool.</p>
+      <p><b>Choose the storage</b> for each of the four jobs in that paragraph, name the property that decided each, and state the one recovery assumption your design depends on.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>There are four distinct jobs hidden here, and only two of them are shared file systems. For the fast one, ask what happens if its zone goes away and whether that matters.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Reference data set: leave it in the bucket, linked to the parallel engine.</b> The deciding property is that it already lives in object storage and is read at high throughput by many machines. The high-performance engine links to an S3 bucket, so the data does not have to be copied into a second permanent home.</li>
+        <li><b>Shared intermediate files: the same parallel file system.</b> The deciding property is many concurrent writers over a shared tree at high throughput, which is what the engine is for.</li>
+        <li><b>Final results for seven years: a general-purpose bucket, tiered.</b> The deciding property is a long retention with rare reads. Lesson 0400's class ladder and lesson 0404's archive classes are the right home, not a file system that is billed to be fast.</li>
+        <li><b>Windows share: FSx for Windows File Server.</b> The deciding property is the protocol and the directory integration, which the requirement names outright. It is a multi-zone engine with the higher availability commitment.</li>
+        <li><b>State the recovery assumption.</b> The parallel file system is single-zone, so the design assumes that losing its zone costs a rebuild rather than a loss. That is true only because the reference data is still in the bucket and the intermediates are reproducible. Write that assumption down, because it stops being true the moment somebody keeps a unique result there.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two of your four answers should be file systems and two should not, and the single-zone choice should be justified by reproducibility rather than by speed. If the seven-year results ended up on a file system, ask what you are paying per byte for data nobody reads.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0404-cold-data-and-getting-data-in.html">Cold data and getting data in</a></b> closes the module at the coldest end of the ladder, and with the paths that move bulk data into the platform.</li>
+    <li>A four-cloud view of file storage is in <a href="../../cloud-comparison-course/lessons/0301-storage-four-clouds.html">Comparing the Four Clouds</a>.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If a shared file system keeps appearing in your designs, ask an agent to check whether the requirement really says many writers, or only many readers - because many readers is usually a bucket, and the difference is most of the bill.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://aws.amazon.com/fsx/when-to-choose-fsx/">Choosing an FSx file system</a> lays the four engines out against each other with their deployment and availability characteristics, which is the comparison the family's single name hides.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="0402-block-storage-bound-to-a-zone.html"><span class="dir">&larr; Previous</span><span class="ttl">Block storage, bound to a zone</span></a>
+    <a class="nxt" href="0404-cold-data-and-getting-data-in.html"><span class="dir">Next &rarr;</span><span class="ttl">Cold data and getting data in</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 0403 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
