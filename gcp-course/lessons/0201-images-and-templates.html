@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Images, families and templates - Inside Google Cloud</title>
+<meta name="description" content="A Compute Engine instance is stamped from an image and a fleet is stamped from a template, and the tension between a moving image family and an immutable template is where rollback lives.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Compute &middot; Lesson 0201</div>
+  <h1>An instance is stamped from an image, and a fleet is stamped from a template</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Capabilities <code>vm-images</code> and <code>instance-template</code>. Sourced from
+    <a href="https://cloud.google.com/compute/docs/images">Google's images documentation</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An <b>image</b> is a boot disk you can stamp copies of. Google publishes public ones and you capture custom ones.</li>
+      <li>An <b>image family</b> is a versioned name over a series of images, so a build can refer to a family and keep receiving newer versions.</li>
+      <li>A <b>machine image</b> is a different object from a disk image: it bundles the whole instance configuration together with its data.</li>
+      <li>An <b>instance template</b> is a reusable blueprint that fleets and bulk creation stamp from, and it is <b>immutable once created</b>.</li>
+      <li>Those last two facts pull against each other. A family is a moving name and a deterministic template pins exact resources, so you choose between <b>drift you did not ask for</b> and <b>staleness you must manage</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous page&lt;br/&gt;one machine,&lt;br/&gt;shaped by dial"] --> T["THIS PAGE&lt;br/&gt;what a machine is&lt;br/&gt;stamped from"]
+  T --> N["What it enables&lt;br/&gt;a fleet held at a size,&lt;br/&gt;rolled forward&lt;br/&gt;and rolled back"]
+  W["Module 02&lt;br/&gt;Compute"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page named one machine, and the fleet page needs many identical ones - these two objects are what turns the first into the second.
+    <b>Everything about updating and rolling back a fleet is decided here, before any fleet exists, by whether the blueprint names a moving target or a fixed one.</b></figcaption>
+  </figure>
+
+  <h2>1. The stamping chain</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  PUB["Public image&lt;br/&gt;published by Google"] --> FAM["Image family&lt;br/&gt;a versioned name&lt;br/&gt;over a series"]
+  CUS["Custom image&lt;br/&gt;captured from your disk"] --> FAM
+  FAM --> TPL["Instance template&lt;br/&gt;immutable blueprint"]
+  TPL --> ONE["One instance"]
+  TPL --> MANY["Bulk creation&lt;br/&gt;or a managed group"]
+  MI["Machine image&lt;br/&gt;configuration plus data"] --> ONE
+    </div>
+    <figcaption>The two paths into a running instance. The upper path is the one that scales - images feed families, families feed templates, templates feed fleets. The lower path is the whole-instance capture, which carries data as well as configuration and is therefore a different tool for a different job.
+    <b>A disk image is a starting point you stamp many copies of, and a machine image is a particular instance you want back, so a design that reaches for the second at fleet scale is carrying data it did not mean to duplicate.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/compute/docs/images">Compute Engine images</a> come in two supplies. Google publishes and maintains public images, and you capture custom ones from a disk you have prepared. Both are organised into <b>image families</b>, which are versioned names rather than single artefacts, and the platform provides operating-system image lifecycle management around them. Google also offers an image-building pipeline, so hardened images can be produced as a repeatable job rather than by hand.</p>
+
+  <h2>2. What a family is actually for</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Current: a new image version is published
+  Current --> Superseded: a newer version arrives in the family
+  Superseded --> Deprecated: marked as no longer recommended
+  Deprecated --> [*]
+  Current --> Referenced: something points at the family name
+  Referenced --> Current: the pointer follows the family forward
+    </div>
+    <figcaption>An image family over time. Versions arrive, older ones are superseded and eventually marked deprecated, and anything referring to the family name follows the series rather than one artefact.
+    <b>Referring to a family is how a build keeps receiving patched images - and it is also how a build changes without anybody editing it.</b></figcaption>
+  </figure>
+
+  <p>That double edge is the point of this page. Naming a family in a build is a maintenance decision: you have chosen to receive whatever the family holds when the build next runs. Naming one exact image version is the opposite decision: the build is reproducible and it stops receiving patches until somebody moves it.</p>
+
+  <h2>3. The template, and why immutability is the feature</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant Au as Author
+  participant T1 as Template version one
+  participant T2 as Template version two
+  participant Fl as Fleet
+  Au->>T2: create a new template - the old one cannot be edited
+  Au->>Fl: point the fleet at version two
+  Fl->>T2: read the blueprint
+  Fl->>Fl: replace members one at a time
+  Note over Fl: a member built from version one is still described by it
+  Au->>Fl: point back at version one
+  Fl-->>Au: rollback is a pointer move, not a rebuild
+    </div>
+    <figcaption>Why an immutable blueprint makes rollback cheap. Because a template can never be edited, the previous version still exists and still describes exactly what the fleet used to be, so going back is a change of pointer rather than a reconstruction from memory.
+    <b>Immutability is not a restriction that got in the way of editing - it is the property that makes the previous state recoverable at all.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/compute/docs/instance-templates">Instance templates</a> are the reusable blueprints that managed instance groups and bulk creation stamp from, and they are immutable once created. A change is therefore always a new template. That is what the fleet page builds on, and it is also the reason a Google Cloud fleet update reads as a series of small immutable artefacts rather than as an edit history.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  A template can be written two ways and the difference is not cosmetic. A template that names an <b>image family</b> stamps whatever the family holds at stamp time, so two members created a month apart may differ. A <b>deterministic</b> template pins exact resources, so every member it ever stamps is identical. Pick by which failure you would rather debug: an unexplained difference between two members, or a fleet that quietly stopped receiving operating-system patches.</div>
+
+  <h2>4. Choosing between them without hand-waving</h2>
+
+  <p>The two failures are not equally likely in every setting. A fleet that is rebuilt often - a stateless web tier rolled forward every week - has little exposure to staleness and a lot of exposure to drift, because members are created constantly and any family movement lands between two of them. A fleet that is rebuilt rarely has the opposite exposure. The honest rule is that whichever risk you leave open must be managed somewhere else: drift by pinning and rebuilding on a schedule you own, staleness by a job that moves the pin.</p>
+
+  <div class="callout warn">
+  Custom images are not free of the same question one level down. An image you captured is a point in time, so a fleet pinned to a custom image is pinned to whatever was patched into it on the day it was captured. Building images through a pipeline rather than by hand is what keeps that date from drifting quietly into the past, because a pipeline can be re-run and a hand-built image usually is not.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An instance template needs a change to its machine type. What does the platform require?</div>
+      <button class="q-opt">An edit to the template, which the fleet picks up on its own</button>
+      <button class="q-opt">An edit to the template plus a manual refresh of the fleet</button>
+      <button class="q-opt">A new template, because a template cannot be edited at all</button>
+      <button class="q-opt">A new fleet, because a template belongs to one fleet only</button>
+      <div class="q-fb">Instance templates are immutable, so every change is a new template. The first two options assume an editable blueprint, which is the assumption that makes rollback impossible. The fourth is wrong for a different reason: one template can feed several groups and bulk creation as well.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Two members of one fleet were created a month apart and differ in their operating-system patch level. What most likely explains it?</div>
+      <button class="q-opt">The template names an image family, which moved between them</button>
+      <button class="q-opt">The template was edited between the two members being created</button>
+      <button class="q-opt">The two members were placed in different zones of the region</button>
+      <button class="q-opt">The fleet applied patches to one member and not to the other</button>
+      <div class="q-fb">A family is a versioned name, so a template pointing at one stamps whatever the family holds at stamp time. The second option describes something the platform does not allow. The third confuses placement with content. The fourth attributes patching to a fleet controller, which stamps members rather than maintaining them.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A team wants a particular configured instance back exactly as it was, data included. Which object is that?</div>
+      <button class="q-opt">A custom disk image captured from the instance's boot disk</button>
+      <button class="q-opt">A machine image, which bundles configuration together with data</button>
+      <button class="q-opt">An instance template written to describe that instance's shape</button>
+      <button class="q-opt">An image family holding every version of that instance's disk</button>
+      <div class="q-fb">Machine images bundle the instance configuration with its data, which is exactly the whole-instance recovery case. A custom disk image captures a disk rather than the instance around it. A template describes a shape and carries no data at all. The fourth option describes a family, which organises images and does not hold instances.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Two fleets exist. Fleet A is a stateless web tier rebuilt weekly. Fleet B is a licensed appliance rebuilt roughly twice a year.</p>
+      <p><b>Decide</b> for each fleet whether its template should name an image family or pin an exact image, and <b>name</b> the specific operational job each choice creates.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Ask which of the two risks each fleet is naturally exposed to, then remember that the risk you do not take is the one you have to manage by hand.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Name the two risks.</b> A family exposes you to drift - members created at different moments differ. A pin exposes you to staleness - members stop receiving newer images until somebody moves the pin.</li>
+        <li><b>Place fleet A.</b> Weekly rebuilds mean members are created constantly, so any family movement lands inside the fleet. Pin the image, so a week's members are identical and a regression can be traced to one artefact.</li>
+        <li><b>Name fleet A's job.</b> Pinning creates the job of moving the pin - a scheduled bump of the template to a newer image, which is a small task and must actually exist, or the weekly fleet is running last quarter's image.</li>
+        <li><b>Place fleet B and name its job.</b> Twice-yearly rebuilds give little drift exposure and a lot of staleness exposure, so naming a family is reasonable. The job that creates is verification: because the image can change between rebuilds, the rebuild is the moment to test rather than to assume, and a licensed appliance is exactly the kind of thing an unannounced image change disturbs.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Each fleet should have ended with a job attached, and the two jobs should be different. If either fleet came out with no follow-up work, the choice was read as a preference rather than as a trade - both options leave one risk open, and the open risk is the job.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the family-against-pin choice still feels like a coin toss, ask an agent to describe what a rollback looks like under each one. The answers are noticeably different lengths, and that difference is the decision.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/compute/docs/images">The Compute Engine images documentation</a> covers public and custom images, families and the lifecycle around them, and it links the machine-image and image-building material. Read it beside <a href="https://cloud.google.com/compute/docs/instance-templates">the instance templates page</a>, which is where immutability is stated and where the fleet page picks the story up.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0200-compute-engine-the-machine-you-shape.html"><span class="dir">&larr; Previous</span><span class="ttl">The machine you shape yourself</span></a>
+    <a class="nxt" href="0202-changing-what-you-rent.html"><span class="dir">Next &rarr;</span><span class="ttl">Five levers on the same machine</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0201 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

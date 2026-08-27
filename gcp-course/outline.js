@@ -5,6 +5,51 @@
 window.COURSE_OUTLINE = {
   "key": "gcp",
   "title": "Inside Google Cloud",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "Regions, zones and the scope of a resource",
+          "href": "lessons/0100-regions-zones-and-scope.html"
+        },
+        {
+          "title": "The resource hierarchy and the project",
+          "href": "lessons/0101-the-resource-hierarchy.html"
+        },
+        {
+          "title": "What flows down the tree",
+          "href": "lessons/0102-what-flows-down-the-tree.html"
+        },
+        {
+          "title": "The platform map and the names that moved",
+          "href": "lessons/0103-the-platform-map.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The machine you shape yourself",
+          "href": "lessons/0200-compute-engine-the-machine-you-shape.html"
+        },
+        {
+          "title": "Images, families and templates",
+          "href": "lessons/0201-images-and-templates.html"
+        },
+        {
+          "title": "Five levers on the same machine",
+          "href": "lessons/0202-changing-what-you-rent.html"
+        },
+        {
+          "title": "Managed instance groups and Batch",
+          "href": "lessons/0203-managed-instance-groups.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

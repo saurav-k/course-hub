@@ -6,8 +6,29 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing yet. `gcp-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+Lesson numbers are `MMxx`: the two-digit module number, then a two-digit sequence inside
+that module. Module 01 owns 0100 to 0199, module 02 owns 0200 to 0299, and so on.
+Modules are written in parallel by different contributors, so a single running sequence
+would collide the moment two of them add a lesson. Nothing already published is
+renumbered.
+
+**Module 01 - The lay of the land**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0100 | Regions, zones and the scope of a resource | `region-az-model` |
+| 0101 | The resource hierarchy and the project | `org-hierarchy` |
+| 0102 | What flows down the tree | `org-guardrail-policy` |
+| 0103 | The platform map and the names that moved | platform map |
+
+**Module 02 - Compute**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0200 | The machine you shape yourself | `vm-instances` |
+| 0201 | Images, families and templates | `vm-images`, `instance-template` |
+| 0202 | Five levers on the same machine | `gpu-compute`, `dedicated-hosts`, `confidential-compute`, `bare-metal`, `spot-capacity` |
+| 0203 | Managed instance groups and Batch | `autoscaling-group`, `batch-compute` |
 
 ## Planned, in order
 
