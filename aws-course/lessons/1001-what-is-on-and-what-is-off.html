@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What is on and what is off - Inside AWS</title>
+<meta name="description" content="Almost every telemetry stream on AWS is off until you switch it on, the few that are on carry limits worth knowing, and one of them is not a durable record at all.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1001</div>
+  <h1>Almost nothing is recorded until you say so</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>control-plane-audit-log</code>, <code>data-plane-access-log</code>, <code>network-flow-log</code>, <code>load-balancer-access-log</code>, <code>dns-query-log</code> and <code>service-specific-log</code>.
+    &middot; <a href="https://docs.aws.amazon.com/awscloudtrail/latest/userguide/how-cloudtrail-works.html">How CloudTrail works</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Control-plane audit is <b>on by default</b> as a free, immutable <b>90-day event history</b> - and that history is not a trail, so it holds management events only and cannot be kept longer.</li>
+      <li><b>Data events are off everywhere</b> and require selectors. They are the high-volume ones - object reads, function invocations, item-level database calls - and they dominate audit cost when scoped loosely.</li>
+      <li>Network, load-balancer, CDN, DNS and most service logs are all <b>off by default</b>, each with its own switch in its own service.</li>
+      <li><b>Flow logs do not see everything on the wire.</b> DNS resolver traffic, instance metadata, NTP, DHCP and ARP are excluded by design.</li>
+      <li>What it costs: two widely used streams are explicitly <b>best-effort</b>, so neither is a complete accounting and neither should be the basis of a billing-grade claim.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1000&lt;br/&gt;three stores and&lt;br/&gt;no workspace"] --> T["THIS PAGE&lt;br/&gt;which streams exist,&lt;br/&gt;and which are running"]
+  T --> A["How fast each arrives&lt;br/&gt;lesson 1002"]
+  T --> B["Threat detection&lt;br/&gt;module 11"]
+  W["Module 10&lt;br/&gt;observability and audit"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page said telemetry lands in three stores. This page is the inventory of what actually produces it, and the single most useful column in that inventory is whether the stream is running right now.
+    <b>An investigation is bounded by what was being recorded at the time, so this page is really about decisions you have to make before anything goes wrong.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: the default column</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Grid of telemetry streams and their default state: control-plane audit event history and Lambda function logs are on by default, while data events, flow logs, load balancer access logs, CDN standard logs, DNS resolver query logs and Kubernetes control-plane logs are all off by default">
+      <text class="ttl" x="20" y="24">Is this stream running before anybody touches it</text>
+      <text class="lbl-b" x="410" y="52" text-anchor="middle">on</text>
+      <text class="lbl-b" x="540" y="52" text-anchor="middle">off</text>
+      <line class="grid" x1="20" y1="60" x2="620" y2="60"/>
+      <text class="lbl-sm" x="20" y="82">Control-plane audit, 90-day event history</text>
+      <rect class="m-stat"  x="380" y="70" width="60" height="16"/>
+      <text class="lbl-sm" x="20" y="106">Function logs from the serverless runtime</text>
+      <rect class="m-stat"  x="380" y="94" width="60" height="16"/>
+      <line class="grid" x1="20" y1="116" x2="620" y2="116"/>
+      <text class="lbl-sm" x="20" y="138">Data events - object, item and invoke level</text>
+      <rect class="m-alarm" x="510" y="126" width="60" height="16"/>
+      <text class="lbl-sm" x="20" y="162">VPC flow logs</text>
+      <rect class="m-alarm" x="510" y="150" width="60" height="16"/>
+      <text class="lbl-sm" x="20" y="186">Load balancer access logs</text>
+      <rect class="m-alarm" x="510" y="174" width="60" height="16"/>
+      <text class="lbl-sm" x="20" y="210">CDN standard logs</text>
+      <rect class="m-alarm" x="510" y="198" width="60" height="16"/>
+      <text class="lbl-sm" x="20" y="234">DNS resolver query logs</text>
+      <rect class="m-alarm" x="510" y="222" width="60" height="16"/>
+      <text class="lbl-sm" x="20" y="258">Kubernetes control-plane logs, all five types</text>
+      <rect class="m-alarm" x="510" y="246" width="60" height="16"/>
+      <line class="grid" x1="20" y1="268" x2="620" y2="268"/>
+      <text class="lbl-sm" x="20" y="290">default states as published in each service's own logging reference</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>on by default</span><span><i class="sw-alarm"></i>off by default</span></div>
+    <figcaption>Two rows out of eight. The pattern holds well beyond this list: engine logs on managed databases, cache logs, broker logs and warehouse audit logs are all opt-in too, each with its own switch in its own service.
+    <b>A new account is not recording its network, its load balancers, its DNS or its object access, and none of that becomes true retrospectively.</b></figcaption>
+  </figure>
+
+  <h2>2. The stream that is on, and what it is not</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Event history - on by default, free, immutable" as E
+  state "Management events only, 90 days, then gone" as L
+  state "A trail - you create it" as T
+  state "Delivered to S3, CloudWatch Logs or the event bus" as D
+  state "Kept as long as you keep the objects" as K
+  [*] --> E
+  E --> L
+  T --> D
+  D --> K
+  E --> T: create a trail when 90 days is not enough
+  note right of K
+    Hourly digest files chain signatures
+    so the log's integrity can be verified
+  end note
+    </div>
+    <figcaption>The distinction people get wrong under pressure. <b>Event history is not a trail</b>: it is free, immutable, on by default, and it holds management events for ninety days and no longer. A trail is what makes the record durable, and the first copy of management events in a trail carries no charge.
+    <b>Global-service events - identity, the CDN, console sign-in and the global token endpoint - are recorded in us-east-1, while calls to regional token endpoints log in the Region that served them.</b></figcaption>
+  </figure>
+
+  <p><b>Data events</b> are the other half of the audit story and they behave in the opposite way: off everywhere, selectors required, and priced per hundred thousand delivered. Advanced selectors filter by event name, resource ARN and whether the call was read-only, with up to <b>500 values per field</b>, which is the mechanism that keeps a bucket's audit trail affordable (<a href="https://docs.aws.amazon.com/awscloudtrail/latest/userguide/logging-data-events-with-cloudtrail.html">logging data events</a>). <b>CloudTrail Insights</b> adds anomaly detection over call rates and error rates, also off by default, and its first findings can take up to thirty-six hours to appear after it is enabled.</p>
+
+  <h2>3. What the network log does not see</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  F["VPC flow logs&lt;br/&gt;IP flow metadata per interface"] --> Y["Recorded&lt;br/&gt;accepted and rejected flows,&lt;br/&gt;including service-owned interfaces"]
+  F --> N["Not recorded, by design"]
+  N --> N1["Traffic to the VPC DNS resolver"]
+  N --> N2["Instance metadata at 169.254.169.254"]
+  N --> N3["NTP, DHCP and ARP"]
+  N --> N4["Mirrored traffic"]
+    </div>
+    <figcaption>The exclusion list, which matters because it is where several interesting behaviours live (<a href="https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html">VPC flow logs</a>). Records can also be skipped during aggregation under internal capacity constraints, so absence of a flow is not proof it did not happen.
+    <b>Instance metadata access is invisible to flow logs, so a detector built on them alone cannot see a credential being read from the metadata service.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two streams are documented as <b>best-effort</b> and should never be treated as complete. Load balancer access logs carry an explicit warning that they are not a complete accounting, and legacy object-store server access logging is delivered within a few hours with duplicates possible. For reliable object access auditing, use data events instead.</div>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Read the default column before the feature list. <b>The question is never "can AWS log this" - it almost always can - but "was it logging this on the day it mattered"</b>, and that is decided by a switch somebody either did or did not set, in a service that has nothing to do with the incident.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">An investigation needs to know who read a particular object four months ago. What decides whether that is answerable?</div>
+      <button class="q-opt">Whether the event history retention was extended</button>
+      <button class="q-opt">Whether data events were enabled for that bucket</button>
+      <button class="q-opt">Whether flow logs were on in the bucket's Region</button>
+      <button class="q-opt">Whether the trail was delivering to object storage</button>
+      <div class="q-fb">Object reads are data events, which are off by default and require selectors, so the question is answerable only if somebody enabled them beforehand. Event history retention cannot be extended and covers management events only, flow logs record IP flows rather than object access, and a trail without data-event selectors records no object reads.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which activity is invisible to VPC flow logs?</div>
+      <button class="q-opt">A rejected connection to a database port</button>
+      <button class="q-opt">Traffic through a managed NAT gateway interface</button>
+      <button class="q-opt">An accepted flow to a load balancer interface</button>
+      <button class="q-opt">A process reading the instance metadata service</button>
+      <div class="q-fb">Instance metadata traffic is excluded by design, along with DNS resolver, NTP, DHCP and ARP. Rejected flows are recorded, and service-owned interfaces such as NAT gateways and load balancers appear in flow logs like any other interface.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What is the difference between the default event history and a trail?</div>
+      <button class="q-opt">A trail delivers durably - the history stops at 90 days</button>
+      <button class="q-opt">A trail records data events and history records reads</button>
+      <button class="q-opt">A trail is immutable while the history can be edited</button>
+      <button class="q-opt">A trail covers one Region and history covers them all</button>
+      <div class="q-fb">Event history is free, immutable, on by default and capped at ninety days of management events, while a trail is what delivers records durably to a destination you keep. Data events require selectors on a trail rather than being its defining feature, the history is immutable too, and neither is defined by Region coverage.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A new organisation is being set up. The security team asks for four guarantees: every administrative action is retained for two years, access to one sensitive bucket is auditable, unusual outbound network connections can be investigated, and nothing costs more than it has to.</p>
+      <p><b>Specify the streams</b> to enable for each guarantee, name the one that must be scoped narrowly and why, and state one thing the fourth guarantee cannot cover.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Take the guarantees in order and ask, for each, whether the stream is on already, and whether it is charged by volume. One of the four is charged by volume and is the reason audit bills surprise people.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Two years of administrative actions - a trail.</b> The default event history stops at ninety days, so a trail delivering management events to object storage is what makes two years possible. The first copy of management events in a trail carries no charge, and the object storage lifecycle of lesson 0400 controls what the two years actually cost.</li>
+        <li><b>Auditing the sensitive bucket - data events, scoped.</b> This is the stream that must be narrow. Data events are charged per hundred thousand delivered and object access is high volume, so use advanced selectors to name that bucket's ARN specifically rather than enabling data events account-wide.</li>
+        <li><b>Say why the scoping matters.</b> Enabling data events across every bucket in a busy account produces a stream orders of magnitude larger than the management-event stream, and it is the single most common cause of an unexpected audit bill.</li>
+        <li><b>Outbound network investigation - flow logs.</b> Off by default, so they must be enabled per network, and the destination decides the cost: object storage in a columnar format is cheaper at volume than the log store.</li>
+        <li><b>State the gap.</b> Flow logs do not record traffic to the DNS resolver or to the instance metadata service. So a workload resolving an unexpected name, or a process reading credentials from metadata, is outside this guarantee - DNS resolver query logging is a separate switch, and metadata access has no flow-log record at all.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one of your four streams should be scoped by selector, and your gap should name something a flow log cannot see rather than something it records badly. If your answer relied on the ninety-day event history for the two-year requirement, re-read what that history is.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1002-how-fast-each-stream-arrives.html">How fast each stream arrives</a></b> takes the same list and asks how long each one takes to show up.</li>
+    <li>Lesson 0702 covered <a href="0702-egress-and-private-access.html">the NAT gateway</a> whose translations have no log of their own.</li>
+    <li>Lesson 0400 covered <a href="0400-the-object-store-and-its-classes.html">the storage classes</a> that decide what two years of audit records cost.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the default column still feels like trivia, ask an agent to check one real account for each stream on this page and report which are running.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/vpc/latest/userguide/flow-logs.html">VPC flow logs</a> is worth reading for its limitations section alone, because the list of what the stream does not capture is the part that decides whether a detection design works.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1000-three-stores-and-no-workspace.html"><span class="dir">&larr; Previous</span><span class="ttl">Three stores and no workspace</span></a>
+    <a class="nxt" href="1002-how-fast-each-stream-arrives.html"><span class="dir">Next &rarr;</span><span class="ttl">How fast each stream arrives</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1001 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

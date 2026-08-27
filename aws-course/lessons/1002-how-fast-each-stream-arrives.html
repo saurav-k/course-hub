@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How fast each stream arrives - Inside AWS</title>
+<meta name="description" content="The tail is fast and the delivery leg is slow: first-party paths reach one-second cadence, while most services take minutes to land telemetry in a store you can query.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1002</div>
+  <h1>The tail is fast and the delivery leg is the honest bottleneck</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>log-store</code>, <code>control-plane-audit-log</code> and <code>telemetry-export-pipeline</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html">CloudWatch Logs Live Tail</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Live Tail streams new log events at a one-second cadence over any log group</b>, through a first-party API rather than as a console convenience.</li>
+      <li>The CDN's <b>real-time logs</b> reach a stream in seconds, sampled at a rate you choose, and the platform event bus carries service events at the same scale.</li>
+      <li>Most streams are <b>minutes</b>: audit records typically about five minutes, flow logs about five to the log store and ten to object storage, function logs five to ten.</li>
+      <li>So the honest limit is not the tail, it is the <b>delivery leg into a store you can query</b>, and a detection design has to be built against that number.</li>
+      <li>What it costs: subscription-filter deliveries retry for up to <b>24 hours and then drop</b>, so a downstream consumer that is down long enough loses events with no replay.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1001&lt;br/&gt;which streams&lt;br/&gt;are running"] --> T["THIS PAGE&lt;br/&gt;how long each one&lt;br/&gt;takes to arrive"]
+  T --> A["Noticing, and acting&lt;br/&gt;lesson 1003"]
+  T --> B["Threat detection&lt;br/&gt;module 11"]
+  W["Module 10&lt;br/&gt;observability and audit"] -.- T
+    </div>
+    <figcaption>Where this sits. A stream that is running is only useful if it arrives in time to be useful. This page is the timing column of the same inventory, and it is what decides whether an automated response is possible or whether the answer is always a post-mortem.
+    <b>Detection latency is the sum of the delivery leg and your own evaluation, and the first of those two is not yours to tune.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: where each stream lands on the clock</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Logarithmic latency chart of AWS telemetry streams: Live Tail at about one second, CDN real-time logs and the platform event bus at seconds, audit trail delivery typically about five minutes, flow logs and function logs at five to ten minutes, a CDN standard-log setting taking effect within twelve hours, and subscription-filter retries giving up after twenty-four hours">
+      <text class="ttl" x="20" y="22">How long telemetry takes to become queryable</text>
+      <line class="grid" x1="70"  y1="42" x2="70"  y2="252"/>
+      <line class="grid" x1="178" y1="42" x2="178" y2="252"/>
+      <line class="grid" x1="262" y1="42" x2="262" y2="252"/>
+      <line class="grid" x1="370" y1="42" x2="370" y2="252"/>
+      <line class="grid" x1="456" y1="42" x2="456" y2="252"/>
+      <line class="grid" x1="552" y1="42" x2="552" y2="252"/>
+      <line class="axis" x1="70" y1="252" x2="614" y2="252"/>
+      <circle class="m-stat" cx="70" cy="54" r="5"/>
+      <rect class="m-stat"   x="70"  y="74"  width="108" height="12"/>
+      <rect class="m-stat"   x="70"  y="100" width="108" height="12"/>
+      <rect class="m-signal" x="262" y="126" width="108" height="12"/>
+      <rect class="m-signal" x="337" y="152" width="33"  height="12"/>
+      <rect class="m-signal" x="337" y="178" width="33"  height="12"/>
+      <circle class="m-alarm" cx="519" cy="210" r="5"/>
+      <circle class="m-alarm" cx="552" cy="236" r="5"/>
+      <text class="lbl-sm" x="82"  y="58">Live Tail - about one second</text>
+      <text class="lbl-sm" x="186" y="84">CDN real-time logs - seconds</text>
+      <text class="lbl-sm" x="186" y="110">Platform event bus - seconds</text>
+      <text class="lbl-sm" x="378" y="136">Audit trail - typically about five minutes</text>
+      <text class="lbl-sm" x="378" y="162">Flow logs - five to ten minutes</text>
+      <text class="lbl-sm" x="378" y="188">Function logs - five to ten minutes</text>
+      <text class="lbl-sm" x="507" y="214" text-anchor="end">CDN standard-log setting takes effect - 12 hours</text>
+      <text class="lbl-sm" x="540" y="240" text-anchor="end">Subscription-filter retries give up - 24 hours</text>
+      <text class="lbl-sm" x="70"  y="270" text-anchor="middle">1 s</text>
+      <text class="lbl-sm" x="178" y="270" text-anchor="middle">10 s</text>
+      <text class="lbl-sm" x="262" y="270" text-anchor="middle">1 min</text>
+      <text class="lbl-sm" x="370" y="270" text-anchor="middle">10 min</text>
+      <text class="lbl-sm" x="456" y="270" text-anchor="middle">1 h</text>
+      <text class="lbl-sm" x="552" y="270" text-anchor="middle">24 h</text>
+      <text class="lbl-sm" x="20"  y="292">logarithmic scale - every figure is published as typical rather than guaranteed</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>seconds-scale</span><span><i class="sw-signal"></i>minutes-scale delivery leg</span><span><i class="sw-alarm"></i>hours-scale behaviour</span></div>
+    <figcaption>Three clusters, and the gap between the first two is where most designs go wrong. The seconds-scale paths are real and first-party; what stays minutes-scale is the delivery of most services' telemetry into a store, which is the number an automated response has to be designed around.
+    <b>An alarm cannot fire on data that has not arrived, so a detection promise faster than the delivery leg of its own source is a promise about nothing.</b></figcaption>
+  </figure>
+
+  <h2>2. The mental model: two legs, not one</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  E["Something happens"] --> D["The delivery leg&lt;br/&gt;the service batches and ships&lt;br/&gt;- minutes, for most streams"]
+  D --> S["A store you can query&lt;br/&gt;log group, object storage or a stream"]
+  S --> Q["Your evaluation&lt;br/&gt;an alarm, a query or a rule"]
+  Q --> R["A response"]
+  F["The fast paths bypass the batching&lt;br/&gt;- Live Tail, real-time CDN logs, the event bus"] -.- D
+    </div>
+    <figcaption>The two legs of every detection. Tuning the second leg - a faster alarm period, a tighter query schedule - cannot move the first, and the first is where the minutes are.
+    <b>Choose the stream by its delivery leg before choosing the evaluation, because that ordering is the only one that can meet a stated response time.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Where AWS publishes no figure, this course does not invent one. <b>CloudWatch metric streams</b> are documented only as "near-real-time delivery and low latency" with no number attached, so any minute-scale estimate you meet is somebody's measurement rather than a commitment - measure your own pipeline instead (<a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch-Metric-Streams.html">metric streams</a>).</div>
+
+  <h2>3. The pipeline that quietly gives up</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant L as A log group
+  participant S as A subscription filter
+  participant C as The consumer
+  L->>S: matching events
+  S->>C: deliver
+  C--xS: the consumer is unavailable
+  S->>S: retry, for up to 24 hours
+  S->>C: deliver, if the consumer returns in time
+  S--xS: after 24 hours the events are dropped
+  Note over S,C: there is no replay - the log group still holds them, the pipeline does not
+    </div>
+    <figcaption>Subscription filters retry for up to twenty-four hours and then drop, which is generous until a downstream consumer is broken over a weekend. The events still exist in the log group; what is lost is their delivery (<a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/SubscriptionFilters.html">subscription filters</a>).
+    <b>Any consumer at the end of a subscription filter needs its own dead-letter thinking, because the pipeline in front of it has a deadline.</b></figcaption>
+  </figure>
+
+  <p>Three more timing facts belong on the same page. <b>Flow log aggregation</b> is configured at one minute or ten, and the interval is added to the delivery time rather than replacing it. <b>Load balancer access logs</b> are written in five-minute batches per node. And a change to the CDN's <b>standard logging settings</b> takes effect within twelve hours, which is a configuration delay rather than a delivery one and catches people who enable logging during an incident.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Write the response time you need, then subtract the delivery leg of the stream you plan to use. <b>What is left is the budget for your own evaluation</b>, and if it is negative the answer is a different stream rather than a faster alarm. That single subtraction settles most arguments about whether a control can be automated.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A requirement asks for automated response within thirty seconds of an unusual API call. What is the obstacle?</div>
+      <button class="q-opt">Alarm evaluation periods have a one-minute floor</button>
+      <button class="q-opt">Audit records are sampled and may not include it</button>
+      <button class="q-opt">Audit delivery is typically about five minutes</button>
+      <button class="q-opt">The event history retains only ninety days of calls</button>
+      <div class="q-fb">The delivery leg is the obstacle: audit records typically arrive about five minutes after the call, so nothing downstream can respond in thirty seconds. Audit records are not sampled, retention governs how far back you can look rather than how fast records arrive, and the evaluation period is the smaller half of the sum.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which first-party path delivers log events at a one-second cadence?</div>
+      <button class="q-opt">Live Tail, which streams over any log group</button>
+      <button class="q-opt">A metric filter, evaluated as events arrive</button>
+      <button class="q-opt">An export task, delivering into object storage</button>
+      <button class="q-opt">Logs Insights, when run against a recent window</button>
+      <div class="q-fb">Live Tail is a streaming tail with a documented one-second cadence and its own API, available over any log group. A metric filter produces a metric rather than a stream of events, an export task is a batch operation, and a query returns what has already been stored.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A consumer behind a subscription filter is offline for two days. What happens to the events?</div>
+      <button class="q-opt">They queue indefinitely until the consumer returns</button>
+      <button class="q-opt">Delivery is retried for a day and then dropped</button>
+      <button class="q-opt">They are redirected to the log group's export task</button>
+      <button class="q-opt">They are replayed automatically on reconnection</button>
+      <div class="q-fb">Subscription filters retry for up to twenty-four hours and then drop the deliveries, with no replay. The events remain in the log group, but nothing re-sends them, and export tasks are a separate mechanism that is not a fallback.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A security team writes three requirements. A publicly exposed storage bucket must be corrected within ten minutes of being made public. A suspicious sign-in must page a human within one minute. A sudden surge of errors at the CDN edge must be visible to an on-call engineer within a minute of starting.</p>
+      <p><b>For each</b>, name the stream you would build on, do the subtraction, and say which requirement cannot be met as written.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Write the delivery leg of each candidate stream first, then subtract from the stated deadline. Two of the three have a stream in the seconds cluster available; one does not.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>The public bucket - ten minutes, on an audit stream.</b> The configuration change is an API call, so the audit trail is the source, with a typical delivery of about five minutes. Ten minutes minus five leaves about five minutes for evaluation and remediation, which is workable but has no margin, so the remediation itself must be automatic rather than a ticket.</li>
+        <li><b>Consider the alternative for the same requirement.</b> A detective configuration rule also sees this, but it is evaluating recorded configuration rather than the call, so it is not the faster path. Keep it as the backstop that catches whatever the first path misses.</li>
+        <li><b>The suspicious sign-in - one minute, and this is the one that fails.</b> Sign-in events reach the audit stream, whose delivery leg is typically about five minutes. One minute minus five is negative, so the requirement cannot be met from that source however the alarm is configured. Say so plainly and renegotiate the number, or find a source that emits the signal on the event bus.</li>
+        <li><b>The CDN error surge - one minute, and this one is comfortable.</b> Real-time CDN logs deliver in seconds to a stream, so a minute is achievable with room to spare. Note that they are sampled at a rate you choose, so pick a sampling percentage high enough for the surge to be visible.</li>
+        <li><b>Record the trap that catches people mid-incident.</b> If real-time logging is not already enabled, turning on the CDN's standard logging during the incident will not help either - that setting takes effect within twelve hours.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Exactly one requirement should come out negative, and it should be the one-minute sign-in requirement rather than the ten-minute bucket one. If all three looked achievable, you subtracted the evaluation period rather than the delivery leg.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1003-noticing-and-acting.html">Noticing and acting</a></b> covers the alarms, dashboards and probes that sit on the far side of these delivery legs.</li>
+    <li>Lesson 0604 covered <a href="0604-ingest-deliver-process.html">the stream that seconds-scale telemetry is delivered into</a>.</li>
+    <li>Lesson 0204 covered <a href="0204-buying-the-same-machine-for-less.html">the interruption notice</a> that arrives on the platform event bus at seconds scale.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the subtraction feels like arithmetic for its own sake, ask an agent to take one existing automated response and work out the earliest moment it could possibly fire.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/logs/CloudWatchLogs_LiveTail.html">Live Tail</a> is the page that corrects the common belief that nothing on AWS is sub-minute, and knowing it exists changes what a first-response tool can be built on.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from. Where the vendor publishes no latency figure, this page says so rather than estimating.</p>
+
+  <div class="pager">
+    <a href="1001-what-is-on-and-what-is-off.html"><span class="dir">&larr; Previous</span><span class="ttl">What is on and what is off</span></a>
+    <a class="nxt" href="1003-noticing-and-acting.html"><span class="dir">Next &rarr;</span><span class="ttl">Noticing and acting</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1002 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

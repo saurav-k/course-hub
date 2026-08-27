@@ -86,6 +86,15 @@ is wrong and it gets fixed before anything new is added.
 | 0903 | Quotas, tags and what you own | working |
 | 0904 | The cost model | working |
 
+### Module 10 - Observability and audit
+
+| Lesson | Title | Rung |
+| 1000 | Three stores and no workspace | working |
+| 1001 | What is on and what is off | working |
+| 1002 | How fast each stream arrives | working |
+| 1003 | Noticing and acting | working |
+| 1004 | Instrumenting, and what telemetry cannot answer | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -124,7 +133,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 10 to 14 above**, none started. New numbers go at the end of the
+- **Modules 11 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

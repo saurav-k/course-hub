@@ -235,6 +235,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0904-the-cost-model.html"
         }
       ]
+    },
+    {
+      "n": "10",
+      "title": "Observability and audit",
+      "lessons": [
+        {
+          "title": "Three stores and no workspace",
+          "href": "lessons/1000-three-stores-and-no-workspace.html"
+        },
+        {
+          "title": "What is on and what is off",
+          "href": "lessons/1001-what-is-on-and-what-is-off.html"
+        },
+        {
+          "title": "How fast each stream arrives",
+          "href": "lessons/1002-how-fast-each-stream-arrives.html"
+        },
+        {
+          "title": "Noticing and acting",
+          "href": "lessons/1003-noticing-and-acting.html"
+        },
+        {
+          "title": "Instrumenting, and what telemetry cannot answer",
+          "href": "lessons/1004-instrumenting-and-what-telemetry-cannot-answer.html"
+        }
+      ]
     }
   ],
   "extras": []

@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Noticing and acting - Inside AWS</title>
+<meta name="description" content="Three things can tell you something is wrong - your own metrics, a synthetic user, and AWS itself - and only the alarm can do anything about it.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Observability and audit &middot; Lesson 1003</div>
+  <h1>Three things can tell you something is wrong, and one of them can act</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>alerting</code>, <code>dashboards</code>, <code>synthetic-monitoring</code> and <code>service-health-dashboard</code>.
+    &middot; <a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Create_Composite_Alarm.html">CloudWatch alarms</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An alarm is not a threshold check. It is a <b>state that changes when a condition is sustained</b>, which is what stops a single noisy data point paging anybody.</li>
+      <li><b>Composite alarms</b> combine child alarms with AND, OR and NOT, which is the mechanism for turning an alarm storm into one page.</li>
+      <li>Alarm actions reach further than notification: <b>scaling groups, instance recovery, functions and operational items</b> are all valid targets.</li>
+      <li>A <b>canary</b> is a scripted probe that runs as often as <b>once a minute</b>, takes screenshots and emits heartbeat metrics, so a failure is noticed even when no real user is looking.</li>
+      <li>What it costs: the <b>Health</b> feed tells you about AWS's own events and names your affected resources, but its API is gated behind a Business or higher support plan.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1002&lt;br/&gt;how long telemetry&lt;br/&gt;takes to arrive"] --> T["THIS PAGE&lt;br/&gt;what watches it,&lt;br/&gt;and what it can do"]
+  T --> A["Instrumenting properly&lt;br/&gt;lesson 1004"]
+  T --> B["Security findings&lt;br/&gt;module 11"]
+  W["Module 10&lt;br/&gt;observability and audit"] -.- T
+    </div>
+    <figcaption>Where this sits. Two pages built an inventory of streams and their timing. This page is the layer that watches them, and it introduces the two sources that do not come from your own workload at all.
+    <b>A monitoring design that only watches your own metrics cannot tell the difference between your outage and AWS's.</b></figcaption>
+  </figure>
+
+  <h2>1. The mechanism: an alarm is a state</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "Healthy - the condition is not met" as H
+  state "Breaching, but not for long enough yet" as B
+  state "Alarming - sustained across the configured periods" as A
+  state "Actions run" as R
+  [*] --> H
+  H --> B: a data point crosses the threshold
+  B --> H: it recovers before the periods elapse
+  B --> A: it stays breached
+  A --> R
+  R --> H: the condition clears
+    </div>
+    <figcaption>Why the middle state exists. An alarm fires on a <b>sustained</b> change rather than on a single point, so the number of evaluation periods is the dial that separates a real problem from a spike. An anomaly-detection model can replace the fixed threshold when a static number cannot describe normal.
+    <b>Most alarm fatigue is a periods problem rather than a threshold problem, and it is fixed by asking how long the condition must hold rather than by moving the line.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  C1["Alarm - error rate high"] --> X["Composite alarm&lt;br/&gt;AND, OR and NOT over children"]
+  C2["Alarm - latency high"] --> X
+  C3["Alarm - deployment in progress"] --> X
+  X --> P["One page&lt;br/&gt;errors AND latency, but NOT during a deployment"]
+  X --> A2["Actions - notify, scale,&lt;br/&gt;recover an instance, run a function,&lt;br/&gt;open an operational item"]
+    </div>
+    <figcaption>A composite alarm expressed as the sentence a human would say. The NOT branch is the one worth copying: suppressing during a known event is what turns a nightly batch or a rolling deployment from a recurring false page into a condition the alarm already knows about.
+    <b>Alarm actions can change infrastructure, so an alarm is a control as well as a signal - and one that fires wrongly can do real damage.</b></figcaption>
+  </figure>
+
+  <h2>2. A user who is always there</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as A canary
+  participant S as Your service
+  participant M as CloudWatch Metrics
+  participant AL as An alarm
+  participant O as On-call
+  C->>S: run the script - as often as once a minute
+  S-->>C: response, or a failure
+  C->>M: heartbeat metrics, and a screenshot on failure
+  M->>AL: the metric is evaluated
+  AL->>O: sustained failure pages a human
+  Note over C,S: the probe runs whether or not any real user is on the site
+    </div>
+    <figcaption>Synthetic monitoring, and the property that earns its cost: a canary notices a broken sign-in page at three in the morning, when no real user is there to generate the error metric you would otherwise be watching (<a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Synthetics_Canaries.html">Synthetics canaries</a>). Blueprints cover simple API probes, and a multi-step journey through a user interface needs a script you write.
+    <b>The minimum schedule is once a minute, so a canary's detection time has a floor that no alarm configuration can go under.</b></figcaption>
+  </figure>
+
+  <div class="callout">
+  The third source is AWS itself. The <b>Health</b> feed is account-scoped and names the resources of yours that an event affects, rather than describing a Region in general, and an organisational view aggregates every account. Events can be routed to the platform event bus for automation. Two access notes matter: the <b>Health API needs a Business, Enterprise On-Ramp or Enterprise support plan</b>, while the public status page needs no account at all (<a href="https://docs.aws.amazon.com/health/latest/ug/what-is-aws-health.html">AWS Health</a>).</div>
+
+  <h2>3. Dashboards, and what they can honestly show</h2>
+
+  <p>Dashboards are widgets over metrics, alarms and log queries, and they carry two properties worth knowing before an escalation. They render metrics down to <b>one-minute resolution</b>, or ten seconds where the underlying metric is high-resolution, so a dashboard cannot show a finer picture than the metric behind it. And a dashboard is a <b>regional object</b>: a cross-account or cross-region view is arranged through sharing or cross-account observability rather than being the default (<a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/CloudWatch_Dashboards.html">CloudWatch dashboards</a>).</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Sort your monitoring by <b>who notices first</b>. Your own metrics notice load problems; a canary notices that the thing is broken for users; the Health feed notices that the problem is not yours at all. An estate missing any one of the three has a class of incident it will always learn about from a customer.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">An alarm pages every night during a batch job that is expected to be slow. What is the cleanest fix?</div>
+      <button class="q-opt">Raise the threshold until the batch no longer crosses it</button>
+      <button class="q-opt">Delete the alarm and rely on the dashboard instead</button>
+      <button class="q-opt">A composite alarm with a NOT on a batch-running alarm</button>
+      <button class="q-opt">Shorten the evaluation periods so the spike is missed</button>
+      <div class="q-fb">A composite alarm can suppress on a known condition, which keeps the original sensitivity for every other hour of the day. Raising the threshold blinds the alarm to real problems, deleting it removes the signal entirely, and shortening the periods makes it fire more readily rather than less.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which source notices that a sign-in page is broken when no customers are online?</div>
+      <button class="q-opt">A canary, which runs its script regardless of traffic</button>
+      <button class="q-opt">An error-rate alarm on the application's own metric</button>
+      <button class="q-opt">The Health feed, which reports affected resources</button>
+      <button class="q-opt">A dashboard widget showing recent request counts</button>
+      <div class="q-fb">A synthetic probe generates its own traffic, so it fails whether or not anyone is using the service. An error-rate metric needs requests to exist, the Health feed reports AWS's events rather than your application's, and a dashboard needs somebody looking at it.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What limits how quickly a canary can detect a failure?</div>
+      <button class="q-opt">Alarm evaluation, which has a five-minute floor</button>
+      <button class="q-opt">The schedule, whose minimum is once a minute</button>
+      <button class="q-opt">Screenshot capture, which runs after the probe</button>
+      <button class="q-opt">The Region, since canaries are regional objects</button>
+      <div class="q-fb">A canary cannot run more often than once a minute, so that is the floor on its detection time. Alarms have no five-minute floor of their own here, screenshots are an artefact of the run rather than a delay in front of the metric, and being regional affects where it runs rather than how often.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A checkout service has one alarm: error rate above one percent for one period. It pages during every deployment, during a nightly reconciliation job, and occasionally at random. It did not page during a two-hour outage in which the load balancer returned errors before requests ever reached the application, and nobody noticed an AWS event affecting the database until a customer complained.</p>
+      <p><b>Redesign the monitoring</b>, saying what you change about the existing alarm, what you add, and which of the three sources each failure in the story exposes as missing.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Three symptoms, three different causes: one is about how the alarm evaluates, one is about who generates the traffic, and one is about who owns the problem. Deal with them in that order.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Fix the random pages first.</b> One period is a single data point, so any spike pages. Require the condition to be sustained across several periods, which removes the random pages without touching the threshold.</li>
+        <li><b>Fix the known events.</b> Deployments and the nightly job are expected, so express them as child alarms and build a composite alarm that fires on the error condition AND NOT during either. The original sensitivity is preserved for every other hour.</li>
+        <li><b>Name the first missing source and add it.</b> The outage produced no application errors because requests never arrived, so a metric emitted by the application could never see it. A canary that walks the checkout journey from outside would have failed on the first run, and its heartbeat metric is what the alarm should also watch.</li>
+        <li><b>Name the second missing source and add it.</b> An AWS event affecting the database is not your metric and not your canary - it is the Health feed. Route those events to the platform event bus so the on-call channel receives them automatically, and remember that programmatic access to that feed depends on the support plan.</li>
+        <li><b>Say what each failure exposed.</b> The random pages exposed an evaluation problem. The unnoticed outage exposed a missing synthetic source. The unnoticed AWS event exposed a missing platform source. Only the first was ever an alarm-tuning question.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your redesign should still contain the original error-rate condition rather than replacing it, and you should have added exactly two new sources. If you fixed the false pages by raising the threshold, check what that does to the one percent the business actually cares about.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1004-instrumenting-and-what-telemetry-cannot-answer.html">Instrumenting, and what telemetry cannot answer</a></b> closes the module with the producer side and with two questions no stream can settle.</li>
+    <li>Lesson 1000 covered <a href="1000-three-stores-and-no-workspace.html">the metric resolutions</a> that decide what a dashboard can honestly render.</li>
+    <li>Lesson 0203 covered <a href="0203-holding-a-fleet-at-a-size.html">the scaling group</a> that an alarm action can drive directly.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the three sources still feel like one thing, ask an agent to take your last three incidents and say, for each, which of the three noticed it first.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AmazonCloudWatch/latest/monitoring/Create_Composite_Alarm.html">Creating a composite alarm</a> is the page that turns alarm design from tuning numbers into writing a sentence about when a human should be woken up.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1002-how-fast-each-stream-arrives.html"><span class="dir">&larr; Previous</span><span class="ttl">How fast each stream arrives</span></a>
+    <a class="nxt" href="1004-instrumenting-and-what-telemetry-cannot-answer.html"><span class="dir">Next &rarr;</span><span class="ttl">Instrumenting, and what telemetry cannot answer</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1003 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
