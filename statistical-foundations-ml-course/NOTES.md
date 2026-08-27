@@ -53,7 +53,7 @@ This is the part the learner asked for loudest, so it gets the most care.
 - **The browser caches `hub.css` hard.** When a style change appears not to take effect, add a query string to the page URL before concluding the CSS is wrong.
 - **The validator only checks links, not correctness.** It will happily pass a page with a wrong exponent. Check the arithmetic yourself against the slide images.
 
-## Honesty notes carried in Lecture 1
+## Honesty notes carried in the pages
 
 The lecture is a first lecture, so it is deliberately loose in places.
 Three of those places are called out in the pages rather than smoothed over, because hiding them would teach a wrong habit:
@@ -62,8 +62,13 @@ Three of those places are called out in the pages rather than smoothed over, bec
 2. **The exponential model is an assumption the slide adopts, not a fact the ten data points establish.** Ten points cannot identify a distribution family. Page 0004 says this plainly.
 3. **The correlation slide's normalising constants do not reproduce from its own table.** Page 0007 quotes the deck's stated results, then shows what the table itself gives, and notes that the qualitative conclusion survives either way. See `learning-records/0001-quoting-a-deck-that-does-not-recompute.md` for the full decision.
 
+Lecture 4 carries two more of the same kind, both named on its hub page before the reader meets them:
+
+4. **The lecture writes the reverse decomposition for `P(D | -)` and never evaluates it.** Page 0049 shows the identity as the notes leave it, then works the number out in a separate callout marked as this course's own derivation. See `learning-records/0002-finishing-an-arithmetic-the-lecture-leaves-open.md`.
+5. **Conditional independence gets a definition and no example.** Page 0052 supplies one - two API replicas behind a shared database - and labels it as this course's construction rather than the lecture's.
+
 ## Open threads
 
-- Lecture 2 is not written. When it is, decide whether nine pages per lecture is the right grain.
-- No learning record on the learner's own recall yet. Add one after Lecture 1 has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lecture 1. Keep one per lecture rather than growing a single sheet that nobody prints.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4. One idea per page is the constraint; the total falls out of it.
+- No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
+- A print-friendly formula sheet exists for Lectures 1, 2, 3 and 4. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.

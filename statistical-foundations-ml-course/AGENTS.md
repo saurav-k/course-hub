@@ -8,7 +8,7 @@ This file adds only what is true of this course and nowhere else.
 
 A deck-faithful expansion of the IIT Bombay lecture series *Statistical Foundations of Machine Learning* (Nikhil Karamchandani and D. Manjunath), written for one learner: a tech lead whose university probability has gone cold and who asked for near-zero cognitive load and many diagrams.
 The course nests three levels deep: course map, lecture hub, one-idea page.
-Lecture 1 is on the site; Lectures 2, 3 and TA Session 1 are in progress; see [`PLOT.md`](PLOT.md) for the exact state.
+Lectures 1 to 4, TA Session 1 and Homework 1 are on the site, occupying lessons `0000` to `0057`; see [`PLOT.md`](PLOT.md) for the exact state and the true reading order.
 
 ## Read before you write
 
@@ -23,8 +23,8 @@ In this order:
 
 ## The rules that bite hardest here
 
-- **Deck numbers are quoted, never recomputed or improved.** A stated figure goes on the page inside `<span class="keynum">` exactly as the slide gives it. Where the deck is loose or does not recompute from its own table, say so in a `.callout.warn` rather than fixing it silently; `learning-records/0001-quoting-a-deck-that-does-not-recompute.md` records one full worked example of that decision.
-- **Never renumber anything.** Lecture 1 occupies lessons `0000` to `0008`, and Lecture 2 starts at `0009`. URLs are public.
+- **Deck numbers are quoted, never recomputed or improved.** A stated figure goes on the page inside `<span class="keynum">` exactly as the slide gives it. Where the deck is loose or does not recompute from its own table, say so in a `.callout.warn` rather than fixing it silently; `learning-records/0001-quoting-a-deck-that-does-not-recompute.md` records one full worked example of that decision, and `learning-records/0002-finishing-an-arithmetic-the-lecture-leaves-open.md` records the companion case, where the deck states no figure at all and this course derives one under its own name.
+- **Never renumber anything.** Lecture 1 occupies lessons `0000` to `0008`, and every session since has taken the next free numbers in one continuous sequence. URLs are public.
 - **A tutorial or TA session sits after the lecture it supports**, in both `index.html` and `PLOT.md`, never in a separate list at the bottom of the map.
 - **Mermaid labels carrying maths need double quotes** (`A["P(X > 2000)"]`), line breaks are the entity `&lt;br/&gt;`, and a semicolon in a label breaks the diagram. This subject is full of parentheses; read the gotchas section of `NOTES.md` before drawing anything.
 - **SVG charts use the semantic `.chart` classes, never hex values.** Teal is statistics, indigo is probability, green is signal, grey is noise, rust is the outlier or risk tail, on every page, in both themes.
