@@ -261,6 +261,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1004-instrumenting-and-what-telemetry-cannot-answer.html"
         }
       ]
+    },
+    {
+      "n": "11",
+      "title": "Security services",
+      "lessons": [
+        {
+          "title": "Protection at the edge",
+          "href": "lessons/1100-protection-at-the-edge.html"
+        },
+        {
+          "title": "Inspection inside the network",
+          "href": "lessons/1101-inspection-inside-the-network.html"
+        },
+        {
+          "title": "Four detectors",
+          "href": "lessons/1102-four-detectors.html"
+        },
+        {
+          "title": "Posture and org-wide enforcement",
+          "href": "lessons/1103-posture-and-org-wide-enforcement.html"
+        },
+        {
+          "title": "Three decisions above the network",
+          "href": "lessons/1104-three-decisions-above-the-network.html"
+        }
+      ]
     }
   ],
   "extras": []

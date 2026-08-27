@@ -95,6 +95,15 @@ is wrong and it gets fixed before anything new is added.
 | 1003 | Noticing and acting | working |
 | 1004 | Instrumenting, and what telemetry cannot answer | working |
 
+### Module 11 - Security services
+
+| Lesson | Title | Rung |
+| 1100 | Protection at the edge | working |
+| 1101 | Inspection inside the network | working |
+| 1102 | Four detectors | working |
+| 1103 | Posture and org-wide enforcement | working |
+| 1104 | Three decisions above the network | working |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -133,7 +142,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 11 to 14 above**, none started. New numbers go at the end of the
+- **Modules 12 to 14 above**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of AWS terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.

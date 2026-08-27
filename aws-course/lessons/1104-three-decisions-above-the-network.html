@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three decisions above the network - Inside AWS</title>
+<meta name="description" content="Whether a person reaches an application, whether an action on a resource is allowed inside it, and whether a model's words may pass - three per-request decisions, two of them in the same policy language.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AWS</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Security services &middot; Lesson 1104</div>
+  <h1>Three per-request decisions that neither identity nor a firewall makes</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Capability keys <code>zero-trust-app-access</code>, <code>verified-permissions</code> and <code>ai-safety-guardrails</code>.
+    &middot; <a href="https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html">AWS Verified Access</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Verified Access</b> decides, per request, whether a person reaches an internal application - evaluating identity and device posture with no VPN client involved.</li>
+      <li><b>Verified Permissions</b> decides, per request, whether an action on a resource is allowed <b>inside</b> your application. It is a <b>decision point, not a proxy</b>: your code asks it and enforces the answer.</li>
+      <li>Both are written in <b>Cedar</b>, the open-source policy language, in terms of principal, action, resource and context.</li>
+      <li><b>Bedrock Guardrails</b> decides whether words may pass - filtering harmful content, denied topics and sensitive information, on both the prompt and the model's response.</li>
+      <li>What it costs: a decision point that your application forgets to call is a policy that does not exist, so enforcement discipline is the design work here.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 1100 to 1103&lt;br/&gt;edge protection, inspection,&lt;br/&gt;detection and posture"] --> T["THIS PAGE&lt;br/&gt;decisions made per request,&lt;br/&gt;above the network"]
+  T --> A["Shipping change safely&lt;br/&gt;module 12"]
+  T --> B["Model applications&lt;br/&gt;module 13"]
+  W["Module 11&lt;br/&gt;security services"] -.- T
+    </div>
+    <figcaption>Where this sits, and the last page of the module. Module 08 decided what a principal may do to AWS resources. Module 07 decided which packets may travel. None of that decides whether this user may open this internal tool, whether this customer may edit this document, or whether a model may say what it just generated.
+    <b>These three questions are asked inside your application, on every request, and the platform answers them with policy rather than with code you maintain.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: three gates, one per layer</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  R["A request"] --> G1["Reach the application at all&lt;br/&gt;Verified Access - identity plus device posture"]
+  G1 --> G2["Do this to that resource&lt;br/&gt;Verified Permissions - principal, action, resource, context"]
+  G2 --> G3["May these words pass&lt;br/&gt;Guardrails - on the prompt and on the response"]
+  G3 --> D["The request proceeds"]
+  C["Cedar, the same policy language"] -.- G1
+  C -.- G2
+    </div>
+    <figcaption>Three gates at three layers, and two of them share a policy language. Verified Access evaluates trust at a load balancer or CDN endpoint and reaches private applications through connectors, with an identity provider integration required (<a href="https://docs.aws.amazon.com/verified-access/latest/ug/what-is-verified-access.html">Verified Access</a>).
+    <b>Reaching the application and being allowed to act inside it are different decisions, and a design that conflates them ends with everyone who can log in able to do everything.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: a decision point is not a proxy</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as A user
+  participant A as Your application
+  participant V as Verified Permissions
+  participant D as Your data
+  U->>A: edit this document
+  A->>V: is this principal allowed this action on this resource
+  V->>V: evaluate the Cedar policies against the schema
+  V-->>A: allow, or deny
+  A->>D: perform the edit, only on allow
+  Note over A,V: nothing intercepts the request - the application asks, and the application enforces
+    </div>
+    <figcaption>The distinction that decides whether this service helps you. Verified Permissions is a <b>policy decision point</b>: your application calls it and acts on the answer, and identity tokens from the customer directory integrate as the principal source (<a href="https://docs.aws.amazon.com/verifiedpermissions/latest/userguide/what-is-avp.html">Verified Permissions</a>).
+    <b>A code path that skips the call is unauthorised access that no policy can prevent, so the value comes from having exactly one place in the application that asks.</b></figcaption>
+  </figure>
+
+  <p>What this buys is that authorisation logic stops being scattered through the application. Rules live in Cedar policies against a schema, they can be changed without a deployment, and they can be read by someone who does not read your language - which is what makes an authorisation model reviewable.</p>
+
+  <h2>3. The third gate: what a model is allowed to say</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  state "A prompt arrives" as P
+  state "Screened - content filters, denied topics, word filters" as S1
+  state "The model generates a response" as M
+  state "Screened again - the response is checked too" as S2
+  state "Sensitive information redacted" as R
+  state "Delivered" as D
+  [*] --> P
+  P --> S1
+  S1 --> M: allowed
+  S1 --> D: blocked, with your configured message
+  M --> S2
+  S2 --> R
+  R --> D
+    </div>
+    <figcaption>Guardrails screen <b>both directions</b>, which is the property that matters: a prompt can be refused, and a response the model produced anyway can still be blocked or redacted. The content filter categories are hate, insults, sexual, violence, misconduct and prompt attack, each with a configurable strength, and contextual grounding checks are available alongside them (<a href="https://docs.aws.amazon.com/bedrock/latest/userguide/guardrails.html">Bedrock Guardrails</a>).
+    <b>The same policy can be applied to models hosted outside this platform through a dedicated API, so the guardrail is not tied to where the model runs.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  All three are the same shape: <b>a policy, evaluated per request, at a layer the network cannot see</b>. Identity policies of module 08 protect AWS's own APIs; these protect yours. An application that has adopted the first and not the second has a beautifully governed cloud account and an authorisation model living in scattered conditional statements.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What happens if an application code path forgets to call the authorisation decision point?</div>
+      <button class="q-opt">The request is denied, since no decision was returned</button>
+      <button class="q-opt">The request is queued until a decision is available</button>
+      <button class="q-opt">The proxy in front of the application blocks it anyway</button>
+      <button class="q-opt">The action proceeds, because nothing was intercepting it</button>
+      <div class="q-fb">A decision point is asked rather than interposed, so an uncalled decision is simply an unenforced policy. There is no proxy in this design, nothing fails closed on the application's behalf, and no queueing is involved.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which requirement points at Verified Access rather than at identity policies?</div>
+      <button class="q-opt">A role must be assumable only from one account</button>
+      <button class="q-opt">Staff reach an internal tool without a VPN client</button>
+      <button class="q-opt">A bucket must reject callers outside the estate</button>
+      <button class="q-opt">A function must read one table and nothing else</button>
+      <div class="q-fb">Verified Access is about people reaching an application, judged per request on identity and device posture, with no VPN client. The other three are all decisions about AWS resources, which belong to the trust policies, guardrails and identity policies of module 08.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does a guardrail screen?</div>
+      <button class="q-opt">The prompt only, before the model is invoked</button>
+      <button class="q-opt">The response only, before it reaches the user</button>
+      <button class="q-opt">Both the prompt and the model's response</button>
+      <button class="q-opt">Neither - it audits the exchange afterwards</button>
+      <div class="q-fb">Guardrails screen in both directions, which is what allows a response to be blocked or redacted even when the prompt was acceptable. Screening one side only would leave the other unprotected, and this is enforcement rather than after-the-fact auditing.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A company builds an internal assistant. Employees reach it from laptops and personal devices. It answers questions about documents, and each employee may see only the documents their team owns. It calls a hosted model, and legal is worried both about employees pasting customer data into prompts and about the assistant repeating something it should not.</p>
+      <p><b>Place each requirement</b> on one of the three gates, name the failure mode of the middle gate, and say which requirement is not solved by any of them.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Sort the requirements by the layer each one lives at: reaching the thing, acting inside it, and what may be said. One requirement about people and devices belongs to the first gate, and one requirement is not a policy question at all.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Reaching the assistant - the first gate.</b> Verified Access evaluates identity and device posture per request, so the personal-device concern is expressed as a trust requirement rather than as a network rule. No VPN client is involved, and an identity provider integration is a prerequisite rather than an optional extra.</li>
+        <li><b>Document-level access - the second gate.</b> Each employee seeing only their team's documents is principal, action, resource and context, which is exactly what Cedar expresses. Write it as policy against a schema rather than as conditionals scattered through the retrieval code.</li>
+        <li><b>Name the middle gate's failure mode.</b> A code path that fetches a document without calling the decision point. The service cannot intercept anything, so the discipline is architectural: one place in the application asks, and everything that reads documents goes through it.</li>
+        <li><b>Both of legal's concerns - the third gate.</b> Guardrails screen the prompt, so customer data pasted in can be blocked or redacted, and they screen the response, so the assistant repeating something unacceptable is caught on the way out. Sensitive-information redaction is the specific mechanism for the first, and the content filters and denied topics for the second.</li>
+        <li><b>Name what is not solved here.</b> Whether the underlying documents were correctly labelled by team in the first place. Every gate on this page evaluates policy against attributes that already exist, and no policy language can fix a document whose ownership metadata is wrong - that is a data problem, and it belongs upstream.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> All three gates should be used, legal's two worries should land on the same gate, and your final answer should be about data quality rather than about a missing service. If the device-posture requirement ended up as a network rule, re-read what the first gate evaluates.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, module 12</b> turns to how any of this reaches production in the first place.</li>
+    <li>Lesson 0803 covered <a href="0803-neither-your-staff-nor-your-customers.html">the customer directory</a> whose tokens are the principal source for the middle gate.</li>
+    <li>Lesson 0800 covered <a href="0800-the-gates-an-access-decision-passes.html">the platform's own authorisation</a>, which these three sit above rather than replace.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the decision-point distinction still feels academic, ask an agent to count how many places in one real application read a resource, and how many of them check permission first.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/verifiedpermissions/latest/userguide/what-is-avp.html">What is Verified Permissions</a> is the page that makes the decision-point model explicit, and understanding that one sentence is what stops a team expecting enforcement they were never given.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified AWS inventory behind this course, each cell linked to the vendor page it was read from.</p>
+
+  <div class="pager">
+    <a href="1103-posture-and-org-wide-enforcement.html"><span class="dir">&larr; Previous</span><span class="ttl">Posture and org-wide enforcement</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Inside AWS &middot; Lesson 1104 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>
