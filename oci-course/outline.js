@@ -205,6 +205,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0804-keys-secrets-and-certificates.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Governance, tenancy and cost",
+      "lessons": [
+        {
+          "title": "Four guardrails, and which of them actually blocks",
+          "href": "lessons/0900-four-guardrails-and-which-blocks.html"
+        },
+        {
+          "title": "The landing zone is a framework, and how you check what exists",
+          "href": "lessons/0901-the-landing-zone-is-a-framework.html"
+        },
+        {
+          "title": "Tagging is the cost model",
+          "href": "lessons/0902-tagging-is-the-cost-model.html"
+        },
+        {
+          "title": "Seeing and shaping the bill",
+          "href": "lessons/0903-seeing-and-shaping-the-bill.html"
+        }
+      ]
     }
   ],
   "extras": []

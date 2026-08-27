@@ -168,6 +168,20 @@ from and the date it was read.
 - [Secret Management](https://docs.oracle.com/en-us/iaas/Content/secret-management/overview.htm) - versioned secrets, rotation schedules, retrieval bundles and the free allowance.
 - [Certificates](https://docs.oracle.com/en-us/iaas/Content/certificates/home.htm) - the managed internal authority with automatic renewal, imported certificates, and the gateway bundle limit.
 
+### Module 09 - Governance, tenancy and cost
+
+- [Adding governance to tenancies](https://docs.oracle.com/en-us/iaas/Content/General/organization/add-governance.htm) - parent-created allowed regions, quota policies and tags, locked against the child tenancy.
+- [Security Zones](https://docs.oracle.com/en-us/iaas/Content/security-zone/home.htm) - compartment-scoped recipes that block non-compliant creation and raise the violation to Cloud Guard, and the recipe model that stands in for a custom policy engine.
+- [Compartment quotas](https://docs.oracle.com/en-us/iaas/Content/Quotas/Concepts/resourcequotas.htm) - declarative caps on resource counts, including a quota of zero.
+- [Budgets](https://docs.oracle.com/en-us/iaas/Content/Billing/Concepts/budgetsoverview.htm) - alert thresholds on compartments and tags, soft rather than blocking, managed in the root compartment, and the absence of a first-party spend anomaly detector.
+- [OCI landing zones](https://github.com/oracle-quickstart/oci-landing-zones) - the published Terraform framework deployed through Resource Manager stacks. Vendor-published repository rather than documentation.
+- [Detecting drift](https://docs.oracle.com/en-us/iaas/Content/ResourceManager/Tasks/detect-drift.htm) - stack-level, per-resource comparison of live infrastructure with the last applied state.
+- [Cloud Guard](https://docs.oracle.com/en-us/iaas/Content/cloud-guard/home.htm) - the benchmark detector recipe and the compliance documents available in the console.
+- [Search query syntax](https://docs.oracle.com/en-us/iaas/Content/Search/Concepts/querysyntax.htm) - the query, where, return and sort form, its regional reach, eventual consistency and permission filtering.
+- [Tagging overview](https://docs.oracle.com/en-us/iaas/Content/Tagging/Concepts/taggingoverview.htm) - defined and free-form tags, namespaces, value lists, defaults, tag variables, inheritance for cost reporting and the per-resource limits.
+- [Universal Credits](https://www.oracle.com/cloud/universal-credits/) - an annual monetary commitment drawn down by any eligible service in any region, with unused credit forfeited at the end of the term. Vendor product page rather than documentation.
+- [Cloud Advisor](https://docs.oracle.com/en-us/iaas/Content/CloudAdvisor/Concepts/cloudadvisoroverview.htm) - recommendations across cost, performance, availability and security, each with an estimated saving and an apply action.
+
 ## Gaps
 
 Topics deliberately left unwritten because the verified inventory does not cover

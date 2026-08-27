@@ -86,6 +86,14 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0803 | Crossing a boundary without assuming a role |
 | 0804 | Keys, secrets and certificates |
 
+**Module 09 - Governance, tenancy and cost**
+
+| Lesson | Title |
+| 0900 | Four guardrails, and which of them actually blocks |
+| 0901 | The landing zone is a framework, and how you check what exists |
+| 0902 | Tagging is the cost model |
+| 0903 | Seeing and shaping the bill |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
