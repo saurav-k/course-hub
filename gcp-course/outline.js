@@ -127,6 +127,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0504-moving-a-database-in.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Analytics",
+      "lessons": [
+        {
+          "title": "BigQuery, the warehouse and the query engine",
+          "href": "lessons/0600-bigquery.html"
+        },
+        {
+          "title": "BigLake and the lakehouse",
+          "href": "lessons/0601-biglake-and-the-lakehouse.html"
+        },
+        {
+          "title": "Dataflow and the streaming row",
+          "href": "lessons/0602-dataflow-and-streaming.html"
+        },
+        {
+          "title": "A recurring Spark job is two decisions",
+          "href": "lessons/0603-spark-and-the-orchestrator.html"
+        },
+        {
+          "title": "Governing and reading the data",
+          "href": "lessons/0604-governing-and-reading-the-data.html"
+        }
+      ]
     }
   ],
   "extras": []

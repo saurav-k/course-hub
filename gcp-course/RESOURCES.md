@@ -96,6 +96,17 @@ All fetched 2026-08-26 as part of the verified inventory. Grouped by module.
   [Database Migration Service](https://cloud.google.com/database-migration/docs),
   [Datastream](https://cloud.google.com/datastream/docs/overview),
   [Database Center](https://cloud.google.com/database-center/docs/overview).
+- **Module 06.** [BigQuery](https://cloud.google.com/bigquery/docs/introduction),
+  [BigLake](https://cloud.google.com/bigquery/docs/biglake-intro),
+  [Dataflow](https://cloud.google.com/dataflow/docs/guides),
+  [Managed Service for Apache Kafka](https://cloud.google.com/managed-kafka/docs/overview),
+  [Dataproc](https://cloud.google.com/dataproc/docs/concepts/overview),
+  [Managed Service for Apache Spark](https://cloud.google.com/products/managed-service-for-apache-spark),
+  [Cloud Composer](https://cloud.google.com/composer/docs/concepts/overview),
+  [Knowledge Catalog](https://cloud.google.com/dataplex/docs/introduction),
+  [BigQuery data clean rooms](https://cloud.google.com/bigquery/docs/data-clean-rooms),
+  [Looker](https://cloud.google.com/looker/docs),
+  [Looker Studio](https://cloud.google.com/looker-studio).
 - **Certification weights**, used only to say what an exam tests and never as a schedule:
   the [Associate Cloud Engineer guide](https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf)
   and the [Professional Cloud Architect guide](https://services.google.com/fh/files/misc/professional_cloud_architect_exam_guide_english.pdf).

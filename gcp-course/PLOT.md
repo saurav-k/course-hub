@@ -60,6 +60,21 @@ renumbered.
 | 0503 | Memorystore and the cache tier | `in-memory-cache` |
 | 0504 | Moving a database in | `db-migration-service`, `change-data-capture`, `database-fleet-management` |
 
+**Module 06 - Analytics**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0600 | BigQuery, the warehouse and the query engine | `data-warehouse`, `serverless-query-engine` |
+| 0601 | BigLake and the lakehouse | `data-lake` |
+| 0602 | Dataflow and the streaming row | `etl-service`, `stream-analytics`, `stream-ingest` |
+| 0603 | A recurring Spark job is two decisions | `managed-spark`, `workflow-orchestration` |
+| 0604 | Governing and reading the data | `data-catalog`, `clean-rooms`, `bi-dashboards` |
+
+`managed-search` belongs to the analytics domain in the shared taxonomy, and this course
+teaches it in module 13 beside the agent platform and the retrieval pipeline it now ships
+with. `workflow-orchestration` carries two products: Cloud Composer is taught here as the
+data-pipeline orchestrator, and Workflows in module 12 as the lighter service orchestrator.
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
@@ -94,7 +109,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 06 to 14 above**, none started. Each module owns its own hundred of the
+- **Modules 07 to 14 above**, none started. Each module owns its own hundred of the
   `MMxx` sequence, so a later contributor takes the next free number inside its module
   rather than appending to the end of the course; nothing already published is
   renumbered or renamed.
