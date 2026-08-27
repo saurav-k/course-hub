@@ -56,9 +56,19 @@ is wrong and it gets fixed before anything new is added.
 | 0603 | Streams and the units that carry them |
 | 0604 | Who reads the result |
 
+**Module 07 - Networking and delivery**
+
+| Lesson | Title |
+| 0700 | The virtual network is an address plan |
+| 0701 | Rules and routes |
+| 0702 | Joining networks |
+| 0703 | Private endpoints and the DNS behind them |
+| 0704 | The edge |
+| 0705 | Paths in from outside |
+
 ## Planned, in order
 
-Modules 07 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
+Modules 08 to 14 remain unwritten. The full fourteen-module plan is below, unchanged.
 
 Fourteen modules, following the platform the way a first architecture meets it:
 where it runs, what it runs on, then data, plumbing, who may act, how it is governed
@@ -92,7 +102,7 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **Modules 07 to 14**, none started. New numbers go at the end of the
+- **Modules 08 to 14**, none started. New numbers go at the end of the
   sequence; nothing already published is renumbered or renamed.
 - **Reference: glossary of Azure terms**, linked from every lesson foot once it
   exists. Not written yet, so no lesson links it and no lesson spine carries a

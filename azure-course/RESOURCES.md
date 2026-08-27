@@ -159,6 +159,36 @@ page the verified inventory records as fetched and read.
 - <https://learn.microsoft.com/en-us/purview/purview>
 - <https://learn.microsoft.com/en-us/azure/confidential-computing/confidential-clean-rooms>
 
+**Module 07 - Networking and delivery**
+
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-overview>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-manage-subnet>
+- <https://learn.microsoft.com/en-us/azure/virtual-network-manager/concept-ip-address-management>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/network-security-groups-overview>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/network-security-group-how-it-works>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-udr-overview>
+- <https://learn.microsoft.com/en-us/azure/virtual-network-manager/overview>
+- <https://learn.microsoft.com/en-us/azure/nat-gateway/nat-overview>
+- <https://learn.microsoft.com/en-us/azure/virtual-network/virtual-network-peering-overview>
+- <https://learn.microsoft.com/en-us/azure/virtual-wan/virtual-wan-about>
+- <https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview>
+- <https://learn.microsoft.com/en-us/azure/dns/dns-private-resolver-overview>
+- <https://learn.microsoft.com/en-us/azure/dns/dns-overview>
+- <https://learn.microsoft.com/en-us/azure/load-balancer/load-balancer-overview>
+- <https://learn.microsoft.com/en-us/azure/load-balancer/gateway-overview>
+- <https://learn.microsoft.com/en-us/azure/application-gateway/overview>
+- <https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview>
+- <https://learn.microsoft.com/en-us/azure/ddos-protection/ddos-protection-overview>
+- <https://learn.microsoft.com/en-us/azure/traffic-manager/traffic-manager-overview>
+- <https://learn.microsoft.com/en-us/azure/vpn-gateway/vpn-gateway-about-vpngateways>
+- <https://learn.microsoft.com/en-us/azure/expressroute/expressroute-introduction>
+- <https://learn.microsoft.com/en-us/azure/expressroute/about-fastpath>
+- <https://learn.microsoft.com/en-us/azure/bastion/bastion-overview>
+- <https://learn.microsoft.com/en-us/azure/azure-arc/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-local/overview>
+- <https://learn.microsoft.com/en-us/azure/azure-vmware/introduction>
+- <https://learn.microsoft.com/en-us/azure/cloud-adoption-framework/ready/azure-best-practices/connectivity-to-other-providers-oci>
+
 ## Gaps
 
 Things a written lesson wanted to say and did not, because the verified inventory
@@ -213,6 +243,18 @@ them was filled from memory.
 - **Current naming of the Purview governance experiences.** The inventory records
   that classic portal capabilities are converging into the Unified Catalog and says
   to check the product page, so lesson 0604 names the Unified Catalog and links it.
+- **Per-hub connection and scale numbers for Virtual WAN**, and how many peerings one
+  virtual network will carry. The inventory records both as figures to re-read from
+  the vendor's live limits table, so lesson 0702 quotes neither.
+- **Per-SKU throughput figures for the VPN gateway.** The inventory closes the
+  aggregate envelope and leaves the per-SKU table as a build-time lookup, so lesson
+  0705 draws the envelope and quotes no SKU.
+- **The default record-set quota for a public DNS zone.** The inventory records that
+  the figure lives in the vendor's limits table rather than on the overview page, so
+  lesson 0704 names the limit's existence and not its value.
+- **The smallest permitted subnet size.** The inventory records the five-address
+  reservation and no minimum prefix length, so lesson 0700's chart shows the
+  arithmetic for several sizes and asserts no floor.
 - **A glossary of Azure terms.** Reserved in `PLOT.md` and not written, so no lesson
   links one and no lesson spine carries a Glossary entry.
 

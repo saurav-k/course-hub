@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Private endpoints and the DNS behind them - Inside Azure</title>
+<meta name="description" content="A private endpoint puts a service's address inside your subnet, and it only works when DNS hands back that address - which is why private DNS zones are part of the mechanism rather than an optional extra.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0703</div>
+  <h1>A private endpoint is only private once DNS agrees</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>networking-core</code> row <code>private-endpoint</code>, with <code>private-dns</code> from <code>dns-domains</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview">Azure Private Link</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>private endpoint is a network interface with a private address in your subnet</b>, pointed at one <b>subresource</b> of a platform service - or at your own service behind a Standard load balancer.</li>
+      <li>It needs DNS to answer the service's own name with that private address, which is what the <b>privatelink</b> private DNS zones exist for. Without them the name still resolves publicly and nothing is private.</li>
+      <li>Traffic is <b>single-direction</b>: you reach the service, the service cannot call you.</li>
+      <li><b>Azure DNS Private Resolver</b> replaces hand-built forwarder machines: an <b>outbound endpoint with rule sets</b> sends on-premises suffixes to on-premises resolvers, and an <b>inbound endpoint</b> lets on-premises resolve Azure private zones.</li>
+      <li>Traffic <b>at the endpoint is invisible to flow logs</b>. Capture it at the source interface instead, or the evidence is simply not there.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Networks joined&lt;br/&gt;lesson 0702"] --> T["THIS PAGE&lt;br/&gt;reaching a platform service&lt;br/&gt;without leaving your network"]
+  T --> A["Letting the public in&lt;br/&gt;lesson 0704"]
+  T --> B["Resolving names across&lt;br/&gt;the on-premises boundary&lt;br/&gt;lesson 0705"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits. Modules 04 to 06 kept saying "reach it privately" and deferring the mechanism. This is the mechanism, and it is half networking and half name resolution, which is why the two subjects share a page rather than sitting in separate ones.
+    <b>Private connectivity on Azure fails far more often in DNS than in the network, so the two halves are learned together or not at all.</b></figcaption>
+  </figure>
+
+  <h2>What actually happens when the name is resolved</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client in your subnet
+  participant D as DNS
+  participant Z as privatelink private DNS zone linked to the network
+  participant E as Private endpoint interface in your subnet
+  participant S as The platform service
+  C->>D: resolve the service's ordinary public name
+  D->>Z: the linked zone holds a record for that name
+  Z-->>D: the private address of the endpoint
+  D-->>C: private address
+  C->>E: connect to an address inside your own space
+  E->>S: the endpoint fronts the service
+  S-->>C: response - and the service can never start a call the other way
+    </div>
+    <figcaption>The whole mechanism in one exchange. The client asks for the service's normal name, and the private DNS zone linked to the network is what makes that name answer with an address in your subnet. Remove the zone link and every step still works except the second, so the client reaches the public endpoint instead - which is a working application and a failed control.
+    <b>The failure mode is silent success: nothing breaks, the traffic simply keeps going the old way.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Granularity is the <b>subresource</b>, not the service. A storage account serving blobs and files needs <b>one endpoint per subresource</b>, each with its own private DNS record, exactly as lesson 0400 said. A design that provisions one endpoint and calls the account private has made half of it private, and the half that is still public looks identical from the application.</div>
+
+  <h2>The rest of the endpoint's own behaviour</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  PE["Private endpoint"] --> AP{"Connection approval"}
+  AP -->|"automatic"| A1["Approved on creation&lt;br/&gt;when you own both sides"]
+  AP -->|"manual"| A2["The service owner approves&lt;br/&gt;- the model for another party's service"]
+  PE --> DIR["One direction only&lt;br/&gt;the service cannot initiate to you"]
+  PE --> BILL["Billed hourly, plus per gigabyte in and out"]
+  PE --> LIM["Constraints worth checking before you commit:&lt;br/&gt;static addresses unsupported for several target types,&lt;br/&gt;application security group membership capped around fifty,&lt;br/&gt;source address translation advised when a path crosses an appliance"]
+    </div>
+    <figcaption>What an endpoint is besides an address. The approval workflow is the part that makes Private Link work across organisations: a manual approval means the service's owner decides, so the same mechanism serves both "my own storage account" and "a partner's service exposed to me".
+    <b>An endpoint is a billed resource with an hourly rate and per-gigabyte charges, so the number of them is a cost line as well as a design line.</b></figcaption>
+  </figure>
+
+  <p>The older mechanism, <b>service endpoints</b>, is still there and still appropriate where a private address of your own is not what you need. The architect's default on Azure is the pair - a private endpoint plus a private DNS zone - and a design choosing the older mechanism should be able to say why the private address is unnecessary.</p>
+
+  <h2>Names that have to cross the boundary</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  R["Azure DNS Private Resolver"] --> OUT["Outbound endpoint&lt;br/&gt;plus rule sets"]
+  OUT --> ONP["Queries for on-premises suffixes&lt;br/&gt;go to the on-premises resolvers"]
+  R --> IN["Inbound endpoint"]
+  IN --> BACK["On-premises resolvers can resolve&lt;br/&gt;the Azure private zones"]
+  R --> LINK["A network linked to a rule set&lt;br/&gt;gets the rules automatically"]
+  R -.-|"what it replaced"| VMS["Forwarder machines built and&lt;br/&gt;operated by hand"]
+    </div>
+    <figcaption>Two endpoints, opposite directions, one managed service. <a href="https://learn.microsoft.com/en-us/azure/dns/dns-private-resolver-overview">Azure DNS Private Resolver</a> is what a hybrid estate needs the moment private endpoints exist, because an on-premises client that cannot resolve a privatelink name cannot use the private path however well the tunnel works. The rule sets attach through network links, so a new spoke inherits the rules rather than being configured.
+    <b>Private endpoints and hybrid connectivity generate a name-resolution requirement between them, and this is the service that answers it without machines to patch.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Flow logs do <b>not</b> record traffic inbound at the private endpoint's interface. If you need evidence that a workload used the private path, capture it at the <b>source</b> interface, because there is nothing to read at the destination. A control that is audited by looking for endpoint traffic in flow logs will report an absence and be believed.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A private endpoint is created, but the private DNS zone is never linked to the network. What happens?</div>
+      <button class="q-opt">The application fails to connect, since the name no longer resolves</button>
+      <button class="q-opt">The application works, resolving the public address and going that way</button>
+      <button class="q-opt">The application works, because the endpoint intercepts the public address</button>
+      <button class="q-opt">The application fails, because the endpoint rejects unresolved connections</button>
+      <div class="q-fb">The name resolves publicly as it always did, so nothing breaks and the private path is unused. The first and fourth options both assume a visible failure, which is exactly what does not happen. The third invents an interception behaviour - the endpoint is an address, not a proxy for the public one.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which statement about a private endpoint's traffic direction is correct?</div>
+      <button class="q-opt">Traffic flows both ways once the connection has been approved once</button>
+      <button class="q-opt">Traffic flows both ways, but the return path needs its own route entry</button>
+      <button class="q-opt">The service initiates, and the client accepts on the endpoint interface</button>
+      <button class="q-opt">The client initiates, and the service can never start a call to you</button>
+      <div class="q-fb">Initiation is single-direction by design, which is a large part of the security argument for Private Link. The first two options treat approval or routing as what unlocks a reverse path. The third has the direction backwards.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">An on-premises client cannot resolve a privatelink name over an established tunnel. What supplies the answer?</div>
+      <button class="q-opt">A Private Resolver inbound endpoint, which on-premises resolvers query</button>
+      <button class="q-opt">A Private Resolver outbound endpoint, with a rule set for that suffix</button>
+      <button class="q-opt">A second private endpoint, created inside the on-premises address space</button>
+      <button class="q-opt">A public zone of the same name, so the record resolves from anywhere</button>
+      <div class="q-fb">The inbound endpoint is the direction that lets on-premises resolvers reach Azure private zones. The second option is the opposite direction - it sends Azure queries out to on-premises. The third misplaces a resource that only exists inside a virtual network. The fourth would publish internal addresses publicly and defeat the purpose.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A compliance rule says no workload data may traverse the public internet. An estate has a storage account serving blobs and files, a database, and an on-premises batch job that reads from all three over an existing tunnel. The team creates one private endpoint per service, links the privatelink zones to the workload network, and reports the rule as satisfied. An auditor then asks for evidence and is shown flow logs with no traffic at the endpoints.</p>
+      <p><b>Assess it</b>: name the two configuration defects, say what the auditor was actually looking at, and say what evidence you would produce instead.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Count the subresources before you count the services. Then ask which network the on-premises job's resolver consults, and whether that resolver has ever heard of a privatelink zone.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Count the endpoints needed.</b> The storage account serves two subresources, blobs and files, and granularity is per subresource. Three services therefore need at least four endpoints, and the team created three.</li>
+        <li><b>Name the first defect.</b> One of the storage subresources has no endpoint, so the workload reaching it resolves the public name publicly and uses the public path. Nothing fails, which is why nobody noticed.</li>
+        <li><b>Follow the on-premises job.</b> It resolves names using on-premises resolvers, which know nothing about the privatelink zones linked to the Azure network. So it resolves the public names and takes the public path for all three services.</li>
+        <li><b>Name the second defect.</b> The estate needs a Private Resolver inbound endpoint so that on-premises resolvers can resolve the Azure private zones. Linking a zone to a virtual network does nothing for a client outside that network.</li>
+        <li><b>Read the auditor's evidence correctly.</b> Flow logs do not record traffic inbound at a private endpoint interface, so an empty result there is expected whether the private path is used or not. It is not evidence of anything, and treating it as evidence of failure would be as wrong as treating it as evidence of success.</li>
+        <li><b>Produce evidence that exists.</b> Capture at the source interfaces, where flow records do exist, and show the connections going to private addresses. Pair that with the configuration itself - the endpoint per subresource, the zone links, and the resolver rule sets - since the control is a configuration claim as much as a traffic claim.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your endpoint count should be at least four rather than three, and your evidence should come from the source side rather than the destination side. If your answer produced destination-side evidence, it is describing a stream that does not exist.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0704-the-edge.html">the edge</a></b> turns the page around and asks how traffic from outside is deliberately let in.</li>
+    <li><b>Lesson 0400</b> is where the subresource idea first appeared, on the storage account, and lesson 0500 is where the same idea reappeared for the relational engines.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the DNS half still feels bolted on, ask an agent what a client actually sends on the wire after resolving a name. The answer makes it obvious that a private endpoint is unreachable unless resolution points at it, and that the network was never the deciding part.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/private-link/private-endpoint-overview">private endpoint overview</a> in full, including the constraints section. It is the densest page in Azure networking and almost every line of it is a design consequence.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0702-joining-networks.html"><span class="dir">&larr; Previous</span><span class="ttl">Joining networks</span></a>
+    <a class="nxt" href="0704-the-edge.html"><span class="dir">Next &rarr;</span><span class="ttl">The edge</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0703 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

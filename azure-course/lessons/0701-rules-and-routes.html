@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rules and routes - Inside Azure</title>
+<meta name="description" content="Three layers decide whether a packet moves on Azure - central admin rules, network security groups and route tables - and the order they are evaluated in is the part designs get wrong.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0701</div>
+  <h1>Three layers decide whether a packet moves, and one of them always goes first</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>networking-core</code>, rows <code>stateful-packet-filter</code>, <code>route-table</code>, <code>network-manager</code> and <code>nat-gateway</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/virtual-network/network-security-groups-overview">Network security groups</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Security admin rules</b> in Virtual Network Manager evaluate <b>before</b> network security groups and can deny across them, which is the closest thing Azure has to a central network guardrail.</li>
+      <li>A <b>network security group</b> is a stateful filter with priorities from 100 to 4096, <b>lowest number wins</b>, and processing <b>stops at the first match</b>.</li>
+      <li>A group can attach at the subnet, at the interface, or <b>both at once</b>, and when both exist the evaluation order differs by direction and <b>both must allow</b> inbound traffic.</li>
+      <li>Routing is separate: a <b>user-defined route</b> overrides system routes by <b>longest prefix match</b>, with next hops including a virtual appliance, a gateway, the network, the internet, or <b>None</b>, which is a blackhole.</li>
+      <li>Outbound internet egress with predictable addresses is the <b>NAT Gateway</b>. It is outbound-initiated only, allocated per zone, and it emits <b>metrics but no per-translation log</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["The address plan&lt;br/&gt;lesson 0700"] --> T["THIS PAGE&lt;br/&gt;what filters and routes&lt;br/&gt;a packet inside a network"]
+  T --> A["Joining networks together&lt;br/&gt;lesson 0702"]
+  T --> B["What the flow logs&lt;br/&gt;actually record&lt;br/&gt;module 10"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page gave every workload an address. This page is what happens between two addresses, and it is deliberately separate from the pages about joining networks, because a packet blocked here is blocked no matter how well the networks are joined.
+    <b>Most "the networks are connected but it still does not work" problems are on this page rather than on the next one.</b></figcaption>
+  </figure>
+
+  <h2>The three layers, in order</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  PK["A packet"] --> AD{"Security admin rules&lt;br/&gt;Virtual Network Manager"}
+  AD -->|"Deny"| STOP1["Dropped - and no network&lt;br/&gt;security group can permit it"]
+  AD -->|"Always allow"| PASS["Permitted - evaluation terminates here"]
+  AD -->|"no admin rule matches"| NSG{"Network security groups&lt;br/&gt;subnet and interface"}
+  NSG -->|"deny, or no allow rule"| STOP2["Dropped"]
+  NSG -->|"allow"| RT{"Route tables&lt;br/&gt;system routes and user-defined routes"}
+  RT --> HOP["Next hop&lt;br/&gt;appliance, gateway, network, internet or None"]
+    </div>
+    <figcaption>Filtering happens twice and routing happens once, and the order is fixed. <a href="https://learn.microsoft.com/en-us/azure/virtual-network-manager/overview">Virtual Network Manager</a> security admin rules are evaluated first, and both of their decisive outcomes terminate evaluation - a Deny cannot be softened by a permissive group below it, and an Always allow cannot be overruled by one.
+    <b>This is why a central network team can express a guardrail on Azure at all: everything else in this picture is delegated to whoever owns the subnet.</b></figcaption>
+  </figure>
+
+  <h2>Two attachment points, and an order that flips</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant O as Outside the machine
+  participant SN as Subnet security group
+  participant NI as Interface security group
+  participant VM as The machine
+  Note over O,VM: inbound - the subnet group is evaluated first
+  O->>SN: inbound packet
+  SN->>NI: allowed here, so evaluate the interface group
+  NI->>VM: allowed here too - only now does it arrive
+  Note over VM,O: outbound - the order is reversed
+  VM->>NI: outbound packet
+  NI->>SN: allowed here, so evaluate the subnet group
+  SN->>O: allowed here too - only now does it leave
+    </div>
+    <figcaption>When a group is attached at both levels, both must allow the traffic and the order in which they are consulted depends on the direction. Inbound is subnet then interface; outbound is interface then subnet. The <b>effective security rules</b> view renders the merged result per interface, which is why the interface is the debugging unit from lesson 0200.
+    <b>Because both layers must allow inbound traffic, an allow rule added at one layer alone changes nothing - and the documented advice is to pick one layer rather than to reason about two.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Rule ordering inside a group has one law: <b>priorities run from 100 to 4096, the lowest number wins, and processing stops at the first match</b>. There is no accumulation and no second opinion. Default rules allow traffic within the network until something overrides them, so the interesting question about a group is rarely what it allows - it is which rule matched first and stopped everything after it from being consulted.</div>
+
+  <h2>Grouping by role instead of by address</h2>
+
+  <p>An <b>application security group</b> lets a rule name a role rather than an address range: interfaces are made members of the group, and rules reference the group. It is the nearest thing Azure has to an attribute-based network policy, and the corpus is explicit that it is only near - there is <b>no attribute-based network intent layer</b> on Azure, and rules still resolve to addresses and ports underneath. What the group buys is that the membership changes without the rule changing.</p>
+
+  <h2>Routing, and the next hop called None</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  RT["A route table&lt;br/&gt;attached to a subnet"] --> M["Longest prefix match wins&lt;br/&gt;over the system routes"]
+  M --> H1["Virtual appliance&lt;br/&gt;send it through a firewall or NVA"]
+  M --> H2["Virtual network gateway&lt;br/&gt;send it to the other side of a tunnel"]
+  M --> H3["Virtual network&lt;br/&gt;keep it local"]
+  M --> H4["Internet&lt;br/&gt;send it out"]
+  M --> H5["None&lt;br/&gt;a blackhole - the packet is dropped silently"]
+    </div>
+    <figcaption>A user-defined route does not add a path so much as it overrides one, and the more specific prefix wins against whatever the platform would have done. The next hop worth remembering is the last: <b>None</b> discards the traffic, which makes it a deliberate blackhole rather than an error.
+    <b>A route with next hop None fails silently by design, so a route table is the first thing to read when traffic vanishes with no rule denying it.</b></figcaption>
+  </figure>
+
+  <h2>Leaving the network with an address you chose</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  SUB["A subnet"] --> NG["NAT Gateway&lt;br/&gt;managed source address translation&lt;br/&gt;allocated per zone"]
+  NG --> IP["Predictable public addresses&lt;br/&gt;for anything an allow-list has to name"]
+  NG --> PORTS["Relieves source-port exhaustion&lt;br/&gt;for machine fleets and platform outbound traffic"]
+  NG -.-|"outbound-initiated only -&lt;br/&gt;nothing reaches in through it"| NONE["No inbound path"]
+  NG --> MET["Metrics only&lt;br/&gt;there is no per-translation log"]
+    </div>
+    <figcaption>The egress side, which designs usually meet as a problem rather than as a choice. <a href="https://learn.microsoft.com/en-us/azure/nat-gateway/nat-overview">NAT Gateway</a> gives outbound traffic a stable set of public addresses, which is what a partner allow-list needs, and it relieves the source-port exhaustion that fleets and platform runtimes hit when many connections share one address. It is <b>allocated per zone</b>, so zonal thinking from lesson 0102 applies to it.
+    <b>Its telemetry is metrics rather than records, so source-port exhaustion is something you infer from connection metrics rather than read in a log.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  Two telemetry absences shape how this page is debugged. A network security group emits <b>no per-rule verdict log</b>: the allow-or-deny outcome is carried by <b>virtual network flow logs</b> instead, which module 10 covers. And the NAT Gateway has <b>no per-translation record</b> at all. So an investigation that starts by looking for "which rule denied this" is looking for a stream that does not exist, and should start from the flow logs and the effective-rules view instead.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A security admin rule denies a port, and a subnet security group allows it. What happens?</div>
+      <button class="q-opt">The two are merged, and the more specific of the pair takes effect</button>
+      <button class="q-opt">The group wins, because it is attached closer to the workload</button>
+      <button class="q-opt">The admin rule wins, because it is evaluated first and terminates</button>
+      <button class="q-opt">The traffic is allowed, but the admin rule records a compliance failure</button>
+      <div class="q-fb">Admin rules evaluate before groups and their decisions terminate evaluation, which is what makes them a guardrail. The first option invents a merge. The second applies a proximity rule that does not exist here. The fourth describes an audit behaviour rather than the enforcement one.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A group is attached to both the subnet and the interface. An inbound allow rule is added to the interface group only. What is the result?</div>
+      <button class="q-opt">The traffic now arrives, because one allow rule is sufficient inbound</button>
+      <button class="q-opt">The traffic still does not arrive, because both layers must allow it</button>
+      <button class="q-opt">The traffic arrives only if the subnet group has no matching deny rule</button>
+      <button class="q-opt">The traffic arrives, and the subnet group applies to outbound traffic only</button>
+      <div class="q-fb">Both layers must allow inbound traffic, so an allow at one layer alone changes nothing. The first option assumes the layers are alternatives. The third is close but wrong in the same way - an absent deny is not an allow. The fourth invents a direction split between the two attachment points.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Traffic to one prefix disappears with no denial recorded anywhere. What should be checked first?</div>
+      <button class="q-opt">Whether the NAT Gateway has exhausted its available source ports</button>
+      <button class="q-opt">Whether an application security group lost a member interface</button>
+      <button class="q-opt">Whether a rule at priority 4096 is matching before the allow rule</button>
+      <button class="q-opt">Whether a route for that prefix has a next hop of None</button>
+      <div class="q-fb">A next hop of None discards traffic silently, which fits "gone with nothing denied". The first is a real failure but presents as connection problems rather than one missing prefix. The second would change which rules apply, not make denials invisible. The third has the priority rule backwards - 4096 is the weakest priority, not the strongest.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A platform team must guarantee that a management port is never reachable from the internet on any workload in the estate, whatever a workload team configures. It must also route all outbound internet traffic through an inspection appliance, and give a payments partner a fixed set of source addresses to allow-list. Application teams keep their own security groups on their own subnets and want to continue doing so.</p>
+      <p><b>Design the controls</b>: name the layer each requirement belongs to, say why the first cannot be met with a security group, and say what the partner requirement collides with.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Work the three layers in the order the second figure draws them, and ask for each requirement which layer can still be overridden by somebody else. Then check the third requirement against the direction NAT Gateway works in.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Test the guarantee against a security group.</b> A group is owned by whoever owns the subnet or the interface, so a workload team can add a permissive rule at a lower priority number and it will match first. A guarantee cannot live in a layer the guaranteed-against party controls.</li>
+        <li><b>Place the guarantee.</b> It belongs in a security admin rule, because those evaluate before groups and a Deny terminates evaluation. The application teams keep their own groups, and the guarantee holds above them.</li>
+        <li><b>Place the inspection requirement.</b> Sending outbound traffic through an appliance is a routing decision, not a filtering one, so it is a user-defined route on each workload subnet with a next hop of virtual appliance. Longest prefix match is what makes the override take effect over the system route to the internet.</li>
+        <li><b>Place the partner addresses.</b> A stable set of outbound source addresses is what NAT Gateway provides, and it is outbound-initiated only, which suits a partner allow-list exactly - nothing reaches inward through it.</li>
+        <li><b>Find the collision.</b> The second and third requirements both claim the outbound path. If all internet-bound traffic is routed to the inspection appliance, it leaves the estate from the appliance rather than through the subnet's NAT Gateway, so the addresses the partner sees are the appliance's. The two requirements have to be reconciled on one egress design rather than configured independently.</li>
+        <li><b>State what is monitored and how.</b> Neither the groups nor the gateway produce per-rule or per-translation records, so the estate's evidence is virtual network flow logs for the allow-and-deny outcome and gateway metrics for port pressure.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your three requirements should land on three different layers, and exactly one pair should conflict. If nothing conflicted, re-read requirements two and three - both of them decide what the last hop out of the estate is, and only one of them can.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0702-joining-networks.html">joining networks</a></b> takes two networks that each work internally and asks what it takes to make them reach each other.</li>
+    <li><b>Lesson 0101</b> is where scope and inheritance were introduced, and security admin rules are the network expression of the same idea - a control asserted above the level that would otherwise own it.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two attachment points still feel interchangeable, ask an agent to write the effective inbound rule set for a machine whose subnet group and interface group disagree. Doing it once is enough to see why the documented advice is to use one layer.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/virtual-network/virtual-networks-udr-overview">user-defined routes overview</a> after the security group material rather than before it. Filtering is what most people look for first, and routing is what most people find the answer in.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from.</p>
+
+  <div class="pager">
+    <a href="0700-the-virtual-network-is-an-address-plan.html"><span class="dir">&larr; Previous</span><span class="ttl">The virtual network is an address plan</span></a>
+    <a class="nxt" href="0702-joining-networks.html"><span class="dir">Next &rarr;</span><span class="ttl">Joining networks</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0701 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

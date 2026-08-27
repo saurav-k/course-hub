@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The edge - Inside Azure</title>
+<meta name="description" content="Four layers let traffic in, each at a different scope - DNS steering, global anycast, regional layer-seven routing and regional layer-four balancing - and the scope is what decides which one a requirement belongs to.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE AZURE</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Networking and delivery &middot; Lesson 0704</div>
+  <h1>Four ways in, and the scope of each one decides the design</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Capability area <code>networking-lb-edge</code>, rows <code>l4-load-balancer</code>, <code>l7-load-balancer</code>, <code>global-front-door</code>, <code>ddos-protection</code> and <code>gateway-load-balancer</code>.
+    &middot; <a href="https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview">Azure Front Door</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Traffic Manager steers in DNS</b>, so its failover speed is bounded by the profile's time to live and by what clients have already cached.</li>
+      <li><b>Front Door is global anycast</b> ingress with caching, a rules engine, a web application firewall and origin health steering - and it is the current answer for content delivery.</li>
+      <li><b>Application Gateway v2 is the regional layer-seven proxy</b>: listeners, rules, backend pools and probes, autoscaling, zone-redundant, with an optional firewall of its own.</li>
+      <li><b>Load Balancer is layer four and pass-through</b>, so it preserves the client address. Its Basic tier has been retired, leaving the Standard and Gateway forms.</li>
+      <li><b>DDoS Network Protection is enabled on the virtual network</b>, not on an address or an interface - and a platform layer of protection is always on and free underneath it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Reaching services privately&lt;br/&gt;lesson 0703"] --> T["THIS PAGE&lt;br/&gt;letting traffic in on purpose,&lt;br/&gt;at four different scopes"]
+  T --> A["Paths in from your own estate&lt;br/&gt;lesson 0705"]
+  T --> B["What the edge logs&lt;br/&gt;module 10, and the firewall&lt;br/&gt;in module 11"]
+  W["Module 07&lt;br/&gt;networking and delivery"] -.- T
+    </div>
+    <figcaption>Where this sits. The previous page was about keeping traffic off the public internet. This one is about the traffic you want, and the products differ less in what they can do than in where they sit - which is why the page is organised by scope rather than by feature.
+    <b>Almost every wrong answer at the edge is a product operating at the wrong scope, not a product missing a feature.</b></figcaption>
+  </figure>
+
+  <h2>The four scopes</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  U["A client"] --> TM["Traffic Manager&lt;br/&gt;steering in DNS&lt;br/&gt;priority, weighted, performance,&lt;br/&gt;geographic and subnet methods"]
+  TM --> FD["Azure Front Door&lt;br/&gt;global anycast ingress&lt;br/&gt;TLS termination, caching, rules engine,&lt;br/&gt;web application firewall, origin health steering"]
+  FD --> AG["Application Gateway v2&lt;br/&gt;regional layer seven&lt;br/&gt;listeners, rules, backend pools, probes"]
+  AG --> LB["Azure Load Balancer&lt;br/&gt;regional layer four, pass-through&lt;br/&gt;health probes decide membership"]
+  LB --> W2["The workload"]
+  DDOS["DDoS Network Protection&lt;br/&gt;enabled on the virtual network"] -.- LB
+    </div>
+    <figcaption>The stack, drawn top to bottom by scope rather than by importance. Very few designs use all four - the picture is a menu, and the useful reading is that each layer answers a question the one below it cannot. Traffic Manager decides which address a client is even given; Front Door decides which edge and which origin; Application Gateway decides which backend by path or host; Load Balancer decides which instance.
+    <b>Front Door and Application Gateway are frequently paired rather than compared: the global product finds the region, and the regional one delivers inside it.</b></figcaption>
+  </figure>
+
+  <h2>Why DNS steering fails over more slowly than anycast</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant C as A client
+  participant D as DNS resolver
+  participant T as Traffic Manager profile
+  participant R1 as Region one
+  participant R2 as Region two
+  C->>D: resolve the application name
+  D->>T: the profile answers with an endpoint
+  T-->>D: region one - cache this for the profile time to live
+  D-->>C: region one
+  Note over T,R1: endpoint monitoring notices region one is unhealthy
+  T->>T: the profile now answers with region two
+  C->>D: the client resolves again only when its cached answer expires
+  D-->>C: region two - the delay was the time to live, not the detection
+    </div>
+    <figcaption>What "DNS-level steering" costs. <a href="https://learn.microsoft.com/en-us/azure/traffic-manager/traffic-manager-overview">Traffic Manager</a> monitors endpoints and changes its answer promptly, but a client holding a cached answer keeps using it until that answer expires. Its great advantage is scope: it works with any publicly reachable endpoint, including ones that are not on Azure at all, and nested profiles let methods be combined.
+    <b>Failover time here is detection plus the time to live, so the time-to-live setting is a recovery-time decision rather than a tuning detail.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  <b>Azure CDN is a transition story, not a choice.</b> The legacy content-delivery products were built on partner networks, one of which shut down, and Microsoft directs content-delivery needs to <a href="https://learn.microsoft.com/en-us/azure/frontdoor/front-door-overview">Front Door</a>. Front Door itself has a classic tier with an announced retirement, so "Front Door" in a current design means the Standard or Premium surface. Its <b>Private Link origin support</b> is the detail that matters most for the previous lesson: the public edge can reach a backend that has no public exposure at all.</div>
+
+  <h2>Inserting an appliance without re-addressing anything</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  PUB["A public endpoint&lt;br/&gt;fronting an application"] --> SEL["One selection chains the&lt;br/&gt;Gateway load balancer in"]
+  SEL --> GLB["Gateway Load Balancer&lt;br/&gt;bump in the wire"]
+  GLB --> POOL["A backend pool of third-party appliances&lt;br/&gt;firewalls, intrusion prevention,&lt;br/&gt;packet analytics, traffic mirroring"]
+  POOL --> GLB
+  GLB --> APP["The application&lt;br/&gt;addressing unchanged"]
+    </div>
+    <figcaption>The Gateway form of the load balancer exists for one job: putting a third-party appliance fleet into the traffic path without the application being re-architected around it. The appliances are an ordinary backend pool, so they get health probes and scaling like any other pool, and the chaining is a single selection on the public endpoint.
+    <b>Because the application's addressing does not change, an appliance can be added or removed as a decision rather than as a migration.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+  <b>DDoS Network Protection is enabled on the virtual network</b>, not on a public address or an interface, and a free always-on platform layer sits underneath it protecting the infrastructure regardless. The paid plan is what adds policies tuned to your traffic, its own telemetry, and cost credits for the resources consumed during an attack. A design that "enabled DDoS protection on the public IP" has configured nothing, and the mistake survives review because the free layer means nothing visibly fails.</div>
+
+  <h2>The apex problem, and the record that solves it</h2>
+
+  <p><a href="https://learn.microsoft.com/en-us/azure/dns/dns-overview">Azure DNS</a> public zones are authoritative hosting for a domain, and their <b>alias records</b> are what let the root of a domain point at a Traffic Manager profile, a Front Door endpoint or another Azure resource - the case ordinary aliasing cannot express. Two limits belong beside them: the default record-set quota per zone is published in the vendor's limits table rather than on the overview page, and there is <b>no per-query logging for public zones</b>, so query visibility has to come from a resolver you control, which is the subject of module 10.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A regional failover must complete in seconds. Why is a DNS-steering profile alone a poor fit?</div>
+      <button class="q-opt">Its endpoint monitoring cannot detect a regional failure quickly enough</button>
+      <button class="q-opt">Its methods cannot express a preference between two named regions</button>
+      <button class="q-opt">Clients keep using a cached answer until its time to live expires</button>
+      <button class="q-opt">It only steers between endpoints that are hosted inside Azure itself</button>
+      <div class="q-fb">Detection is not the constraint - the cached answer is. The first option blames monitoring, which is the part that works. The second is false: priority is exactly that preference. The fourth is false and inverts one of the product's strengths, which is that any publicly reachable endpoint qualifies.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where is DDoS Network Protection enabled?</div>
+      <button class="q-opt">On the virtual network, with a free platform layer always on beneath</button>
+      <button class="q-opt">On each public address, so protection follows the address if it moves</button>
+      <button class="q-opt">On the interface, so a machine keeps its policy wherever it attaches</button>
+      <button class="q-opt">On the subscription, so every network inside it inherits the same policy</button>
+      <div class="q-fb">The network is the object the plan attaches to. The second and third options are the two most common wrong answers, and both fail quietly because the free platform layer means nothing appears broken. The fourth invents an inheritance that this resource does not have.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which pairing does the corpus describe as a common shape rather than a choice between rivals?</div>
+      <button class="q-opt">Traffic Manager in front of a regional layer-four load balancer</button>
+      <button class="q-opt">Front Door for global reach, with Application Gateway delivering</button>
+      <button class="q-opt">Gateway Load Balancer in front of a global anycast front door</button>
+      <button class="q-opt">Application Gateway in front of a second Application Gateway</button>
+      <div class="q-fb">The global product finds the region and the regional layer-seven product delivers inside it, which is why the two are frequently paired. The first is possible but is not the documented pairing. The third has the scopes inverted. The fourth is not a shape the corpus describes.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A retailer serves customers on two continents. Requirements: static assets should be served near the customer; requests must be routed to a regional deployment and, inside the region, split by path between a storefront and an API; the origins must not be reachable from the public internet; a third-party inspection appliance must sit in the path for a regulated subset of traffic; and the site must survive losing one region. Somebody proposes Traffic Manager plus one Application Gateway per region, and nothing else.</p>
+      <p><b>Rebuild it</b>: place each requirement at a scope, say what the proposal cannot do, and name what changes about the origins.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Take the requirements one at a time and ask, for each, whether it is decided before the connection exists, at the edge, inside the region, or at the instance. Two of the five cannot be answered by anything in the proposal.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Place the caching requirement.</b> Serving assets near the customer is caching at a global edge, which is Front Door. The proposal has nothing at that scope, so this requirement is unmet.</li>
+        <li><b>Place the path split.</b> Splitting between a storefront and an API by path is regional layer-seven routing, which the proposed Application Gateway does. This one the proposal meets.</li>
+        <li><b>Place the origin exposure requirement.</b> Origins that must not be publicly reachable is what Front Door's Private Link origin support is for. Under the proposal the gateways have to be publicly reachable for Traffic Manager to send clients to them, so this requirement is not merely unmet - the proposal actively conflicts with it.</li>
+        <li><b>Place the appliance.</b> A third-party appliance in the path without re-addressing the application is the Gateway form of the load balancer, chained at the public endpoint. Nothing in the proposal covers it.</li>
+        <li><b>Place the regional survival requirement.</b> Both a DNS profile and a global anycast front door can steer away from a failed region, but they differ in speed: the profile is bounded by its time to live, and the anycast product is not. If seconds matter, the requirement lands on Front Door.</li>
+        <li><b>State the rebuilt shape and what changed.</b> Front Door globally, with caching, health steering and Private Link origins, and an Application Gateway per region behind it doing the path split. The Gateway load balancer chains the inspection appliance into the regulated path. The origins change from publicly reachable gateways to backends reached over Private Link, which is the single largest difference from the proposal.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your rebuilt design should have exactly one global component and one regional layer-seven component per region. If Traffic Manager survived in your answer, ask what it is deciding that the anycast layer is not - on this set of requirements the honest answer is nothing.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0705-paths-in-from-outside.html">paths in from outside</a></b> closes the module with the connections that come from your own estate rather than from the public.</li>
+    <li><b>Lesson 0703</b> is where Private Link was built, and it is what makes an origin unreachable from the internet while still serving a global edge.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the four scopes still blur, ask an agent to say, for one request, exactly what decision each layer made and what information it had available. The layers separate immediately, because each one knows something the layer above it did not.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the <a href="https://learn.microsoft.com/en-us/azure/application-gateway/overview">Application Gateway overview</a> beside the Front Door one. Read together they make the pairing obvious, and they make it clear that the overlap in features is real and the difference in scope is what actually decides.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Azure inventory behind this course, each fact linked to the Microsoft Learn page it was read from. Record-set quotas are deliberately not quoted; the vendor's limits table is the live authority.</p>
+
+  <div class="pager">
+    <a href="0703-private-endpoints-and-the-dns-behind-them.html"><span class="dir">&larr; Previous</span><span class="ttl">Private endpoints and the DNS behind them</span></a>
+    <a class="nxt" href="0705-paths-in-from-outside.html"><span class="dir">Next &rarr;</span><span class="ttl">Paths in from outside</span></a>
+  </div>
+
+  <footer><p>Inside Azure &middot; Lesson 0704 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

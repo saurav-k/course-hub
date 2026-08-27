@@ -145,6 +145,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0604-who-reads-the-result.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Networking and delivery",
+      "lessons": [
+        {
+          "title": "The virtual network is an address plan",
+          "href": "lessons/0700-the-virtual-network-is-an-address-plan.html"
+        },
+        {
+          "title": "Rules and routes",
+          "href": "lessons/0701-rules-and-routes.html"
+        },
+        {
+          "title": "Joining networks",
+          "href": "lessons/0702-joining-networks.html"
+        },
+        {
+          "title": "Private endpoints and the DNS behind them",
+          "href": "lessons/0703-private-endpoints-and-the-dns-behind-them.html"
+        },
+        {
+          "title": "The edge",
+          "href": "lessons/0704-the-edge.html"
+        },
+        {
+          "title": "Paths in from outside",
+          "href": "lessons/0705-paths-in-from-outside.html"
+        }
+      ]
     }
   ],
   "extras": []
