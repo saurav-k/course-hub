@@ -27,6 +27,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0103-the-platform-map.html"
         }
       ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The shape is a dial, and it moves more than you think",
+          "href": "lessons/0200-the-shape-is-a-dial.html"
+        },
+        {
+          "title": "Placement, host tenancy and what maintenance does",
+          "href": "lessons/0201-placement-and-the-host.html"
+        },
+        {
+          "title": "From one instance to a fleet",
+          "href": "lessons/0202-from-one-instance-to-a-fleet.html"
+        },
+        {
+          "title": "Capacity you can be asked to give back",
+          "href": "lessons/0203-capacity-you-give-back.html"
+        }
+      ]
     }
   ],
   "extras": []

@@ -24,6 +24,14 @@ the four-digit number unchanged: dropping the padding would render 0200 as
 | 0102 | The tenancy, the compartment and the organization above them |
 | 0103 | The platform map, and the names that mislead |
 
+**Module 02 - Compute**
+
+| Lesson | Title |
+| 0200 | The shape is a dial, and it moves more than you think |
+| 0201 | Placement, host tenancy and what maintenance does |
+| 0202 | From one instance to a fleet |
+| 0203 | Capacity you can be asked to give back |
+
 ## Planned, in order
 
 Fourteen modules, following the platform the way a first architecture meets it:
