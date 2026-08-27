@@ -5,6 +5,103 @@
 window.COURSE_OUTLINE = {
   "key": "gcp",
   "title": "Inside Google Cloud",
-  "sections": [],
+  "sections": [
+    {
+      "n": "01",
+      "title": "The lay of the land",
+      "lessons": [
+        {
+          "title": "Regions, zones and the scope of a resource",
+          "href": "lessons/0100-regions-zones-and-scope.html"
+        },
+        {
+          "title": "The resource hierarchy and the project",
+          "href": "lessons/0101-the-resource-hierarchy.html"
+        },
+        {
+          "title": "What flows down the tree",
+          "href": "lessons/0102-what-flows-down-the-tree.html"
+        },
+        {
+          "title": "The platform map and the names that moved",
+          "href": "lessons/0103-the-platform-map.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Compute",
+      "lessons": [
+        {
+          "title": "The machine you shape yourself",
+          "href": "lessons/0200-compute-engine-the-machine-you-shape.html"
+        },
+        {
+          "title": "Images, families and templates",
+          "href": "lessons/0201-images-and-templates.html"
+        },
+        {
+          "title": "Five levers on the same machine",
+          "href": "lessons/0202-changing-what-you-rent.html"
+        },
+        {
+          "title": "Managed instance groups and Batch",
+          "href": "lessons/0203-managed-instance-groups.html"
+        }
+      ]
+    },
+    {
+      "n": "03",
+      "title": "Containers and serverless",
+      "lessons": [
+        {
+          "title": "How much of the GKE cluster you run",
+          "href": "lessons/0300-gke-how-much-of-the-cluster-you-run.html"
+        },
+        {
+          "title": "Beyond one cluster",
+          "href": "lessons/0301-beyond-one-cluster.html"
+        },
+        {
+          "title": "Cloud Run, a container with a URL",
+          "href": "lessons/0302-cloud-run-a-container-with-a-url.html"
+        },
+        {
+          "title": "Functions and app runtimes",
+          "href": "lessons/0303-functions-and-app-runtimes.html"
+        },
+        {
+          "title": "Choosing a runtime",
+          "href": "lessons/0304-choosing-a-runtime.html"
+        }
+      ]
+    },
+    {
+      "n": "04",
+      "title": "Storage",
+      "lessons": [
+        {
+          "title": "Cloud Storage and the bucket",
+          "href": "lessons/0400-cloud-storage-the-bucket.html"
+        },
+        {
+          "title": "Classes, lifecycle and archive",
+          "href": "lessons/0401-classes-lifecycle-and-archive.html"
+        },
+        {
+          "title": "Block storage on Compute Engine",
+          "href": "lessons/0402-block-storage.html"
+        },
+        {
+          "title": "Shared filesystems",
+          "href": "lessons/0403-shared-filesystems.html"
+        },
+        {
+          "title": "Where the storage menu stops",
+          "href": "lessons/0404-where-the-storage-menu-stops.html"
+        }
+      ]
+    }
+  ],
   "extras": []
 };

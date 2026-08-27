@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Managed instance groups and Batch - Inside Google Cloud</title>
+<meta name="description" content="On Compute Engine you rarely run a machine - you declare a managed instance group and let a controller hold it at a size, and when the work ends rather than persists you declare a Batch job instead.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">INSIDE GOOGLE CLOUD</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Compute &middot; Lesson 0203</div>
+  <h1>You declare a group and a controller holds it, or you declare a job that ends</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Capabilities <code>autoscaling-group</code> and <code>batch-compute</code>. Sourced from
+    <a href="https://cloud.google.com/compute/docs/instance-groups">Google's instance groups documentation</a>.
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>managed instance group</b> stamps members from an instance template and then keeps its promises: a target size, health-based replacement, and rolling updates.</li>
+      <li><b>Autohealing is the part that earns its keep.</b> Scaling is what people buy it for and replacement is what saves them, and Google records those replacements in the System Event audit stream.</li>
+      <li>A <b>regional</b> group distributes members across the zones of a region, so a lost zone costs a share of the fleet instead of all of it.</li>
+      <li>A <b>stateful</b> group preserves disks and addresses across a replacement, which buys back identity at the cost of the disposability that made the group simple.</li>
+      <li>A group holds a <b>size</b>. When the work ends rather than persists, <b>Batch</b> is the right shape: a managed scheduler that provisions Compute Engine resources for jobs with no cluster to manage.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Previous pages&lt;br/&gt;the machine, the image,&lt;br/&gt;the template"] --> T["THIS PAGE&lt;br/&gt;the controller that&lt;br/&gt;holds many of them"]
+  T --> N["What it enables&lt;br/&gt;module 03, where the&lt;br/&gt;fleet is scheduled onto&lt;br/&gt;or hidden entirely"]
+  W["Module 02&lt;br/&gt;Compute closes here"] -.- T
+    </div>
+    <figcaption>Where this sits. This is the last page of the module and the top of the ladder built from the three before it - a template stamps a member, and a controller decides how many members there are and what happens when one dies.
+    <b>Everything in the next module either schedules work onto a fleet like this one or hides one from you completely.</b></figcaption>
+  </figure>
+
+  <h2>1. The loop that is the actual product</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Creating: the group is below its target size
+  Creating --> Serving: the health check passes
+  Serving --> Unhealthy: the health check fails
+  Unhealthy --> Replacing: the controller marks it for replacement
+  Replacing --> Creating: a new member is stamped from the template
+  Serving --> Draining: the target size is lowered
+  Draining --> [*]
+    </div>
+    <figcaption>The controller loop. A member that fails its health check is removed and stamped again from the immutable template, without a person being involved, and the loop runs whether or not anything is scaling.
+    <b>Autoscaling is a feature and autohealing is the reason the group exists - a construct that launches instances without running this loop is a launcher, not a controller.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/compute/docs/instance-groups">Managed instance groups</a> carry autoscaling, autohealing, rolling updates and distribution across zones, and predictive autoscaling is included rather than sold beside it. Because a template is immutable, a rolling update is the controller reading a different template rather than an edit being applied to running machines, which is the mechanism the previous page set up.</p>
+
+  <p>One operational detail is worth carrying into module 10 now: a replacement performed by the controller is a Google-side action on your resources, so it is recorded in the <a href="https://cloud.google.com/logging/docs/audit">System Event audit log</a>, which is always on and free. That is where the evidence lives when a fleet quietly replaced a member overnight and nobody knows why the graph has a step in it.</p>
+
+  <h2>2. What a regional group actually buys</h2>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing a nine member zonal group and a nine member regional group before and after the loss of one zone. The zonal group drops from nine to zero. The regional group drops from nine to six.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <line class="grid" x1="70" y1="70" x2="610" y2="70"/>
+      <line class="grid" x1="70" y1="130" x2="610" y2="130"/>
+      <line class="grid" x1="70" y1="190" x2="610" y2="190"/>
+      <rect class="m-stat" x="120" y="70" width="60" height="180"/>
+      <rect class="m-alarm" x="200" y="250" width="60" height="0"/>
+      <rect class="m-stat" x="380" y="70" width="60" height="180"/>
+      <rect class="m-signal" x="460" y="130" width="60" height="120"/>
+      <text class="ttl" x="70" y="26">Nine members, one zone lost</text>
+      <text class="lbl-sm" x="190" y="268" text-anchor="middle">zonal group</text>
+      <text class="lbl-sm" x="450" y="268" text-anchor="middle">regional group</text>
+      <text class="lbl-sm" x="150" y="62" text-anchor="middle">9</text>
+      <text class="lbl-sm t-alarm" x="230" y="244" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="410" y="62" text-anchor="middle">9</text>
+      <text class="lbl-sm" x="490" y="122" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="82" y="56">members</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>before</span><span><i class="sw-alarm"></i>zonal, after</span><span><i class="sw-signal"></i>regional, after</span></div>
+    <figcaption>The arithmetic behind the regional form, worked rather than asserted. A regional group spreads members across three zones, so nine members are three per zone. Losing one zone removes three of them and leaves six, which is two thirds of the fleet. The same nine members in one zone leave nothing.
+    <b>A regional group does not prevent the loss - it converts a total loss into a partial one, and whether two thirds of the fleet can carry the load is a capacity question you have to answer separately.</b></figcaption>
+  </figure>
+
+  <p>That last sentence is the trade, and it is the one most often skipped. A regional group spread over three zones means the surviving fraction after a zone loss is two of three, so a fleet sized exactly for its peak is under-provisioned the moment a zone goes. Sizing for the survivable case means running more members than the load needs, every day, in exchange for not being paged on the day a zone is lost.</p>
+
+  <h2>3. Stateful members, and what they cost</h2>
+
+  <p>A stateful managed instance group preserves disks and addresses across a replacement, so a member keeps its identity rather than being an interchangeable copy. That is what makes a group usable for workloads that are not fully disposable. The cost is the thing that made the stateless group easy: once members are distinguishable, a replacement is no longer free, the controller has more to preserve, and the fleet stops being cattle.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+  Ask of any fleet: <b>are its members interchangeable?</b> If yes, the stateless group is doing exactly what it was designed for and every property of it - stamping, replacing, rolling forward - is cheap. If no, a stateful group will hold the identity for you, and you have chosen a harder object to operate. The wrong answer here is not choosing the wrong group, it is not noticing that the question was asked.</div>
+
+  <h2>4. When the work ends</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q["What is the shape of the work?"] --> A["It persists and&lt;br/&gt;serves requests"]
+  Q --> B["It is a queue of jobs&lt;br/&gt;that finish"]
+  A --> MIG["Managed instance group&lt;br/&gt;a target size held,&lt;br/&gt;members replaced,&lt;br/&gt;updates rolled"]
+  B --> BAT["Batch&lt;br/&gt;jobs scheduled onto&lt;br/&gt;Compute Engine resources&lt;br/&gt;with no cluster to manage"]
+  BAT -.- N1["Dataflow for Beam pipelines&lt;br/&gt;Dataproc for Spark and Hadoop"]
+    </div>
+    <figcaption>The two controller shapes and the question that separates them. A group holds a number. A job scheduler takes work, provisions for it, runs it and tears the resources down, so there is no steady-state size to hold at all.
+    <b>Running batch work under a managed instance group means writing the queue, the completion and the teardown yourself, which is precisely the machinery Batch already is.</b></figcaption>
+  </figure>
+
+  <p><a href="https://cloud.google.com/batch/docs/get-started">Batch</a> is the fully managed scheduler for batch jobs on Compute Engine resources with no cluster to manage. It sits beside two other job-shaped services rather than replacing them: Dataflow runs Apache Beam pipelines and Dataproc runs Spark and Hadoop, both of which module 06 covers. Batch is the general case - work that is a program to run rather than a pipeline to express.</p>
+
+  <div class="card callout key"><span class="tag">What this certification tests</span>
+  Fleet operations are examined as tasks rather than as theory. <a href="https://services.google.com/fh/files/misc/associate_cloud_engineer_exam_guide_english.pdf">The Associate Cloud Engineer guide</a> puts <b>Planning and implementing a cloud solution at about 30 per cent</b> and <b>Ensuring the successful operation of a cloud solution at about 30 per cent</b>, and managed instance groups appear in both - built in the first, healed and scaled in the second.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A nine-member regional group is spread across three zones and one zone is lost. What is left, and what does that imply?</div>
+      <button class="q-opt">Nine members remain, because the controller replaces the lost ones</button>
+      <button class="q-opt">Six members remain, so the fleet must be sized above its peak load</button>
+      <button class="q-opt">Three members remain, so two thirds of the capacity has been lost</button>
+      <button class="q-opt">Six members remain, and the controller cannot replace them at all</button>
+      <div class="q-fb">Three per zone means a zone loss removes three and leaves six, so surviving peak load means running more than peak needs. The first option assumes instant replacement into zones that may have no capacity. The third inverts the arithmetic. The fourth pairs the right number with a false claim about the controller.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which property of a managed instance group is the one that saves you on a day nothing is scaling?</div>
+      <button class="q-opt">Predictive autoscaling, which starts the ramp before the load</button>
+      <button class="q-opt">Rolling updates, which walk a new template across the fleet</button>
+      <button class="q-opt">Zone distribution, which places members in more than one zone</button>
+      <button class="q-opt">Autohealing, which replaces a member that fails its health check</button>
+      <div class="q-fb">Autohealing runs whether or not the size is changing, which is why it is the property that pays on an ordinary day. The other three are real and each one only acts when something else happens: a load change, a template change, or a zone loss.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A team has a queue of independent jobs that each run once and finish. Which construct fits?</div>
+      <button class="q-opt">Batch, which schedules the jobs and releases the resources after</button>
+      <button class="q-opt">A stateless group, sized to the queue and scaled down after</button>
+      <button class="q-opt">A stateful group, so each job keeps its disk across a restart</button>
+      <button class="q-opt">A regional group, so the jobs survive the loss of a single zone</button>
+      <div class="q-fb">Work that finishes wants a job scheduler, and Batch provisions and tears down for exactly that. The second option can be made to work by writing the queue, the completion detection and the teardown by hand, which is the machinery Batch already is. The third and fourth answer different questions entirely.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A stateless web tier must serve its peak load even while one zone of its region is unavailable. Peak load needs eight members. The team plans a regional managed instance group spread across three zones.</p>
+      <p><b>Work out</b> the smallest fleet size that meets the requirement, <b>show the arithmetic</b>, and <b>say</b> what the design is paying for it on an ordinary day.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>A zone loss removes one third of the members. Work backwards from the eight that must survive, and remember that members come in whole numbers.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>State the surviving fraction.</b> Three zones, evenly spread, so a zone loss leaves two thirds of the fleet running.</li>
+        <li><b>Solve for the total.</b> Two thirds of the total must be at least 8, so the total must be at least 8 multiplied by 3 and divided by 2, which is <span class="keynum">12</span>.</li>
+        <li><b>Check that it divides.</b> Twelve members over three zones is four per zone. Losing one zone removes four and leaves eight, which is exactly peak - so twelve is the smallest size that works and also happens to spread evenly.</li>
+        <li><b>Name the ordinary-day cost.</b> On every day when no zone is lost, twelve members serve a load that needs eight, so the design runs 50 per cent more compute than the load requires. That surplus is the price of the requirement, and it is paid continuously.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Twelve is above eight and divides by three, which are the two conditions. If you arrived at ten, you solved for surviving the loss of some members rather than of a whole zone - ten over three zones does not spread evenly, and the largest zone would take four members with it.</p>
+    </details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the regional group still feels like free insurance, ask an agent to price the same fleet at eight members and at twelve. The difference is the actual cost of the availability requirement, and it is a number a business can decide about.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cloud.google.com/compute/docs/instance-groups">The instance groups documentation</a> is the reference for the controller: target sizes, autohealing, rolling updates, the regional and zonal forms, and the stateful variant. It is the page to read before deciding a fleet's shape, because most of the decisions on this page are configuration on that one object.</p>
+
+  <p class="note-sm">Provenance: every claim on this page comes from the verified Google Cloud inventory behind this course, each fact linked to the vendor page it was read from. The read dates and the refresh procedure are recorded in this course's <code>RESOURCES.md</code>.</p>
+
+  <div class="pager">
+    <a href="0202-changing-what-you-rent.html"><span class="dir">&larr; Previous</span><span class="ttl">Five levers on the same machine</span></a>
+    <a class="nxt" href="0300-gke-how-much-of-the-cluster-you-run.html"><span class="dir">Next &rarr;</span><span class="ttl">How much of the GKE cluster you run</span></a>
+  </div>
+
+  <footer><p>Inside Google Cloud &middot; Lesson 0203 &middot; <a href="../index.html">Course map</a> &middot; <a href="../../index.html">Course Hub</a></p></footer>
+</main>
+</body>
+</html>

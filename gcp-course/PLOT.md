@@ -6,8 +6,49 @@ is wrong and it gets fixed before anything new is added.
 
 ## Written, in order
 
-Nothing yet. `gcp-course` is a shell: its module plan below is recorded so later slices
-have a place to attach, and no lesson page exists.
+Lesson numbers are `MMxx`: the two-digit module number, then a two-digit sequence inside
+that module. Module 01 owns 0100 to 0199, module 02 owns 0200 to 0299, and so on.
+Modules are written in parallel by different contributors, so a single running sequence
+would collide the moment two of them add a lesson. Nothing already published is
+renumbered.
+
+**Module 01 - The lay of the land**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0100 | Regions, zones and the scope of a resource | `region-az-model` |
+| 0101 | The resource hierarchy and the project | `org-hierarchy` |
+| 0102 | What flows down the tree | `org-guardrail-policy` |
+| 0103 | The platform map and the names that moved | platform map |
+
+**Module 02 - Compute**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0200 | The machine you shape yourself | `vm-instances` |
+| 0201 | Images, families and templates | `vm-images`, `instance-template` |
+| 0202 | Five levers on the same machine | `gpu-compute`, `dedicated-hosts`, `confidential-compute`, `bare-metal`, `spot-capacity` |
+| 0203 | Managed instance groups and Batch | `autoscaling-group`, `batch-compute` |
+
+**Module 03 - Containers and serverless**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0300 | How much of the GKE cluster you run | `managed-kubernetes`, `kubernetes-node-autoscaler` |
+| 0301 | Beyond one cluster | `kubernetes-fleet-management`, `service-mesh`, `kubernetes-backup` |
+| 0302 | Cloud Run, a container with a URL | `serverless-containers`, `container-orchestrator-nonk8s` |
+| 0303 | Functions and app runtimes | `functions-faas`, `paas-web-runtime`, `static-site-hosting` |
+| 0304 | Choosing a runtime | runtime placement across the five |
+
+**Module 04 - Storage**
+
+| # | Lesson | Capability |
+|---|---|---|
+| 0400 | Cloud Storage and the bucket | `object-storage`, `object-storage-highperf` |
+| 0401 | Classes, lifecycle and archive | `archive-storage` |
+| 0402 | Block storage on Compute Engine | `block-storage` |
+| 0403 | Shared filesystems | `file-storage` |
+| 0404 | Where the storage menu stops | `hybrid-storage-gateway`, `object-storage-tables`, `bulk-transfer-appliance`, `online-transfer` |
 
 ## Planned, in order
 
@@ -43,8 +84,10 @@ against all of it.
 
 ## Reserved, unwritten
 
-- **The fourteen modules above**, none started. New numbers go at the end of the
-  sequence; nothing already published is renumbered or renamed.
+- **Modules 05 to 14 above**, none started. Each module owns its own hundred of the
+  `MMxx` sequence, so a later contributor takes the next free number inside its module
+  rather than appending to the end of the course; nothing already published is
+  renumbered or renamed.
 - **Reference: glossary of GCP terms**, linked from every lesson foot once the
   first lessons exist. Not written yet.
 
