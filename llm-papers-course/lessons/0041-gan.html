@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generative Adversarial Networks - LLM Papers Course</title>
+<meta name="description" content="Train a generator against a discriminator so the loss itself is learned. Why the images were sharp, why the training was miserable, the dated paper where diffusion took the crown, and the three places the adversarial term is still load-bearing.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 41</div>
+  <h1>Generative Adversarial Networks</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">2014</span>
+    <span class="pill">15 min</span>
+    Goodfellow, Pouget-Abadie, Mirza, Xu, Warde-Farley, Ozair, Courville, Bengio &middot; Universite de Montreal
+    &middot; <a href="https://arxiv.org/abs/1406.2661">arXiv:1406.2661</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two networks play a game. A <b>generator</b> turns noise into samples. A <b>discriminator</b> tries to tell real data from the generator's output, and the generator is trained "to maximize the probability of D making a mistake".</li>
+      <li>There is no likelihood, no lower bound and no explicit density. <b>The loss is learned</b>, and it is learned to be exactly the loss that catches whatever the generator is currently getting wrong. That is why the images were sharp when the previous lesson's were blurry.</li>
+      <li>It never solved training stability, distribution coverage, or conditioning on rich text - and those three are why it lost.</li>
+      <li><b>As a way to generate images in 2026: history. Reach for diffusion.</b> As a loss term: alive and load-bearing inside diffusion decoders, inside one-step distillation, and in speech.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  V["the VAE&lt;br/&gt;(Lesson 40)&lt;br/&gt;a chosen loss gives an average"] --> G["THIS PAGE&lt;br/&gt;learn the loss instead&lt;br/&gt;with a discriminator"]
+  G --> S["sharp samples&lt;br/&gt;2014 to 2021"]
+  G --> L["the adversarial term inside&lt;br/&gt;a latent diffusion decoder"]
+  G --> F["few-step image synthesis&lt;br/&gt;and speech vocoders"]
+  D["diffusion&lt;br/&gt;(Lesson 42)"] -.-> |"takes the crown&lt;br/&gt;on coverage"| S
+    </div>
+    <figcaption>Where this sits. The previous lesson ended with a loss that averages; this one replaces the loss with a network that objects. The result dominated image synthesis for seven years and then lost the top job while keeping several smaller ones. <b>The idea was demoted, not deleted.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>The previous lesson left a specific problem. A hand-chosen reconstruction loss cannot tell you that an image looks wrong, only that it differs from a particular target, and when several answers are equally good it asks for their average.</p>
+
+  <p>So stop choosing the loss. Train a second network whose only job is to look at a sample and say whether it came from the real data. That network <em>is</em> the loss, and unlike a fixed formula it adapts: whatever tell the generator currently leaves, the discriminator learns to spot, and the generator is then pushed to remove it. Blur is trivially detectable, so a discriminator punishes blur immediately.</p>
+
+  <h2>2. The mechanism: a two-player game</h2>
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  N["noise vector z"] --> G["generator G"]
+  G --> F["fake sample"]
+  R["real sample&lt;br/&gt;from the dataset"] --> D["discriminator D"]
+  F --> D
+  D --> P["probability the input is real"]
+  P --> LD["D's loss - be right more often"]
+  P --> LG["G's loss - make D wrong more often"]
+    </div>
+    <figcaption>The setup. One network invents, one network judges, and the judge's verdict is the only training signal the inventor ever sees. <b>Nothing in the picture compares a generated sample to a specific real image, which is why the generator is free to invent rather than reproduce.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant D as Discriminator
+  participant G as Generator
+  participant B as Data batch
+  B->>D: real samples, labelled real
+  G->>D: fake samples, labelled fake
+  D->>D: step 1 - update D to separate the two piles
+  G->>D: fresh fakes, this time labelled real
+  D->>G: step 2 - gradients pushed back into G only
+  Note over G,D: repeat - each side improves against the other's current best
+    </div>
+    <figcaption>One round of training, in order. The discriminator is updated first on both piles, then the generator is updated using the discriminator's own gradients while the discriminator itself is held still. <b>The two updates are separate steps on the same batch, never one joint step.</b></figcaption>
+  </figure>
+
+  <h2>3. The maths, read aloud</h2>
+  <div class="math">min<sub>G</sub> max<sub>D</sub> V(D, G) = E<sub>x~p<sub>data</sub></sub>[ log D(x) ] + E<sub>z~p<sub>z</sub></sub>[ log(1 &minus; D(G(z))) ]
+    <span class="gloss"><b>D(x)</b>: the discriminator's estimated probability that the input is real, a number between 0 and 1. <b>G(z)</b>: the generator's sample, built from a noise vector <b>z</b>. <b>E<sub>x~p<sub>data</sub></sub>[ log D(x) ]</b>: over real data, reward the discriminator for saying "real". <b>E<sub>z~p<sub>z</sub></sub>[ log(1 &minus; D(G(z))) ]</b>: over generated data, reward it for saying "fake". <b>max<sub>D</sub></b>: the discriminator climbs this value. <b>min<sub>G</sub></b>: the generator descends the same value, using the second term only. Read the whole line as: one number that one player pushes up and the other pushes down.</span>
+  </div>
+
+  <p>The paper's analysis says where the game ends: "a unique solution exists, with G recovering the training data distribution and D equal to 1/2 everywhere". A discriminator forced down to a coin flip is the success condition, because it means the two piles have become indistinguishable.</p>
+
+  <div class="callout warn">
+    Notice what that success condition is not. It is not a loss that goes down. There is no scalar you can watch converge, because you are looking for a saddle point of a two-player game rather than the bottom of a valley. Every practical difficulty with GANs starts here.
+  </div>
+
+  <h2>4. Implement it</h2>
+  <div class="code-cap">gan.py &middot; runnable with torch</div>
+  <pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+LATENT, DATA = 16, 64
+G = nn.Sequential(nn.Linear(LATENT, 128), nn.ReLU(), nn.Linear(128, DATA))
+D = nn.Sequential(nn.Linear(DATA, 128), nn.LeakyReLU(0.2), nn.Linear(128, 1))
+opt_g = torch.optim.Adam(G.parameters(), lr=2e-4, betas=(0.5, 0.999))
+opt_d = torch.optim.Adam(D.parameters(), lr=2e-4, betas=(0.5, 0.999))
+
+def bce(logits, is_real):
+    target = torch.ones_like(logits) if is_real else torch.zeros_like(logits)
+    return F.binary_cross_entropy_with_logits(logits, target)
+
+real_batch = torch.randn(32, DATA) * 0.5 + 2.0        # stand-in for real data
+
+for step in range(200):
+    # ---- step 1: train D on both piles, generator held still ----
+    z = torch.randn(32, LATENT)
+    fake = G(z).detach()                              # detach: no gradient into G here
+    loss_d = bce(D(real_batch), True) + bce(D(fake), False)
+    opt_d.zero_grad(); loss_d.backward(); opt_d.step()
+
+    # ---- step 2: train G, discriminator held still ----
+    z = torch.randn(32, LATENT)
+    # the non-saturating form: ask G to make D say "real", rather than
+    # minimising log(1 - D(G(z))), which gives vanishing gradients early on
+    loss_g = bce(D(G(z)), True)
+    opt_g.zero_grad(); loss_g.backward(); opt_g.step()
+
+    if step % 50 == 0:
+        with torch.no_grad():
+            p_real = torch.sigmoid(D(real_batch)).mean()
+            p_fake = torch.sigmoid(D(G(torch.randn(32, LATENT)))).mean()
+        print(step, "D(real)", round(float(p_real), 3), "D(fake)", round(float(p_fake), 3))</code></pre>
+
+  <p>Watch the two printed numbers rather than the losses. Both drifting towards 0.5 is the equilibrium the paper describes. <code>D(fake)</code> stuck near zero means the discriminator has won and the generator has no usable gradient left; <code>D(real)</code> near 0.5 with the generator producing one repeated output is mode collapse. Neither shows up as a rising loss, which is the difficulty in one sentence.</p>
+
+  <h2>5. What it did not solve</h2>
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Balanced
+  Balanced --> DTooStrong: D learns faster than G
+  DTooStrong --> Stalled: G's gradient vanishes
+  Balanced --> ModeCollapse: G finds one output that fools D
+  ModeCollapse --> Balanced: D adapts and punishes it
+  ModeCollapse --> Stalled: D never adapts
+  Balanced --> Balanced: the healthy case
+  Stalled --> [*]
+    </div>
+    <figcaption>The states a GAN training run moves between. Only one of them is the intended one, and the transitions out of it are driven by the relative learning speed of two networks rather than by anything you set directly. <b>This is a structural property of a two-player game, not a hyper-parameter you failed to tune.</b></figcaption>
+  </figure>
+
+  <p><strong>Coverage is the deeper failure, and it is distinct from stability.</strong> A GAN can produce beautiful samples drawn from only a fraction of the real distribution, and nothing in its samples tells you which fraction is missing. There is no likelihood to check and no held-out number that falls when the model quietly stops modelling half the data.</p>
+
+  <p><strong>And conditioning never scaled.</strong> There is no clean GAN equivalent of "train on a billion image-text pairs and condition on any sentence a user types". That was an open research problem which the next lesson's method simply made moot.</p>
+
+  <h2>6. Where and when it lost</h2>
+  <p>The date is documented, and it is worth putting in the course rather than gesturing at a decade. Dhariwal and Nichol published "Diffusion Models Beat GANs on Image Synthesis" on 11 May 2021. Their reported numbers are an FID of 2.97 on ImageNet at 128 by 128, 4.59 at 256 by 256, and 7.72 at 512 by 512 - FID being a distance between generated and real image statistics, so lower is better.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of the FID reported for guided diffusion at three ImageNet resolutions: 2.97 at 128 pixels, 4.59 at 256 pixels, and 7.72 at 512 pixels. Lower is better.">
+      <text class="ttl" x="20" y="24">FID reported for guided diffusion, three ImageNet resolutions</text>
+      <line class="axis" x1="70" y1="250" x2="620" y2="250"/>
+      <rect class="m-stat" x="110" y="175" width="80" height="75"/>
+      <rect class="m-stat" x="280" y="133" width="80" height="117"/>
+      <rect class="m-stat" x="450" y="54"  width="80" height="196"/>
+      <text class="lbl-b"  x="150" y="167" text-anchor="middle">2.97</text>
+      <text class="lbl-b"  x="320" y="125" text-anchor="middle">4.59</text>
+      <text class="lbl-b"  x="490" y="46"  text-anchor="middle">7.72</text>
+      <text class="lbl-sm" x="150" y="268" text-anchor="middle">128 x 128</text>
+      <text class="lbl-sm" x="320" y="268" text-anchor="middle">256 x 256</text>
+      <text class="lbl-sm" x="490" y="268" text-anchor="middle">512 x 512</text>
+      <text class="lbl-sm" x="70"  y="290">Lower is better. Bar height is proportional to the reported score.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>guided diffusion, as reported</span></div>
+    <figcaption>The scores in the paper that changed the field, drawn so the shape is visible: quality is best at the smallest resolution and degrades as the picture grows. <b>These are the numbers that took the crown, and the resolution trend is the cost problem the next two lessons are about.</b></figcaption>
+  </figure>
+
+  <p>The clause that matters most, though, is not a number. The same abstract reports that they "match BigGAN-deep even with as few as 25 forward passes per sample, all while maintaining better coverage of the distribution". Read that carefully. Diffusion did not only win on picture quality. It won on the exact thing GANs were structurally bad at, and it won while being slower per sample.</p>
+
+  <div class="card callout key"><span class="tag">The judgement worth carrying</span>
+    The field traded sampling speed for coverage and trainability, deliberately and with numbers on the table. When you meet a method that is slower per unit of output but has no failure mode you cannot see, that is the same trade, and it usually goes the same way.</div>
+
+  <h2>7. Does this still matter in 2026?</h2>
+  <p><strong>As a way to generate images: no. It is history, and reaching for a GAN in 2026 is a mistake.</strong> Reach for diffusion.</p>
+
+  <p>But the adversarial <em>loss</em> is alive in three specific places, and this is the nuance that makes the lesson worth reading rather than skipping.</p>
+
+  <ol class="worked">
+    <li><b>Inside diffusion models.</b> The autoencoder in a latent diffusion model is trained with "a combination of a perceptual loss and a patch-based adversarial objective". Every image out of such a model passes through a decoder that was trained adversarially, which is the direct answer to the blur of Lesson 40.</li>
+    <li><b>Making diffusion fast.</b> Adversarial Diffusion Distillation "use[s] score distillation to leverage large-scale off-the-shelf image diffusion models as a teacher signal in combination with an adversarial loss to ensure high image fidelity even in the low-step regime of one or two sampling steps". Near-real-time image synthesis runs on an adversarial term.</li>
+    <li><b>Speech.</b> HiFi-GAN is a GAN vocoder, reported at "167.9 times faster than real-time on a single V100 GPU" and, for its small version, "13.4 times faster than real-time on CPU".</li>
+  </ol>
+
+  <div class="callout">
+    One honesty note on that third item. The paper's speed figures are the paper's own. Whether GAN vocoders are still a default choice in text-to-speech today is a judgement from secondary reading rather than something measured here, so treat "still standard" as a claim to check, not a fact this lesson establishes.</div>
+
+  <p>The staff framing is this. GANs answer the question "how do you get a sharp result when your reconstruction loss wants to give you an average". That question did not go away. The answer simply stopped being a whole model and became a term in someone else's loss.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does the discriminator really provide to the generator?</div>
+      <button class="q-opt">A compressed latent code the generator then learns to decode</button>
+      <button class="q-opt">A held-out score used to stop training at the right moment</button>
+      <button class="q-opt">A learned loss that adapts to the generator's current flaws</button>
+      <button class="q-opt">A fixed target image the generator is asked to reproduce</button>
+      <div class="q-fb">The discriminator is the loss, and it changes as the generator changes. It supplies no latent code, no target image, and it is not a validation metric.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">At the paper's equilibrium, what does the discriminator output?</div>
+      <button class="q-opt">Zero for every sample, real or generated, once G has converged</button>
+      <button class="q-opt">One half everywhere, since the two piles are indistinguishable</button>
+      <button class="q-opt">One for real samples and zero for the generated ones, exactly</button>
+      <button class="q-opt">A value that rises steadily as the generator keeps on improving</button>
+      <div class="q-fb">The paper states the unique solution as G recovering the data distribution and D equal to 1/2 everywhere. Perfect separation is the discriminator winning, which is a failed run.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What did diffusion beat GANs on, beyond image quality?</div>
+      <button class="q-opt">Sampling speed, needing far fewer passes for each generated image</button>
+      <button class="q-opt">Model size, reaching the same quality with far fewer parameters</button>
+      <button class="q-opt">Memory use, since no second network is held during any training</button>
+      <button class="q-opt">Coverage, the exact weakness the adversarial game never fixed</button>
+      <div class="q-fb">The reported win is "better coverage of the distribution", achieved while being slower per sample. Speed was the thing given up, not gained.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does an adversarial loss still earn its place?</div>
+      <button class="q-opt">Training the decoder of a latent diffusion model to stay sharp</button>
+      <button class="q-opt">Ranking retrieved documents before they enter a model's prompt</button>
+      <button class="q-opt">Choosing the learning rate schedule used by a diffusion trainer</button>
+      <button class="q-opt">Replacing the denoiser in a modern text-conditioned image model</button>
+      <div class="q-fb">The latent diffusion autoencoder is trained with a patch-based adversarial objective, and the same term appears in few-step distillation and in speech vocoders. It does not replace the denoiser and has nothing to do with retrieval.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><a href="0040-vae.html">Variational Autoencoders</a> set up the problem this lesson answers: a chosen loss that averages when it should choose.</li>
+    <li><a href="0042-diffusion.html">Diffusion Models</a> is the method that took the top job, and the paper that did it is dated in section 6 above.</li>
+    <li><a href="0043-latent-diffusion.html">Latent Diffusion</a> is where the adversarial term reappears as a component, training the decoder that every generated image passes through.</li>
+    <li>The two-player instability here rhymes with the reward-model dynamics of <a href="0023-instructgpt-rlhf.html">InstructGPT (RLHF)</a>: in both, one network's output is another's objective.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Run the loop and ask the agent to plot <code>D(real)</code> and <code>D(fake)</code> over the steps rather than the losses. Then ask it to make the discriminator ten times larger and rerun - you should see the stalled state from the diagram, with the generator's gradient collapsing. That failure, produced deliberately, is the fastest way to feel why the field moved on.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the original: <a href="https://arxiv.org/abs/1406.2661">Goodfellow et al., "Generative Adversarial Networks" (arXiv:1406.2661)</a>. Then read the paper that ended the era: <a href="https://arxiv.org/abs/2105.05233">Dhariwal and Nichol, "Diffusion Models Beat GANs on Image Synthesis" (arXiv:2105.05233)</a>, paying attention to the coverage claim rather than only the scores.</p>
+
+  <div class="pager">
+    <a href="0040-vae.html"><span class="dir">&larr; Previous</span><span class="ttl">Variational Autoencoders (VAE)</span></a>
+    <a class="nxt" href="0042-diffusion.html"><span class="dir">Next &rarr;</span><span class="ttl">Diffusion Models</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 41 &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

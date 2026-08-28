@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Diffusion Models - LLM Papers Course</title>
+<meta name="description" content="Destroy an image with noise in fixed steps, then learn to undo one step. Why decomposing beats compressing, what classifier-free guidance actually is, and why sampling cost is the whole downside.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 42</div>
+  <h1>Diffusion Models</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">2020</span>
+    <span class="pill">16 min</span>
+    Ho, Jain, Abbeel &middot; UC Berkeley &middot; after Sohl-Dickstein, Weiss, Maheswaranathan, Ganguli (2015)
+    &middot; <a href="https://arxiv.org/abs/2006.11239">arXiv:2006.11239</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Add a little Gaussian noise to a real image, over and over, until nothing is left. That <b>forward process is fixed</b>, needs no learning, and has a closed form for any step.</li>
+      <li>Train one network to undo a single step. To generate, start from pure noise and run the learned reverse step many times. <b>The hard task is decomposed rather than compressed</b>, which is exactly what the VAE could not do.</li>
+      <li>The objective is "a weighted variational bound", so this is VAE mathematics. In code it reduces to something almost embarrassingly simple: <b>predict the noise that was added, and take the mean squared error against it</b>.</li>
+      <li><b>In 2026 this is the default generative model for every continuous modality</b> - image, video, audio, 3D. The whole cost story is sampling: one output needs many forward passes, and every engineering advance since has been about reducing that number.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  V["the variational bound&lt;br/&gt;(Lesson 40)"] --> D["THIS PAGE&lt;br/&gt;destroy structure in fixed steps&lt;br/&gt;then learn the reverse"]
+  S["non-equilibrium thermodynamics&lt;br/&gt;the 2015 original"] --> D
+  D --> G["classifier-free guidance&lt;br/&gt;your guidance_scale"]
+  D --> L["latent diffusion&lt;br/&gt;(Lesson 43)"]
+  D --> M["video, audio, 3D&lt;br/&gt;same recipe, swapped modality"]
+    </div>
+    <figcaption>Where this sits. The bound comes from the VAE lesson and the forward process comes from a 2015 paper that sat nearly unused for five years. What this page adds is the training objective that made it practical, and everything after it is either conditioning or cost reduction. <b>Diffusion is older than the Vision Transformer and it did not become useful until the loss was right.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>A VAE asks one network to produce a whole image from a short latent in a single shot. That is a hard mapping, and the loss that trains it settles for an average. A GAN removes the averaging but replaces it with a game that has no scalar to watch.</p>
+
+  <p>Diffusion changes the question. Instead of one enormous step from noise to image, take a thousand tiny steps, each of which asks only "make this slightly less noisy". Every individual task is easy, and every one is trained by a plain regression loss with a convergence curve you can look at.</p>
+
+  <div class="card callout key"><span class="tag">The reframing</span>
+    Compression is not the only way to make generation tractable. Decomposition works too, and it buys you a stable loss, because each sub-task is a small supervised problem rather than one giant unsupervised leap.</div>
+
+  <h2>2. The two processes</h2>
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  X0["x0&lt;br/&gt;a real image"] -->|"add noise&lt;br/&gt;fixed, no learning"| XT1["x1"]
+  XT1 -->|"add noise"| XTD["... xt ..."]
+  XTD -->|"add noise"| XT["xT&lt;br/&gt;pure Gaussian noise"]
+  XT -->|"learned reverse step"| RD["... xt ..."]
+  RD -->|"learned reverse step"| R1["x1"]
+  R1 -->|"learned reverse step"| R0["x0&lt;br/&gt;a generated image"]
+    </div>
+    <figcaption>Two directions along the same chain. The top row is a fixed recipe that destroys an image, so training data for any step is free - take a real image and noise it. The bottom row is the only learned part. <b>You never need a paired dataset, because the forward process manufactures its own supervision.</b></figcaption>
+  </figure>
+
+  <p>The forward process being fixed is what makes training cheap. To make one training example you take a real image, pick a random step number, jump straight to that noise level in one closed-form operation, and ask the network what noise you added. There is no simulation of the chain and no rollout.</p>
+
+  <h2>3. The maths, read aloud</h2>
+  <p>Two equations. The first says you can skip to any step directly. The second is the entire training loss.</p>
+
+  <div class="math">x<sub>t</sub> = &radic;(&#257;<sub>t</sub>) &middot; x<sub>0</sub> + &radic;(1 &minus; &#257;<sub>t</sub>) &middot; &epsilon;,&nbsp;&nbsp; &epsilon; ~ N(0, 1)
+    <span class="gloss"><b>x<sub>0</sub></b>: the real image. <b>t</b>: which step of the chain you want, chosen at random during training. <b>&#257;<sub>t</sub></b> (alpha-bar): a number between 1 and 0 fixed in advance by the noise schedule, close to 1 early in the chain and close to 0 at the end. <b>&radic;(&#257;<sub>t</sub>) &middot; x<sub>0</sub></b>: what survives of the original image. <b>&radic;(1 &minus; &#257;<sub>t</sub>) &middot; &epsilon;</b>: the noise mixed in, with <b>&epsilon;</b> drawn from a standard normal. Read it as: a weighted blend of the picture and pure noise, where the weights are decided by the schedule and nothing is learned.</span>
+  </div>
+
+  <div class="math">L = E<sub>t, x<sub>0</sub>, &epsilon;</sub> &#8214; &epsilon; &minus; &epsilon;<sub>&theta;</sub>(x<sub>t</sub>, t) &#8214;&sup2;
+    <span class="gloss"><b>&epsilon;</b>: the noise you actually added, which you know because you drew it. <b>&epsilon;<sub>&theta;</sub>(x<sub>t</sub>, t)</b>: the network's guess at that noise, given the noisy image and the step number. <b>&#8214; &middot; &#8214;&sup2;</b>: squared error between the two. <b>E<sub>t, x<sub>0</sub>, &epsilon;</sub></b>: averaged over random steps, random images and random noise draws. Read the whole line as: guess the noise, and be scored on how close the guess is.</span>
+  </div>
+
+  <p>That simple form is not the paper's starting point, and the connection is the reason this lesson sits after the VAE. DDPM's stated contribution is training on "a weighted variational bound designed according to a novel connection between diffusion probabilistic models and denoising score matching with Langevin dynamics". A weighted variational bound is the ELBO of Lesson 40, reweighted. The mean-squared-error line above is what that bound reduces to in practice.</p>
+
+  <h2>4. Implement it</h2>
+  <div class="code-cap">diffusion.py &middot; runnable with torch, model is a stand-in</div>
+  <pre><code>import torch
+import torch.nn as nn
+
+T = 1000
+betas = torch.linspace(1e-4, 0.02, T)          # the noise schedule, fixed in advance
+alphas = 1.0 - betas
+abar = torch.cumprod(alphas, dim=0)            # alpha-bar: how much image survives
+
+def add_noise(x0, t, eps):
+    """Jump straight to step t in one operation - no chain simulation."""
+    a = abar[t].view(-1, 1)
+    return a.sqrt() * x0 + (1 - a).sqrt() * eps
+
+# a real model is a U-Net or a transformer - the shape is what matters here
+DIM = 64
+model = nn.Sequential(nn.Linear(DIM + 1, 256), nn.SiLU(), nn.Linear(256, DIM))
+def predict_noise(x, t):
+    return model(torch.cat([x, (t.float() / T).view(-1, 1)], dim=1))
+
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+x0 = torch.randn(32, DIM)                       # stand-in for a batch of real data
+
+for step in range(200):                         # ---- training ----
+    t = torch.randint(0, T, (len(x0),))         # a different step per example
+    eps = torch.randn_like(x0)                  # the noise we will ask it to name
+    xt = add_noise(x0, t, eps)
+    loss = ((eps - predict_noise(xt, t)) ** 2).mean()
+    opt.zero_grad(); loss.backward(); opt.step()
+
+@torch.no_grad()                                # ---- sampling ----
+def sample(n=4):
+    x = torch.randn(n, DIM)                     # start from pure noise
+    for i in reversed(range(T)):                # and walk the chain backwards
+        t = torch.full((n,), i)
+        eps_hat = predict_noise(x, t)
+        mean = (x - betas[i] / (1 - abar[i]).sqrt() * eps_hat) / alphas[i].sqrt()
+        x = mean + betas[i].sqrt() * torch.randn_like(x) if i > 0 else mean
+    return x
+
+print(sample().shape)                           # torch.Size([4, 64])</code></pre>
+
+  <p>Read the two halves against each other. Training touches one random step per example and never runs the chain. Sampling runs the chain in full, once per generated output. That asymmetry - cheap training steps, expensive sampling - is the whole cost model of diffusion.</p>
+
+  <h2>5. Conditioning, and what guidance_scale is</h2>
+  <p>A generator nobody can steer is a curiosity. Conditioning gives the network the prompt as an extra input, but early results were not obedient enough, so a classifier was used to push samples towards a class. Classifier-free guidance removed the separate classifier: train one network to work both with and without the condition, then at sampling time push away from the unconditional prediction and towards the conditional one.</p>
+
+  <div class="math">&epsilon;&#770; = &epsilon;<sub>&theta;</sub>(x<sub>t</sub>, &empty;) + w &middot; ( &epsilon;<sub>&theta;</sub>(x<sub>t</sub>, c) &minus; &epsilon;<sub>&theta;</sub>(x<sub>t</sub>, &empty;) )
+    <span class="gloss"><b>&epsilon;<sub>&theta;</sub>(x<sub>t</sub>, c)</b>: the noise prediction when the model is shown the condition <b>c</b>, such as the prompt. <b>&epsilon;<sub>&theta;</sub>(x<sub>t</sub>, &empty;)</b>: the prediction when the condition is blanked out. <b>Their difference</b>: the direction the prompt is pulling in. <b>w</b>: the guidance weight, exposed in an image API as <code>guidance_scale</code>. <b>&epsilon;&#770;</b>: the prediction actually used for this step. Read it as: start from what the model would do with no prompt, then step further along the direction the prompt asks for than the model would go on its own.</span>
+  </div>
+
+  <div class="callout warn">
+    Guidance is a blunt instrument and its cost is visible. Turning <code>w</code> up trades diversity for prompt adherence, and pushed far enough it produces oversaturated, samey images. Everything built after it - extra conditioning networks, adapters, regional prompting - exists because a single text string is a poor controller.</div>
+
+  <h2>6. What it did not solve</h2>
+  <p><strong>Sampling cost is the whole downside.</strong> One output needs many forward passes, where a GAN needed one. Almost all applied diffusion engineering since has been the history of reducing that number: deterministic samplers, better numerical solvers, consistency models, and distillation.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of network forward passes per generated sample: one for a GAN generator, one to two for adversarial diffusion distillation, and as few as twenty five for guided diffusion matching BigGAN-deep.">
+      <text class="ttl" x="20" y="24">Forward passes through the network, per generated sample</text>
+      <line class="axis" x1="70" y1="250" x2="620" y2="250"/>
+      <rect class="m-signal" x="110" y="242" width="80" height="8"/>
+      <rect class="m-signal" x="280" y="238" width="80" height="12"/>
+      <rect class="m-alarm"  x="450" y="54"  width="80" height="196"/>
+      <text class="lbl-b"  x="150" y="234" text-anchor="middle">1</text>
+      <text class="lbl-b"  x="320" y="230" text-anchor="middle">1 to 2</text>
+      <text class="lbl-b"  x="490" y="46"  text-anchor="middle">25</text>
+      <text class="lbl-sm" x="150" y="268" text-anchor="middle">GAN generator</text>
+      <text class="lbl-sm" x="320" y="268" text-anchor="middle">distilled diffusion</text>
+      <text class="lbl-sm" x="490" y="268" text-anchor="middle">guided diffusion</text>
+      <text class="lbl-sm" x="70"  y="290">The 25 is the reported figure at which guided diffusion matched BigGAN-deep.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>few-step methods</span><span><i class="sw-alarm"></i>the reported diffusion figure</span></div>
+    <figcaption>What a single picture costs in network passes. A GAN generator is one pass by construction, distillation gets diffusion down to one or two, and the figure that beat GANs on quality needed at least twenty five. <b>The field paid this bill deliberately, and then spent five years negotiating it down.</b></figcaption>
+  </figure>
+
+  <p><strong>Cost in pixel space</strong> is the second limit, and the next lesson is entirely about it. <strong>Editing and likelihoods</strong> are the third: a diffusion model does not hand you a clean likelihood for a given image, and editing a real photograph means inverting the sampler, which is approximate.</p>
+
+  <h2>7. Does this still matter in 2026?</h2>
+  <p><strong>Yes. It is the default generative model for every continuous modality</strong> - image, video, audio, 3D - and there is no live competitor for photorealistic image and video synthesis. Two things a staff engineer should carry beyond that.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+timeline
+  title The chain that made diffusion practical
+  2015 : Forward and reverse processes proposed
+  2020 : DDPM finds the objective that works
+  2021 : Beats GANs on quality and on coverage
+       : Latent diffusion makes it affordable
+  2022 : Guidance drops the separate classifier
+       : DiT swaps the U-Net for a transformer
+    </div>
+    <figcaption>Six papers, in the order the ideas landed. The gap between the first and second is five years, spent on an idea that worked in principle and not in practice. <b>The 2015 method was not wrong, it was untrained - the 2020 objective is what unlocked it.</b></figcaption>
+  </figure>
+
+  <p><strong>The architecture converged on transformers.</strong> DiT replaced the U-Net backbone with a Vision Transformer and reported that "DiTs with higher Gflops - through increased transformer depth/width or increased number of input tokens - consistently have lower FID", reaching an FID of 2.27 on ImageNet at 256 by 256. The practical consequence is that your intuitions about parameter count and compute now transfer from language models to image models unchanged. Later work moved the training path as well: SD3 uses rectified flow, which connects "data and noise in a straight line", on a two-stream architecture with "separate weights for the two modalities" and "a bidirectional flow of information between image and text tokens".</p>
+
+  <p><strong>Diffusion has started moving into text.</strong> Shipped diffusion language models exist, and their pitch is generating tokens in parallel rather than one at a time, with reported throughput in the region of one to two thousand tokens per second on a single accelerator.</p>
+
+  <div class="callout">
+    Treat those throughput figures as vendor claims rather than measurements. No independent benchmark of diffusion-language-model throughput was found while this lesson was written, so the durable point is directional: the autoregressive decoder is no longer the only option for text, and the reason to care is latency rather than quality.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which part of a diffusion model is learned?</div>
+      <button class="q-opt">The forward noising schedule, tuned against the training data</button>
+      <button class="q-opt">The reverse step alone, which predicts the noise that was added</button>
+      <button class="q-opt">Both directions, trained jointly so the chain stays consistent</button>
+      <button class="q-opt">Neither, since the whole chain is fixed and only scaled at use</button>
+      <div class="q-fb">The forward process is fixed in advance and has a closed form, which is what makes training examples free. Only the reverse step is a network.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does the training loss actually ask the network for?</div>
+      <button class="q-opt">The clean image, scored against the original by squared error</button>
+      <button class="q-opt">The next step's image, scored against the true noisy version</button>
+      <button class="q-opt">A likelihood for the image, maximised over the whole data set</button>
+      <button class="q-opt">The noise that was added, scored against the noise that was drawn</button>
+      <div class="q-fb">In implementation the weighted variational bound reduces to predicting the added noise under mean squared error. Predicting the clean image is a related but different parameterisation, and no explicit likelihood is optimised.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does raising guidance_scale do?</div>
+      <button class="q-opt">Follows the prompt harder, at the cost of sample diversity</button>
+      <button class="q-opt">Adds sampling steps, so each image takes longer to produce</button>
+      <button class="q-opt">Widens the schedule, so more noise is added at every step</button>
+      <button class="q-opt">Trains a classifier, which then steers the sampler each step</button>
+      <div class="q-fb">Guidance amplifies the difference between the conditioned and unconditioned predictions, buying prompt adherence with diversity. Classifier-free guidance exists precisely so no separate classifier is needed.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is diffusion expensive at generation time?</div>
+      <button class="q-opt">The forward noising chain must be simulated before each sample</button>
+      <button class="q-opt">Two networks run per step, one conditioned and one classifier</button>
+      <button class="q-opt">One output needs many network passes, one per reverse step</button>
+      <button class="q-opt">The latent must be re-encoded after every reverse step is taken</button>
+      <div class="q-fb">Sampling walks the chain backwards, one forward pass per step. The forward process is never simulated, and guidance costing two passes per step is a detail on top of the real driver.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>The bound this is trained on is the one derived in <a href="0040-vae.html">Variational Autoencoders</a>, reweighted.</li>
+    <li><a href="0041-gan.html">Generative Adversarial Networks</a> is the method it displaced, and the coverage argument there is the reason.</li>
+    <li><a href="0043-latent-diffusion.html">Latent Diffusion</a> answers the pixel-space cost, and puts the CLIP text encoder in charge of conditioning.</li>
+    <li>Once the backbone is a transformer, the scaling arguments of <a href="0005-scaling-laws.html">Scaling Laws</a> and the kernels of <a href="0017-flashattention.html">FlashAttention</a> apply to image models too.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask the agent to plot <code>abar</code> against the step number, so you can see the schedule move an image from mostly-signal to mostly-noise. Then ask it to sample with the loop truncated to 50 steps instead of 1000 and compare - that gap, and how cheaply it can be closed, is the entire applied diffusion literature.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the paper that made it work: <a href="https://arxiv.org/abs/2006.11239">Ho, Jain and Abbeel, "Denoising Diffusion Probabilistic Models" (arXiv:2006.11239)</a>. Then read <a href="https://arxiv.org/abs/2207.12598">Ho and Salimans, "Classifier-Free Diffusion Guidance" (arXiv:2207.12598)</a> for the parameter you will actually tune, and <a href="https://arxiv.org/abs/1503.03585">Sohl-Dickstein et al. (arXiv:1503.03585)</a> for the 2015 original.</p>
+
+  <div class="pager">
+    <a href="0041-gan.html"><span class="dir">&larr; Previous</span><span class="ttl">Generative Adversarial Networks</span></a>
+    <a class="nxt" href="0043-latent-diffusion.html"><span class="dir">Next &rarr;</span><span class="ttl">Latent Diffusion</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 42 &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

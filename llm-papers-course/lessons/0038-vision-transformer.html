@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Vision Transformer (ViT) - LLM Papers Course</title>
+<meta name="description" content="Cut an image into fixed-size patches, treat each patch as a token, and a standard Transformer encoder reads pictures. What that bought, what it cost, and why you consume a pretrained ViT rather than train one.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 38</div>
+  <h1>Vision Transformer (ViT)</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">2020</span>
+    <span class="pill">13 min</span>
+    Dosovitskiy, Beyer, Kolesnikov, Weissenborn, Zhai, Unterthiner, Dehghani, Minderer, Heigold, Gelly, Uszkoreit, Houlsby &middot; Google Research
+    &middot; <a href="https://arxiv.org/abs/2010.11929">arXiv:2010.11929</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Cut the image into a grid of fixed-size squares, flatten each square, project it to the model width, add a position embedding. You now have <b>a sequence of vectors</b>, and a standard Transformer encoder does not know it came from a picture.</li>
+      <li>There is <b>no convolution anywhere</b>. The paper's own claim is that "a pure transformer applied directly to sequences of image patches can perform very well on image classification tasks".</li>
+      <li>The price is data. A convolution hands you locality and translation equivariance for free; a ViT has to <b>learn them</b>, and the paper is explicit that its result holds "when pre-trained on large amounts of data".</li>
+      <li><b>Still matters in 2026, and you will never train one.</b> Every vision tower you would ship is a ViT or a close variant, so the live question is which pretrained one, at what resolution, and what the patch count does to your token bill.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  T["Transformer encoder&lt;br/&gt;(Lesson 01)&lt;br/&gt;reads a sequence of vectors"] --> V["THIS PAGE&lt;br/&gt;an image is a sequence&lt;br/&gt;of patch vectors"]
+  B["BERT&lt;br/&gt;(Lesson 02)&lt;br/&gt;the masked objective"] -.-> V
+  V --> C["CLIP&lt;br/&gt;the image encoder"]
+  V --> D["DiT&lt;br/&gt;a ViT inside a diffusion model"]
+  V --> L["every vision-language model&lt;br/&gt;its vision tower"]
+    </div>
+    <figcaption>Where this sits. The Transformer encoder you already know needs a sequence; this paper supplies one by cutting the picture into patches, and everything multimodal in this module stands on that one substitution. <b>ViT is not a vision paper that borrowed attention. It is the paper that stopped vision and language being two fields.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Before this paper, accuracy was not the problem. Convolutional networks were already very good at recognising objects. The problem was that vision and language had grown two of everything: two architectures, two sets of engineering tricks, two scaling stories, two communities. Improving one taught you nothing about the other.</p>
+
+  <p>A Transformer eats a sequence of vectors and does not care what those vectors mean. So the question is not "how do we build attention for images" but the much smaller one: <strong>what is an image a sequence of?</strong> The paper's answer is a grid of square patches, and the rest of the architecture is left alone.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph CNN["Before: a convolutional network"]
+    direction TB
+    ci["image"] --> cc["stacked convolutions&lt;br/&gt;locality and translation&lt;br/&gt;equivariance built in"]
+    cc --> cp["pooling, then a classifier head"]
+  end
+  subgraph VIT["After: a Vision Transformer"]
+    direction TB
+    vi["image"] --> vp["cut into fixed patches&lt;br/&gt;project each one to a vector"]
+    vp --> ve["the same Transformer encoder&lt;br/&gt;used for text"]
+    ve --> vc["classifier head"]
+  end
+    </div>
+    <figcaption>The substitution. A convolutional network bakes assumptions about pictures into its wiring. A Vision Transformer removes that wiring and replaces the input instead, so the encoder is the ordinary text one. <b>The architecture stopped being modality-specific; only the tokeniser changed.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism, in five steps</h2>
+  <p>Everything below happens before the first attention layer. After it, the model is the encoder from Lesson 01, unchanged.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  I["image&lt;br/&gt;224 x 224 x 3"] --> P["1. cut into 16 x 16 patches&lt;br/&gt;14 x 14 grid = 196 patches"]
+  P --> F["2. flatten each patch&lt;br/&gt;16 &middot; 16 &middot; 3 = 768 numbers"]
+  F --> E["3. one linear projection&lt;br/&gt;to the model width D"]
+  E --> A["4. prepend a class token&lt;br/&gt;add position embeddings"]
+  A --> T["5. Transformer encoder&lt;br/&gt;then a head on the class token"]
+    </div>
+    <figcaption>The whole of ViT. Steps one to four turn a picture into 197 vectors; step five is a text Transformer that was never told otherwise. <b>The learned part of the tokeniser is a single linear layer.</b></figcaption>
+  </figure>
+
+  <p><strong>Why a position embedding is needed at all.</strong> Attention is permutation invariant: shuffle the patches and the encoder computes the same thing. A picture with its patches shuffled is a different picture, so the grid position has to be added back explicitly, exactly as token position is added back for text.</p>
+
+  <p><strong>Why a class token.</strong> The encoder returns one vector per patch, and classification wants one vector per image. The paper prepends an extra learned token whose output is used as the image summary, so the classifier head reads a single position.</p>
+
+  <h2>3. The maths: patch count is your token bill</h2>
+  <p>There is only one equation in this lesson and it is arithmetic, not calculus. It is also the number that decides what a vision model costs you, which is why it is worth working rather than quoting.</p>
+
+  <div class="math">N = (H &middot; W) / P&sup2;
+    <span class="gloss"><b>N</b>: how many patch tokens the encoder receives. <b>H</b> and <b>W</b>: the height and width of the input image in pixels. <b>P</b>: the side length of one square patch in pixels, so <b>P&sup2;</b> is the pixel count of a single patch. Read it as: the number of tokens is the number of pixels divided by the number of pixels per patch. A class token adds one more.</span>
+  </div>
+
+  <ol class="worked">
+    <li><b>The paper's own setting.</b> A 224 by 224 image at a patch side of 16 gives a grid of 224 &divide; 16 = 14 patches per side, so N = 14 &times; 14 = <span class="keynum">196</span> tokens, plus the class token, which is 197.</li>
+    <li><b>Raise the resolution and the cost is quadratic in the side.</b> At 336 by 336 with the same 16-pixel patch the grid is 21 per side, so N = 21 &times; 21 = <span class="keynum">576</span> tokens. The image got 1.5 times wider and the token count roughly tripled.</li>
+    <li><b>Now tile a document page.</b> Four 336-pixel crops plus one whole-page thumbnail is 5 &times; 576 = <b>2,880 tokens</b> before the reader's question is appended. Attention within the vision tower is quadratic in N on top of that.</li>
+  </ol>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of patch-token counts at three input settings: 196 tokens at 224 pixels, 576 at 336 pixels, and 2880 for five tiled 336-pixel crops">
+      <text class="ttl" x="20" y="24">Patch tokens the encoder receives, 16-pixel patches</text>
+      <line class="axis" x1="60" y1="250" x2="620" y2="250"/>
+      <rect class="m-stat"  x="90"  y="237" width="90" height="13"/>
+      <rect class="m-sky"   x="250" y="211" width="90" height="39"/>
+      <rect class="m-alarm" x="410" y="54"  width="90" height="196"/>
+      <text class="lbl-b"  x="135" y="229" text-anchor="middle">196</text>
+      <text class="lbl-b"  x="295" y="203" text-anchor="middle">576</text>
+      <text class="lbl-b"  x="455" y="46"  text-anchor="middle">2,880</text>
+      <text class="lbl-sm" x="135" y="268" text-anchor="middle">224px, one view</text>
+      <text class="lbl-sm" x="295" y="268" text-anchor="middle">336px, one view</text>
+      <text class="lbl-sm" x="455" y="268" text-anchor="middle">336px, five tiles</text>
+      <text class="lbl-sm" x="60"  y="290">Bar height is proportional to token count.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>paper setting</span><span><i class="sw-sky"></i>higher resolution</span><span><i class="sw-alarm"></i>tiled page</span></div>
+    <figcaption>The same encoder, three input settings. The first is what the paper measured; the second is what a document-reading model uses; the third is one page split into crops. <b>Resolution is not a quality dial, it is a token budget, and it is spent before the question is even asked.</b></figcaption>
+  </figure>
+
+  <h2>4. What it did not solve</h2>
+  <p>Two limits, and the first is the one that decides how you will actually use a ViT.</p>
+
+  <p><strong>It threw away the free assumptions.</strong> A convolution is built to slide the same small filter everywhere, so locality and translation equivariance come for nothing. A ViT has neither and must learn both from examples. The paper states the condition plainly - the result holds "when pre-trained on large amounts of data" - and the consequence is that on a small dataset a ViT trained from scratch loses to a convolutional network. Read the efficiency claim in the same light: ViT matches convolutional networks "while requiring substantially fewer computational resources to train", and that is measured at the large-pretraining end, not on your own labelled folder.</p>
+
+  <p><strong>It did nothing about the cost of attention.</strong> Attention is quadratic in the number of patches, and the number of patches is quadratic in the resolution. That is why high-resolution vision is still expensive and why practical vision-language models play games with tiling, patch pruning and resamplers.</p>
+
+  <div class="callout warn">
+    The commonest way to get this wrong is to read "Transformers beat convolutions" and reach for a randomly initialised ViT on ten thousand of your own images. The paper's result is a claim about pretraining scale, not about the architecture in isolation, and at small scale it points the other way.
+  </div>
+
+  <h2>5. Implement it: the patch embedding</h2>
+  <p>The only new module is the tokeniser. A convolution whose kernel and stride both equal the patch size is exactly "cut into non-overlapping patches and apply one linear projection", so the whole of step one to three is a single layer.</p>
+
+  <div class="code-cap">vit_patches.py &middot; runnable with torch</div>
+  <pre><code>import torch
+import torch.nn as nn
+
+class PatchEmbed(nn.Module):
+    """Image -> sequence of patch vectors. Kernel == stride == patch size,
+    so this convolution IS the cut-and-project step, done in one op."""
+    def __init__(self, img=224, patch=16, in_ch=3, dim=768):
+        super().__init__()
+        self.n_patches = (img // patch) ** 2          # 14 * 14 = 196
+        self.proj = nn.Conv2d(in_ch, dim, kernel_size=patch, stride=patch)
+        self.cls = nn.Parameter(torch.zeros(1, 1, dim))              # image summary
+        self.pos = nn.Parameter(torch.zeros(1, self.n_patches + 1, dim))
+
+    def forward(self, x):                              # x: (B, 3, 224, 224)
+        x = self.proj(x)                               # (B, dim, 14, 14)
+        x = x.flatten(2).transpose(1, 2)               # (B, 196, dim)
+        cls = self.cls.expand(x.size(0), -1, -1)       # (B, 1, dim)
+        x = torch.cat([cls, x], dim=1)                 # (B, 197, dim)
+        return x + self.pos                            # positions added back
+
+class ViT(nn.Module):
+    """Patch embedding, then the ordinary text encoder, then a head."""
+    def __init__(self, img=224, patch=16, dim=768, depth=12, heads=12, classes=1000):
+        super().__init__()
+        self.embed = PatchEmbed(img, patch, 3, dim)
+        layer = nn.TransformerEncoderLayer(dim, heads, dim * 4,
+                                           batch_first=True, norm_first=True)
+        self.encoder = nn.TransformerEncoder(layer, depth)
+        self.norm = nn.LayerNorm(dim)
+        self.head = nn.Linear(dim, classes)
+
+    def forward(self, x):
+        x = self.encoder(self.embed(x))
+        return self.head(self.norm(x[:, 0]))           # read the class token only
+
+model = ViT()
+out = model(torch.randn(2, 3, 224, 224))
+print(model.embed.n_patches, out.shape)   # 196  torch.Size([2, 1000])</code></pre>
+
+  <p>Count the vision-specific lines. There are three, all inside <code>PatchEmbed</code>, and the rest is <code>nn.TransformerEncoder</code>. That ratio is the paper.</p>
+
+  <h2>6. Does this still matter in 2026?</h2>
+  <p><strong>Yes, universally, and almost nobody implements one.</strong> Every vision tower in every vision-language model you would ship is a ViT or a close variant, and the diffusion models in Lesson 43 put a ViT in the denoiser as well. The architecture is load-bearing infrastructure.</p>
+
+  <p>But your relationship to it is <em>consumption</em>. The pretrained encoders come in a small number of sizes - SigLIP 2, the current default family, ships at 86M, 303M, 400M and 1B parameters - and you pick one rather than design one. The staff-level question is never "should I use a ViT". It is: which pretrained encoder, at what input resolution, and what does the resulting patch count do to my context window and my bill.</p>
+
+  <table>
+    <thead><tr><th>Question</th><th>Convolutional network</th><th>Vision Transformer</th></tr></thead>
+    <tbody>
+      <tr><td>Locality assumption</td><td>Built into the wiring</td><td>Learned from data</td></tr>
+      <tr><td>Small-data behaviour</td><td>Strong</td><td>Weak without pretraining</td></tr>
+      <tr><td>Large-data behaviour</td><td>Saturates earlier</td><td>Keeps improving</td></tr>
+      <tr><td>Cost driver</td><td>Pixels and channels</td><td>Patch count, quadratically</td></tr>
+      <tr><td>Shares tooling with text</td><td>No</td><td>Yes, entirely</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does a Vision Transformer feed into the encoder?</div>
+      <button class="q-opt">Feature maps taken from a frozen convolutional backbone</button>
+      <button class="q-opt">Flattened fixed-size image patches projected to one width</button>
+      <button class="q-opt">One vector for each pixel row of the resized input image</button>
+      <button class="q-opt">Edge histograms computed for every region of the picture</button>
+      <div class="q-fb">The image is cut into fixed square patches, each flattened and linearly projected. The first option describes a hybrid the paper contrasts with, the third and fourth are hand-built inputs nobody uses here.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does a ViT need a lot of pretraining data?</div>
+      <button class="q-opt">Attention layers hold far more parameters than convolutions</button>
+      <button class="q-opt">Patch projection discards colour, so more examples are needed</button>
+      <button class="q-opt">Position embeddings are random and converge extremely slowly</button>
+      <button class="q-opt">It has to learn locality, which a convolution gets for nothing</button>
+      <div class="q-fb">A convolution builds in locality and translation equivariance; a ViT learns them from examples. The other three name mechanisms that are either false or not what the paper points at.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A 224px image at 16px patches gives how many patch tokens?</div>
+      <button class="q-opt">196, because the grid is 14 by 14 patches across the image</button>
+      <button class="q-opt">224, because one token is made for each row of the picture</button>
+      <button class="q-opt">576, because the grid is 24 by 24 patches across the image</button>
+      <button class="q-opt">768, because each patch holds 768 numbers once flattened</button>
+      <div class="q-fb">224 divided by 16 is 14 per side, so 196 patches plus a class token. 576 is the count at 336px, and 768 is the length of one flattened patch, not the token count.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is the practical 2026 relationship to ViT for most engineers?</div>
+      <button class="q-opt">Train one from scratch on the images your own product collects</button>
+      <button class="q-opt">Avoid it, since convolutional networks now win at every scale</button>
+      <button class="q-opt">Consume a pretrained one, and budget for the patch-token count</button>
+      <button class="q-opt">Replace it with a recurrent encoder to escape quadratic costs</button>
+      <div class="q-fb">Pretrained ViTs are consumed, not trained: the live decisions are which encoder and what resolution. Training from scratch is the failure mode the paper warns about, and convolutions do not win at large scale.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>The encoder ViT reuses is exactly the one from <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a>. Only the tokeniser is new.</li>
+    <li>The masked objective of <a href="0002-bert.html">BERT</a> is the ancestor of masked image pretraining, one of the two ways ViTs are pretrained.</li>
+    <li><a href="0039-clip.html">CLIP</a> trains a ViT as its image encoder, which is what puts pictures and words in one space.</li>
+    <li><a href="0043-latent-diffusion.html">Latent Diffusion</a> and its successors put a ViT inside the generator itself, so the same block draws as well as reads.</li>
+    <li>Patch count is a context-length problem, so <a href="0017-flashattention.html">FlashAttention</a> and <a href="0019-kv-cache-optimization.html">KV cache</a> economics apply here unchanged.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask the agent to print the shape after every line of <code>PatchEmbed.forward</code>, then to rerun it at 336 pixels and check the token count against the formula. Then ask what breaks if you keep the pretrained position embeddings while changing the input resolution - the answer is where interpolation of position embeddings comes from.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2010.11929">Dosovitskiy et al., "An Image is Worth 16x16 Words: Transformers for Image Recognition at Scale" (arXiv:2010.11929)</a>. The results section is where the data-scale condition is made precise, and it is the half most summaries drop.</p>
+
+  <div class="pager">
+    <a href="0037-muon-optimizer.html"><span class="dir">&larr; Previous</span><span class="ttl">Muon Optimizer</span></a>
+    <a class="nxt" href="0039-clip.html"><span class="dir">Next &rarr;</span><span class="ttl">CLIP</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 38 &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

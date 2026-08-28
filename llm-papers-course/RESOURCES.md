@@ -47,6 +47,35 @@ High-trust sources grounding this course. Each lesson also links its own primary
 - 35 Switch Transformer - https://arxiv.org/abs/2101.03961
 - 36 DeepSeekMoE - https://arxiv.org/abs/2401.06066
 - 37 Muon - Keller Jordan writeup (2024): https://kellerjordan.github.io/posts/muon/
+- 38 ViT - https://arxiv.org/abs/2010.11929
+- 39 CLIP - https://arxiv.org/abs/2103.00020
+- 39 ARO, the bag-of-words finding - https://arxiv.org/abs/2210.01936
+- 39 SigLIP - https://arxiv.org/abs/2303.15343 ; SigLIP 2 - https://arxiv.org/abs/2502.14786
+- 40 VAE - https://arxiv.org/abs/1312.6114 ; VQ-VAE - https://arxiv.org/abs/1711.00937
+- 41 GAN - https://arxiv.org/abs/1406.2661
+- 41 Diffusion Models Beat GANs (where GANs lost) - https://arxiv.org/abs/2105.05233
+- 41 Adversarial Diffusion Distillation - https://arxiv.org/abs/2311.17042 ; HiFi-GAN - https://arxiv.org/abs/2010.05646
+- 42 DDPM - https://arxiv.org/abs/2006.11239 ; the 2015 original - https://arxiv.org/abs/1503.03585
+- 42 Classifier-Free Guidance - https://arxiv.org/abs/2207.12598
+- 42 DiT - https://arxiv.org/abs/2212.09748 ; SD3 rectified flow - https://arxiv.org/abs/2403.03206
+- 43 Latent Diffusion - https://arxiv.org/abs/2112.10752 (read section 3.1, not only the abstract)
+- 44 BLIP - https://arxiv.org/abs/2201.12086 ; BLIP-2 - https://arxiv.org/abs/2301.12597
+- 44 LLaVA - https://arxiv.org/abs/2304.08485 ; LLaVA-1.5 - https://arxiv.org/abs/2310.03744
+- 45 GraphRAG - https://arxiv.org/abs/2404.16130
+- 45 GraphRAG-Bench, the independent evaluation - https://arxiv.org/abs/2506.05690
+- 45 LightRAG - https://arxiv.org/abs/2410.05779
+- 45 Microsoft GraphRAG documentation and repository - https://microsoft.github.io/graphrag/ and https://github.com/microsoft/graphrag
+- 45 LazyGraphRAG (vendor claims about its own system) - https://www.microsoft.com/en-us/research/blog/lazygraphrag-setting-a-new-standard-for-quality-and-cost/
+
+## Gaps
+
+Named absences in Module 11, recorded so a later refresh chases only what is missing rather than re-deriving the whole module.
+
+- **Diffusion language model throughput.** The figures in circulation, around one to two thousand tokens per second, are all vendor-reported. No independent benchmark was found, so Lesson 42 states the direction and marks the numbers as claims.
+- **A dollar cost for indexing a GraphRAG corpus.** A widely repeated figure traces only to a blog post with no primary citation. Lesson 45 leaves it out and carries the measured token counts instead.
+- **A named company publishing that GraphRAG runs its production retrieval.** Not found. Lesson 45 says so rather than implying adoption.
+- **Whether current vision encoders still show the bag-of-words failure.** The ARO finding stands as published; whether the newest encoders still fail that way is a separate question this course has not tested.
+- **Whether GAN vocoders are still a default in text-to-speech.** The HiFi-GAN speed figures are the paper's own. The claim that it remains standard is flagged in Lesson 41 as a judgement to check, not a fact established here.
 
 ## Communities (for wisdom / testing understanding)
 - r/MachineLearning and r/LocalLLaMA (Reddit)

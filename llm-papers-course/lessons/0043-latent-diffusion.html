@@ -1,0 +1,297 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Latent Diffusion - LLM Papers Course</title>
+<meta name="description" content="Run diffusion in a compressed latent instead of on pixels. The lesson where five separate papers turn out to be five parts of one checkpoint, and the real dependency graph replaces the reading order.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 43</div>
+  <h1>Latent Diffusion</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">2021</span>
+    <span class="pill">16 min</span>
+    Rombach, Blattmann, Lorenz, Esser, Ommer &middot; LMU Munich and Runway
+    &middot; <a href="https://arxiv.org/abs/2112.10752">arXiv:2112.10752</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Diffusion on raw pixels is unaffordable. Compress the image first with an autoencoder, <b>run the whole diffusion process in that small latent space</b>, and decode once at the end.</li>
+      <li>At the usual settings that is <b>48 times fewer numbers</b> to denoise at every one of the many steps, which is the difference between a datacentre artifact and one people run at home.</li>
+      <li><b>This is the convergence point of the whole module.</b> One checkpoint contains a VAE doing the compression, an adversarial loss that trained it, a CLIP text encoder supplying the prompt, a diffusion model doing the generation, and after DiT a Vision Transformer as the denoiser.</li>
+      <li>That is also why the "old" papers are not optional history. <b>If you can name those five parts inside one artifact, this module has done its job.</b></li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  VA["VAE&lt;br/&gt;(Lesson 40)&lt;br/&gt;compression"] --> LD["THIS PAGE&lt;br/&gt;diffusion inside&lt;br/&gt;a learned latent space"]
+  GA["adversarial loss&lt;br/&gt;(Lesson 41)&lt;br/&gt;keeps the decoder sharp"] --> LD
+  DF["diffusion&lt;br/&gt;(Lesson 42)&lt;br/&gt;the generator"] --> LD
+  CL["CLIP&lt;br/&gt;(Lesson 39)&lt;br/&gt;the conditioning"] --> LD
+  VI["ViT&lt;br/&gt;(Lesson 38)&lt;br/&gt;the denoiser, after DiT"] --> LD
+  LD --> OUT["the shape of every&lt;br/&gt;shipped image model"]
+    </div>
+    <figcaption>Where this sits, and why the module was ordered the way it was. Five lessons that each looked like a separate topic are five components of one system, and every arrow into this box is a paper you have already read. <b>This is not a summary lesson - it is the lesson the other five were prerequisites for.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>The previous lesson ended on a cost problem. Diffusion needs many forward passes per image, and in pixel space every one of those passes operates on every pixel of a full-resolution picture. Multiply a large tensor by many steps and the bill is why high-quality image generation was, until this paper, something only large labs did.</p>
+
+  <p>The observation the paper builds on is that most of the bits in an image are not where the meaning is. Fine texture and imperceptible detail cost a great deal of compute and carry little of what makes the picture that picture. So split the job in two: let a separate model handle the perceptually unimportant compression once, and let diffusion work only in the space that is left.</p>
+
+  <h2>2. Two stages, trained separately</h2>
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph S1["Stage 1 - trained once, then frozen"]
+    direction LR
+    IMG["image&lt;br/&gt;512 x 512 x 3"] --> ENC["encoder"]
+    ENC --> Z["latent&lt;br/&gt;64 x 64 x 4"]
+    Z --> DEC["decoder"]
+    DEC --> REC["reconstruction"]
+  end
+  subgraph S2["Stage 2 - the generative model"]
+    direction LR
+    ZN["noisy latent"] --> UN["denoiser&lt;br/&gt;U-Net, later a transformer"]
+    TXT["prompt"] --> TE["CLIP text encoder"]
+    TE --> XA["cross-attention&lt;br/&gt;into the denoiser"]
+    XA --> UN
+    UN --> ZC["cleaner latent"]
+  end
+  S1 --> S2
+    </div>
+    <figcaption>The split. The autoencoder is trained once on images alone and then frozen, so its cost is paid a single time for everyone. Diffusion then lives entirely inside the small latent, and the prompt reaches it through cross-attention rather than being concatenated to the input. <b>Two stages, two objectives, and only the second one is retrained per model.</b></figcaption>
+  </figure>
+
+  <h2>3. The arithmetic that makes it affordable</h2>
+  <p>Do the count rather than accepting "smaller". The usual configuration downsamples by 8 in each spatial direction and uses 4 latent channels where the image had 3.</p>
+
+  <ol class="worked">
+    <li><b>The image.</b> 512 &times; 512 pixels with 3 colour channels is 512 &times; 512 &times; 3 = <b>786,432</b> numbers.</li>
+    <li><b>The latent.</b> Downsampling by 8 gives 512 &divide; 8 = 64 per side, and 4 channels, so 64 &times; 64 &times; 4 = <b>16,384</b> numbers.</li>
+    <li><b>The ratio.</b> 786,432 &divide; 16,384 = <span class="keynum">48</span>. Every reverse step now touches 48 times fewer values, and a sampling run makes many such steps, so the saving multiplies by the step count.</li>
+  </ol>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two bars comparing element counts: 786,432 numbers for a 512 by 512 colour image against 16,384 numbers for its 64 by 64 four-channel latent, a ratio of 48 to 1.">
+      <text class="ttl" x="20" y="24">Numbers the denoiser touches, per step</text>
+      <line class="axis" x1="70" y1="250" x2="620" y2="250"/>
+      <rect class="m-alarm" x="130" y="54"  width="110" height="196"/>
+      <rect class="m-stat"  x="400" y="246" width="110" height="4"/>
+      <text class="lbl-b"  x="185" y="46"  text-anchor="middle">786,432</text>
+      <text class="lbl-b"  x="455" y="238" text-anchor="middle">16,384</text>
+      <text class="lbl-sm" x="185" y="268" text-anchor="middle">pixel space, 512 x 512 x 3</text>
+      <text class="lbl-sm" x="455" y="268" text-anchor="middle">latent space, 64 x 64 x 4</text>
+      <text class="lbl-sm" x="70"  y="290">Bars are to scale. The right-hand bar is 48 times shorter, which is the whole paper.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>pixels</span><span><i class="sw-stat"></i>latent</span></div>
+    <figcaption>The same picture, counted two ways, drawn to scale so the ratio is felt rather than read. The right-hand bar is nearly invisible, and that is the point. <b>Latent diffusion did not make diffusion better, it made it 48 times cheaper per step, which turned out to be the same thing.</b></figcaption>
+  </figure>
+
+  <h2>4. The convergence: five papers in one checkpoint</h2>
+  <p>Now open the box. The abstract does not carry this detail, so it is worth quoting the method section directly: the autoencoder is trained with "a combination of a perceptual loss and a patch-based adversarial objective". For the latent itself the paper offers two regularisations. One "imposes a slight KL-penalty towards a standard normal on the learned latent, similar to a VAE"; the other "uses a vector quantization layer within the decoder".</p>
+
+  <p>Read those two sentences against the last three lessons and the parts name themselves.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  CK["one image-model checkpoint"] --> A["the autoencoder&lt;br/&gt;a KL-regularised VAE&lt;br/&gt;or a VQ variant"]
+  CK --> B["the decoder's training signal&lt;br/&gt;a patch-based adversarial objective"]
+  CK --> C["the text encoder&lt;br/&gt;CLIP, reaching the denoiser&lt;br/&gt;through cross-attention"]
+  CK --> D["the generator&lt;br/&gt;a diffusion model in the latent"]
+  CK --> E["the denoiser backbone&lt;br/&gt;a U-Net, then a ViT after DiT"]
+  A -.- L40["Lesson 40"]
+  B -.- L41["Lesson 41"]
+  C -.- L39["Lesson 39"]
+  D -.- L42["Lesson 42"]
+  E -.- L38["Lesson 38"]
+    </div>
+    <figcaption>One artifact, dissected. Each branch is a component you can point at in the weights, and each dotted line is the lesson that explains it. <b>The GAN did not die and the VAE did not die - both are running, every time an image is generated.</b></figcaption>
+  </figure>
+
+  <div class="card callout key"><span class="tag">The sentence to keep</span>
+    The adversarial term is exactly what stops the VAE's blur reaching the reader. Lesson 40 showed that a reconstruction loss wants an average; lesson 41 showed that a discriminator punishes an average. Latent diffusion puts them in the same optimiser, and that is why a decoder trained this way returns sharp texture rather than a mean.</div>
+
+  <h2>5. The generation path, in order</h2>
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Prompt
+  participant T as CLIP text encoder
+  participant L as Latent
+  participant N as Denoiser
+  participant D as VAE decoder
+  U->>T: a sentence
+  T->>N: text vectors, read by cross-attention at every step
+  L->>N: start from random noise in latent space
+  N->>L: one reverse step - repeat many times
+  Note over N,L: guidance runs the denoiser twice per step - with and without the prompt
+  L->>D: the final clean latent
+  D->>U: the image, decoded once
+    </div>
+    <figcaption>What happens when you press generate. The text is encoded once, the denoiser runs many times inside the small latent, and the expensive decode to pixels happens exactly once at the end. <b>Everything repeated is cheap and everything expensive happens once, which is the whole design.</b></figcaption>
+  </figure>
+
+  <div class="code-cap">latent_pipeline.py &middot; runnable with torch, components are stand-ins</div>
+  <pre><code>import torch
+import torch.nn as nn
+
+H = W = 512
+DOWN, ZCH = 8, 4                                   # 8x spatial, 4 latent channels
+
+encoder = nn.Conv2d(3, ZCH, kernel_size=DOWN, stride=DOWN)      # image -> latent
+decoder = nn.ConvTranspose2d(ZCH, 3, kernel_size=DOWN, stride=DOWN)
+denoiser = nn.Conv2d(ZCH + 1, ZCH, kernel_size=3, padding=1)    # stands for a U-Net
+text_encoder = nn.Embedding(1000, 64)                           # stands for CLIP
+
+def predict_noise(z, t, cond):
+    """A real denoiser cross-attends to cond at every block. Here the shapes
+    are what matters: the prompt never enters the latent, it steers the model."""
+    t_map = torch.full_like(z[:, :1], float(t) / 50.0)
+    return denoiser(torch.cat([z, t_map], dim=1)) * (1.0 + 0.0 * cond.mean())
+
+@torch.no_grad()
+def generate(prompt_ids, steps=50, guidance=7.5):
+    cond = text_encoder(prompt_ids)                 # encoded once, reused every step
+    uncond = torch.zeros_like(cond)                 # the blank prompt, for guidance
+    z = torch.randn(1, ZCH, H // DOWN, W // DOWN)   # noise, in LATENT space
+    for t in reversed(range(steps)):
+        eps_c = predict_noise(z, t, cond)
+        eps_u = predict_noise(z, t, uncond)
+        eps = eps_u + guidance * (eps_c - eps_u)    # classifier-free guidance
+        z = z - eps / steps                         # a stand-in for the real update
+    return decoder(z)                               # decode ONCE, at the end
+
+img = torch.rand(1, 3, H, W)
+print("image elements ", img.numel())               # 786432
+print("latent elements", encoder(img).numel())      # 16384
+print("ratio          ", img.numel() // encoder(img).numel())   # 48
+print("output shape   ", generate(torch.tensor([[1, 2, 3]])).shape)</code></pre>
+
+  <p>The update rule in that loop is deliberately a stand-in; the sampler from the previous lesson belongs there. What is faithful is the structure: encode or start in latent space, loop with guidance, decode once. Every shipped image pipeline has that shape.</p>
+
+  <h2>6. The reading order is not the dependency order</h2>
+  <p>This module was read as ViT, CLIP, VAE, GAN, diffusion, and now this. That is not the order the ideas arrived in, and it is worth saying plainly where the two differ.</p>
+
+  <p>The VAE is from 2013 and the GAN from 2014, six and seven years before ViT. The original diffusion paper is from 2015, and DDPM predates ViT by four months. Nothing in the generative line depends on anything in the vision-transformer line. The module reads the other way round for one reason: the payoff lesson is this one, and you cannot explain the conditioning inside a latent diffusion model without CLIP, or CLIP without ViT. Teaching the generative line first would mean either explaining this checkpoint twice or leaving its text encoder unexplained.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  TR["Transformer&lt;br/&gt;2017"] --> VT["ViT&lt;br/&gt;Oct 2020"]
+  BE["BERT&lt;br/&gt;2018&lt;br/&gt;masked objective"] -.-> VT
+  VT --> CP["CLIP&lt;br/&gt;Feb 2021"]
+  VA["VAE&lt;br/&gt;Dec 2013"] --> VQ["VQ-VAE&lt;br/&gt;2017"]
+  GN["GAN&lt;br/&gt;Jun 2014"] --> LDX["Latent Diffusion&lt;br/&gt;Dec 2021"]
+  SD["Sohl-Dickstein&lt;br/&gt;Mar 2015"] --> DP["DDPM&lt;br/&gt;Jun 2020"]
+  DP --> LDX
+  VQ --> LDX
+  VA --> LDX
+  CP --> LDX
+  LDX --> DIT["DiT&lt;br/&gt;Dec 2022"]
+  VT --> DIT
+  DIT --> SD3["SD3 and video models&lt;br/&gt;2024 onwards"]
+    </div>
+    <figcaption>The real dependency graph, with the dates the papers carry. Two long-separate lines - the vision-transformer line along the top and the generative line below it - meet for the first time at latent diffusion, and only there. <b>The generative papers are six years older than the vision ones and owe them nothing until this box.</b></figcaption>
+  </figure>
+
+  <h2>7. Does this still matter in 2026?</h2>
+  <p><strong>Yes, and more than any single paper in this module.</strong> The two-stage shape - a frozen learned codec, generation inside its latent, one decode at the end - is what every shipped image and video model looks like. What has moved is the inside of stage two: the U-Net has been replaced by a transformer, and the diffusion path itself by rectified flow in the newest systems.</p>
+
+  <p>It also gives you a debugging heuristic worth carrying. When generated images come out with washed colours, mushy fine detail or odd artefacts in flat regions, the fault is usually in the codec rather than the sampler, because the sampler never saw a pixel. That is exactly why the community swaps decoder checkpoints, and it only makes sense once you know the two stages are separate models.</p>
+
+  <table>
+    <thead><tr><th>Question</th><th>Pixel-space diffusion</th><th>Latent diffusion</th></tr></thead>
+    <tbody>
+      <tr><td>What each step touches</td><td>786,432 numbers</td><td>16,384 numbers</td></tr>
+      <tr><td>Conditioning route</td><td>Concatenation or a classifier</td><td>Cross-attention from a text encoder</td></tr>
+      <tr><td>Codec</td><td>None</td><td>A frozen autoencoder at both ends</td></tr>
+      <tr><td>Retrained per model</td><td>Everything</td><td>Stage two only</td></tr>
+      <tr><td>Blur symptom traces to</td><td>The sampler</td><td>The decoder</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does latent diffusion move into the latent space?</div>
+      <button class="q-opt">The text encoder, so the prompt is compressed alongside it</button>
+      <button class="q-opt">The decoder only, so pixels are produced one region at a time</button>
+      <button class="q-opt">The whole reverse process, so every step denoises a small tensor</button>
+      <button class="q-opt">The training data, which is stored compressed to save on disk</button>
+      <div class="q-fb">Every reverse step happens in the latent, and pixels are produced by one decode at the end. The text encoder stays outside, and this is not a storage optimisation.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which loss keeps the decoder's output from going blurry?</div>
+      <button class="q-opt">A patch-based adversarial objective, alongside a perceptual loss</button>
+      <button class="q-opt">A larger weighting on the KL penalty applied to the latent code</button>
+      <button class="q-opt">A higher guidance scale, applied during every one of the steps</button>
+      <button class="q-opt">A longer noise schedule, which gives the sampler more fine steps</button>
+      <div class="q-fb">The autoencoder is trained with a perceptual loss and a patch-based adversarial objective, and the adversarial term is the anti-blur one. The KL penalty tidies the latent, and guidance and schedules belong to stage two.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which five papers are inside one such checkpoint?</div>
+      <button class="q-opt">ViT, BERT, GAN, diffusion, and retrieval-augmented generation</button>
+      <button class="q-opt">VAE, GAN, CLIP, chain-of-thought prompting, and the Transformer</button>
+      <button class="q-opt">VAE, CLIP, diffusion, mixture of experts, and low-rank adaption</button>
+      <button class="q-opt">VAE, GAN, CLIP, diffusion, and ViT once the denoiser is a DiT</button>
+      <div class="q-fb">The autoencoder is a VAE trained partly adversarially, conditioning is a CLIP text encoder, generation is diffusion, and the backbone became a ViT after DiT. The other lists mix in language-only papers that are not in the pipeline.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Generated images look washed out. Where do you look first?</div>
+      <button class="q-opt">The sampler, since it decides the final step of every generation</button>
+      <button class="q-opt">The autoencoder, since every image passes through its decoder</button>
+      <button class="q-opt">The text encoder, since the prompt sets the palette of the image</button>
+      <button class="q-opt">The schedule, since noise levels control contrast in the output</button>
+      <div class="q-fb">The sampler never sees a pixel - it works entirely in the latent. Colour and fine texture are produced by the decoder, which is why swapping that checkpoint is the usual fix.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>Every arrow in the opening figure is a lesson: <a href="0038-vision-transformer.html">ViT</a>, <a href="0039-clip.html">CLIP</a>, <a href="0040-vae.html">VAE</a>, <a href="0041-gan.html">GAN</a> and <a href="0042-diffusion.html">Diffusion</a>.</li>
+    <li>The two-stage split is the same instinct as <a href="0028-lora.html">LoRA</a>: freeze the expensive general part, train the small specific one.</li>
+    <li>The next lesson, <a href="0044-blip-2-and-llava.html">BLIP-2 and LLaVA</a>, applies that same instinct to understanding rather than generation.</li>
+    <li>For the chronology and the people, the hub's <a href="../../llm-evolution-course/index.html">How Language Models Happened</a> owns that story - this course owns the mechanism.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask the agent to redo the element count for 768 by 768 and for a 4x downsampling factor, and to say what happens to the saving. Then ask it to explain why the autoencoder is frozen while stage two is retrained, and what would break if it were fine-tuned alongside - the answer is that every latent the diffusion model learned to denoise would move.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2112.10752">Rombach et al., "High-Resolution Image Synthesis with Latent Diffusion Models" (arXiv:2112.10752)</a>, and read section 3.1 rather than only the abstract - the abstract does not tell you the autoencoder is adversarially trained. Then read <a href="https://arxiv.org/abs/2212.09748">Peebles and Xie, "Scalable Diffusion Models with Transformers" (arXiv:2212.09748)</a> for the backbone that replaced the U-Net.</p>
+
+  <div class="pager">
+    <a href="0042-diffusion.html"><span class="dir">&larr; Previous</span><span class="ttl">Diffusion Models</span></a>
+    <a class="nxt" href="0044-blip-2-and-llava.html"><span class="dir">Next &rarr;</span><span class="ttl">BLIP-2 and LLaVA</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 43 &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

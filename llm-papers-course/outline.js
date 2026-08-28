@@ -221,10 +221,44 @@ window.COURSE_OUTLINE = {
         {
           "title": "Muon Optimizer",
           "href": "lessons/0037-muon-optimizer.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Vision, Multimodal & Generative",
+      "lessons": [
+        {
+          "title": "Vision Transformer (ViT)",
+          "href": "lessons/0038-vision-transformer.html"
         },
         {
-          "title": "Primer",
-          "href": "lessons/0000-primer-neural-nets-to-tokens.html"
+          "title": "CLIP",
+          "href": "lessons/0039-clip.html"
+        },
+        {
+          "title": "Variational Autoencoders (VAE)",
+          "href": "lessons/0040-vae.html"
+        },
+        {
+          "title": "Generative Adversarial Networks",
+          "href": "lessons/0041-gan.html"
+        },
+        {
+          "title": "Diffusion Models",
+          "href": "lessons/0042-diffusion.html"
+        },
+        {
+          "title": "Latent Diffusion",
+          "href": "lessons/0043-latent-diffusion.html"
+        },
+        {
+          "title": "BLIP-2 and LLaVA",
+          "href": "lessons/0044-blip-2-and-llava.html"
+        },
+        {
+          "title": "GraphRAG",
+          "href": "lessons/0045-graphrag.html"
         }
       ]
     }

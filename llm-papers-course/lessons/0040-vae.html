@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Variational Autoencoders (VAE) - LLM Papers Course</title>
+<meta name="description" content="The reparameterisation trick that made latent-variable generative models trainable by gradient descent, why their samples are blurry for a structural reason, and why in 2026 a VAE is a codec rather than a generator.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 40</div>
+  <h1>Variational Autoencoders (VAE)</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">2013</span>
+    <span class="pill">15 min</span>
+    Kingma, Welling &middot; University of Amsterdam
+    &middot; <a href="https://arxiv.org/abs/1312.6114">arXiv:1312.6114</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>You want a generative model with continuous hidden variables, but the posterior over those variables is intractable, so you cannot train it. The VAE's answer is to <b>approximate the posterior with a second network</b> and optimise a lower bound instead of the true likelihood.</li>
+      <li>The move that made it work is the <b>reparameterisation trick</b>: do not sample from a distribution whose parameters you need gradients through. Sample fixed noise and push it through a deterministic function of those parameters instead.</li>
+      <li>Its samples are blurry for a structural reason, not a tuning one. A Gaussian decoder likelihood is a per-pixel squared error, and <b>the best answer under squared error is an average</b>.</li>
+      <li><b>In 2026 nobody trains a VAE to generate images, and almost everybody runs one.</b> The "latent" in latent diffusion is a VAE latent, so it survives as a codec rather than as a generator.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["the autoencoder&lt;br/&gt;compress and reconstruct"] --> V["THIS PAGE&lt;br/&gt;a latent-variable model&lt;br/&gt;trained by gradient descent"]
+  B["variational inference&lt;br/&gt;bound what you cannot compute"] --> V
+  V --> Q["VQ-VAE&lt;br/&gt;discrete latents"]
+  V --> D["the latent space inside&lt;br/&gt;every latent diffusion model"]
+  V --> R["the reparameterisation trick&lt;br/&gt;used far outside this model"]
+    </div>
+    <figcaption>Where this sits. Two old ideas meet: an autoencoder that compresses, and variational inference that bounds an intractable quantity. What comes out is a latent space you can sample from, and that space is what Lesson 43 runs diffusion inside. <b>The model lost as a generator and won as a component.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Suppose you believe your data was produced in two steps: draw a hidden vector <code>z</code> from some simple distribution, then draw the image from a distribution that depends on <code>z</code>. That story is attractive because <code>z</code> is short and the image is long, so <code>z</code> is where the meaning lives.</p>
+
+  <p>Training it means asking, for an image you have, which <code>z</code> produced it. That is the posterior, and for any decoder worth using it has no closed form. Before this paper you attacked that with Markov chains or expensive approximate inference, neither of which scales to a large dataset and neither of which fits inside a gradient-descent loop.</p>
+
+  <p>The VAE makes the intractable step into a second neural network. An <strong>encoder</strong> looks at the image and proposes a distribution over <code>z</code>. Training then optimises how good that proposal is at the same time as it optimises the decoder.</p>
+
+  <h2>2. The mechanism</h2>
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  X["image x"] --> E["encoder&lt;br/&gt;outputs mu and log-variance&lt;br/&gt;a Gaussian over z"]
+  E --> S["sample z from that Gaussian"]
+  S --> D["decoder&lt;br/&gt;maps z back to an image"]
+  D --> R["reconstruction term&lt;br/&gt;how close is x-hat to x"]
+  E --> K["KL term&lt;br/&gt;keep the proposal near&lt;br/&gt;a standard normal"]
+    </div>
+    <figcaption>The whole model. The encoder proposes a small cloud in latent space rather than a single point, a sample is drawn from that cloud, and the decoder reconstructs from the sample. <b>Two losses pull against each other: reconstruct well, and keep the latent space tidy enough to sample from.</b></figcaption>
+  </figure>
+
+  <p><strong>Why a cloud rather than a point.</strong> An ordinary autoencoder maps each image to one latent point, and the space between the points can decode to nothing meaningful. Forcing the encoder to emit a distribution, and penalising it for straying from a standard normal, packs the latents into a region you can later sample from blindly. That is the difference between a compressor and a generative model.</p>
+
+  <h2>3. The reparameterisation trick</h2>
+  <p>Here is the obstacle. You need the gradient of the loss with respect to the encoder's parameters, but the path from the encoder to the loss goes through a random draw, and you cannot differentiate through "sample from this distribution".</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant E as Encoder
+  participant N as Noise source
+  participant Z as Latent z
+  participant D as Decoder
+  E->>Z: naive path - sample z directly from N(mu, sigma)
+  Note over Z: gradient stops here - the draw is not a function of mu
+  N->>Z: reparameterised - draw epsilon from N(0, 1) first
+  E->>Z: then compute z = mu + sigma * epsilon
+  Z->>D: decode
+  D->>E: gradients flow back through mu and sigma
+    </div>
+    <figcaption>The same random z, obtained two ways. Sampling directly leaves no differentiable path back to the encoder. Drawing the randomness first, from a distribution with no parameters, and combining it arithmetically leaves an ordinary computation graph. <b>Move the randomness off the path you need to differentiate.</b></figcaption>
+  </figure>
+
+  <p>The paper states the consequence plainly: "a reparameterization of the variational lower bound yields a lower bound estimator that can be straightforwardly optimized using standard stochastic gradient methods". After that sentence a latent-variable generative model is just a network you train with your usual optimiser.</p>
+
+  <div class="card callout key"><span class="tag">The idea that outlived the model</span>
+    Reparameterisation is not about images. It is the general answer to backpropagating through a sampling step, and it turns up wherever a stochastic node sits in the middle of a differentiable system. The VAE is where you meet it; it is not where it stays.</div>
+
+  <h2>4. The maths, read aloud</h2>
+  <p>The objective is a lower bound on the log-likelihood of the data, usually called the ELBO. It has exactly two terms, and both have a plain reading.</p>
+
+  <div class="math">L(x) = E<sub>q(z|x)</sub>[ log p(x|z) ] &minus; KL( q(z|x) &#8214; p(z) )
+    <span class="gloss"><b>q(z|x)</b>: the encoder's proposed distribution over latents for this image. <b>p(x|z)</b>: the decoder's distribution over images given a latent. <b>E<sub>q(z|x)</sub>[ log p(x|z) ]</b>: the reconstruction term - draw a latent from the encoder's proposal and ask how probable the real image is under the decoder. Higher is better. <b>KL( q(z|x) &#8214; p(z) )</b>: the Kullback-Leibler divergence, a measure of how far the proposal has drifted from the prior <b>p(z)</b>, which is a standard normal. It is subtracted, so drifting is penalised. <b>L(x)</b>: the bound. It is never above the true log-likelihood, so pushing it up pushes the real quantity up too.</span>
+  </div>
+
+  <div class="math">z = &mu;(x) + &sigma;(x) &middot; &epsilon;,&nbsp;&nbsp; &epsilon; ~ N(0, 1)
+    <span class="gloss"><b>&mu;(x)</b> and <b>&sigma;(x)</b>: the mean and standard deviation the encoder outputs for this image, both ordinary differentiable functions of the encoder's weights. <b>&epsilon;</b>: a draw from a standard normal, which depends on nothing you are training. <b>z</b>: the latent, now a differentiable function of &mu; and &sigma; with the randomness supplied from outside. Read it as: keep the noise, move it out of the way.</span>
+  </div>
+
+  <h2>5. Implement it</h2>
+  <div class="code-cap">vae.py &middot; runnable with torch</div>
+  <pre><code>import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+class VAE(nn.Module):
+    def __init__(self, in_dim=784, hidden=400, latent=20):
+        super().__init__()
+        self.enc = nn.Sequential(nn.Linear(in_dim, hidden), nn.ReLU())
+        self.mu = nn.Linear(hidden, latent)          # centre of the proposal
+        self.logvar = nn.Linear(hidden, latent)      # log variance, so it can be negative
+        self.dec = nn.Sequential(nn.Linear(latent, hidden), nn.ReLU(),
+                                 nn.Linear(hidden, in_dim))
+
+    def encode(self, x):
+        h = self.enc(x)
+        return self.mu(h), self.logvar(h)
+
+    def reparameterise(self, mu, logvar):
+        std = torch.exp(0.5 * logvar)                # log-variance to std
+        eps = torch.randn_like(std)                  # randomness from outside
+        return mu + std * eps                        # differentiable in mu and std
+
+    def forward(self, x):
+        mu, logvar = self.encode(x)
+        z = self.reparameterise(mu, logvar)
+        return self.dec(z), mu, logvar
+
+def elbo_loss(logits, x, mu, logvar):
+    """Negative ELBO, so lower is better. Two terms, summed per image."""
+    recon = F.binary_cross_entropy_with_logits(logits, x, reduction="sum")
+    # closed form of KL(N(mu, sigma) || N(0, 1)) for a diagonal Gaussian
+    kl = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
+    return recon + kl
+
+model = VAE()
+opt = torch.optim.Adam(model.parameters(), lr=1e-3)
+x = torch.rand(64, 784)                              # stand-in for a batch of images
+for step in range(3):
+    logits, mu, logvar = model(x)
+    loss = elbo_loss(logits, x, mu, logvar) / len(x)
+    opt.zero_grad(); loss.backward(); opt.step()
+    print(step, round(float(loss), 2))
+
+# generation needs no input image: sample the prior and decode
+with torch.no_grad():
+    sample = torch.sigmoid(model.dec(torch.randn(8, 20)))
+print(sample.shape)                                  # torch.Size([8, 784])</code></pre>
+
+  <p>The last three lines are the point of the whole model. Generation draws <code>z</code> from a standard normal and decodes it, with no image involved, and that only produces something sensible because the KL term spent training pushing the encoder's clouds towards exactly that distribution.</p>
+
+  <h2>6. What it did not solve: the blur has a cause</h2>
+  <p>VAE samples are famously soft, and the reason is worth teaching because it is a property of the loss rather than of the network. A Gaussian decoder makes the reconstruction term a per-pixel squared error. When several different sharp images are all plausible for one latent, the prediction that minimises expected squared error is not any of them - it is their average, and the average of sharp images is a blurry image.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Expected squared error against the predicted value, for a target that is equally likely to be minus one or plus one. The curve is a parabola whose minimum sits at zero, between the two possible targets.">
+      <text class="ttl" x="20" y="24">Expected squared error when two answers are equally right</text>
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <polyline class="s-signal" points="70,40 137,113 205,166 272,197 340,208 407,197 475,166 542,113 610,40"/>
+      <circle class="m-stat" cx="205" cy="250" r="6"/>
+      <circle class="m-stat" cx="475" cy="250" r="6"/>
+      <circle class="m-alarm" cx="340" cy="208" r="7"/>
+      <text class="lbl-sm" x="205" y="272" text-anchor="middle">a sharp image</text>
+      <text class="lbl-sm" x="475" y="272" text-anchor="middle">another sharp image</text>
+      <text class="lbl-b"  x="340" y="196" text-anchor="middle">the loss picks here</text>
+      <text class="lbl-sm" x="70"  y="292">Prediction runs left to right. Height is expected squared error, so lower is better.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>expected squared error</span><span><i class="sw-stat"></i>plausible outputs</span><span><i class="sw-alarm"></i>the minimiser</span></div>
+    <figcaption>Two equally good answers, and a loss that refuses to choose. Squared error is minimised at the mean of the possibilities, which here is the one value that is not a plausible image at all. <b>The blur is the loss doing its job, so no amount of extra capacity removes it.</b></figcaption>
+  </figure>
+
+  <p>The second failure is <strong>posterior collapse</strong>. Pair a VAE with a decoder powerful enough to model the data on its own and the model learns to ignore the latent entirely: the KL term is happiest at zero, and a strong decoder does not need <code>z</code>. VQ-VAE was invented to dodge exactly this and says so, describing vector quantisation as a way to "circumvent issues of 'posterior collapse' - where the latents are ignored when they are paired with a powerful autoregressive decoder".</p>
+
+  <h2>7. Does this still matter in 2026?</h2>
+  <p><strong>Yes, but not as a generative model. It matters as a codec.</strong> This is the judgement to carry out of the lesson.</p>
+
+  <p>Nobody in 2026 trains a VAE to generate pictures. But everyone running a latent diffusion model runs a VAE on every single generation, because the latent that diffusion operates in is a VAE latent, encoded on the way in and decoded on the way out. That has a very practical consequence: when generated images come out with washed colours or mushy fine detail, the encoder and decoder are the first place a competent engineer looks, not the sampler.</p>
+
+  <p>The discrete branch matters more broadly still. Vector quantisation of a continuous signal - the VQ-VAE move - is the mechanism behind turning audio and images into token sequences a language model can read, which is what "everything becomes tokens" means in an early-fusion multimodal model.</p>
+
+  <table>
+    <thead><tr><th>Question</th><th>VAE in 2013</th><th>VAE in 2026</th></tr></thead>
+    <tbody>
+      <tr><td>Role</td><td>A generative model</td><td>A learned codec</td></tr>
+      <tr><td>What you sample</td><td>The prior, then decode</td><td>Nothing, a diffusion model does that</td></tr>
+      <tr><td>Where it runs</td><td>End to end</td><td>Either end of a latent pipeline</td></tr>
+      <tr><td>Symptom when wrong</td><td>Blurry samples</td><td>Washed colour, mushy detail</td></tr>
+      <tr><td>Discrete cousin</td><td>Not yet invented</td><td>Tokenisers for audio and images</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What problem does the reparameterisation trick solve?</div>
+      <button class="q-opt">It removes the prior term, so only reconstruction is trained</button>
+      <button class="q-opt">It makes the decoder deterministic, which stabilises training</button>
+      <button class="q-opt">It compresses the latent, so fewer dimensions are required</button>
+      <button class="q-opt">It restores a gradient path through an otherwise random draw</button>
+      <div class="q-fb">Sampling directly from the encoder's distribution breaks the gradient path. Drawing fixed noise first and combining it arithmetically restores it. The other three describe things the trick does not do.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why are VAE samples blurry?</div>
+      <button class="q-opt">The latent vector is too short to carry the fine picture detail</button>
+      <button class="q-opt">Squared error is minimised by averaging the plausible outputs</button>
+      <button class="q-opt">The encoder network is smaller than the decoder it is paired to</button>
+      <button class="q-opt">Gaussian noise is added to the image after the decoder has run</button>
+      <div class="q-fb">A Gaussian decoder makes reconstruction a per-pixel squared error, whose optimum is the mean of the possibilities. Latent width and network sizes change the degree, not the cause.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is posterior collapse?</div>
+      <button class="q-opt">The decoder overfits, so held-out reconstructions become poor</button>
+      <button class="q-opt">The encoder outputs variances of zero and gradients then vanish</button>
+      <button class="q-opt">The model ignores the latent because the decoder needs no help</button>
+      <button class="q-opt">The prior drifts away from a normal, so sampling stops working</button>
+      <div class="q-fb">A decoder strong enough to model the data alone lets the KL term drive the latent towards the prior and carry no information. VQ-VAE's discrete latents were introduced to avoid exactly this.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does a VAE actually run in a 2026 image pipeline?</div>
+      <button class="q-opt">At both ends, encoding into and decoding out of a latent space</button>
+      <button class="q-opt">In the middle, generating the image the sampler then refines</button>
+      <button class="q-opt">Nowhere, since diffusion models replaced it in every position</button>
+      <button class="q-opt">Only in training, since inference runs on raw pixels directly</button>
+      <div class="q-fb">Latent diffusion encodes to a latent, denoises there, and decodes back. The VAE is the codec at both ends; the generation in the middle is diffusion's job.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><a href="0041-gan.html">Generative Adversarial Networks</a> is the other answer to the blur problem: instead of fixing the loss, learn it.</li>
+    <li><a href="0042-diffusion.html">Diffusion Models</a> are trained on a weighted variational bound, so the mathematics of this lesson is the mathematics of that one.</li>
+    <li><a href="0043-latent-diffusion.html">Latent Diffusion</a> is where the VAE reappears as the compression stage, and where its blurriness is fixed by a term borrowed from the next lesson.</li>
+    <li>The discrete branch is why a picture or a sound can become a token sequence at all, which is the assumption behind every early-fusion multimodal model.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask the agent to train this VAE on MNIST for one epoch and show samples, then to set the KL term to zero and show samples again - the second run reconstructs well and generates noise, which is the clearest demonstration of what the KL term buys. Then ask it to derive the closed-form KL in the code from the two Gaussians.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the paper: <a href="https://arxiv.org/abs/1312.6114">Kingma and Welling, "Auto-Encoding Variational Bayes" (arXiv:1312.6114)</a>. Then read <a href="https://arxiv.org/abs/1711.00937">van den Oord, Vinyals and Kavukcuoglu, "Neural Discrete Representation Learning" (arXiv:1711.00937)</a> for the discrete latent that dodges posterior collapse.</p>
+
+  <div class="pager">
+    <a href="0039-clip.html"><span class="dir">&larr; Previous</span><span class="ttl">CLIP</span></a>
+    <a class="nxt" href="0041-gan.html"><span class="dir">Next &rarr;</span><span class="ttl">Generative Adversarial Networks</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 40 &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
