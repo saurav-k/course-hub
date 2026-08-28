@@ -249,6 +249,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0042-diffusion.html"
         },
         {
+          "title": "Latent Diffusion",
+          "href": "lessons/0043-latent-diffusion.html"
+        },
+        {
           "title": "Primer",
           "href": "lessons/0000-primer-neural-nets-to-tokens.html"
         }
