@@ -118,4 +118,4 @@ Beyond those two it touches `llm-inference-course` for the sell side of inferenc
 
 Two of this course's sources are vendor deprecation pages that change every few weeks, and chapter 0007 is built on them.
 Reopen this file when that chapter is next touched, and re-fetch both pages before editing a word of it.
-Reopen it also when the vision and multimodal module lands in `llm-papers-course`, because chapter 0003's multimodal decision should then link to a specific lesson rather than to that course's map.
+The vision and multimodal module has since landed in `llm-papers-course`, and chapter 0003 links into it directly; reopen this file if that course ever renumbers those lessons.

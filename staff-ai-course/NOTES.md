@@ -68,7 +68,7 @@ Where this course knowingly says less than a source claims, or leans on evidence
 
 ## Open threads
 
-- **The vision and multimodal module in `llm-papers-course` does not exist yet.** Chapter 0003's multimodal decision therefore links to that course's map rather than to a lesson. Point it at the lesson the day the module lands.
+- **The vision and multimodal module landed in `llm-papers-course` while this course was being written.** Chapter 0003's multimodal decision and its GraphRAG routing decision now link straight into lessons 0038, 0039, 0042 and 0045 there. If that course renumbers, those four links are the ones to re-check.
 - **Two sources in chapter 0007 change every few weeks.** Anthropic's model deprecation page and OpenAI's deprecations page are the only canon entries that must be re-fetched every time the course is touched, or that chapter will be the first page in the hub to state something provably false.
 - **No learning record yet.** Add one once a reader takes a chapter into a real design review and reports what it got wrong.
 - **`reference/decision-record.html` has not been used in anger.** It is the artefact the course claims is its practical output, and nobody has filled one in for a live decision. The first person who does should record what the template missed.
