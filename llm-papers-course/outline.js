@@ -253,6 +253,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0043-latent-diffusion.html"
         },
         {
+          "title": "BLIP-2 and LLaVA",
+          "href": "lessons/0044-blip-2-and-llava.html"
+        },
+        {
           "title": "Primer",
           "href": "lessons/0000-primer-neural-nets-to-tokens.html"
         }
