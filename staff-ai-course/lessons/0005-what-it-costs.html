@@ -1,0 +1,276 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The cheapest lever is a shorter answer - The Staff AI Engineer</title>
+<meta name="description" content="Five decisions about unit economics as a design input: the denominator, the cache that fails silently, routing to a smaller model, the honest self-hosting arithmetic, and the ceiling that holds overnight.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">THE STAFF AI ENGINEER</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Money &middot; Chapter 6</div>
+  <h1>The cheapest reliable lever is a shorter answer.</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">13 min</span>
+    Five decisions that make unit economics a design input rather than a monthly report.
+    &middot; <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic, Prompt caching</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Output costs several times input at every vendor, clustering at <b>five times</b>, so the first lever is a shorter answer and <code>max_tokens</code> is a budget line.</li>
+      <li>A cached read costs <b>a tenth of a fresh input token</b>, and the five-minute cache pays back after one read. Below the minimum cacheable length it silently does nothing, and <b>the API returns no error</b>.</li>
+      <li>At the small-model tier, <b>self-hosting loses on price</b>, so the reasons that survive are residency, latency floors and pinning.</li>
+      <li>The same rented silicon spans a <b>21-fold price range</b> across providers. Where you rent moves the answer more than whether you host.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["Chapter 5&lt;br/&gt;there is a gate that&lt;br/&gt;can detect a regression"] --> T["THIS CHAPTER&lt;br/&gt;five cost decisions,&lt;br/&gt;each changing behaviour"]
+  T --> N["Chapter 7&lt;br/&gt;the spend ceiling and the&lt;br/&gt;authority ceiling are one limit"]
+  T -.-> S["llm-inference-course&lt;br/&gt;owns the sell side:&lt;br/&gt;what a GPU costs you"]
+    </div>
+    <figcaption>Where this sits: every lever in this chapter changes what the system produces, so none of them is safe to pull before chapter 5's gate exists. <b>The dotted edge is the boundary of this chapter: the inference course prices a GPU you rent, and this one prices the token you buy and the decision that spends it.</b></figcaption>
+  </figure>
+
+  <h2>1. The denominator, and the two cheapest levers</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  A["Shorter answer&lt;br/&gt;output is about 5x input"] --> B["Cache the reused prefix&lt;br/&gt;read costs 0.1x"]
+  B --> C["Batch what can wait&lt;br/&gt;50% off both sides"]
+  C --> D["Route to a smaller model&lt;br/&gt;only with a gate to prove it"]
+  D --> E["Self-host&lt;br/&gt;rarely about price"]
+    </div>
+    <figcaption>The levers in the order their cost-to-risk ratio recommends, not the order teams reach for them. The first three change no behaviour at all and the last two change it a great deal. <b>Most teams start at the fourth rung, because swapping a model is the change that feels like engineering, and it is the only one on this list that needs chapter 5's gate before it is safe.</b></figcaption>
+  </figure>
+
+  <h3 id="the-denominator">Cost per resolved user problem, not cost per call: what is the denominator?</h3>
+
+  <p><b>The call.</b> What unit your cost number is per. Cost per call is measurable and almost useless, because a system that answers badly and is asked again looks cheap on it.</p>
+
+  <p><b>What you must know first.</b> What a cost number looks like when it is published with its conditions. Semgrep reported about <span class="keynum">0.17 USD</span> per vulnerability found, on one detection task, one dataset, one run, inside a purpose-built harness. That is a denominator a reader can argue with, and the arguing is the point. <em>Source: <a href="https://semgrep.dev/blog/2026/we-have-mythos-at-home-glm-52-beats-claude-in-our-cyber-benchmarks/">Semgrep (22 June 2026)</a>.</em></p>
+
+  <p><b>The bill.</b> Choosing the denominator costs one conversation with whoever owns the product metric and nothing else. Not choosing it costs a quarter of optimisation aimed at the wrong quantity, and every one of those optimisations changes behaviour.</p>
+
+  <p><b>How you find out you were wrong.</b> The signal is cost per call falling while the total bill rises. It shows up on a finance dashboard rather than an engineering one, and the two teams have no shared meeting until somebody escalates.</p>
+
+  <p><b>The reversal.</b> Changing the denominator is free and instantly reframes everything already measured. What cannot be reversed is the work already spent optimising the old one, which is why this decision belongs before the first cost review rather than after it.</p>
+
+  <h3 id="which-cache">Which caching layer, and what does a silent miss cost?</h3>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Your application
+  participant P as Model API
+  A->>P: request with a reused prefix&lt;br/&gt;below the minimum cacheable length
+  Note over P: no cache entry is created
+  P-->>A: 200 OK, a normal completion
+  Note over A: usage fields both read zero&lt;br/&gt;and nothing else says so
+  A->>A: the bill does not fall,&lt;br/&gt;and the config looks correct
+    </div>
+    <figcaption>Anthropic's documentation states it plainly: prompts shorter than the minimum cannot be cached, and the API returns no error. The minimum varies by model, so the same configuration can be correct on one model and inert on the next. <b>The only thing that catches this is asserting in CI that the cache-creation and cache-read token counts are not both zero, which is a test about a usage field rather than about behaviour.</b></figcaption>
+  </figure>
+
+  <p><b>The call.</b> Whether to cache the reused prefix, at which time-to-live, and what you assert to prove the caching is actually happening.</p>
+
+  <p><b>What you must know first.</b> The multipliers and the trap. Relative to base input price, a five-minute cache write costs <span class="keynum">1.25x</span>, a one-hour write <span class="keynum">2x</span>, and a read <span class="keynum">0.1x</span>. The vendor states the payback: the five-minute cache pays off after one read, the one-hour cache after two. The minimum cacheable prompt length is 512, 1,024, 2,048 or 4,096 tokens depending on model, and below it "the API returns no error". <em>Source: <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">Anthropic prompt caching</a>.</em></p>
+
+  <p><b>The bill.</b> Caching attacks the input side only, so its leverage is set by your input-to-output ratio. On a worked twenty-turn session with a 30,000-token reused prefix, this course's arithmetic gives <span class="keynum">72.8%</span> off overall and <span class="keynum">82.4%</span> off the input alone. Long-context, short-answer work is where caching pays; short-prompt, long-generation work is where it does almost nothing.</p>
+
+  <p><b>How you find out you were wrong.</b> You do not, and that is the failure. Nothing errors, nothing alerts, and the bill simply fails to fall by the amount somebody promised in a planning document three months earlier. The person who notices is whoever reconciles the forecast.</p>
+
+  <p><b>The reversal.</b> Trivially two-way: caching is a request flag. The irreversible part is the trust spent on a saving that never arrived, which is why the assertion goes in with the flag rather than after it.</p>
+
+  <h2>2. Smaller, cheaper, and where the arithmetic actually lands</h2>
+
+  <h3 id="route-to-smaller">Route to a smaller model where, and what proves quality held?</h3>
+
+  <p><b>The call.</b> Which requests get the cheaper model, and what evidence is required before that route is opened rather than after the bill improves.</p>
+
+  <p><b>What you must know first.</b> The published procedure runs the opposite way to instinct. OpenAI advise building the prototype "with the most capable model for every task to establish a performance baseline. From there, try swapping in smaller models to see if they still achieve acceptable results." Starting cheap is diagnostically useless: a failure tells you nothing about whether the task is impossible, the prompt is bad, or the model is too small. <em>Source: <a href="https://cdn.openai.com/business-guides-and-resources/a-practical-guide-to-building-agents.pdf">OpenAI, "A practical guide to building agents"</a>.</em></p>
+
+  <p><b>The bill.</b> Two structural facts beat any individual price. Output costs four to eight times input across three vendors' tables, clustering at five, so a shorter answer is the cheapest saving. And a tokenizer change is a price change: Anthropic document a newer tokenizer producing about <span class="keynum">30%</span> more tokens for the same text.</p>
+
+  <p><b>How you find out you were wrong.</b> The signal is a quality regression confined to the routed slice, which an aggregate score hides by construction. It arrives whenever somebody segments the eval by route, which for most teams is never. Segment before you route, not after.</p>
+
+  <p><b>The reversal.</b> A route is a config change, so undoing it is an afternoon. What it costs to have been wrong is one segment of users who had a worse product for a quarter, and no record of when it started.</p>
+
+  <h3 id="host-or-buy">At what volume does self-hosting win, and what is the arithmetic?</h3>
+
+  <div class="math">
+    cost per 1M tokens = gpu_hourly &divide; (T &times; 3600 &times; u) &times; 10<sup>6</sup>
+    <span class="gloss">Read as: <i>gpu_hourly</i> is what one accelerator costs you per hour, <i>T</i> is the tokens per second it sustains under your real workload, 3600 converts hours to seconds, and <i>u</i> is the fraction of the hour it is actually generating rather than idle. The formula is the one <a href="../../llm-inference-course/lessons/0014-inference-unit-economics.html">the inference course</a> derives; this chapter only puts today's prices into it.</span>
+  </div>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Self-hosted cost per million tokens against utilisation at three throughputs, against two blended hosted prices: a well-run accelerator only reaches the cheapest hosted tier at very high throughput and utilisation">
+      <text class="ttl" x="60" y="24">Self-hosted dollars per 1M tokens, one H100 at the market median</text>
+      <line class="grid" x1="120" y1="194" x2="600" y2="194"/>
+      <line class="grid" x1="120" y1="139" x2="600" y2="139"/>
+      <line class="grid" x1="120" y1="83"  x2="600" y2="83"/>
+      <text class="lbl-sm" x="112" y="198" text-anchor="end">$0.50</text>
+      <text class="lbl-sm" x="112" y="143" text-anchor="end">$1.00</text>
+      <text class="lbl-sm" x="112" y="87"  text-anchor="end">$1.50</text>
+      <line class="axis" x1="120" y1="256" x2="600" y2="256"/>
+      <polyline class="s-stat thick" fill="none" points="120,76 273,146 427,176 580,192"/>
+      <polyline class="s-sky thick"  fill="none" points="120,163 273,198 427,212 580,221"/>
+      <polyline class="s-plum thick" fill="none" points="120,192 273,216 427,226 580,231"/>
+      <line class="s-noise ref" x1="120" y1="50"  x2="600" y2="50"/>
+      <line class="s-alarm ref" x1="120" y1="232" x2="600" y2="232"/>
+      <text class="lbl-sm" x="596" y="44"  text-anchor="end">$1.80 blended, a hosted small model</text>
+      <text class="lbl-sm" x="596" y="249" text-anchor="end">$0.16 blended, the cheapest hosted tier</text>
+      <text class="lbl-sm" x="126" y="70">2,000 tok/s</text>
+      <text class="lbl-sm" x="126" y="157">4,000 tok/s</text>
+      <text class="lbl-sm" x="126" y="186">6,000 tok/s</text>
+      <text class="lbl-sm" x="120" y="274" text-anchor="middle">30%</text>
+      <text class="lbl-sm" x="273" y="274" text-anchor="middle">50%</text>
+      <text class="lbl-sm" x="427" y="274" text-anchor="middle">70%</text>
+      <text class="lbl-sm" x="580" y="274" text-anchor="middle">90%</text>
+      <text class="lbl-sm" x="360" y="294" text-anchor="middle">utilisation, the fraction of the hour actually generating</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>2,000 tok/s</span><span><i class="sw-sky"></i>4,000</span><span><i class="sw-plum"></i>6,000</span><span><i class="sw-alarm"></i>the floor you must beat</span></div>
+    <figcaption>The three curves are the formula above at the median on-demand H100 rate across 54 tracked providers. The dashed lines are blended hosted prices at an 80 percent input mix, from the vendors' own pricing pages. <b>Only the best curve at the highest utilisation touches the cheapest hosted tier, and at that point you are running a serving operation to save nothing.</b></figcaption>
+  </figure>
+
+  <p><b>The call.</b> Whether to rent accelerators and serve the model yourself, or keep buying tokens, decided on quality-matched arithmetic rather than on a slogan about volume.</p>
+
+  <p><b>What you must know first.</b> Today's inputs, and that they move weekly. The median on-demand H100 rate is <span class="keynum">$3.39</span> per GPU-hour across <span class="keynum">54</span> tracked providers, with a <span class="keynum">21-fold</span> spread from <span class="keynum">$0.67</span> spot to <span class="keynum">$14.19</span> on demand for identical silicon. <em>Source: <a href="https://getdeploying.com/gpus/nvidia-h100">GetDeploying, data date 28 August 2026</a>.</em> Blended hosted prices at an 80 percent input mix run from about <span class="keynum">$0.16</span> to <span class="keynum">$9.00</span> per million tokens.</p>
+
+  <div class="callout warn"><b>Two honest limits on this arithmetic.</b> First, it is only answerable quality-matched, and one accelerator does not serve frontier-class quality, so the comparison stops being fair at the top of the range. Second, every number in it goes stale in weeks: one vendor's own page documented an introductory price becoming standard days after the research read it. Published break-even token volumes circulate widely and every source found for them was a marketing post with unstated assumptions, so this course teaches you to derive your own rather than quoting theirs.</div>
+
+  <p><b>The bill.</b> A serving operation: capacity planning on a twelve-month horizon, an on-call rotation for hardware, and the utilisation term you control least. <a href="../../llm-inference-course/lessons/0011-kubernetes-for-ai-workloads.html">The inference course</a> owns how to run it.</p>
+
+  <p><b>How you find out you were wrong.</b> The signal is a utilisation number well below the one in your business case, and it arrives about a month after go-live, on a dashboard the platform team owns. Nobody who signed the case is looking at it.</p>
+
+  <p><b>The reversal.</b> Going back to an API is a routing change and a contract: weeks. Going the other way took a quarter and a hiring plan. The one-way part is the team you built to run it, which is why the surviving reasons are residency, latency floors, rate-limit independence and pinning.</p>
+
+  <h2>3. The ceiling</h2>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Normal
+  Normal --> Warning: spend rate crosses&lt;br/&gt;the hourly budget
+  Warning --> Degraded: cheaper model,&lt;br/&gt;shorter answers, no tools
+  Degraded --> Halted: the hard ceiling,&lt;br/&gt;enforced without a human
+  Warning --> Normal: rate falls back
+  Degraded --> Normal: rate falls back
+  Halted --> Normal: a human clears it
+    </div>
+    <figcaption>Three states rather than two, because a system that only has "running" and "stopped" will be left running. The middle state is where the levers from section 1 are applied automatically, and it is the one that keeps the product alive through a spike. <b>Only the transition into Halted may be automatic in both directions and manual on the way out - everything else recovers on its own, and the one that does not is the one that needs a person to look at what happened.</b></figcaption>
+  </figure>
+
+  <h3 id="the-ceiling">What is the ceiling, and what enforces it while everyone is asleep?</h3>
+
+  <p><b>The call.</b> The maximum spend per hour and per task, and which component refuses the next call when it is reached, with no human in the path.</p>
+
+  <p><b>What you must know first.</b> How much an agent multiplies a chat bill, and that the multiplier is a design choice. This course's own arithmetic on a twelve-step agent carrying 25,000 input tokens per step puts it at <span class="keynum">76</span> times a single chat turn without caching and <span class="keynum">34</span> times with a 20,000-token prefix cached. Read the assumption before the number: the multiplier is driven almost entirely by how much context each step carries, so halving the context roughly halves the bill.</p>
+
+  <p><b>The bill.</b> The costs a per-token model silently omits: server-side web search priced per thousand searches, a fetched page becoming input tokens, tool definitions charged on every call, a rich toolset adding thousands of input tokens before the user's message, session runtime metered hourly, and a regional multiplier. For a tool-heavy agent none is a rounding error.</p>
+
+  <p><b>How you find out you were wrong.</b> The signal is a bill, with a lag of up to a month. Nothing about a runaway loop looks like an outage: latency is fine, errors are zero, dashboards green while the meter runs. Finance sees it first. <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html#cost-kill-switches">The build track</a> owns the enforcement point.</p>
+
+  <p><b>The reversal.</b> Raising a ceiling is a config change. There is no reversal for a weekend of unbounded spend, which is what makes this the one decision in the chapter that is worth building before the feature it protects.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">You enable prompt caching, the configuration is right, and the bill does not change. What is the most likely explanation?</div>
+      <button class="q-opt">The cache time-to-live expired between calls and it never hit</button>
+      <button class="q-opt">The reused prefix changed slightly, so the entry never matched</button>
+      <button class="q-opt">The prefix is under the model's minimum, and nothing errored</button>
+      <button class="q-opt">The workload is output-heavy, so caching had little to attack</button>
+      <div class="q-fb">The vendor documents that prompts shorter than the minimum cannot be cached and the API returns no error, and the minimum varies by model. The first two are real cache misses and both would still report cache-creation tokens somewhere. The fourth is true of some workloads and would reduce the saving rather than remove it, and it is the reason to check your input-to-output ratio before promising a number.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your team wants to cut cost and proposes starting the prototype on the cheapest model. What does the published guidance say?</div>
+      <button class="q-opt">Start on the best model, then descend, so failures mean something</button>
+      <button class="q-opt">Start on the cheapest model, since the budget is the constraint</button>
+      <button class="q-opt">Start on a mid-tier model, since it balances both of the risks</button>
+      <button class="q-opt">Start on two models at once, and compare them on the same set</button>
+      <div class="q-fb">Establish the baseline with the most capable model, then swap smaller ones in: the reason is diagnostic rather than generous, because a failure on a cheap model tells you nothing about which of three causes it was. The second option is the instinct the guidance exists to correct. The third splits the difference and keeps the diagnostic ambiguity. The fourth doubles the cost of the phase whose purpose is to establish what is achievable at all.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A business case says self-hosting will beat your hosted small model on price. Which number would you ask for first?</div>
+      <button class="q-opt">The token volume per day the workload is expected to reach</button>
+      <button class="q-opt">The utilisation, since it is the term the arithmetic hinges on</button>
+      <button class="q-opt">The model quality, since the comparison must be like for like</button>
+      <button class="q-opt">The rental rate, since it varies by 21x across the providers</button>
+      <div class="q-fb">Utilisation moves the answer by a factor of three across the plausible range and is the term a team controls least, so it is the assumption most likely to be optimistic. The first option is the number business cases lead with and it does not appear in the formula. The third and fourth are both real and both matter, and each is the right second question: quality-matching decides whether the comparison is fair, and the rental spread decides where you rent rather than whether you host.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>A session reuses a 30,000-token prefix across 20 turns, adding 500 new input tokens and producing 800 output tokens per turn. Input is $2 per million tokens and output is $10.</p>
+      <p><b>Work out</b> the input cost with no caching and with a five-minute cache, and <b>say</b> why the overall saving is smaller than the input-only saving.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>With no cache the whole prefix is a fresh input on every turn. With a cache it is written once at 1.25 times the base rate and read nineteen times at a tenth of it. Output is not cacheable at all.</p></details>
+
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Count the uncached input.</b> 20 turns times 30,500 tokens is 610,000 tokens, at $2 per million, which is <span class="keynum">$1.22</span>.</li>
+        <li><b>Count the cached input.</b> One write of 30,000 at 1.25 times base is equivalent to 37,500 tokens. Nineteen reads at 0.1 times base is 19 times 3,000, which is 57,000 equivalent tokens. The 500 new tokens a turn add 10,000. Total about 104,500 equivalent tokens, or <span class="keynum">$0.21</span>.</li>
+        <li><b>Add the output, which is identical either way.</b> 20 times 800 is 16,000 tokens at $10 per million, which is $0.16.</li>
+        <li><b>Compare the two totals.</b> $1.38 against $0.37, so about 73 percent overall against about 83 percent on the input alone.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The gap between the two percentages is the whole lesson: caching attacks only the input side, so the leverage is set by your input-to-output ratio. If your arithmetic gives the same percentage twice, you cached the output, which no vendor on the market lets you do.</p>
+    </details>
+  </div>
+
+  <h2>Decision drill</h2>
+
+  <p>Questions a reviewer puts to a cost model, and the trap in each.</p>
+
+  <ul>
+    <li><b>"What does this cost?"</b> The trap is answering per call. Answer per resolved user problem, and say what a re-ask does to the number.</li>
+    <li><b>"You said caching would halve it."</b> The trap is checking the config. Show the usage fields, and the CI assertion that they are not both zero.</li>
+    <li><b>"Why not the cheaper model everywhere?"</b> The trap is arguing on quality in general. Show the eval segmented by route.</li>
+    <li><b>"At what volume do we self-host?"</b> The trap is quoting a break-even from a blog. Derive it, and lead with the utilisation you are assuming.</li>
+    <li><b>"What stops a runaway overnight?"</b> The trap is naming an alert. Name the component that refuses the call, and the state it enters first.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one real request from your system and account for every token in it: the system prompt, the tool schemas, the retrieved passages, the user's message, and the answer. Most people find the tool schemas alone are larger than the message. That accounting is what turns cost from a monthly report into a design input, and it takes about twenty minutes.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read <a href="https://platform.claude.com/docs/en/build-with-claude/prompt-caching">the prompt caching documentation</a> for the multipliers and the silent failure, then <a href="../../llm-inference-course/lessons/0014-inference-unit-economics.html">the inference course's unit economics lesson</a> for the sell side of the same arithmetic.</p>
+
+  <div class="pager">
+    <a href="0004-proving-it-works.html"><span class="dir">&larr; Previous</span><span class="ttl">Proving It Works</span></a>
+    <a class="nxt" href="0006-the-blast-radius.html"><span class="dir">Next &rarr;</span><span class="ttl">The Blast Radius</span></a>
+  </div>
+
+  <footer><p>The Staff AI Engineer &middot; Chapter 6 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
