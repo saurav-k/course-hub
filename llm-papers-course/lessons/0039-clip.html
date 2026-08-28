@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CLIP - LLM Papers Course</title>
+<meta name="description" content="Train an image encoder and a text encoder so a photo and its caption land in the same place. Zero-shot classification becomes a lookup, and the limitations section is the half worth reading.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 39</div>
+  <h1>CLIP</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">2021</span>
+    <span class="pill">15 min</span>
+    Radford, Kim, Hallacy, Ramesh, Goh, Agarwal, Sastry, Askell, Mishkin, Clark, Krueger, Sutskever &middot; OpenAI
+    &middot; <a href="https://arxiv.org/abs/2103.00020">arXiv:2103.00020</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two encoders, one for images and one for text, trained on <b>400 million image-text pairs</b> with a single task: given a batch of images and a batch of captions, say which caption belongs to which image.</li>
+      <li>What falls out is <b>one vector space for pictures and words</b>. Classification becomes a lookup against sentences you invent at inference time, which is what "zero-shot" means here.</li>
+      <li>It matches "the accuracy of the original ResNet-50 on ImageNet zero-shot without needing to use any of the 1.28 million training examples it was trained on".</li>
+      <li><b>The technique matters absolutely in 2026; the 2021 checkpoint is superseded</b> by SigLIP and SigLIP 2. And CLIP embeddings behave like a bag of words, which breaks any product that needs "cat on mat" to differ from "mat on cat".</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  V["ViT&lt;br/&gt;(Lesson 38)&lt;br/&gt;an image encoder"] --> C["THIS PAGE&lt;br/&gt;one embedding space&lt;br/&gt;for pictures and words"]
+  T["a text encoder&lt;br/&gt;the Transformer&lt;br/&gt;you already know"] --> C
+  C --> G["text-conditioned&lt;br/&gt;image generation"]
+  C --> M["every vision-language&lt;br/&gt;model's vision tower"]
+  C --> D["dataset filtering&lt;br/&gt;at billion scale"]
+    </div>
+    <figcaption>Where this sits. Two encoders you already understand are trained until their outputs are comparable, and that single shared space is what the rest of the module is built on. <b>If you take one paper from this module, take this one - it is upstream of nearly everything multimodal.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>The bottleneck was labels. In the paper's framing, standard vision systems "are trained to predict a fixed set of predetermined object categories", and "additional labeled data is needed to specify any other visual concept". Every new concept costs an annotation campaign, and the model can only ever answer questions whose vocabulary was fixed before training.</p>
+
+  <p>Meanwhile the internet is full of images with captions attached. They are noisy, informal and unlabelled in any structured sense, but there are hundreds of millions of them and they are free. The question this paper answers is what you can learn from that data with no annotation at all.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph OLD["Before: fixed categories"]
+    direction TB
+    oa["annotators label 1,000 classes"] --> ob["train a classifier with&lt;br/&gt;1,000 output slots"]
+    ob --> oc["a new concept needs&lt;br/&gt;new labels and retraining"]
+  end
+  subgraph NEW["After: supervision from captions"]
+    direction TB
+    na["scrape image-caption pairs&lt;br/&gt;no annotation"] --> nb["train two encoders to agree&lt;br/&gt;on which pair goes together"]
+    nb --> nc["a new concept is&lt;br/&gt;just a new sentence"]
+  end
+    </div>
+    <figcaption>The reframing. A fixed-category classifier can only answer inside a vocabulary chosen before training; a shared image-text space lets the vocabulary be written at inference time. <b>Natural language turned a closed label set into an open one.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: agree on a batch</h2>
+  <p>Take a batch of N images with their N real captions. Encode all the images and all the captions, and compute every image-caption similarity: an N by N grid. The N pairs that genuinely belong together sit on the diagonal, and every other cell is a wrong pairing that happens to be in the same batch. Train so the diagonal wins.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  IM["N images"] --> IE["image encoder&lt;br/&gt;a ViT"]
+  TX["N captions"] --> TE["text encoder&lt;br/&gt;a Transformer"]
+  IE --> N1["normalise to unit length"]
+  TE --> N2["normalise to unit length"]
+  N1 --> S["N x N similarity grid"]
+  N2 --> S
+  S --> L["push the N diagonal cells up&lt;br/&gt;and the other cells down"]
+    </div>
+    <figcaption>One training step. Both encoders produce vectors of the same width, both are normalised, and the whole loss is computed from the grid of their dot products. <b>The wrong answers are free: every other caption in the batch is a negative example.</b></figcaption>
+  </figure>
+
+  <p>Note what that buys. Nothing in the loss names a category. The supervision is entirely "these two go together and those two do not", so the model is pushed to encode whatever distinguishes one caption from another, which is roughly everything a person would bother writing down.</p>
+
+  <h2>3. Zero-shot classification is a lookup</h2>
+  <p>Once images and sentences live in one space, classifying an image does not need a classifier. Write one sentence per class, embed them, embed the image, and take the nearest. Because the classes are sentences and not indices, you can invent them after training.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as You
+  participant T as Text encoder
+  participant I as Image encoder
+  participant M as Nearest match
+  U->>T: one sentence per class - a photo of a dog, a photo of a cat
+  T->>M: class vectors, computed once and cached
+  U->>I: the image to classify
+  I->>M: one image vector
+  M->>U: the class whose sentence sits closest
+    </div>
+    <figcaption>Inference with no training. The class sentences are embedded once and reused; each image costs one forward pass and a nearest-neighbour lookup. <b>Changing the label set is editing a list of strings, not retraining a head.</b></figcaption>
+  </figure>
+
+  <h2>4. The maths, read aloud</h2>
+  <p>The loss is ordinary cross-entropy applied twice to the same grid: once treating each row as a question over captions, once treating each column as a question over images.</p>
+
+  <div class="math">L = &frac12; &middot; CE(rows of S, diag) + &frac12; &middot; CE(columns of S, diag),&nbsp;&nbsp; S<sub>ij</sub> = (i&#770;<sub>i</sub> &middot; t&#770;<sub>j</sub>) / &tau;
+    <span class="gloss"><b>i&#770;<sub>i</sub></b>: the image vector for row i, normalised to unit length. <b>t&#770;<sub>j</sub></b>: the caption vector for column j, also unit length, so their dot product is a cosine similarity between -1 and 1. <b>&tau;</b>: the temperature, a learned number that divides every similarity and so decides how sharply the model must separate the right pair from the near misses. <b>S</b>: the N by N grid of scaled similarities. <b>CE(rows, diag)</b>: read each row as a multiple-choice question whose correct answer is the cell on the diagonal, and take the usual cross-entropy. <b>The two halves</b>: one asks each image to find its caption, the other asks each caption to find its image, and the loss is their average.</span>
+  </div>
+
+  <div class="code-cap">clip_loss.py &middot; runnable with torch</div>
+  <pre><code>import torch
+import torch.nn.functional as F
+
+def clip_loss(img_vecs, txt_vecs, logit_scale):
+    """Symmetric contrastive loss over one batch.
+    img_vecs, txt_vecs: (N, D) outputs of the two encoders.
+    logit_scale: exp of a learned parameter, i.e. 1 / temperature."""
+    img = F.normalize(img_vecs, dim=-1)          # unit length, so dot = cosine
+    txt = F.normalize(txt_vecs, dim=-1)
+    logits = logit_scale * img @ txt.T           # (N, N) similarity grid
+    target = torch.arange(len(img), device=img.device)   # the diagonal is correct
+    loss_i = F.cross_entropy(logits, target)     # each image picks its caption
+    loss_t = F.cross_entropy(logits.T, target)   # each caption picks its image
+    return (loss_i + loss_t) / 2
+
+def zero_shot(img_vec, class_vecs, class_names):
+    """Classification with no classifier: nearest class sentence wins."""
+    sims = F.normalize(img_vec, dim=-1) @ F.normalize(class_vecs, dim=-1).T
+    return class_names[int(sims.argmax())]
+
+torch.manual_seed(0)
+N, D = 8, 512
+img_vecs, txt_vecs = torch.randn(N, D), torch.randn(N, D)
+scale = torch.tensor(100.0)                      # a trained model learns this
+print(float(clip_loss(img_vecs, txt_vecs, scale)))   # high: random vectors do not agree
+
+# now make one pair agree and watch that row's similarity dominate
+txt_vecs[3] = img_vecs[3]
+grid = F.normalize(img_vecs, dim=-1) @ F.normalize(txt_vecs, dim=-1).T
+print(grid[3].argmax().item())                   # 3: the matched pair is now nearest</code></pre>
+
+  <p>Two details in that code carry the whole idea. Normalising both sides makes the dot product a cosine, so only direction matters and not vector length. And the target is <code>arange(N)</code>, which is another way of saying the correct answer is always the diagonal.</p>
+
+  <h2>5. What it did not solve</h2>
+  <p>The paper's own limitations section is unusually honest and worth quoting rather than paraphrasing.</p>
+
+  <ul>
+    <li><b>Fine-grained recognition.</b> "performance of CLIP is poor on several types of fine-grained classification such as differentiating models of cars, species of flowers, and variants of aircraft".</li>
+    <li><b>Counting and systematic tasks.</b> It struggles with "abstract and systematic tasks such as counting the number of objects in an image".</li>
+    <li><b>Genuinely unfamiliar data.</b> "zero-shot CLIP still generalizes poorly to data that is truly out-of-distribution". The paper's own example is MNIST, where logistic regression on raw pixels beats it.</li>
+    <li><b>Scale.</b> "we estimate around a 1000x increase in compute is required for zero-shot CLIP to reach overall state-of-the-art performance. This is infeasible to train with current hardware."</li>
+  </ul>
+
+  <p>And one failure the paper did not identify, found later and load-bearing for anyone building retrieval. Yuksekgonul and colleagues showed that vision-language models of this kind have "poor relational understanding", "blunder when linking objects to their attributes", and show "a severe lack of order sensitivity". Their diagnosis points at the training task rather than the architecture: "it is possible to perform well on retrieval over existing datasets without using the composition and order information", so contrastive pretraining was never forced to learn it.</p>
+
+  <div class="callout warn">
+    A retrieval system built on CLIP-style embeddings cannot reliably tell "the cat on the mat" from "the mat on the cat". The embedding is closer to a bag of the concepts present than to a description of how they relate. If your product turns on that distinction, embeddings alone will not carry it, and no amount of index tuning changes the finding.
+  </div>
+
+  <h2>6. Does this still matter in 2026?</h2>
+  <p><strong>The technique, yes. The checkpoint, no.</strong> The successor is SigLIP, which changes exactly one thing: it replaces the softmax contrastive loss with a pairwise sigmoid loss that "operates solely on image-text pairs and does not require a global view of the pairwise similarities for normalization".</p>
+
+  <p>That is a cluster-engineering win before it is a quality win. CLIP's softmax normalises across the whole batch, so computing the loss needs every other example's similarity, which on many devices means an all-gather. Batch size is therefore tangled up with the loss and with your hardware. A sigmoid loss scores each pair on its own, which "allows further scaling up the batch size, while also performing better at smaller batch sizes". The same work reports a useful negative result too: pushing batch size towards a million gives diminishing returns, with "a more reasonable batch size of 32k being sufficient".</p>
+
+  <p>SigLIP 2 added caption-based pretraining, self-distillation, masked prediction and multilingual data, and ships at four sizes: 86M, 303M, 400M and 1B parameters. It is the default vision tower in current open vision-language models.</p>
+
+  <div class="card callout key"><span class="tag">What to actually pick</span>
+    Start at SigLIP 2 rather than original CLIP. Reach for the 2021 CLIP checkpoint only when something downstream already expects it, which in practice mostly means older image-generation checkpoints whose text conditioning was trained against it. The concept - a shared image-text space learned contrastively from web pairs - is unchanged, and that is what this lesson teaches.</div>
+
+  <table>
+    <thead><tr><th>Property</th><th>CLIP (2021)</th><th>SigLIP (2023)</th></tr></thead>
+    <tbody>
+      <tr><td>Loss over a batch</td><td>Softmax, normalised</td><td>Sigmoid, per pair</td></tr>
+      <tr><td>Needs a global view</td><td>Yes, across the batch</td><td>No</td></tr>
+      <tr><td>Batch size coupling</td><td>Tied to the loss</td><td>Decoupled</td></tr>
+      <tr><td>Small batches</td><td>Weaker</td><td>Reported better</td></tr>
+      <tr><td>Reported sweet spot</td><td>Very large batches</td><td>About 32k</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What is CLIP's training task?</div>
+      <button class="q-opt">Predict the missing words of a caption written for an image</button>
+      <button class="q-opt">Predict a fixed label for each image from a chosen taxonomy</button>
+      <button class="q-opt">Predict which caption in the batch belongs to which image</button>
+      <button class="q-opt">Predict the pixels of an image from the caption written for it</button>
+      <div class="q-fb">The task is matching within a batch, so every other caption is a negative. Masked captioning and pixel prediction are different objectives, and a fixed taxonomy is exactly what CLIP avoids.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why can CLIP classify categories it never trained on?</div>
+      <button class="q-opt">Classes are sentences, so a new class is a new sentence</button>
+      <button class="q-opt">Its final layer is resized whenever a new class is added</button>
+      <button class="q-opt">It memorised every class name found across the whole web</button>
+      <button class="q-opt">A small head is fine-tuned on each new class before its use</button>
+      <div class="q-fb">Classification is a nearest-neighbour lookup against embedded class sentences, so the label set is a list of strings. The other three all describe some form of retraining, which is what zero-shot avoids.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which weakness did later work identify rather than the paper itself?</div>
+      <button class="q-opt">Poor accuracy on data that is truly out of the distribution</button>
+      <button class="q-opt">Weak results on fine-grained classes such as flower species</button>
+      <button class="q-opt">Difficulty with counting the number of objects in a picture</button>
+      <button class="q-opt">Bag-of-words behaviour, so word order and relations are lost</button>
+      <div class="q-fb">The first three are named in CLIP's own limitations section. The order and relation failure came from the later ARO work, which traced it to the training task rather than the architecture.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does SigLIP's sigmoid loss actually buy you?</div>
+      <button class="q-opt">A smaller text encoder, since captions need fewer parameters</button>
+      <button class="q-opt">Pair-wise scoring, so batch size stops being tied to the loss</button>
+      <button class="q-opt">Exact retrieval, since the similarity grid is no longer needed</button>
+      <button class="q-opt">Order sensitivity, so relational captions are finally separated</button>
+      <div class="q-fb">Softmax normalises over the batch and so needs a global view; a sigmoid scores each pair alone, which decouples batch size from the loss. It does not shrink encoders and it does not fix the bag-of-words finding.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li>The image encoder is the <a href="0038-vision-transformer.html">Vision Transformer</a> of the previous lesson, and the text encoder is the model from <a href="0001-attention-is-all-you-need.html">Attention Is All You Need</a>.</li>
+    <li>The text conditioning inside <a href="0043-latent-diffusion.html">Latent Diffusion</a> is a CLIP text encoder, so this lesson is a prerequisite for that one.</li>
+    <li><a href="0044-blip-2-and-llava.html">BLIP-2 and LLaVA</a> reuse the contrastive objective and then bolt the frozen image encoder onto a language model.</li>
+    <li>The bag-of-words finding is a retrieval-quality result, so read it beside <a href="0031-rag.html">Retrieval-Augmented Generation</a> when you design an embedding index.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask the agent to build the N by N similarity grid for a small batch and print it, then to swap two captions and watch the diagonal stop winning. Then ask it to write two prompts that differ only in word order and compare their text embeddings - that is the bag-of-words result reproduced on your own machine.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2103.00020">Radford et al., "Learning Transferable Visual Models From Natural Language Supervision" (arXiv:2103.00020)</a>. Read the limitations section in full - it is the part that tells you what to design around, and it is the part most summaries drop. Then read <a href="https://arxiv.org/abs/2210.01936">Yuksekgonul et al., "When and why vision-language models behave like bags-of-words" (arXiv:2210.01936)</a>.</p>
+
+  <div class="pager">
+    <a href="0038-vision-transformer.html"><span class="dir">&larr; Previous</span><span class="ttl">Vision Transformer (ViT)</span></a>
+    <a class="nxt" href="0040-vae.html"><span class="dir">Next &rarr;</span><span class="ttl">Variational Autoencoders (VAE)</span></a>
+  </div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 39 &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

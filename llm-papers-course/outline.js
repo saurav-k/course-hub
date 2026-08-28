@@ -221,6 +221,20 @@ window.COURSE_OUTLINE = {
         {
           "title": "Muon Optimizer",
           "href": "lessons/0037-muon-optimizer.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Vision, Multimodal & Generative",
+      "lessons": [
+        {
+          "title": "Vision Transformer (ViT)",
+          "href": "lessons/0038-vision-transformer.html"
+        },
+        {
+          "title": "CLIP",
+          "href": "lessons/0039-clip.html"
         },
         {
           "title": "Primer",
