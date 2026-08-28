@@ -237,6 +237,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0039-clip.html"
         },
         {
+          "title": "Variational Autoencoders (VAE)",
+          "href": "lessons/0040-vae.html"
+        },
+        {
           "title": "Primer",
           "href": "lessons/0000-primer-neural-nets-to-tokens.html"
         }
