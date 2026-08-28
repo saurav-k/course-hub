@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GraphRAG - LLM Papers Course</title>
+<meta name="description" content="Some questions have no top k. Building an entity graph and pregenerating community summaries answers them, at roughly three hundred times the tokens per query - and it loses outright on plain lookups.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">LLM PAPERS</a>
+  <a href="../index.html">Syllabus</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Vision, Multimodal &amp; Generative &middot; Lesson 45</div>
+  <h1>GraphRAG</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">2024</span>
+    <span class="pill">16 min</span>
+    Edge, Trinh, Cheng, Bradley, Chao, Mody, Truitt, Metropolitansky, Ness, Larson &middot; Microsoft Research
+    &middot; <a href="https://arxiv.org/abs/2404.16130">arXiv:2404.16130</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The name misleads. <b>GraphRAG is not "RAG with a graph database", it is a different task.</b> "What are the main themes in this corpus" is query-focused summarisation, and no ranking of chunks answers it.</li>
+      <li>The mechanism is two offline stages: an LLM extracts entities and relationships from every text unit, then community detection groups them and an LLM <b>pregenerates a summary for each community</b>. A global question is answered by map-reduce over those summaries.</li>
+      <li>The measured cost is the headline. A benchmark reports roughly <b>331,000 prompt tokens per global query against about 900 for vanilla retrieval</b> - and vanilla retrieval <em>wins</em> on plain fact lookup.</li>
+      <li><b>So the question is never "should we use GraphRAG".</b> It is what fraction of your queries are sensemaking rather than lookup. If that fraction is near zero this is a tax.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  R["Retrieval-Augmented Generation&lt;br/&gt;(Lesson 31)&lt;br/&gt;fetch the top k chunks"] --> Q["THIS PAGE&lt;br/&gt;questions where no top k&lt;br/&gt;contains the answer"]
+  Q --> S["an entity graph plus&lt;br/&gt;pregenerated community summaries"]
+  Q --> C["a routing decision,&lt;br/&gt;not an upgrade"]
+  S --> L["lazy and incremental variants&lt;br/&gt;that cut the index cost"]
+    </div>
+    <figcaption>Where this sits. The previous retrieval lesson taught fetching the most relevant passages; this one is about the class of question for which relevance ranking is the wrong tool entirely. <b>Read it as a second option to route to, never as a better version of the first.</b></figcaption>
+  </figure>
+
+  <h2>1. Why this paper exists</h2>
+  <p>Ordinary retrieval embeds the question, finds the nearest chunks, and puts them in the prompt. That works whenever the answer is written down somewhere in particular. It fails on a whole class of question, and the paper names the class precisely: conventional retrieval "fails on global questions directed at an entire text corpus, such as 'What are the main themes in the dataset?', since this is inherently a query-focused summarization (QFS) task, rather than an explicit retrieval task."</p>
+
+  <p>Sit with that sentence, because it is the lesson. If the answer is a property of the whole corpus, then no top k contains it. Better embeddings do not help, a larger k does not help, and a reranker does not help, because <strong>the failure is not in the ranking</strong>. You asked a retrieval system to do summarisation.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  subgraph LOOKUP["A lookup question"]
+    direction LR
+    la["what is the notice period&lt;br/&gt;in contract 47"] --> lb["it is written in&lt;br/&gt;one passage"]
+    lb --> lc["retrieval finds that passage&lt;br/&gt;and the job is done"]
+  end
+  subgraph GLOBAL["A global question"]
+    direction LR
+    ga["what themes run through&lt;br/&gt;all 4,000 reports"] --> gb["it is written in&lt;br/&gt;no passage at all"]
+    gb --> gc["any top k is arbitrary&lt;br/&gt;so ranking cannot help"]
+  end
+    </div>
+    <figcaption>Two questions that look alike to an API and are not alike at all. The first has a location in the corpus, the second has none, and the second is what this paper addresses. <b>Tell the two apart before choosing any retrieval architecture, because they need different machinery.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: two offline stages, then map-reduce</h2>
+  <p>Both expensive stages run before any user asks anything.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  D["every text unit&lt;br/&gt;in the corpus"] --> X["an LLM extracts entities,&lt;br/&gt;relationships and claims"]
+  X --> G["an entity graph"]
+  G --> CD["community detection&lt;br/&gt;groups closely related entities"]
+  CD --> CS["an LLM pregenerates a summary&lt;br/&gt;for each community,&lt;br/&gt;at several levels of granularity"]
+  CS --> IDX["the index, ready for queries"]
+    </div>
+    <figcaption>The indexing pipeline. Note what is doing the work at each arrow: an LLM reads every text unit, and an LLM writes every community summary. <b>Indexing cost here is model cost, not compute cost, and it scales with the size of your corpus rather than with your hardware.</b></figcaption>
+  </figure>
+
+  <p>At query time, a global question is not answered from the corpus at all. It is answered from the summaries. The paper describes the reduction step directly: "each community summary is used to generate a partial response, before all partial responses are again summarized in a final response to the user."</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as User
+  participant R as Router
+  participant C as Community summaries
+  participant M as Model
+  U->>R: what are the main themes here
+  R->>C: fan the question out over the summaries
+  C->>M: summary 1 - partial answer
+  C->>M: summary 2 - partial answer
+  C->>M: and so on, across every community
+  M->>M: reduce - summarise the partial answers
+  M->>U: one final answer
+  Note over C,M: the map step varies with the question, so caching it does not help
+    </div>
+    <figcaption>Global search, in order. Every community summary is visited for every global query, and each visit is a model call. <b>This is where the token bill comes from, and the note is why it cannot be cached away.</b></figcaption>
+  </figure>
+
+  <p>The published tooling ships four query modes, and is candid about the cost of one of them. <strong>Local Search</strong> is for "questions that require an understanding of specific entities". <strong>Global Search</strong> runs across community reports and is described verbatim as "a resource-intensive method". <strong>DRIFT Search</strong> widens a local search with community information and generated follow-up questions. <strong>Basic Search</strong> is plain vector retrieval, included so you can compare against it.</p>
+
+  <div class="callout">
+    That last mode is worth noticing. The project ships the baseline that competes with it and tells you to measure. The repository's own README carries the warning: "GraphRAG indexing can be an expensive operation, please read all of the documentation to understand the process and costs involved, and start small." The hype around this method is not coming from the people who built it.</div>
+
+  <h2>3. What it costs, measured</h2>
+  <p>An independent benchmark measured prompt tokens per query across methods. The spread is not a detail, it is the design constraint.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart on a logarithmic scale of prompt tokens per query: about 900 for vanilla retrieval, about 1000 for HippoRAG2, about 100000 for LightRAG, and about 331000 for Microsoft GraphRAG global search.">
+      <text class="ttl" x="20" y="24">Prompt tokens per query, logarithmic scale</text>
+      <line class="grid" x1="70" y1="220" x2="620" y2="220"/>
+      <line class="grid" x1="70" y1="160" x2="620" y2="160"/>
+      <line class="grid" x1="70" y1="100" x2="620" y2="100"/>
+      <text class="lbl-sm" x="30" y="224">1k</text>
+      <text class="lbl-sm" x="30" y="164">10k</text>
+      <text class="lbl-sm" x="24" y="104">100k</text>
+      <line class="axis" x1="70" y1="250" x2="620" y2="250"/>
+      <rect class="m-stat"  x="100" y="223" width="90" height="27"/>
+      <rect class="m-stat"  x="240" y="220" width="90" height="30"/>
+      <rect class="m-sky"   x="380" y="100" width="90" height="150"/>
+      <rect class="m-alarm" x="520" y="69"  width="90" height="181"/>
+      <text class="lbl-b"  x="145" y="215" text-anchor="middle">~900</text>
+      <text class="lbl-b"  x="285" y="212" text-anchor="middle">~1k</text>
+      <text class="lbl-b"  x="425" y="92"  text-anchor="middle">~100k</text>
+      <text class="lbl-b"  x="565" y="61"  text-anchor="middle">~331k</text>
+      <text class="lbl-sm" x="145" y="268" text-anchor="middle">vanilla RAG</text>
+      <text class="lbl-sm" x="285" y="268" text-anchor="middle">HippoRAG2</text>
+      <text class="lbl-sm" x="425" y="268" text-anchor="middle">LightRAG</text>
+      <text class="lbl-sm" x="565" y="268" text-anchor="middle">GraphRAG global</text>
+      <text class="lbl-sm" x="70"  y="290">Each gridline is ten times the one below it, so equal bar steps are not equal costs.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>near vanilla cost</span><span><i class="sw-sky"></i>graph, moderate</span><span><i class="sw-alarm"></i>graph, global search</span></div>
+    <figcaption>The measured spread, drawn logarithmically because a linear axis would render the first two bars invisible. Global graph search sits roughly three hundred times above plain retrieval, and one graph method sits beside plain retrieval. <b>"Graph" is not one cost point - the method inside it decides your bill.</b></figcaption>
+  </figure>
+
+  <p>The same benchmark reports that the cost is not flat either: "MS-GraphRAG(global)'s prompt size expands from 7,800 to 40,000 tokens across tasks of increasing difficulty". Harder questions visit more, so the worst queries are the expensive ones.</p>
+
+  <h2>4. What the evidence says about quality</h2>
+  <p>Now read the accuracy beside the cost, from the same benchmark's novel-text results.</p>
+
+  <table>
+    <thead><tr><th>Task</th><th>Basic RAG</th><th>Best graph method</th><th>Verdict</th></tr></thead>
+    <tbody>
+      <tr><td>Fact retrieval</td><td>60.92%</td><td>HippoRAG2 60.14%</td><td>Graph loses</td></tr>
+      <tr><td>Complex reasoning</td><td>42.93%</td><td>HippoRAG2 53.38%</td><td>Graph wins by ~10 points</td></tr>
+      <tr><td>Contextual summarisation</td><td>51.30%</td><td>HippoRAG 64.40%</td><td>Graph wins by ~13 points</td></tr>
+      <tr><td>Fact retrieval, medical set</td><td>64.73%</td><td>HippoRAG2 66.28%</td><td>Roughly level</td></tr>
+      <tr><td>Complex reasoning, medical set</td><td>58.64%</td><td>HippoRAG2 61.98%</td><td>Graph wins narrowly</td></tr>
+    </tbody>
+  </table>
+
+  <p>The benchmark's own first observation states it without hedging: "basic RAG is comparable to or outperforms GraphRAG in simple fact retrieval tasks that does not require complex reasoning across connected concepts." On the same set, Microsoft's global mode scored 49.29% on fact retrieval against basic retrieval's 60.92%.</p>
+
+  <div class="card callout key"><span class="tag">Read the two tables together</span>
+    Global graph search costs roughly three hundred times the tokens per query and loses on fact retrieval, while graph methods win by ten to thirteen points on the reasoning and summarisation tasks they were designed for. That is not an argument for or against the technique. It is a routing decision, and it is the whole content of this lesson.</div>
+
+  <h2>5. The five failure modes, in the order they bite</h2>
+  <ol class="worked">
+    <li><b>Indexing cost is unbounded in corpus size, and it is model cost.</b> Every text unit needs extraction and every community needs a summary. Double the corpus and you double the bill.</li>
+    <li><b>Re-indexing on change.</b> The graph and its summaries are built from the whole corpus, so adding a document can shift the communities. For a corpus that changes daily this is the killer, not the query cost.</li>
+    <li><b>Extraction quality is the ceiling.</b> An LLM decides what the entities are. Deciding that three spellings of a company name are one node is a classic hard problem being handed to a prompt, and nothing downstream recovers from a graph that is confidently wrong.</li>
+    <li><b>Query cost on global search.</b> Roughly 331,000 prompt tokens, measured, and the map step varies with the question so caching does not rescue it.</li>
+    <li><b>It loses on the queries you actually get.</b> If your users ask where the notice period is in one contract, the graph is pure overhead, and that loss has been measured rather than argued.</li>
+  </ol>
+
+  <h2>6. Does this still matter in 2026?</h2>
+  <p><strong>Yes for one query shape, and no as a default.</strong> Here is the decision, as a procedure rather than an opinion.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  Q{"what fraction of queries are&lt;br/&gt;global sensemaking, not lookup?"} -->|"near zero"| A["stay with vector retrieval&lt;br/&gt;a graph index is a tax"]
+  Q -->|"meaningful"| B{"does the corpus&lt;br/&gt;change often?"}
+  B -->|"yes"| C["check the incremental update path&lt;br/&gt;BEFORE you check answer quality"]
+  B -->|"no"| D["start with a lazy variant,&lt;br/&gt;not the eager index"]
+  C --> E["keep the vector baseline live&lt;br/&gt;and route per query"]
+  D --> E
+    </div>
+    <figcaption>The order to make the decisions in. Query shape comes first because it decides whether anything else matters, and update frequency comes second because it decides maintainability rather than quality. <b>Answer quality is the last thing to measure, not the first.</b></figcaption>
+  </figure>
+
+  <p><strong>Start lazy.</strong> Microsoft themselves published a cheaper variant, claiming that "LazyGraphRAG data indexing costs are identical to vector RAG and 0.1% of the costs of full GraphRAG" with "more than 700 times lower query cost", while keeping "comparable answer quality to GraphRAG Global Search for global queries". The mechanism is to defer model use to query time and use noun-phrase extraction during indexing instead of pregenerating summaries.</p>
+
+  <div class="callout warn">
+    Those numbers are a vendor's claim about its own system, and they are quoted here as such rather than as an independent measurement. Treat them as a reason to try the lazy path first, not as a settled benchmark. One widely repeated figure has been left out of this lesson entirely: a much-quoted dollar cost for indexing a GraphRAG dataset traces only to a blog post with no primary citation, so it does not appear here.</div>
+
+  <p><strong>Check the update path before the quality.</strong> Outside Microsoft, LightRAG attacks the same problem with dual-level retrieval and, more importantly for an operator, "an incremental update algorithm that ensures the timely integration of new data". That feature is a direct response to failure mode two, and for a live corpus it decides whether the system survives contact with production.</p>
+
+  <p><strong>On adoption, be honest.</strong> The research activity is real and the ecosystem around it is real. What could not be found, while this lesson was written, is a named large company publishing that GraphRAG in its original form runs its production retrieval. Secondary write-ups consistently describe the production pattern as hybrid - vector search and graph traversal behind a router, chosen per query - but no primary operator source was found for that either, so treat it as the field's reported consensus rather than as measured fact.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does ordinary retrieval fail on a global question?</div>
+      <button class="q-opt">The embedding model was trained on chunks that are far too small</button>
+      <button class="q-opt">The reranker discards the passages that would answer it properly</button>
+      <button class="q-opt">The context window cannot hold the number of chunks required</button>
+      <button class="q-opt">The answer is in no passage, so no ranking of passages holds it</button>
+      <div class="q-fb">The failure is in the task, not the ranking: a property of the whole corpus is written nowhere in particular. Better embeddings, rerankers and bigger windows all leave it unfixed.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does the indexing stage actually build?</div>
+      <button class="q-opt">A vector index over chunks, plus an inverted keyword index</button>
+      <button class="q-opt">An entity graph, plus a written summary for each community</button>
+      <button class="q-opt">A cache of answers to the questions users have asked before</button>
+      <button class="q-opt">A fine-tuned model that has memorised the whole of the corpus</button>
+      <div class="q-fb">An LLM extracts entities and relationships, communities are detected over that graph, and an LLM pregenerates a summary per community. No fine-tuning and no answer cache is involved.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Roughly how do measured per-query token costs compare?</div>
+      <button class="q-opt">Graph global search costs about three times plain retrieval</button>
+      <button class="q-opt">Graph global search costs about thirty times plain retrieval</button>
+      <button class="q-opt">Graph global search costs about three hundred times plain</button>
+      <button class="q-opt">Graph global search costs about the same as plain retrieval</button>
+      <div class="q-fb">About 331,000 prompt tokens per global query against roughly 900 for vanilla retrieval, which is close to a three-hundred-fold difference. Some graph methods do sit near vanilla cost, which is why the method matters more than the label.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">For a corpus that changes daily, what do you check first?</div>
+      <button class="q-opt">Whether an incremental update path exists for the built index</button>
+      <button class="q-opt">Whether answer quality beats the vector baseline on your data</button>
+      <button class="q-opt">Whether the community summaries read well to a human reviewer</button>
+      <button class="q-opt">Whether the entity extraction prompt can be shortened for cost</button>
+      <div class="q-fb">Communities are built from the whole corpus, so a change can shift them and force a rebuild. That decides maintainability, and it makes the quality comparison moot if it fails.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><a href="0031-rag.html">Retrieval-Augmented Generation</a> is the prerequisite and the baseline you keep live beside this.</li>
+    <li>The map-reduce over summaries is a search over generated intermediate results, which is the same shape as <a href="0033-tree-of-thoughts.html">Tree of Thoughts</a> and the budget argument in <a href="0034-test-time-scaling.html">Test-Time Scaling</a>.</li>
+    <li>Indexing writes summaries with a model and then trains nothing, which puts it beside <a href="0022-self-instruct.html">Self-Instruct</a> as a use of models to manufacture data.</li>
+    <li>The cost per query is a token-budget problem, so the economics of <a href="0019-kv-cache-optimization.html">KV cache</a> and <a href="0020-pagedattention-vllm.html">PagedAttention</a> apply directly.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take a hundred real queries from a system you run and ask the agent to classify each as lookup or sensemaking. That ratio is the decision this lesson is about, and it is usually more lopsided than people expect. Then ask it to estimate the token cost of answering the sensemaking ones by map-reduce over summaries, using the figures above.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the paper: <a href="https://arxiv.org/abs/2404.16130">Edge et al., "From Local to Global: A Graph RAG Approach to Query-Focused Summarization" (arXiv:2404.16130)</a>. Then read the benchmark that tested it, because it is the honest half: <a href="https://arxiv.org/abs/2506.05690">Xiang et al., "When to use Graphs in RAG" (arXiv:2506.05690)</a>. For the cheaper variants, <a href="https://arxiv.org/abs/2410.05779">LightRAG (arXiv:2410.05779)</a> and Microsoft's <a href="https://www.microsoft.com/en-us/research/blog/lazygraphrag-setting-a-new-standard-for-quality-and-cost/">LazyGraphRAG post</a>.</p>
+
+  <div class="pager">
+    <a href="0044-blip-2-and-llava.html"><span class="dir">&larr; Previous</span><span class="ttl">BLIP-2 and LLaVA</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course syllabus</span></a>
+  </div>
+
+  <div class="card callout key"><span class="tag">You made it</span>
+    That is the whole course: from a single neuron, through the papers that built modern language models, to how machines learned to see, to generate, and to answer questions no passage contains. If one thing is worth keeping from this last module, it is Lesson 43 - five papers that looked separate turned out to be five parts of one checkpoint. Head back to the <a href="../index.html">course syllabus</a> to revisit any lesson, and keep asking your agent the "why" questions.</div>
+
+  <footer><p>LLM Papers Course &middot; Lesson 45 &middot; Final lesson &middot; <a href="../index.html">Syllabus</a> &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
