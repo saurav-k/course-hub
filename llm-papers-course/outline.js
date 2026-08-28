@@ -259,10 +259,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "GraphRAG",
           "href": "lessons/0045-graphrag.html"
-        },
-        {
-          "title": "Primer",
-          "href": "lessons/0000-primer-neural-nets-to-tokens.html"
         }
       ]
     }
