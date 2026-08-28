@@ -149,7 +149,14 @@ tint as `--course-soft`, and only the chrome uses them - the wordmark, the two p
 rail's current-lesson chip, a course-map section number and a card's hover border. Verify a new
 hue against every palette surface in both modes before you ship it. Pick the offset on the circle,
 not just on the offset grid: -175 and +175 differ by only 10 degrees of actual hue, so a full
-offset list can collide once it wraps past 180.
+offset list can collide once it wraps past 180. **The 25-degree grid is now full** - read the block
+as absolute hue and every step is taken - so a new course splits a 25-degree gap rather than
+extending outwards, and `new-course.md`'s "extend the grid" advice no longer applies. Choose which
+gap by whose pages your reader actually holds open beside yours, then prove the candidate with the
+canvas readback: `staff-ai-course/learning-records/0001-choosing-the-hue.md` carries the method and
+a measured comparison table for four shipped hues. Compare against that table, not against the
+paragraph in `hub.css`, whose "worst of the 84 course accents" figures were measured when the hub
+had seven courses and were never re-run.
 
 The Cloud Architecture category adds one data-driven widget to the shared system: the capability
 matrix (`figure.cmatrix`), rendered by `hub.js` from `cloud-comparison-course/matrix.js`, which is
