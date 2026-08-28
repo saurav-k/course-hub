@@ -241,6 +241,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0040-vae.html"
         },
         {
+          "title": "Generative Adversarial Networks",
+          "href": "lessons/0041-gan.html"
+        },
+        {
           "title": "Primer",
           "href": "lessons/0000-primer-neural-nets-to-tokens.html"
         }
