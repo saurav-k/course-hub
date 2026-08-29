@@ -6,7 +6,8 @@
    wrong colours.
 
    What it does, in order:
-     1. head phase   - restore mode + palette from localStorage
+     1. head phase   - restore mode, palette and the two reading
+                       preferences from localStorage
      2. mount phase  - build the rail from window.COURSE_OUTLINE,
                        build the topbar controls and settings popover,
                        and the pre-production bar when the host says so
@@ -24,6 +25,44 @@
     read:    'coursehub.read',      // { courseKey: [lesson file names] }
     legacy:  'llmcourse-theme'      // what the first design system wrote
   };
+
+  /* ---------- the two reading preferences ----------
+     Each one is a named step, not a raw length. Two properties follow from
+     that and both matter.
+
+     A stored step is validated against this table exactly as a palette key is,
+     so a value from a step that was later withdrawn falls back to the default
+     rather than leaving one reader with a page nobody else can see.
+
+     And the value reaches the page as a `--*-user` custom property on <html>,
+     which is the only thing a reader is allowed to write. hub.css resolves
+     --measure and --fs-body from these; see the three-layer note there. Until
+     2026-08 these were applied as an inline `--measure` on <html> and an inline
+     `font-size` on <body>, which beat every stylesheet rule that was not
+     !important and pinned a reader who had turned them on. Never write a
+     resolved token from here.
+
+     `legacy` and `on` carry the one-time migration from those two keys. A
+     stored `wide=1` becomes the step that reproduces 52rem and a stored `big=1`
+     the step that reproduces 1.3125rem, so a reader who had them on sees the
+     same page after the migration as before it. */
+  var READING = {
+    measure: {
+      store:  'coursehub.measure',
+      prop:   '--measure-user',
+      steps:  { normal: null, wide: '52rem' },
+      legacy: 'coursehub.wide',
+      on:     'wide'
+    },
+    bodysize: {
+      store:  'coursehub.bodysize',
+      prop:   '--fs-body-user',
+      steps:  { normal: null, big: '1.3125rem' },
+      legacy: 'coursehub.big',
+      on:     'big'
+    }
+  };
+  var READING_KEYS = Object.keys(READING);
 
   var PALETTES = [
     { key: 'paper',     label: 'Paper',     note: 'Warm cream, rust links, deep teal. The house identity.' },
@@ -60,6 +99,31 @@
   var palette = get(STORE.palette);
   if (PALETTE_KEYS.indexOf(palette) === -1) palette = 'paper';
   root.setAttribute('data-palette', palette);
+
+  /* The two reading preferences, restored here rather than when the appearance
+     panel is built, so a reader who widened the column or asked for larger type
+     gets it with the first paint instead of a step after it. */
+  function readStep(axis) {
+    var step = get(axis.store);
+    if (step === null) {
+      // one-time migration from the inline-style era; see READING above
+      if (get(axis.legacy) === '1') { step = axis.on; set(axis.store, step); }
+      drop(axis.legacy);
+    }
+    return Object.prototype.hasOwnProperty.call(axis.steps, step) ? step : 'normal';
+  }
+
+  function applyStep(axis, step) {
+    var value = axis.steps[step];
+    if (value) root.style.setProperty(axis.prop, value);
+    else root.style.removeProperty(axis.prop);
+  }
+
+  var reading = {};
+  READING_KEYS.forEach(function (name) {
+    reading[name] = readStep(READING[name]);
+    applyStep(READING[name], reading[name]);
+  });
 
   /* The third axis: which course this page belongs to. Mode and palette are the
      reader's choices; this one is a property of the page, and it is what stops
@@ -130,6 +194,40 @@
     probe.style.color = '';
     probe.style.color = 'var(' + name + ')';
     return asHex(getComputedStyle(probe).color);
+  }
+
+  /* An undeclared custom property is invalid at computed-value time, and for
+     `color` that means `inherit`, so the probe would hand back the surrounding
+     text colour and report a confident wrong answer. Ask the cascade whether
+     the name exists before trusting it. */
+  function tokenExists(name) {
+    return getComputedStyle(root).getPropertyValue(name).trim() !== '';
+  }
+
+  /* ---------- a token inside a Mermaid classDef ----------
+     Mermaid's flowchart grammar rejects a parenthesis in a classDef value, so
+     `classDef keep fill:var(--ok-soft)` never reaches the renderer: it is a
+     parse error, and Mermaid draws a red error box rather than logging
+     anything. A diagram that needs a colour of its own therefore had to write
+     a hex literal, which is theme-blind by construction and wrong in one of the
+     two modes - a near-white fill under near-white labels in dark, on the
+     published site.
+
+     The source keeps the honest spelling and the token is resolved on the way
+     in, from the same probe that themes the rest of the diagram. So a classDef
+     follows the palette, both modes and every repaint like everything else, and
+     an author writes the token they already know.
+
+     A name the stylesheet does not declare is left as it was written. That
+     turns a typo into the red error box the author sees at once, instead of a
+     colour quietly taken from whatever the probe inherited. */
+  var TOKEN_DECL = /\b([a-z-]+)\s*:\s*var\(\s*(--[a-z0-9-]+)\s*\)/gi;
+
+  function resolveTokens(source, forProperty) {
+    return source.replace(TOKEN_DECL, function (whole, property, name) {
+      if (!tokenExists(name)) return whole;
+      return property + ':' + forProperty(property.toLowerCase(), name);
+    });
   }
 
   /* ============================================================
@@ -240,8 +338,12 @@
         // page collapses under the reader and the scroll position jumps.
         var box = node.getBoundingClientRect();
         if (box.height) node.style.minHeight = box.height + 'px';
-        node.textContent = node.dataset.mmd;
       }
+      // The stash keeps the token spelling, so every repaint resolves against
+      // the mode and palette in force at that moment rather than the first one.
+      node.textContent = resolveTokens(node.dataset.mmd, function (property, name) {
+        return token(name);
+      });
       node.removeAttribute('data-processed');
     });
     var release = function () {
@@ -283,6 +385,19 @@
      ============================================================ */
   var PRINT_FILL = ['#ffffff', '#eeeeee', '#f7f7f7', '#e4e4e4', '#fbfbfb', '#ebebeb', '#f2f2f2', '#e8e8e8'];
   var PRINT_EDGE = ['#000000', '#555555', '#222222', '#777777', '#333333', '#666666', '#111111', '#888888'];
+
+  /* A token named in a classDef is resolved for paper by the role it is used
+     for, not by a second colour table. hub.css's print block already flattens
+     every semantic token to black ink on white paper, and the copy below is
+     drawn in the screen medium where that block does not apply, so a table here
+     would only be a duplicate of it that could go stale. A fill is the paper
+     and everything else is the ink, which is the same answer the print block
+     gives for --ok against --warn or --ok-soft against --warn-soft. */
+  var PRINT_ROLE = { fill: '#ffffff' };
+
+  function printToken(property) {
+    return PRINT_ROLE[property] || '#000000';
+  }
 
   function printVars() {
     var vars = {
@@ -366,6 +481,7 @@
       index += 1;
       var source = node.dataset.mmd;
       if (!source) { step(); return; }
+      source = resolveTokens(source, printToken);
       var drawn;
       try {
         drawn = window.mermaid.render('mmd-print-' + index, source, stage);
@@ -784,12 +900,8 @@
 
     var prefGroup = el('div', 'set-group');
     prefGroup.appendChild(el('h3', null, 'Reading'));
-    prefGroup.appendChild(toggleRow('Wider text column', 'coursehub.wide', function (on) {
-      root.style.setProperty('--measure', on ? '52rem' : '');
-    }));
-    prefGroup.appendChild(toggleRow('Larger type', 'coursehub.big', function (on) {
-      document.body.style.fontSize = on ? '1.3125rem' : '';
-    }));
+    prefGroup.appendChild(readingRow('Wider text column', 'measure'));
+    prefGroup.appendChild(readingRow('Larger type', 'bodysize'));
     var note = el('p', 'set-note',
       'Your choice is remembered in this browser and applies to every course in the hub.');
     prefGroup.appendChild(note);
@@ -797,15 +909,19 @@
     return panel;
   }
 
-  function toggleRow(label, key, apply) {
+  /* Two steps today, a checkbox for each. The row reads the step the head phase
+     already resolved rather than the store, so the panel and the page can never
+     disagree about what is on. */
+  function readingRow(label, name) {
+    var axis = READING[name];
     var row = el('label', 'set-row');
     var box = el('input');
     box.type = 'checkbox';
-    box.checked = get(key) === '1';
-    if (box.checked) apply(true);
+    box.checked = reading[name] !== 'normal';
     box.addEventListener('change', function () {
-      set(key, box.checked ? '1' : '0');
-      apply(box.checked);
+      reading[name] = box.checked ? axis.on : 'normal';
+      set(axis.store, reading[name]);
+      applyStep(axis, reading[name]);
     });
     row.appendChild(box);
     row.appendChild(el('span', null, label));

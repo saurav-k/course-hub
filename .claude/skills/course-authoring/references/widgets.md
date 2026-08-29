@@ -54,6 +54,19 @@ Five rules, all of them load-bearing.
 `main.wrap` is the reading column and it is the default for a lesson and for a reference sheet.
 `main.wide wrap` is the full width and it is for a course map and the hub landing page only.
 
+Inside `main.wrap` a page has three widths, and they are the only three:
+
+| Width | How to reach it | For |
+|---|---|---|
+| the prose column | the default for every child | prose, and anything read as prose |
+| the breakout | a figure, table, `pre`, `.diagram`, `.module`, `.lgrid`, `.hero` or `.roadmap`, which the sheet widens on its own; `class="wide"` on anything else | a figure or a table that does not fit the prose column |
+| edge to edge | `class="bleed"` | reserved, see below |
+
+**`.bleed` is a reserved escape hatch and it has no uses today.**
+It is kept on purpose rather than retired: it is the only route from `main.wrap` to the full grid column, the gutters included, and without it the first page that wants a full-bleed figure would reach for an inline style or invent a class, and the vocabulary is closed.
+It stays one declaration, it stays documented, and reaching for it means the figure genuinely wants the whole page.
+Widening the whole page instead is `main.wide`, which is a decision about the page and not about one element.
+
 ### A course map
 
 Same head, one level shallower, and no Mermaid unless the map itself carries a diagram:
@@ -86,6 +99,23 @@ The module number in the eyebrow is the module the card sits under in `index.htm
 Both are mandatory on every lesson page. See the ladder in [`pedagogy.md`](pedagogy.md).
 
 A one-sentence framing line may use `<p class="lead">` instead, above `.paper-meta`, where the page has no attribution to carry.
+
+### The breadcrumb, `.crumbs`
+
+Optional, and above the eyebrow when it is there.
+The hub sheet styles it; no script is needed to make it work.
+
+```html
+<nav class="crumbs" aria-label="Breadcrumb"><a href="../../index.html">Course Hub</a><span class="sep">/</span><a href="../index.html">Course Name</a><span class="sep">/</span><span>Module name</span></nav>
+```
+
+`.sep` is the divider between the rungs and is a `<span>` holding a single `/`.
+The last rung is the page's own place and is plain text, never a link.
+`aria-label="Breadcrumb"` is what tells a screen reader which navigation this is; the class alone says nothing.
+
+Only `llm-evolution-course` writes one today, on all 60 of its pages, because a routed course is the case where a reader can arrive from four different orders and needs telling which one they are in.
+That course adds `data-crumb-section` to the last rung and its own `outline.js` rewrites the text to the active route's section name; the attribute means nothing outside it, so do not copy it into another course.
+An ordinary course whose spine already names the hub and the course map does not need a breadcrumb as well.
 
 ## Headings: the tag and the size are separate decisions
 
@@ -190,6 +220,26 @@ Pick the kind by what the reader is confused about:
 A `mindmap` and a `timeline` take their branch colours from Mermaid's own twelve-step scale rather than from the theme it is handed.
 `hub.js` supplies that scale from the `--branch-0..7` tokens and `hub.css` pins the mindmap root disc, so both follow the palette.
 A diagram type that appears in a colour following neither the palette nor those tokens is that bug resurfacing.
+
+#### A colour of its own, in a `classDef`
+
+Most diagrams need none: every node already carries the palette.
+Where one node genuinely means something different from another - kept against dropped, a constant against a term you can shrink - write a `classDef` and give it a **token**, never a hex literal.
+
+```
+  classDef keep fill:var(--ok-soft),stroke:var(--ok)
+  classDef drop fill:var(--warn-soft),stroke:var(--warn)
+```
+
+Mermaid's own grammar rejects a parenthesis in a `classDef` value, so `hub.js` resolves the token on the way in, from the same probe that themes the rest of the diagram.
+The result follows the palette, both modes and every repaint, and the printed copy comes out black on white with the rest of the page.
+**A hex literal cannot do any of that**: it is one mode's answer written down, and the mode it is wrong in is the one nobody checked. Two published diagrams carried a near-white fill under near-white labels in dark mode, at 1.1:1, until this existed.
+
+Three rules.
+
+- **Name a semantic token, not a raw one.** `--ok`, `--warn`, `--gold`, `--accent-2`, `--surface-2`, `--line-strong` and their `-soft` partners. The raw `--l-*` and `--d-*` layer belongs to the terminal transcript and to nothing else.
+- **Do not set `color`.** The label already takes `--ink` from the theme, in both modes. Setting it is how a fill and its label drift apart later.
+- **Spell the token correctly.** A name the stylesheet does not declare is left exactly as written, so Mermaid fails to parse it and draws a red error box. That is deliberate: a visible failure beats a colour quietly taken from somewhere else.
 
 ### Inline SVG, for anything quantitative
 
@@ -510,9 +560,20 @@ A roadmap entry that has since been written is marked `class="written"`.
 
 Where a course nests a level deeper, a lecture hub card is followed by `<ul class="parts">` listing its parts, each numbered with `<span class="pn">`.
 
-`.roadmap` is now in `assets/hub.css`, because a second course needed it and an unstyled roadmap is invisible markup.
-**It is currently declared twice**: the copy in `statistical-foundations-ml-course/assets/course-extras.css` is still there, and on that course's own pages it wins on cascade order. The two declarations are equivalent, so nothing renders differently, but the duplication is real and the extras copy should be deleted the next time that course is touched for another reason.
+`.roadmap` is in `assets/hub.css`, because a second course needed it and an unstyled roadmap is invisible markup.
+The hub sheet is its only home; the duplicate that used to sit in `statistical-foundations-ml-course/assets/course-extras.css` is gone.
 `.parts` and `.pn` are still only in that extras sheet, so a new course that uses them gets unstyled markup and must promote them the same way rather than copying the file.
+
+On the hub landing page a category may carry an emblem, `<img class="cat-art">`, between the `.module-h` heading and its `.mcount`:
+
+```html
+<div class="module-h"><span class="mnum">CLOUD</span><h2 class="h-sub">Cloud Architecture</h2><img class="cat-art" src="assets/category-cloud.svg" alt="" width="34" height="34"><span class="mcount">5 courses</span></div>
+```
+
+The image is decorative, so `alt` is empty: the heading beside it already names the category, and a second reading of the same words is noise on a screen reader.
+`width` and `height` are the intrinsic size of the file and hold the space before it loads; the sheet sets the drawn height to `1.7rem` and lets the width follow, so the emblem tracks the heading rather than a pixel figure.
+Only Cloud Architecture has one today.
+An emblem is a hub-landing-page shape, not a course-map one.
 
 Two more small shapes live in the hub sheet and are worth knowing, because both were being written as inline styles before they existed:
 
@@ -573,5 +634,11 @@ For courses whose pages are exercises rather than readings.
 `.metric` is key, value, unit.
 The `ul.checklist` closes a lab page: each item is something the learner can now do, phrased in the first person.
 
-These classes live in `llm-inference-course/assets/course-extras.css`, not in the hub sheet, so today they only work in that course.
-A second course that wants the lab kit promotes the rules into `assets/hub.css` and deletes them from the extras file, in one pull request. It does not fork them.
+**The whole kit lives in `assets/hub.css`, under "the lab kit", and every course may use it.**
+`llm-inference-course` invented it and `llm-efficiency-course` was the second course to need it, which is what promoted it; the originating extras file keeps no copy, and the responsive and print rules for `.lab` and `.metric-grid` and the tabular-numerals entry for `.metric` sit in the hub sheet beside the base rules rather than in two files.
+One owner, one place to change it.
+
+One rule in that block reads the raw palette layer on purpose.
+`.term` is drawn from the `--d-*` values in **both** modes, because a terminal reads as a terminal only while it is dark, and the `--d-*` set is declared whichever mode the reader is in.
+That is the one sanctioned use of the raw layer: everything else in the kit reads the semantic tokens.
+The print block restates the six `--term-*` tokens with `!important`, because the hub's own print block flattens the semantic tokens and cannot reach these.
