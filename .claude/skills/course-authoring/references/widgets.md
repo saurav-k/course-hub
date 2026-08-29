@@ -813,7 +813,7 @@ Every line here is measured on published pages, and it is a promise rather than 
 | Type, rhythm and shape are tokens, so a rule reads a token rather than a literal. | "The design tokens", above |
 | The six legacy aliases `--paper`, `--paper-2`, `--card-bg`, `--rule`, `--maxw` and `--readw` keep resolving. | `assets/hub.css` |
 | The eight-colour chart ramp stays palette-independent, so a course that teaches "statistics is teal" keeps that whichever palette the reader picked. | "Inline SVG, for anything quantitative", above |
-| `--gold` and `--ok` are never aliased to each other in any palette, because the capability matrix uses them for two states that make opposite claims. | "The capability matrix", above |
+| `--gold` and `--ok` are never aliased to each other in any palette or either mode, because the capability matrix uses them for two states that make opposite claims. The print block flattens both to one ink, which is why the `absent` cell also carries the words *No equivalent*. | "The capability matrix", above |
 | `.h-sub` and `.h-label` hold visual rank separately from outline rank, so a heading can be retagged for outline order without being redesigned. | "Headings", above |
 | Mermaid follows the tokens for free: a new palette needs no colour table. | "Mermaid, for structure", above |
 | Diagrams print as ink on paper, from a copy drawn ahead of time during browser idle. | `assets/hub.js` |
