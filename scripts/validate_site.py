@@ -816,8 +816,21 @@ HUB_JS: Path = REPO_ROOT / "assets" / "hub.js"
 # The attributes ``hub.js`` may write on ``<html>``. Three are the reader's own
 # axes, one is derived from the URL and one from the hostname. A control that
 # writes anything else has stepped outside the axis contract.
+# Every attribute a reader control, or the page itself, may put on <html>. Two
+# of them are the reader's and are not `--*-user` properties, because what they
+# carry does not compose: `data-body-face` selects a family and the three
+# measured constants that have to travel with it, and `data-motion` selects a
+# block of rules rather than a value.
 AXIS_ATTRIBUTES: frozenset[str] = frozenset(
-    {"data-mode", "data-palette", "data-design", "data-course", "data-env"}
+    {
+        "data-mode",
+        "data-palette",
+        "data-design",
+        "data-body-face",
+        "data-motion",
+        "data-course",
+        "data-env",
+    }
 )
 
 CSS_COMMENT: re.Pattern[str] = re.compile(r"/\*.*?\*/", re.DOTALL)

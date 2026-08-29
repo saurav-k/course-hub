@@ -22,48 +22,187 @@
     mode:    'coursehub.mode',      // "light" | "dark" | "" (follow the system)
     palette: 'coursehub.palette',   // a palette key
     design:  'coursehub.design',    // a design key
+    face:    'coursehub.bodyface',  // a reading-face key
+    leading: 'coursehub.leading',   // a line-spacing key
+    density: 'coursehub.density',   // a density key
+    motion:  'coursehub.motion',    // "reduced" | "full" | "" (follow the system)
+    panel:   'coursehub.panel',     // where the reader put the appearance panel
     rail:    'coursehub.rail',      // "on" | "off"
     read:    'coursehub.read',      // { courseKey: [lesson file names] }
     legacy:  'llmcourse-theme'      // what the first design system wrote
   };
 
-  /* ---------- the two reading preferences ----------
-     Each one is a named step, not a raw length. Two properties follow from
-     that and both matter.
+  /* ============================================================
+     THE SIX READER CONTROLS
 
-     A stored step is validated against this table exactly as a palette key is,
-     so a value from a step that was later withdrawn falls back to the default
-     rather than leaving one reader with a page nobody else can see.
+     Eleven reading axes were assessed and six earn a control: a control is
+     worth its place when readers genuinely differ on it, the reader can
+     perceive the difference and judge it, and a wrong setting is recoverable.
+     Ground, body size, reading face, measure, line spacing and density pass.
+     The display face, the mono face and the eyebrow treatment fail all three in
+     the same way - a reader sets them once out of curiosity and never returns -
+     and they are author tokens on the course contract instead. The accent is
+     not a seventh control: it is carried by the palette and rotated per course,
+     and a colour picker would put a contrast criterion in the reader's hands.
 
-     And the value reaches the page as a `--*-user` custom property on <html>,
-     which is the only thing a reader is allowed to write. hub.css resolves
-     --measure and --fs-body from these; see the three-layer note there. Until
-     2026-08 these were applied as an inline `--measure` on <html> and an inline
-     `font-size` on <body>, which beat every stylesheet rule that was not
+     Every registry below is DATA. Nothing in this file branches on a known key,
+     so registering a face, a spacing step or a density adds an entry and no
+     framework code, and the source of these lists can move without the code
+     that consumes them changing. The same discipline the design registry
+     already carries.
+
+     Two shapes, and the difference is not cosmetic.
+
+     A value that composes on its own is a `--*-user` custom property written
+     inline on <html>, which is the only thing a reader may write; hub.css
+     resolves the token every rule reads from it. Until 2026-08 the two
+     preferences that existed were applied as an inline `--measure` and an
+     inline `font-size` on <body>, which beat every stylesheet rule that was not
      !important and pinned a reader who had turned them on. Never write a
      resolved token from here.
 
-     `legacy` and `on` carry the one-time migration from those two keys. A
-     stored `wide=1` becomes the step that reproduces 52rem and a stored `big=1`
-     the step that reproduces 1.3125rem, so a reader who had them on sees the
-     same page after the migration as before it. */
-  var READING = {
-    measure: {
-      store:  'coursehub.measure',
-      prop:   '--measure-user',
-      steps:  { normal: null, wide: '52rem' },
-      legacy: 'coursehub.wide',
-      on:     'wide'
+     A value that cannot compose is a registered axis attribute. The reading
+     face is one, because three measured constants - the prose advance, the
+     x-height and the apparent-size factor - have to travel with the family and
+     one property cannot carry them; motion is another, because what it selects
+     is a block of rules rather than a value.
+     ============================================================ */
+
+  /* ---------- 3. the reading face ----------
+     The strongest evidence behind any control here. Wallace et al. 2022, 352
+     readers: a 35% per-individual spread in reading speed across faces at
+     matched perceived size, three quarters of them showing a large effect, and
+     a reader's preferred face is not their fastest one. The framework cannot
+     pick for the reader and cannot claim the reader will pick right by feel
+     either, so the honest response is to offer the control.
+
+     A key here has a `:root[data-body-face="key"]` entry in hub.css declaring
+     the family and its three constants together. The first entry is the
+     registered default and is what a page with no attribute renders. */
+  var FACES = [
+    { key: 'serif', label: 'Serif', note: 'Source Serif 4. The hub as it reads today.' },
+    { key: 'sans',  label: 'Sans',  note: 'Inter. A larger x-height at the same apparent size.' }
+  ];
+
+  /* ---------- 5. line spacing ----------
+     Three steps and not a slider, because the range that matters is narrow and
+     there is no modern screen evidence distinguishing points inside it; a
+     continuous control would imply a precision the literature does not have.
+     It reaches 1.5 because that is the figure both relevant success criteria
+     name.
+
+     Normal writes nothing. That is the whole of the difference between it and
+     the other two: hub.css nudges the leading up above a wide measure, and an
+     explicit reader value suppresses that nudge, so a reader on Normal keeps
+     the design's leading with the nudge and a reader who has stated a number
+     gets exactly that number. Reset therefore lands on Normal by removing a
+     property rather than by writing one. */
+  var LEADINGS = [
+    { key: 'tight',  label: 'Tight',  value: '1.5' },
+    { key: 'normal', label: 'Normal', value: null },
+    { key: 'loose',  label: 'Loose',  value: '1.9' }
+  ];
+  var LEADING_DEFAULT = 'normal';
+
+  /* ---------- 6. density ----------
+     Density scales the reading column's vertical rhythm and reaches nothing
+     else. That is a hard limit rather than a preference: one control in the
+     chrome already fails WCAG 2.2 SC 2.5.8, seven more pass only on the spacing
+     exception, and the smallest compliant control has two pixels of headroom,
+     so a compact chrome turns near-misses into failures.
+
+     The limit is structural and not a promise. Every name in RHYTHM below is
+     one of the twenty prose-rhythm roles, the check in validate_site.py refuses
+     any `--*-user` write hub.css does not resolve, and hub.css resolves exactly
+     the twenty-four tokens a reader control can reach. A density that tried to
+     tighten the topbar would have nothing to write to.
+
+     The factor is applied to the stylesheet's own default rather than to a
+     literal, so a design that restates a role is scaled rather than overruled. */
+  var DENSITIES = [
+    { key: 'comfortable', label: 'Comfortable', factor: 1 },
+    { key: 'compact',     label: 'Compact',     factor: 0.75 }
+  ];
+  var DENSITY_DEFAULT = 'comfortable';
+
+  /* The twenty prose-rhythm roles, each named by the `prop` field the check in
+     validate_site.py reads, and each carrying what it spaces so the list can be
+     compared against hub.css by eye. Six roles, four of them families, because
+     the four heading levels do not share a value and reconciling them would be
+     a design change. */
+  var RHYTHM = [
+    { prop: '--sp-para-user',              role: 'p' },
+    { prop: '--sp-list-user',              role: 'ul, ol' },
+    { prop: '--sp-list-item-user',         role: 'li' },
+    { prop: '--sp-heading-before-1-user',  role: 'h1, above' },
+    { prop: '--sp-heading-before-2-user',  role: 'h2, above' },
+    { prop: '--sp-heading-before-3-user',  role: 'h3, above' },
+    { prop: '--sp-heading-before-4-user',  role: 'h4, above' },
+    { prop: '--sp-heading-after-1-user',   role: 'h1, below' },
+    { prop: '--sp-heading-after-2-user',   role: 'h2, below' },
+    { prop: '--sp-heading-after-3-user',   role: 'h3, below' },
+    { prop: '--sp-heading-after-4-user',   role: 'h4, below' },
+    { prop: '--sp-block-user',             role: '.card, table' },
+    { prop: '--sp-block-note-user',        role: '.callout, .lab' },
+    { prop: '--sp-block-code-user',        role: 'pre, .worked, .metric-grid' },
+    { prop: '--sp-block-panel-user',       role: '.quiz, .practice, .cmatrix' },
+    { prop: '--sp-block-aside-user',       role: '.teacher-note' },
+    { prop: '--sp-block-inline-user',      role: '.math, .q' },
+    { prop: '--sp-block-term-user',        role: '.term' },
+    { prop: '--sp-figure-user',            role: 'figure, above' },
+    { prop: '--sp-figure-after-user',      role: 'figure, below' }
+  ];
+
+  /* ---------- motion, which is a need rather than a taste ----------
+     Present because it must be, and defaulting to the operating system because
+     a reader who has already said this once should not have to say it again. */
+  var MOTIONS = [
+    { key: '',         label: 'System' },
+    { key: 'reduced',  label: 'Reduced' },
+    { key: 'full',     label: 'Full' }
+  ];
+
+  /* ---------- 2 and 4. the two ranges ----------
+     Both are honest units. The body size is apparent px on the Source Serif 4
+     reference scale, so "19" means the same apparent size whichever face is
+     selected; the measure is real characters, because a `ch` is the advance of
+     the digit zero and means a different character count for every face. Both
+     are inputs to a derivation in hub.css and neither writes the width or the
+     px size it implies: those are outputs.
+
+     `token` is what the slider reads to find where it already is, and reading
+     it rather than repeating a number here is what keeps the control honest.
+     The default body size is not one number - the 720px block sets a smaller
+     one, and a design may set another - so a hard-coded start would tell a
+     reader on a phone they are at 19 while the page renders 17. */
+  var RANGES = [
+    {
+      name:  'bodysize',
+      store: 'coursehub.bodysize',
+      prop:  '--fs-body-user',
+      token: '--fs-body-ref',
+      label: 'Text size',
+      legend: function (value) { return value + 'px'; },
+      min: 16, max: 28, step: 1,
+      // The stylesheet states this size in rem and the reader's number is on
+      // the same scale, so the write stays in rem: a reader who has raised the
+      // browser's own default text size keeps it, which a px value would
+      // silently take away from them.
+      read:  function (raw) { return raw * 16; },
+      write: function (value) { return (value / 16) + 'rem'; }
     },
-    bodysize: {
-      store:  'coursehub.bodysize',
-      prop:   '--fs-body-user',
-      steps:  { normal: null, big: '1.3125rem' },
-      legacy: 'coursehub.big',
-      on:     'big'
+    {
+      name:  'measure',
+      store: 'coursehub.measure',
+      prop:  '--measure-chars-user',
+      token: '--measure-chars',
+      label: 'Line width',
+      legend: function (value) { return value + ' characters'; },
+      min: 55, max: 85, step: 5,
+      read:  function (raw) { return raw; },
+      write: function (value) { return String(value); }
     }
-  };
-  var READING_KEYS = Object.keys(READING);
+  ];
 
   var PALETTES = [
     { key: 'paper',     label: 'Paper',     note: 'Warm cream, rust links, deep teal. The house identity.' },
@@ -149,30 +288,118 @@
   if (DESIGN_KEYS.indexOf(design) === -1) design = DESIGNS[0].key;
   root.setAttribute('data-design', design);
 
-  /* The two reading preferences, restored here rather than when the appearance
-     panel is built, so a reader who widened the column or asked for larger type
-     gets it with the first paint instead of a step after it. */
-  function readStep(axis) {
-    var step = get(axis.store);
-    if (step === null) {
-      // one-time migration from the inline-style era; see READING above
-      if (get(axis.legacy) === '1') { step = axis.on; set(axis.store, step); }
-      drop(axis.legacy);
+  /* ---------- a registered choice ----------
+     The reader's stored value if the registry still knows it, and the
+     registry's own default if it does not. That guard is what makes a
+     withdrawal survivable: a reader who chose a step that was later taken out
+     lands on the default rather than on a page nobody else can see and nobody
+     else can reproduce. Storage that raises returns null through `get`, which
+     is not a registered key either, so a reader with storage blocked gets the
+     same default and the same correct page.
+
+     The default is named rather than taken from the first entry, because two of
+     these registries are ordered for the eye - tight before normal before loose
+     - and the step a reader lands on is not the one that happens to come
+     first. */
+  function registered(list, stored, fallback) {
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i].key === stored) return stored;
     }
-    return Object.prototype.hasOwnProperty.call(axis.steps, step) ? step : 'normal';
+    return fallback;
   }
 
-  function applyStep(axis, step) {
-    var value = axis.steps[step];
-    if (value) root.style.setProperty(axis.prop, value);
-    else root.style.removeProperty(axis.prop);
+  function entry(list, key) {
+    for (var i = 0; i < list.length; i += 1) {
+      if (list[i].key === key) return list[i];
+    }
+    return list[0];
+  }
+
+  /* ---------- the reading preferences, restored before the first paint ----------
+     Here rather than when the appearance panel is built, so a reader who has
+     set a face, a size, a column or a spacing gets it with the first paint
+     instead of a step after it. */
+
+  /* The two ranges. A stored value is a number on the control's own grid or it
+     is nothing: anything else - a step that was withdrawn, a value from a range
+     that has since narrowed, a hand-edited key - falls back to writing no
+     property at all, which is exactly the stylesheet's own default.
+
+     The two step names this used to store are migrated once and dropped, as the
+     first design system's single theme key already is above. `big` reproduced
+     1.3125rem, which is 21 on this scale and lands exactly. `wide` reproduced
+     52rem, which is 97.8 characters at the house body size and does not land at
+     all: it is past the 85 this framework calls a safe measure, so it migrates
+     to 85 and that reader's column narrows slightly. The alternative was to
+     keep a value the panel itself will not offer, which is the shape of a
+     preference a reader can no longer find. */
+  var LEGACY_STEPS = { measure: { wide: 85 }, bodysize: { big: 21 } };
+
+  /* Two questions, deliberately not one function. `snap` asks where on the
+     control's grid a number lands and always answers; `onGrid` asks whether a
+     stored value is one this control could have written and answers null when
+     it is not, which is what makes an unknown stored value fall back to the
+     stylesheet's own default rather than to the nearest thing it could reach. */
+  function snap(axis, value) {
+    var stepped = Math.round((value - axis.min) / axis.step) * axis.step + axis.min;
+    return Math.min(Math.max(stepped, axis.min), axis.max);
+  }
+
+  function onGrid(axis, value) {
+    if (!isFinite(value) || value < axis.min || value > axis.max) return null;
+    return snap(axis, value);
+  }
+
+  function readRange(axis) {
+    var stored = get(axis.store);
+    if (stored !== null && Object.prototype.hasOwnProperty.call(LEGACY_STEPS[axis.name], stored)) {
+      stored = String(LEGACY_STEPS[axis.name][stored]);
+      set(axis.store, stored);
+    }
+    return stored === null ? null : onGrid(axis, parseFloat(stored));
+  }
+
+  function applyRange(axis, value) {
+    if (value === null) root.style.removeProperty(axis.prop);
+    else root.style.setProperty(axis.prop, axis.write(value));
   }
 
   var reading = {};
-  READING_KEYS.forEach(function (name) {
-    reading[name] = readStep(READING[name]);
-    applyStep(READING[name], reading[name]);
+  RANGES.forEach(function (axis) {
+    reading[axis.name] = readRange(axis);
+    applyRange(axis, reading[axis.name]);
   });
+
+  /* The reading face. An attribute rather than a property, because three
+     measured constants travel with the family; see the registry above. */
+  var face = registered(FACES, get(STORE.face), FACES[0].key);
+  if (face !== FACES[0].key) root.setAttribute('data-body-face', face);
+
+  /* Line spacing, and the one step that writes nothing. */
+  var leading = registered(LEADINGS, get(STORE.leading), LEADING_DEFAULT);
+  function applyLeadingValue(value) {
+    if (value) root.style.setProperty('--lh-body-user', value);
+    else root.style.removeProperty('--lh-body-user');
+  }
+  applyLeadingValue(entry(LEADINGS, leading).value);
+
+  /* Density, written onto the twenty prose-rhythm roles and nothing else. The
+     factor multiplies each role's own `-default`, so a design that restates one
+     is scaled rather than overruled, and a factor of 1 writes nothing so the
+     comfortable page is byte-for-byte the page that had no control at all. */
+  var density = registered(DENSITIES, get(STORE.density), DENSITY_DEFAULT);
+  function applyDensityFactor(factor) {
+    RHYTHM.forEach(function (role) {
+      if (factor === 1) root.style.removeProperty(role.prop);
+      else root.style.setProperty(role.prop, 'calc(var(' + role.prop.replace('-user', '-default') + ') * ' + factor + ')');
+    });
+  }
+  applyDensityFactor(entry(DENSITIES, density).factor);
+
+  /* Motion. Absent means follow the operating system, which is the state every
+     page was in before this control existed. */
+  var motion = registered(MOTIONS, get(STORE.motion), '');
+  if (motion) root.setAttribute('data-motion', motion);
 
   /* The fourth axis: which course this page belongs to. Mode, palette and
      design are the reader's choices; this one is a property of the page, and it is what stops
@@ -629,16 +856,43 @@
      One function per axis: set the attribute, persist it, repaint the
      diagrams. Nothing here reloads the page.
      ============================================================ */
+  /* Every axis repaints through here, and the request is coalesced onto one
+     frame. Two reasons, and the second is the one that made it necessary.
+
+     Mermaid cuts each label box to a measurement it takes at render time, so a
+     repaint that starts before the new metrics are in place clips the last word
+     of the label - the defect `whenFontsReady` was written for, on 380
+     published flowcharts - and then looks correct on the next reload. The
+     forced reflow first is what puts a newly needed face in flight, so the
+     promise waited on is the new one rather than the settled old one. Mode and
+     palette cannot move a text measurement and do not need any of that, but one
+     path with no exceptions is cheaper to keep right than three.
+
+     And "back to this course's defaults" moves eight axes in one gesture. Eight
+     repaints of 2,159 diagram blocks is a button nobody can press; the last one
+     is the only one that counts. */
+  var repaintQueued = false;
+  function repaint() {
+    if (repaintQueued) return;
+    repaintQueued = true;
+    var run = function () {
+      repaintQueued = false;
+      void root.offsetWidth;
+      whenFontsReady(renderMermaid);
+    };
+    if (window.requestAnimationFrame) window.requestAnimationFrame(run); else setTimeout(run, 0);
+  }
+
   function applyMode(next) {
     if (next) { root.setAttribute('data-mode', next); set(STORE.mode, next); }
     else { root.removeAttribute('data-mode'); set(STORE.mode, ''); }
-    renderMermaid();
+    repaint();
     syncSettings();
   }
   function applyPalette(next) {
     root.setAttribute('data-palette', next);
     set(STORE.palette, next);
-    renderMermaid();
+    repaint();
     syncSettings();
   }
 
@@ -653,16 +907,56 @@
   function applyDesign(next) {
     root.setAttribute('data-design', next);
     set(STORE.design, next);
-    /* `document.fonts.ready` answers for the fonts the document needs *now*,
-       and a browser only discovers it needs a new face while it lays the page
-       out. Read a layout property first, so the attribute above has been laid
-       out and any face the new design asks for is already in flight when
-       `whenFontsReady` asks. Without the flush the promise can be the settled
-       one from the previous design and the wait is a no-op. One forced reflow,
-       once per switch, against a whole page of clipped diagrams. */
-    void root.offsetWidth;
-    whenFontsReady(renderMermaid);
+    repaint();
     syncSettings();
+  }
+
+  function applyFace(next) {
+    face = next;
+    set(STORE.face, next);
+    // The first entry is what a page with no attribute renders, so the default
+    // is expressed by removing the attribute rather than by writing it. That is
+    // what makes the reset exact and what a page with no script already does.
+    if (next === FACES[0].key) root.removeAttribute('data-body-face');
+    else root.setAttribute('data-body-face', next);
+    repaint();
+    syncSettings();
+  }
+
+  function applyLeading(next) {
+    leading = next;
+    set(STORE.leading, next);
+    applyLeadingValue(entry(LEADINGS, next).value);
+    syncSettings();
+  }
+
+  function applyDensity(next) {
+    density = next;
+    set(STORE.density, next);
+    applyDensityFactor(entry(DENSITIES, next).factor);
+    repaint();
+    syncSettings();
+  }
+
+  function applyMotion(next) {
+    motion = next;
+    set(STORE.motion, next);
+    if (next) root.setAttribute('data-motion', next);
+    else root.removeAttribute('data-motion');
+    syncSettings();
+  }
+
+  /* A range moves twice on the way to a value. `input` fires on every step of a
+     drag and writes the property, so the effect is live and the reader judges
+     it rather than imagining it; `change` fires once when the drag ends and is
+     where the diagrams repaint, because repainting 2,159 Mermaid blocks on
+     every pixel of a slider is a page nobody can drag. */
+  function applyRangeValue(axis, value, settled) {
+    reading[axis.name] = value;
+    if (value === null) drop(axis.store);
+    else set(axis.store, String(value));
+    applyRange(axis, value);
+    if (settled) repaint();
   }
 
   /* ============================================================
@@ -935,21 +1229,56 @@
     settingsEl = buildSettings();
     document.body.appendChild(settingsEl);
 
-    function close() { settingsEl.hidden = true; button.setAttribute('aria-expanded', 'false'); }
-    button.addEventListener('click', function (event) {
-      event.stopPropagation();
-      var open = settingsEl.hidden;
-      settingsEl.hidden = !open;
-      button.setAttribute('aria-expanded', String(open));
-      if (open) syncSettings();
-    });
-    document.addEventListener('click', function (event) {
+    /* ---------- opening, closing, and where focus goes ----------
+       The specification's focus contract was written against a popover anchored
+       to this button, and a panel the reader can pick up and park beside the
+       paragraph they are judging is a different thing. So the contract is
+       restated here, and every difference from the anchored one follows from
+       the panel being movable.
+
+       It is a NON-MODAL dialog: `role="dialog"` and `aria-labelledby`, and no
+       `aria-modal`. A reader moves this panel in order to keep reading with it
+       open, so the page behind it is not inert and saying that it is would be a
+       lie a screen reader then acts on. For the same reason focus is not
+       trapped: Tab walks out of the panel into the page and back round, which
+       is what a reader who has parked it wants and what a trap would forbid.
+
+       Focus moves into the panel when it opens, because the reader asked for
+       it. On close it returns to the opening button only if it was inside the
+       panel at the time - a reader who has tabbed back into the page and
+       pressed Escape keeps their place instead of being thrown to the topbar.
+
+       An outside click no longer closes the panel, and that is the one
+       behaviour a reader may notice going. A parked panel that vanishes the
+       moment the reader clicks the text beside it is a panel that cannot be
+       parked. The ways out are the button, the close control in the title bar,
+       and Escape - three, all of them visible or conventional. */
+    function close(restoreFocus) {
       if (settingsEl.hidden) return;
-      if (settingsEl.contains(event.target) || button.contains(event.target)) return;
-      close();
+      var inside = document.activeElement && settingsEl.contains(document.activeElement);
+      settingsEl.hidden = true;
+      button.setAttribute('aria-expanded', 'false');
+      if (restoreFocus && inside) button.focus();
+    }
+
+    function open() {
+      settingsEl.hidden = false;
+      button.setAttribute('aria-expanded', 'true');
+      syncSettings();
+      // The panel has no size while it is hidden, so the constraint that keeps
+      // it on screen can only be applied now. This is also what re-seats a
+      // stored position that no longer fits the viewport in front of the reader.
+      placeFromStore();
+      var first = settingsEl.querySelector('button, input');
+      if (first) first.focus();
+    }
+
+    button.addEventListener('click', function () {
+      if (settingsEl.hidden) open(); else close(true);
     });
+    closePanel = close;
     document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') close();
+      if (event.key === 'Escape') close(true);
     });
   }
 
@@ -960,12 +1289,146 @@
     { key: 'dark',  label: 'Dark',   glyph: '☾' }
   ];
 
+  /* ---------- a segmented group of registered choices ----------
+     Three of the six controls and the motion default are one shape: a short
+     list of registered steps, one native button each, the chosen one carrying
+     `aria-pressed`. It reuses the mode group's own classes rather than
+     inventing a second pair the widget vocabulary would have to learn, exactly
+     as the design group already does with the palette cards.
+
+     `axis` is the attribute a sync pass reads the pressed state back from, so
+     the panel and the page can never disagree about what is on: nothing here
+     remembers what it drew. */
+  function segmented(axis, list, choose) {
+    var cards = el('div', 'mode-cards');
+    cards.style.gridTemplateColumns = 'repeat(' + list.length + ', 1fr)';
+    list.forEach(function (item) {
+      var card = el('button', 'mode-card');
+      card.type = 'button';
+      card.dataset[axis] = item.key;
+      card.appendChild(el('span', null, item.label));
+      card.addEventListener('click', function () { choose(item.key); });
+      cards.appendChild(card);
+    });
+    return cards;
+  }
+
+  /* ---------- a range, in a unit the reader can act on ----------
+     The current value is read out of the stylesheet rather than remembered
+     here, so a slider that has never been touched shows what the page actually
+     renders - which is not one number, because the narrow-viewport block sets a
+     smaller body size and a design may set another.
+
+     The reading sits in an `output` inside the control's own `<label>`, so a
+     screen reader announces it with the control's name and no live region has
+     to speak on every step of a drag. */
+  function rangeField(axis) {
+    var field = el('div', 'set-field');
+    var id = 'set-' + axis.name;
+    var label = el('label', 'set-lbl');
+    label.htmlFor = id;
+    label.appendChild(el('span', null, axis.label));
+
+    /* The readout is for the eye only. A range announces its own value, so the
+       number in the label would be said twice; `aria-valuetext` carries the
+       unit instead, which is what makes "80" into "80 characters" without a
+       live region speaking on every step of a drag. */
+    var readout = document.createElement('output');
+    readout.setAttribute('aria-hidden', 'true');
+    label.appendChild(readout);
+
+    var input = el('input');
+    input.type = 'range';
+    input.id = id;
+    input.min = String(axis.min);
+    input.max = String(axis.max);
+    input.step = String(axis.step);
+
+    var show = function () {
+      var legend = axis.legend(Number(input.value));
+      readout.textContent = legend;
+      input.setAttribute('aria-valuetext', legend);
+    };
+    input.addEventListener('input', function () {
+      applyRangeValue(axis, Number(input.value), false);
+      show();
+    });
+    input.addEventListener('change', function () {
+      applyRangeValue(axis, Number(input.value), true);
+      show();
+    });
+
+    field.appendChild(label);
+    field.appendChild(input);
+    field.rangeAxis = axis;
+    return field;
+  }
+
+  /* A group of buttons is not a labelled control, so the name has to be tied on
+     rather than assumed: the visible label gets an id and the container gets
+     `role="group"` pointing at it, which is what makes a screen reader say
+     "Line spacing" when focus enters the row instead of leaving "Tight" to
+     stand on its own. */
+  function choiceField(name, label, list, choose) {
+    var field = el('div', 'set-field');
+    var caption = el('span', 'set-lbl', label);
+    caption.id = 'set-lbl-' + name;
+    var cards = segmented(name, list, choose);
+    cards.setAttribute('role', 'group');
+    cards.setAttribute('aria-labelledby', caption.id);
+    field.appendChild(caption);
+    field.appendChild(cards);
+    return field;
+  }
+
   function buildSettings() {
     var panel = el('div', 'settings');
     panel.hidden = true;
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', 'Appearance');
+    panel.setAttribute('aria-labelledby', 'set-title');
 
+    /* ---------- the title bar, which is the handle ----------
+       The captain asked for a movable bar and meant it: the panel is picked up
+       and put where the reader wants it, rather than hanging off the button
+       that opened it. The whole strip is the pointer surface and the grip
+       inside it is the keyboard one, because a panel only a mouse can move is a
+       panel some readers cannot move at all. */
+    var bar = el('div', 'set-bar');
+    var grip = el('button', 'set-grip');
+    grip.type = 'button';
+    grip.setAttribute('aria-label', 'Move panel');
+    grip.setAttribute('aria-describedby', 'set-move-hint');
+    grip.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown ArrowLeft ArrowRight Home');
+    grip.appendChild(el('span', 'tb-icon', '✥'));
+    var title = el('h2', 'set-title', 'Appearance');
+    title.id = 'set-title';
+    var shut = el('button', 'set-close');
+    shut.type = 'button';
+    shut.setAttribute('aria-label', 'Close appearance panel');
+    shut.appendChild(el('span', 'tb-icon', '✕'));
+    shut.addEventListener('click', function () { if (closePanel) closePanel(true); });
+    bar.appendChild(grip);
+    bar.appendChild(title);
+    bar.appendChild(shut);
+    panel.appendChild(bar);
+
+    var hint = el('p', 'sr-only',
+      'Drag this panel to move it, or press the arrow keys while this control has focus. '
+      + 'Hold Shift for a smaller step. Press Enter or Home to return the panel to its usual place.');
+    hint.id = 'set-move-hint';
+    panel.appendChild(hint);
+
+    var body = el('div', 'set-body');
+    panel.appendChild(body);
+
+    /* ---------- 1. ground ----------
+       Mode and palette are the accessibility control the rest of the panel is
+       often mistaken for. The success criterion that asks for selectable
+       foreground and background is satisfied by a mechanism rather than by a
+       good default, and this pair is that mechanism. There is nothing between
+       the light band and the dark band, which is what keeps the forbidden
+       ground - the lightness range where no ink reaches the standard - out of
+       the reader's reach by construction rather than by a warning. */
     var modeGroup = el('div', 'set-group');
     modeGroup.appendChild(el('h3', null, 'Colour mode'));
     var modeCards = el('div', 'mode-cards');
@@ -980,7 +1443,7 @@
       modeCards.appendChild(card);
     });
     modeGroup.appendChild(modeCards);
-    panel.appendChild(modeGroup);
+    body.appendChild(modeGroup);
 
     var palGroup = el('div', 'set-group');
     palGroup.appendChild(el('h3', null, 'Colour palette'));
@@ -999,7 +1462,7 @@
       palCards.appendChild(card);
     });
     palGroup.appendChild(palCards);
-    panel.appendChild(palGroup);
+    body.appendChild(palGroup);
 
     /* The design group, in the shape of the palette group above and reusing
        its classes rather than inventing a pair the widget vocabulary does not
@@ -1023,55 +1486,302 @@
     designGroup.appendChild(designCards);
     designGroup.appendChild(el('p', 'set-note',
       'A design sets type, rhythm and shape. Colour is the palette above, so the two choose independently.'));
-    panel.appendChild(designGroup);
+    body.appendChild(designGroup);
 
-    var prefGroup = el('div', 'set-group');
-    prefGroup.appendChild(el('h3', null, 'Reading'));
-    prefGroup.appendChild(readingRow('Wider text column', 'measure'));
-    prefGroup.appendChild(readingRow('Larger type', 'bodysize'));
-    var note = el('p', 'set-note',
-      'Your choice is remembered in this browser and applies to every course in the hub.');
-    prefGroup.appendChild(note);
-    panel.appendChild(prefGroup);
+    /* ---------- 2 to 6. reading ----------
+       In the order a reader is likely to reach for them, largest effect first.
+       None of these is an independent setting: the measure is in real
+       characters and the width follows the face, the body size is apparent size
+       and the rendered px follows the face, the code size follows the face on
+       its own, and the leading rises with a wide measure unless the reader has
+       stated one. hub.css derives all four, so this panel offers the four
+       inputs and never the outputs. */
+    var readGroup = el('div', 'set-group');
+    readGroup.appendChild(el('h3', null, 'Reading'));
+    RANGES.forEach(function (axis) {
+      if (axis.name === 'bodysize') readGroup.appendChild(rangeField(axis));
+    });
+
+    readGroup.appendChild(choiceField('face', 'Reading face', FACES, applyFace));
+
+    RANGES.forEach(function (axis) {
+      if (axis.name === 'measure') readGroup.appendChild(rangeField(axis));
+    });
+
+    readGroup.appendChild(choiceField('leading', 'Line spacing', LEADINGS, applyLeading));
+    readGroup.appendChild(choiceField('density', 'Density', DENSITIES, applyDensity));
+
+    readGroup.appendChild(el('p', 'set-note',
+      'Your choices are remembered in this browser and apply to every course in the hub.'));
+    body.appendChild(readGroup);
+
+    /* ---------- accessibility: motion, and the way back ---------- */
+    var accessGroup = el('div', 'set-group');
+    accessGroup.appendChild(el('h3', null, 'Accessibility'));
+    accessGroup.appendChild(choiceField('motion', 'Motion', MOTIONS, applyMotion));
+
+    var reset = el('button', 'set-reset', "Back to this course's defaults");
+    reset.type = 'button';
+    reset.addEventListener('click', resetEverything);
+    accessGroup.appendChild(reset);
+    body.appendChild(accessGroup);
+
+    wireDrag(panel, bar, grip, shut);
     return panel;
   }
 
-  /* Two steps today, a checkbox for each. The row reads the step the head phase
-     already resolved rather than the store, so the panel and the page can never
-     disagree about what is on. */
-  function readingRow(label, name) {
-    var axis = READING[name];
-    var row = el('label', 'set-row');
-    var box = el('input');
-    box.type = 'checkbox';
-    box.checked = reading[name] !== 'normal';
-    box.addEventListener('change', function () {
-      reading[name] = box.checked ? axis.on : 'normal';
-      set(axis.store, reading[name]);
-      applyStep(axis, reading[name]);
+  /* ---------- back to the defaults ----------
+     Exact, because the reader's layer is an input to a token and never a
+     competitor to one: removing a `--*-user` property leaves the stylesheet's
+     own value with nothing to unwind, and removing a registered axis attribute
+     leaves the arm a page with no script renders. The panel's own position goes
+     too, so no setting a reader can reach is a setting they cannot get out of. */
+  function resetEverything() {
+    RANGES.forEach(function (axis) { applyRangeValue(axis, null, false); });
+    applyLeading(LEADING_DEFAULT);
+    applyDensity(DENSITY_DEFAULT);
+    applyMotion('');
+    applyFace(FACES[0].key);
+    applyPalette(PALETTES[0].key);
+    applyDesign(DESIGNS[0].key);
+    applyMode('');
+    goHome();
+    syncSettings();
+  }
+
+  /* ============================================================
+     MOVING THE PANEL
+
+     The reader can pick the panel up with a pointer or with the keyboard, and
+     the position is a preference like any other: it lives in the same store and
+     it is restored before the panel is shown.
+
+     What is stored is an INTENTION and what is rendered is that intention
+     clamped into whatever viewport is in front of the reader now. A pair of
+     coordinates that was right on a wide display is simply out of reach on a
+     phone, so the clamp runs on every open and on every resize, and it does not
+     write back: going from the phone to the display puts the panel where it was
+     left rather than where the phone could fit it.
+
+     The band the panel is held inside is measured rather than assumed. The
+     topbar is sticky and the pre-production strip is fixed to the foot of the
+     viewport and wraps to two lines on a narrow screen, so both are read off
+     the elements themselves. A panel parked under either of them is a panel the
+     reader cannot reach.
+     ============================================================ */
+  var closePanel = null;
+  var dragging = null;
+
+  var PANEL_EDGE = 8;      // the gap the panel keeps from every edge
+  var PANEL_STEP = 20;     // one arrow key
+  var PANEL_FINE = 4;      // one arrow key with Shift held
+
+  function panelBounds(panel) {
+    var spine = document.querySelector('.spine');
+    var flag = document.querySelector('.preprod-flag');
+    var box = panel.getBoundingClientRect();
+    var ceiling = (spine ? spine.getBoundingClientRect().bottom : 0) + PANEL_EDGE;
+    var floor = window.innerHeight - (flag ? flag.getBoundingClientRect().height : 0) - PANEL_EDGE;
+    return {
+      minX: PANEL_EDGE,
+      maxX: Math.max(PANEL_EDGE, window.innerWidth - box.width - PANEL_EDGE),
+      minY: ceiling,
+      // A panel taller than the band it has to fit in is pinned to the top of
+      // that band rather than pushed above it, and scrolls inside itself.
+      maxY: Math.max(ceiling, floor - box.height)
+    };
+  }
+
+  function place(panel, x, y) {
+    var limit = panelBounds(panel);
+    panel.style.left = Math.min(Math.max(x, limit.minX), limit.maxX) + 'px';
+    panel.style.top = Math.min(Math.max(y, limit.minY), limit.maxY) + 'px';
+    panel.setAttribute('data-moved', '');
+  }
+
+  function storedPosition() {
+    var raw = get(STORE.panel);
+    if (!raw) return null;
+    try {
+      var at = JSON.parse(raw);
+      if (at && isFinite(at.x) && isFinite(at.y)) return { x: Number(at.x), y: Number(at.y) };
+    } catch (e) { /* a key from another era, or a hand edit */ }
+    return null;
+  }
+
+  function placeFromStore() {
+    if (!settingsEl || settingsEl.hidden) return;
+    var at = storedPosition();
+    if (at) place(settingsEl, at.x, at.y);
+    else goHome();
+  }
+
+  /* The way back. Removing the two lengths hands the panel to the stylesheet's
+     own resting place, which is under the button that opened it, so "home" is
+     one answer written in one file rather than a pair of numbers repeated
+     here. */
+  function goHome() {
+    if (!settingsEl) return;
+    settingsEl.style.left = '';
+    settingsEl.style.top = '';
+    settingsEl.removeAttribute('data-moved');
+    drop(STORE.panel);
+  }
+
+  function rememberPosition(panel) {
+    var box = panel.getBoundingClientRect();
+    set(STORE.panel, JSON.stringify({ x: Math.round(box.left), y: Math.round(box.top) }));
+  }
+
+  function wireDrag(panel, bar, grip, shut) {
+    /* The pointer. One code path for mouse, touch and pen, and the capture is
+       what keeps the panel following a finger that has left the strip. The
+       grab offset is taken once, so the panel does not jump to centre itself
+       under the pointer on the first move. */
+    var suppressClick = false;
+
+    bar.addEventListener('pointerdown', function (event) {
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      // The close control lives in the strip and is not part of the handle.
+      if (shut.contains(event.target)) return;
+      suppressClick = false;
+      var box = panel.getBoundingClientRect();
+      dragging = {
+        id: event.pointerId,
+        grabX: event.clientX - box.left,
+        grabY: event.clientY - box.top,
+        was: { x: box.left, y: box.top },
+        wasMoved: panel.hasAttribute('data-moved'),
+        dragged: false
+      };
+      panel.setAttribute('data-dragging', '');
+      bar.setPointerCapture(event.pointerId);
+      // Without this a mouse drag selects the prose behind the panel as it
+      // goes. `user-select` covers the strip's own text and not the page's.
+      event.preventDefault();
     });
-    row.appendChild(box);
-    row.appendChild(el('span', null, label));
-    return row;
+
+    bar.addEventListener('pointermove', function (event) {
+      if (!dragging || event.pointerId !== dragging.id) return;
+      dragging.dragged = true;
+      place(panel, event.clientX - dragging.grabX, event.clientY - dragging.grabY);
+    });
+
+    var release = function (event) {
+      if (!dragging || event.pointerId !== dragging.id) return;
+      panel.removeAttribute('data-dragging');
+      if (dragging.dragged) {
+        rememberPosition(panel);
+        // A drag that ends on the grip fires a click there too, and putting the
+        // panel back the instant it was placed is the opposite of what the
+        // reader asked for. The next press clears this whether a click came or
+        // not, so it can never swallow a later genuine one.
+        suppressClick = true;
+      }
+      dragging = null;
+    };
+    bar.addEventListener('pointerup', release);
+    bar.addEventListener('pointercancel', release);
+
+    /* The keyboard. Arrow keys move the panel while the grip has focus, with no
+       mode to enter and none to be stranded in: a control whose whole purpose
+       is the position takes the arrow keys the way a slider does. Enter and
+       Space are the button's own activation and Home is the same action, so
+       there is no keystroke here that does nothing. */
+    grip.addEventListener('keydown', function (event) {
+      var step = event.shiftKey ? PANEL_FINE : PANEL_STEP;
+      var dx = 0;
+      var dy = 0;
+      if (event.key === 'ArrowLeft') dx = -step;
+      else if (event.key === 'ArrowRight') dx = step;
+      else if (event.key === 'ArrowUp') dy = -step;
+      else if (event.key === 'ArrowDown') dy = step;
+      else if (event.key === 'Home') { goHome(); event.preventDefault(); return; }
+      else return;
+      var box = panel.getBoundingClientRect();
+      place(panel, box.left + dx, box.top + dy);
+      rememberPosition(panel);
+      // Arrow keys scroll the page by default, and a panel that moves while the
+      // page slides under it is a control nobody can aim.
+      event.preventDefault();
+    });
+    grip.addEventListener('click', function () {
+      if (suppressClick) { suppressClick = false; return; }
+      goHome();
+    });
+
+    /* Escape during a drag puts the panel back where it was picked up, which is
+       the one undo a drag needs. It runs on the window in the capture phase so
+       it settles before the handler that closes the panel sees the key: a
+       cancelled drag must not also close the thing being dragged. */
+    window.addEventListener('keydown', function (event) {
+      if (!dragging || event.key !== 'Escape') return;
+      var was = dragging.was;
+      var wasMoved = dragging.wasMoved;
+      panel.removeAttribute('data-dragging');
+      if (bar.hasPointerCapture && bar.hasPointerCapture(dragging.id)) bar.releasePointerCapture(dragging.id);
+      dragging = null;
+      suppressClick = true;
+      if (wasMoved) place(panel, was.x, was.y); else goHome();
+      event.stopPropagation();
+      event.preventDefault();
+    }, true);
+
+    /* A stored position outlives the viewport it was chosen in. Re-seating it
+       on every resize is what stops a reader who rotated a tablet, or came back
+       on a smaller screen, finding the panel parked off the edge. */
+    window.addEventListener('resize', placeFromStore);
+  }
+
+  /* ---------- the panel reads the page back, never its own memory ----------
+     Every control's state is read off the attribute or the computed token that
+     actually decides the page, so the panel and the page cannot disagree about
+     what is on. A control that remembered what it drew would be right until the
+     first time something else moved. */
+  function syncGroup(attribute, current) {
+    if (!settingsEl) return;
+    var cards = settingsEl.querySelectorAll('[data-' + attribute + ']');
+    Array.prototype.forEach.call(cards, function (card) {
+      if (card.tagName !== 'BUTTON') return;
+      card.setAttribute('aria-pressed', String(card.dataset[attribute] === current));
+    });
   }
 
   function syncSettings() {
     if (!settingsEl) return;
-    var currentMode = root.getAttribute('data-mode') || '';
-    Array.prototype.forEach.call(settingsEl.querySelectorAll('.mode-card'), function (card) {
-      card.setAttribute('aria-pressed', String(card.dataset.mode === currentMode));
-    });
-    /* Two groups share the `.pal-card` shape, so each is asked for by the
-       attribute that says which axis it selects. A bare `.pal-card` query
-       would compare a design card's undefined palette against the live one and
-       report every design as unpressed. */
-    var currentPalette = root.getAttribute('data-palette');
-    Array.prototype.forEach.call(settingsEl.querySelectorAll('.pal-card[data-palette]'), function (card) {
-      card.setAttribute('aria-pressed', String(card.dataset.palette === currentPalette));
-    });
-    var currentDesign = root.getAttribute('data-design');
-    Array.prototype.forEach.call(settingsEl.querySelectorAll('.pal-card[data-design]'), function (card) {
-      card.setAttribute('aria-pressed', String(card.dataset.design === currentDesign));
+    /* Four of these read an attribute straight off <html> and two read the
+       chosen key, because a step whose value is "write nothing" leaves no trace
+       on the element to read back. Two groups share the `.pal-card` shape, so
+       each is asked for by the attribute that says which axis it selects: a
+       bare `.pal-card` query would compare a design card's undefined palette
+       against the live one and report every design as unpressed. */
+    syncGroup('mode', root.getAttribute('data-mode') || '');
+    syncGroup('palette', root.getAttribute('data-palette'));
+    syncGroup('design', root.getAttribute('data-design'));
+    syncGroup('face', root.getAttribute('data-body-face') || FACES[0].key);
+    syncGroup('motion', root.getAttribute('data-motion') || '');
+    syncGroup('leading', leading);
+    syncGroup('density', density);
+
+    /* A slider shows where the page actually is, computed, rather than what was
+       last stored. A reader who has never touched it is told the design's own
+       number, and on a narrow screen that is not the same number: the 720px
+       block sets a smaller body size, so a hard-coded 19 here would be a
+       confident wrong answer on every phone.
+
+       The house measure is 81.15 characters and the control steps by five, so
+       an untouched measure slider reads 80. It is the nearest position the
+       control can express and it becomes exact the moment the reader moves it;
+       an off-grid thumb that jumped on first touch would be worse. */
+    Array.prototype.forEach.call(settingsEl.querySelectorAll('.set-field'), function (field) {
+      var axis = field.rangeAxis;
+      if (!axis) return;
+      var computed = axis.read(parseFloat(getComputedStyle(root).getPropertyValue(axis.token)));
+      var input = field.querySelector('input');
+      input.value = String(isFinite(computed) ? snap(axis, computed) : axis.min);
+      var legend = axis.legend(Number(input.value));
+      field.querySelector('output').textContent = legend;
+      input.setAttribute('aria-valuetext', legend);
     });
   }
 
