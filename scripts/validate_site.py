@@ -1412,11 +1412,25 @@ COURSE_LAYERED_TOKENS: tuple[str, ...] = COURSE_TOKENS[1:]
 # The three that name a face rather than a value.
 COURSE_FACE_TOKENS: tuple[str, ...] = ("--font-display", "--font-mono", "--eyebrow-family")
 
-# The registry of loaded families, and the four role aliases over it. A course
-# names one of these; a literal font stack in a course block is a course
-# shipping type, which the contract forbids.
-FAMILY_TOKENS: tuple[str, ...] = ("--sans", "--serif", "--mono")
+# A course names a face from the registry or one of the four role aliases over
+# it; a literal font stack in a course block is a course shipping type, which
+# the contract forbids. The registry itself is read out of the sheet rather than
+# listed here, so a family added later is accepted without editing this file.
 ROLE_TOKENS: tuple[str, ...] = ("--font-body", "--font-display", "--font-ui", "--font-mono")
+GENERIC_FAMILIES: frozenset[str] = frozenset(
+    {
+        "serif",
+        "sans-serif",
+        "monospace",
+        "cursive",
+        "fantasy",
+        "system-ui",
+        "ui-serif",
+        "ui-sans-serif",
+        "ui-monospace",
+        "ui-rounded",
+    }
+)
 
 # `--eyebrow-tracking` runs 0em to 0.34em, and `--eyebrow-size` sits in the
 # `--fs-xs` band, which is 10px to 12.5px, written here in rem at the 16px root.
@@ -1496,6 +1510,25 @@ def hub_stylesheet() -> str:
     return CSS_COMMENT.sub("", HUB_STYLESHEET.read_text(encoding="utf-8"))
 
 
+def registered_faces(source: str) -> frozenset[str]:
+    """Every family the sheet loads, plus the role aliases a course may name.
+
+    A family is recognised by its stack ending in a generic keyword, which is
+    what makes a stack a fallback rather than a single name. Reading it out of
+    the sheet means a face added to the registry later is accepted here without
+    a second edit, exactly as a newly registered hue is.
+    """
+    found: set[str] = set(ROLE_TOKENS)
+    for selector, body in re.findall(r"([^{}]*)\{([^{}]*)\}", source):
+        if " ".join(selector.split()) != ":root":
+            continue
+        for name, value in declarations(body):
+            last = value.split(",")[-1].strip().strip("\"'").lower()
+            if last in GENERIC_FAMILIES:
+                found.add(name)
+    return frozenset(found)
+
+
 def declarations(body: str) -> list[tuple[str, str]]:
     """Every custom property declared in one rule body, in source order."""
     return [(name, value.strip()) for name, value in DECLARATION.findall(body)]
@@ -1520,7 +1553,7 @@ def registrations(source: str) -> dict[str, dict[str, str]]:
     return found
 
 
-def _face_problems(course: str, token: str, value: str) -> list[Problem]:
+def _face_problems(course: str, token: str, value: str, faces: frozenset[str]) -> list[Problem]:
     where = f"assets/hub.css [data-course=\"{course}\"]"
     reference = FACE_REFERENCE.match(value)
     if reference is None:
@@ -1534,22 +1567,21 @@ def _face_problems(course: str, token: str, value: str) -> list[Problem]:
     named = reference.group(1)
     if named == token:
         return [Problem(where, f"{token} names itself, which resolves to nothing")]
-    if named not in FAMILY_TOKENS + ROLE_TOKENS:
+    if named not in faces:
         return [
             Problem(
                 where,
                 f"{token} names {named}, which is not a registered face; "
-                f"the registry is {', '.join(FAMILY_TOKENS)} and the roles over it "
-                f"are {', '.join(ROLE_TOKENS)}",
+                f"the registry and its roles are {', '.join(sorted(faces))}",
             )
         ]
     return []
 
 
-def _value_problems(course: str, token: str, value: str) -> list[Problem]:
+def _value_problems(course: str, token: str, value: str, faces: frozenset[str]) -> list[Problem]:
     where = f"assets/hub.css [data-course=\"{course}\"]"
     if token in COURSE_FACE_TOKENS:
-        return _face_problems(course, token, value)
+        return _face_problems(course, token, value, faces)
 
     if token == "--course-hue":
         if UNITLESS_NUMBER.match(value):
@@ -1608,6 +1640,7 @@ def _value_problems(course: str, token: str, value: str) -> list[Problem]:
 
 def _registration_problems(source: str) -> list[Problem]:
     """Every course folder is registered exactly once, in the documented shape."""
+    faces = registered_faces(source)
     problems: list[Problem] = []
     seen: dict[str, int] = {}
 
@@ -1638,7 +1671,7 @@ def _registration_problems(source: str) -> list[Problem]:
                     )
                 )
                 continue
-            problems += _value_problems(course, token, value)
+            problems += _value_problems(course, token, value, faces)
 
     for course, count in sorted(seen.items()):
         if count > 1:
