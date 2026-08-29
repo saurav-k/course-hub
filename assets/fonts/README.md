@@ -102,5 +102,12 @@ lossless.
 **JetBrains Mono is not cut.** Its axis already starts at 400, so the same command
 saves 0.4K across both files and would rewrite two binaries for nothing.
 
-`fonttools` is needed for this refresh and for nothing else. The hub ships no build
-step: the woff2 files are committed, and a clone renders without installing anything.
+`fonttools` is needed for this refresh and for nothing else, and the files committed
+today were cut with 4.63.0. The hub ships no build step: the woff2 files are committed,
+and a clone renders without installing anything.
+
+Whatever version you use, check the result rather than trusting it. Instantiate the old
+file and the new one at every weight the `@font-face` declares, and at several `opsz`
+values for Source Serif 4, then compare `hmtx` advances and the `hhea`, `OS/2` and
+`head` metrics. Advances must be bit-identical and the metrics unchanged; that is what
+makes the cut invisible, and it is the check that caught `wght=400:700`.
