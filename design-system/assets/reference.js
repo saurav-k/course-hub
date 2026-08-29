@@ -57,15 +57,18 @@
     paintState();
   }
 
-  /* The five axes as the page's own readout: three the reader chooses, one the
-     URL decides and one the hostname does. Reading them back off <html> is the
-     same end-to-end check the computed-style harness makes. */
+  /* The six axis attributes as the page's own readout: three the reader
+     chooses, one the URL decides, one the hostname does, and the reading face,
+     which the stylesheet answers to and no control writes yet. Reading them
+     back off <html> is the same end-to-end check the computed-style harness
+     makes when it proves a page settled in the state it asked for. */
   var AXES = [
     { key: 'data-mode', fallback: 'system' },
     { key: 'data-palette', fallback: 'none' },
     { key: 'data-design', fallback: 'none' },
     { key: 'data-course', fallback: 'none' },
-    { key: 'data-env', fallback: 'production' }
+    { key: 'data-env', fallback: 'production' },
+    { key: 'data-body-face', fallback: 'none' }
   ];
 
   function paintState() {
@@ -85,7 +88,8 @@
      axis. */
   new MutationObserver(function () { paint(); drawRamp(); }).observe(root, {
     attributes: true,
-    attributeFilter: ['data-mode', 'data-palette', 'data-design', 'data-env', 'style']
+    attributeFilter: ['data-mode', 'data-palette', 'data-design', 'data-course',
+                      'data-env', 'data-body-face', 'style']
   });
 
   /* ---------- 3. the self-audit ----------
