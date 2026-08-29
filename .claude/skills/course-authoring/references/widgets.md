@@ -642,3 +642,48 @@ One rule in that block reads the raw palette layer on purpose.
 `.term` is drawn from the `--d-*` values in **both** modes, because a terminal reads as a terminal only while it is dark, and the `--d-*` set is declared whichever mode the reader is in.
 That is the one sanctioned use of the raw layer: everything else in the kit reads the semantic tokens.
 The print block restates the six `--term-*` tokens with `!important`, because the hub's own print block flattens the semantic tokens and cannot reach these.
+
+## The design tokens
+
+Type, rhythm and shape are tokens, in one block near the head of `assets/hub.css` marked "the design axis".
+A page never names one: the sheet does, and a page gets the whole system by linking the sheet.
+The block matters to you in three cases - you are adding a widget, you are changing an existing rule, or you are writing a course sheet.
+
+**Adding a widget or changing a rule: read a token, never a literal.**
+The whole point of the block is that a second design is a list of values rather than a second copy of the sheet, and one hard-coded `1.05rem` is a rule that a design cannot reach.
+If nothing in the block fits, add a token beside the ones it belongs with, give it a call-site comment, and say so in the pull request.
+
+The groups, and what each is for.
+
+| Group | Count | What a rule reads |
+|---|---|---|
+| Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. |
+| Type scale | 60 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. |
+| Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. |
+| Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
+| Tracking | 14 | Negative on display type, positive on anything set in capitals. |
+| Space | 173 | Two layers; see below. |
+| Shape | 11 | The radii, the four border widths, and the shadow *shape* - its colour stays on the mode layer. |
+| Motion | 10 | Six durations, two easings, two lift distances. |
+| Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
+
+**Space has two layers and a rule only ever reads the second.**
+Layer one is `--sp-1` to `--sp-8`, a ramp of ratio about 1.41 anchored on `.5rem`, which is the modal spacing value in the sheet; every step is a local maximum of the measured distribution.
+Layer two is the roles: the reading column's rhythm, the component insets, the gap ladder and the offset ladder.
+**Never write `padding: var(--sp-3)`.** A ramp step in a rule is a value with no name, and it puts a reading-rhythm distance and a chrome distance on the same token, which is exactly what the split exists to prevent.
+
+Six of the role tokens are the reading column's vertical rhythm - `--sp-para`, `--sp-list`, `--sp-heading-before-*`, `--sp-heading-after-*`, `--sp-block*` and `--sp-figure*` - and a later reader density control may scale those and nothing else.
+Everything else, component insets and page chrome included, is permanently out of its reach.
+That is a hard limit rather than a note: seven pointer targets in the chrome pass WCAG 2.2 SC 2.5.8 only on the spacing exception and the smallest compliant control has two pixels of margin, so a compact chrome would turn near-misses into failures.
+
+**A reader-settable value has three layers; nothing else does.**
+`hub.css` declares a `-default`, `hub.js` writes only a `--*-user` property inline on `<html>`, and one resolved token `--x: var(--x-user, var(--x-default))` is what every rule reads.
+Only that resolution line may read a `--*-user` property.
+Twenty-four tokens carry the form today, and they are the ones a reader control can reach: `--font-body`, `--fs-body`, `--lh-body`, `--measure` and the twenty prose-rhythm roles.
+The rest are one-layer design tokens.
+The consequence for a media query: a token with a `-user` layer must be restated as its `-default` inside the query, never as the token, or the query out-argues the reader.
+`--fs-body-default` in the 720px block is the worked example.
+
+**A course sheet restates tokens; it never restates rules.**
+The three `course-extras.css` files are layered after the hub sheet, so a copy of a hub rule in one of them wins on source order and every later change to the hub sheet stops at that course's pages.
+Setting `--radius` or `--fs-note` under a course's own selector reaches the same pixels and keeps one owner.
