@@ -170,12 +170,13 @@ plus motion in the accessibility defaults and one reset: ground (mode and palett
 reading face, measure, line spacing, density. Display face, mono face and eyebrow treatment are
 **not** reader controls and must not become them - a reader sets one once and never returns to it,
 while a course has every reason to differ on it, so they are author tokens on the course contract
-above. The accent is not a control either: expanding it into a picker would put a contrast
+below. The accent is not a control either: expanding it into a picker would put a contrast
 criterion in the reader's hands.
 
 **Every control is an input to a derivation.** The measure names characters, the body size names
 apparent size, and `--measure`, `--fs-body`, `--fs-mono` and the per-face constants are outputs
-nothing may write. See the derived axes above for why the four are coupled.
+nothing may write. See the derived axes under "Editing the shared assets" for why the four are
+coupled.
 
 **The panel moves, by pointer and by keyboard**, and its position is stored as an intention that is
 clamped into whatever viewport is in front of the reader. The band is measured off the sticky
