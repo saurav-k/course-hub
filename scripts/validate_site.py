@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Fifteen checks, all deterministic and offline:
+Eighteen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -43,6 +43,7 @@ Fifteen checks, all deterministic and offline:
    of its own beyond the three grandfathered ones; and no eyebrow set in
    capitals runs past five words in a segment. What the registered hue then
    looks like needs a browser and is asserted in ``scripts/style_snapshot.py``.
+
 13. The accessibility floor, by the arithmetic half of checks G1, G2 and G3 in
    ``scripts/contrast.py``: every registered ground is inside its lightness band,
    every ink clears 7:1 and sits on the right side of the L* 48.9 crossover, and
@@ -56,10 +57,21 @@ Fifteen checks, all deterministic and offline:
    medium. A width feature is answered by the page box in print, and the printed
    page box is narrower than the hub's smallest breakpoint, so an unqualified
    one silently lays the paper out as a phone.
+16. The font contract: every ``@font-face`` reaches a woff2 that is on disk,
+   every woff2 on disk is named by a declaration, every face states a
+   ``font-display``, and the payload stays under the two recorded ceilings.
+17. Below 720px the topbar keeps the wordmark and the page's last link, so that
+   last anchor is the whole of a phone reader's navigation and is the one anchor
+   that may not also carry ``hide-sm``.
+18. Every token a page names, in a ``data-token`` or a ``data-spec`` attribute,
+   is a custom property ``assets/hub.css`` actually declares. Naming a token is
+   how ``design-system/index.html`` documents the system, and a rename in the
+   stylesheet would otherwise leave the reference page describing something that
+   no longer exists, with nothing red anywhere.
 
-Checks 9 to 15 read the shared asset files rather than the pages. What the
-design system then *renders* is the computed-style harness's job; see
-``scripts/style_snapshot.py``.
+Checks 9 to 16 read the shared asset files rather than the pages; 17 reads the
+pages; and check 18 reads both. What the design system then *renders* is the
+computed-style harness's job; see ``scripts/style_snapshot.py``.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -196,7 +208,12 @@ def strip_suffixes(link: str) -> str:
 
 
 def course_directories() -> list[Path]:
-    """Course folders are the top-level directories that ship a page."""
+    """The top-level directories that ship a page.
+
+    Every one of them is registered on the hub landing page and holds to the
+    page contract, which is why this is what most checks here iterate. Not all
+    of them teach; see :func:`teaching_courses`.
+    """
     return sorted(
         entry
         for entry in REPO_ROOT.iterdir()
@@ -204,6 +221,28 @@ def course_directories() -> list[Path]:
         and not entry.name.startswith(".")
         and entry.name not in {"assets", "scripts"}
     )
+
+
+def is_course(folder: Path) -> bool:
+    """A top-level folder that teaches, as opposed to one that does not.
+
+    ``design-system/`` is a single reference page about the design system
+    itself. It has no lessons, so it has no identity to register in the course
+    contract and no accent hue to be told apart by, and the sheet it does ship
+    is that one page's own scaffolding rather than a course reaching for rules
+    the hub sheet should own.
+
+    The test is the ``lessons/`` directory, because that is what a course *is*
+    here and every one of them has one. Deliberately structural rather than a
+    list of names: a list has to be edited by whoever adds the next course, and
+    the failure mode of forgetting is a course that quietly stops being checked.
+    """
+    return folder.is_dir() and (folder / "lessons").is_dir()
+
+
+def teaching_courses() -> list[Path]:
+    """The course folders the course contract applies to."""
+    return [folder for folder in course_directories() if is_course(folder)]
 
 
 def html_pages() -> list[Path]:
@@ -1267,6 +1306,61 @@ def check_contrast_floor() -> list[Problem]:
         for finding in contrast.check_all(registry)
     ]
 
+NAMED_TOKEN: re.Pattern[str] = re.compile(r'data-(?:token|spec)="(?P<name>--[a-z0-9-]+)"')
+
+
+def declared_tokens() -> set[str]:
+    """Every custom property ``assets/hub.css`` declares, anywhere in the file."""
+    return {name for rule in hub_rules() for name in declared_properties(rule.body)}
+
+
+def check_named_tokens_exist() -> list[Problem]:
+    """A page that names a token names one that is there.
+
+    ``design-system/index.html`` documents the framework by naming its tokens:
+    ``data-token`` marks the cell the page fills with the resolved value, and
+    ``data-spec`` marks the specimen its own stylesheet paints with that token.
+    Both are a reference into ``assets/hub.css``, and a reference can rot.
+
+    Nothing else would catch it. A renamed token leaves a ``var()`` that
+    substitutes to nothing, so the specimen paints nothing and the value cell
+    reports that the token is not set - on a page whose whole job is to be
+    right about what exists. The page still renders, every link still resolves,
+    and the computed-style harness records the new emptiness as the expected
+    answer the moment anyone re-records it.
+
+    So the check is on the name rather than on the pixel, it runs over every
+    page rather than over one, and it costs one pass of a regular expression.
+
+    Stylesheets are read as well as pages, because half of the reference lives
+    there: an attribute selector is how one specimen is painted with one token,
+    and a selector that matches nothing is the same rot with no page to show it.
+    """
+    declared = declared_tokens()
+    if not declared:
+        return [Problem("assets/hub.css", "declares no custom properties; the token layer is missing")]
+
+    sheets = [
+        sheet
+        for sheet in REPO_ROOT.rglob("*.css")
+        if not any(part.startswith(".") for part in sheet.relative_to(REPO_ROOT).parts)
+        and "node_modules" not in sheet.parts
+    ]
+
+    problems: list[Problem] = []
+    for source_file in html_pages() + sorted(sheets):
+        source = source_file.read_text(encoding="utf-8", errors="replace")
+        for name in sorted({match.group("name") for match in NAMED_TOKEN.finditer(source)}):
+            if name not in declared:
+                problems.append(
+                    Problem(
+                        relative(source_file),
+                        f"names {name}, which assets/hub.css does not declare; "
+                        "a renamed token leaves the reference describing something that is gone",
+                    )
+                )
+    return problems
+
 
 def check_no_local_markdown_links() -> list[Problem]:
     """The deploy syncs the repository minus ``*.md``, so a page that links a
@@ -1937,7 +2031,7 @@ def _registration_problems(source: str) -> list[Problem]:
                 Problem("assets/hub.css", f"{course} is registered {count} times; one block per course")
             )
 
-    folders = {course.name for course in course_directories()}
+    folders = {course.name for course in teaching_courses()}
     for course in sorted(folders - set(seen)):
         problems.append(
             Problem(
@@ -2030,7 +2124,7 @@ def _layer_problems(source: str) -> list[Problem]:
 def _course_sheet_problems() -> list[Problem]:
     """A course ships no CSS of its own; the three that do are grandfathered."""
     problems: list[Problem] = []
-    for course in course_directories():
+    for course in teaching_courses():
         for sheet in sorted(course.rglob("*.css")):
             name = relative(sheet)
             if name not in GRANDFATHERED_COURSE_SHEETS:
@@ -2252,6 +2346,7 @@ def main() -> int:
         + check_page_margin_boxes()
         + check_width_queries_name_a_medium()
         + check_the_font_contract()
+        + check_named_tokens_exist()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default

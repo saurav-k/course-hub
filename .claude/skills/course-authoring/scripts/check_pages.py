@@ -165,6 +165,24 @@ def is_hub_landing(page: Path) -> bool:
     return page.parent == REPO_ROOT and page.name == "index.html"
 
 
+def is_course(folder: Path) -> bool:
+    """A top-level folder that teaches, as opposed to one that does not.
+
+    Not every folder in the hub is a course. ``design-system/`` is a single
+    reference page about the design system itself: it has no lessons, so it has
+    no rail to build, no mission to declare and no diagram-kind spread to keep.
+    Holding it to the course bar would report five failures that name nothing a
+    reader or an author could act on.
+
+    The test is the ``lessons/`` directory, because that is what a course *is*
+    here and every one of them has one. It is deliberately structural rather
+    than a list of folder names: a list would have to be edited by whoever adds
+    the next course, and the failure mode of forgetting is a course that quietly
+    stops being checked.
+    """
+    return folder.is_dir() and (folder / "lessons").is_dir()
+
+
 def is_course_map(page: Path) -> bool:
     return page.name == "index.html" and page.parent.parent == REPO_ROOT
 
@@ -207,7 +225,11 @@ def check_design_system(page: Path, src: str) -> list[Finding]:
         found.append(Finding(rel(page), "FAIL", "does not load assets/hub.js"))
     elif "</head>" in src and re.search(r'src="[^"]*assets/hub\.js"', src.split("</head>", 1)[1] or ""):
         found.append(Finding(rel(page), "FAIL", "loads hub.js after </head>; it must run before the first paint"))
-    if not is_hub_landing(page) and not re.search(r'src="[^"]*outline\.js"', src):
+    # The rail is a course's table of contents, so only a course's pages owe one.
+    # The hub landing page and the design-system reference have no lessons to
+    # list and `hub.js` builds no rail for them.
+    course = course_of(page)
+    if course is not None and not re.search(r'src="[^"]*outline\.js"', src):
         found.append(Finding(rel(page), "FAIL", "does not load its course outline.js, so it has no sidebar rail"))
     if "theme-btn" in src:
         found.append(Finding(rel(page), "WARN", "carries a legacy .theme-btn; hub.js deletes it at mount"))
@@ -626,8 +648,15 @@ def pages_under(target: Path) -> list[Path]:
 
 
 def course_of(page: Path) -> Path | None:
+    """The course a page belongs to, or ``None`` if it belongs to no course.
+
+    A page directly under the repository root is the hub landing page, and a
+    page under a top-level folder that ships no ``lessons/`` is part of a hub
+    section rather than of a course. Both answer ``None``, which is what keeps
+    the course-wide bars off a page that is not teaching anything.
+    """
     for parent in page.parents:
-        if parent.parent == REPO_ROOT and parent.is_dir():
+        if parent.parent == REPO_ROOT and is_course(parent):
             return parent
     return None
 
