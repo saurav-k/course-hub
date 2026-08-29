@@ -52,6 +52,12 @@ Five rules, all of them load-bearing.
 - **The Mermaid script tag goes on a page if and only if that page contains a `.mermaid` block.** It must come before `hub.js`, which claims the render from it in its head phase.
 - **No `<button class="theme-btn">`.** `hub.js` deletes a legacy one and mounts the real appearance control, which offers three modes and six palettes. Writing one is dead markup.
 
+**The spine is one row that never wraps, and it changes shape twice on the way down.**
+Below 1040px nothing in it may be squeezed except the wordmark, which clips to an ellipsis rather than running out over the next link.
+Below 720px the row keeps the wordmark, the **last** of the page's own links, and the two controls, and hides the rest.
+So write the link a reader on a phone must keep last, which on this hub is `Course Hub`: it is the one destination the wordmark does not already reach.
+`hide-sm` still marks a link as droppable at 720px and is still worth writing, but it is no longer what holds the row together - 493 of the 796 pages carry no such class, so the rules that keep the row legible read the structure every spine shares instead.
+
 `main.wrap` is the reading column and it is the default for a lesson and for a reference sheet.
 `main.wide wrap` is the full width and it is for a course map and the hub landing page only.
 

@@ -710,6 +710,60 @@ def check_pages_link_the_design_system() -> list[Problem]:
     return problems
 
 
+SPINE_BLOCK: re.Pattern[str] = re.compile(r'<nav class="spine">.*?</nav>', re.DOTALL)
+SPINE_ANCHOR: re.Pattern[str] = re.compile(r"<a\b(?P<attributes>[^>]*)>", re.IGNORECASE)
+CLASS_VALUE: re.Pattern[str] = re.compile(r'class="(?P<names>[^"]*)"', re.IGNORECASE)
+
+
+def spine_anchor_classes(page: Path) -> list[frozenset[str]] | None:
+    """The class list of every anchor in a page's topbar, in document order.
+
+    ``None`` means the page has no topbar at all, which is not this check's
+    business.
+    """
+    block = SPINE_BLOCK.search(page.read_text(encoding="utf-8", errors="replace"))
+    if block is None:
+        return None
+    classes: list[frozenset[str]] = []
+    for anchor in SPINE_ANCHOR.finditer(block.group(0)):
+        names = CLASS_VALUE.search(anchor.group("attributes"))
+        classes.append(frozenset(names.group("names").split()) if names else frozenset())
+    return classes
+
+
+def check_spine_keeps_a_link_on_a_phone() -> list[Problem]:
+    """Below 720px the topbar keeps the wordmark and the page's last link.
+
+    The row cannot hold more than that: ``hub.css`` hides every earlier link at
+    that width, because six links only fit on a phone by being squeezed
+    narrower than their own text, which is the defect this rule was written to
+    end. So the last anchor in a spine is the whole of a phone reader's
+    navigation, and it is the one anchor that may not also carry ``hide-sm`` -
+    that class hides it at the same breakpoint, and the reader is left with a
+    wordmark that points at the page it is already on.
+
+    Nothing else can see it. The page is valid HTML, every link resolves, and
+    the topbar looks complete on a laptop. It is checked here rather than in
+    the computed-style harness because it is a fact about markup, and because
+    it is the seam every page of this hub already passes through.
+    """
+    problems: list[Problem] = []
+    for page in html_pages():
+        classes = spine_anchor_classes(page)
+        if classes is None:
+            continue
+        links = [names for names in classes if "home" not in names]
+        if links and "hide-sm" in links[-1]:
+            problems.append(
+                Problem(
+                    relative(page),
+                    "the last topbar link carries hide-sm, so below 720px the page has no "
+                    "topbar link at all; drop the class or put a link after it",
+                )
+            )
+    return problems
+
+
 # ---------------------------------------------------------------------------
 # The design system's own three checks: the axis registry, token completeness
 # and the three-layer property rule. Everything below parses the two shared
@@ -2189,6 +2243,7 @@ def main() -> int:
         + check_no_local_markdown_links()
         + check_comparison_matrix()
         + check_pages_link_the_design_system()
+        + check_spine_keeps_a_link_on_a_phone()
         + check_design_registry_and_blocks()
         + check_design_token_completeness()
         + check_three_layer_rule()
