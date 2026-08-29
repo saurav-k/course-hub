@@ -145,6 +145,27 @@ KEBAB: re.Pattern[str] = re.compile(r"^[a-z0-9]+(-[a-z0-9]+)*$")
 CELL_STATES: frozenset[str] = frozenset({"unfilled", "absent", "elsewhere", "service"})
 
 
+# ---------- the font contract ----------
+# One @font-face block, and the three descriptors this repository holds it to.
+FONT_FACE: re.Pattern[str] = re.compile(r"@font-face\s*\{(?P<body>[^}]*)\}", re.DOTALL)
+FONT_SRC_URL: re.Pattern[str] = re.compile(r"""url\(\s*['"]?(?P<href>[^'")]+)['"]?\s*\)""")
+FONT_DISPLAY: re.Pattern[str] = re.compile(r"font-display\s*:\s*(?P<value>[a-z-]+)")
+FONT_UNICODE_RANGE: re.Pattern[str] = re.compile(r"unicode-range\s*:\s*(?P<value>[^;]+)")
+
+# The basic-latin cut. A face gated to a range carrying it is one an English
+# page fetches; every other range is a subset an English page never asks for.
+FONT_LATIN_MARKER: str = "U+0000-00FF"
+
+# The payload ceilings, in bytes, measured 2026-08-29 and carried here so that a
+# fourth face is added against a known number rather than against a guess.
+# Today: 470,312 bytes over eight files, of which 246,828 are the latin cuts,
+# which is the most one English page can fetch. Each ceiling is today's figure
+# rounded up to the next 10K, which leaves room for a font refresh and none at
+# all for a new face. Raising one is a deliberate act; see assets/fonts/README.md.
+FONT_BYTES_CEILING: int = 480 * 1024
+FONT_LATIN_BYTES_CEILING: int = 250 * 1024
+
+
 @dataclass(frozen=True)
 class Problem:
     """One failed check, reported relative to the repository root."""
@@ -2060,6 +2081,100 @@ def check_course_contract() -> list[Problem]:
     )
 
 
+def check_the_font_contract() -> list[Problem]:
+    """The self-hosted faces: every declaration reaches a file, every file is
+    reached, every face states how it behaves while it loads, and the payload
+    stays under a ceiling somebody chose.
+
+    Four failures, all of them silent on a published page.
+
+    1. **A declaration naming a file that is not there.** The family stack falls
+       through to a system face of the same class, which is exactly what the
+       stacks are for, so the page still reads and nothing anywhere says the
+       hub's own typography stopped being served.
+
+    2. **A woff2 that no declaration names.** Dead weight in the repository and
+       in the bucket, and the reader who does not fetch it is the only one who
+       is unaffected.
+
+    3. **A face with no ``font-display``.** The initial value is ``auto``, which
+       Chrome treats as ``block``: the text is invisible until the face arrives,
+       measured at 1.4s to 1.9s after first paint on a throttled connection.
+       ``optional`` is refused for a different reason and the message carries it.
+
+    4. **A payload nobody costed.** Two ceilings, because a reader does not
+       fetch the repository: the total is what the bucket holds, and the latin
+       cuts are what one English page can actually ask for.
+    """
+    problems: list[Problem] = []
+    font_dir = REPO_ROOT / "assets" / "fonts"
+    declared: set[Path] = set()
+    latin: set[Path] = set()
+
+    sheets = sorted(
+        path
+        for path in REPO_ROOT.rglob("*.css")
+        if not any(part.startswith(".") for part in path.relative_to(REPO_ROOT).parts)
+    )
+    for sheet in sheets:
+        where = relative(sheet)
+        for face in FONT_FACE.finditer(sheet.read_text(encoding="utf-8")):
+            body = face.group("body")
+            hrefs = FONT_SRC_URL.findall(body)
+            if not hrefs:
+                problems.append(Problem(where, "an @font-face block has no src url()"))
+                continue
+            for href in hrefs:
+                target = (sheet.parent / href).resolve()
+                if not target.is_file():
+                    problems.append(
+                        Problem(where, f"@font-face names a file that is not on disk -> {href}")
+                    )
+                    continue
+                declared.add(target)
+                ranges = FONT_UNICODE_RANGE.search(body)
+                if ranges is None or FONT_LATIN_MARKER in ranges.group("value").upper():
+                    latin.add(target)
+
+            display = FONT_DISPLAY.search(body)
+            name = hrefs[0]
+            if display is None:
+                problems.append(
+                    Problem(where, f"@font-face for {name} declares no font-display; "
+                                   "the initial value hides the text until the face arrives")
+                )
+            elif display.group("value") == "optional":
+                problems.append(
+                    Problem(where, f"@font-face for {name} uses font-display: optional, which a face the "
+                                   "reader can switch to may not use: a face that misses the first-paint "
+                                   "deadline is dropped for the life of that page load and "
+                                   "document.fonts.load() does not bring it back")
+                )
+
+    if font_dir.is_dir():
+        for shipped in sorted(font_dir.glob("*.woff2")):
+            if shipped.resolve() not in declared:
+                problems.append(
+                    Problem(relative(shipped), "no @font-face names this file; it is published and never fetched")
+                )
+
+    total = sum(path.stat().st_size for path in declared)
+    latin_total = sum(path.stat().st_size for path in latin)
+    if total > FONT_BYTES_CEILING:
+        problems.append(
+            Problem("assets/fonts", f"the declared faces are {total:,} bytes, over the "
+                                    f"{FONT_BYTES_CEILING:,} byte ceiling; raise it deliberately "
+                                    "or subset, and record the reason in assets/fonts/README.md")
+        )
+    if latin_total > FONT_LATIN_BYTES_CEILING:
+        problems.append(
+            Problem("assets/fonts", f"the latin cuts are {latin_total:,} bytes, over the "
+                                    f"{FONT_LATIN_BYTES_CEILING:,} byte ceiling; that is what one "
+                                    "English page fetches, so this is the reader's bill")
+        )
+    return problems
+
+
 def main() -> int:
     problems = (
         check_courses_are_registered()
@@ -2081,6 +2196,7 @@ def main() -> int:
         + check_contrast_floor()
         + check_page_margin_boxes()
         + check_width_queries_name_a_medium()
+        + check_the_font_contract()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default

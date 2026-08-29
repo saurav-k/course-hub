@@ -748,6 +748,45 @@ The spelling is necessary and not sufficient: a course block and a design block 
 See "The course contract" below.
 A new course has no sheet to do either in: it declares the seven tokens of the course contract and nothing else.
 
+## The faces, and what a page pays for them
+
+Three families are self-hosted as woff2 beside the stylesheet, declared at the head of `assets/hub.css` and served from nowhere else.
+That is what lets a page opened straight off disk look like the published one, and it is why no reader is ever visible to a font service.
+`assets/fonts/README.md` carries the per-file table, the sizes and the refresh procedure.
+
+**Eight files, 459.3K on disk, and no page fetches more than four of them.**
+The `-ext` cuts are gated by `unicode-range` and only 34 of the 796 pages carry a character that needs one.
+A page with no italic in its prose fetches 152.8K; a page with `<em>` in its prose fetches 241.0K, and that is 559 of the 796 pages, so it is the number to plan against.
+`scripts/validate_site.py` holds both a total ceiling and a latin-cut ceiling, so a fourth face is added against a known figure rather than against a guess.
+
+**`font-display` is `swap` on every face, and it is the only value this hub may use.**
+The validator refuses `optional`, and the reason is measured rather than argued.
+`optional` does remove the swap, and there is little left to remove: the font-attributable layout shift on a throttled first load measures 0.00002 on the hub landing page, 0.0011 on the worst lesson and 0.027 on a course map, because the derived apparent-size layer leaves the fallback and the webfont occupying nearly the same space.
+It was 0.29 on that lesson before the derived layer landed, so the swap is cheap because of a fix rather than by nature.
+The reason `optional` is refused is separate: a face that misses the first-paint deadline is dropped for the life of that page load.
+Chrome will not apply it afterwards and `document.fonts.load()` does not bring it back: after the drop, a probe set in `"Source Serif 4"` measures exactly as wide as one set in a family that does not exist.
+A reader control that switches the body face would therefore do nothing at all until the next navigation.
+`block` and `fallback` only add invisible text, because the faces arrive 1.4s to 1.9s after first paint on a Slow 4G connection, which is inside the swap period both of them end with anyway.
+
+**Loading a face on demand is a different mechanism, and it is not governed by that descriptor.**
+Both registry faces are on every page already - `--font-body` resolves to Source Serif 4 or to Inter, and the chrome pulls Inter regardless - so switching between the two today costs no fetch at all.
+A *third* face is the case that needs this note.
+It should not be fetched before the reader picks it, and a `@font-face` rule cannot express that: the browser decides from the rendered content when to fetch, which for a registered face is always.
+The control that offers the face therefore loads it itself, with the CSS Font Loading API, and selects it only once the load has settled:
+
+```js
+var face = new FontFace('Some Face', "url('../../assets/fonts/some-face.woff2') format('woff2')", { display: 'swap', weight: '400 700' });
+face.load().then(function (loaded) {
+  document.fonts.add(loaded);
+  root.setAttribute('data-body-face', 'someface');   // the registry entry, with its three constants
+});
+```
+
+Two properties follow, and both are the point.
+A `FontFace` built in script carries its own `display`, so it is never subject to the descriptor on any `@font-face` rule and never silently dropped.
+And setting the attribute only inside the callback means the reader never sees the fallback flash on a control they just used, and never sees a measure computed from one face while another is on screen.
+The control panel owns that code; this note owns the contract it has to keep.
+
 ## The design axis
 
 The block above is a *design*, and `house` is its name.
