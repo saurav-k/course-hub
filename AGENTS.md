@@ -229,8 +229,10 @@ and a single value cannot carry them; see the derived axes below.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
 near the head of `hub.css`, marked "the design axis", carries 301 of them: `--font-display`,
-`--font-ui` and `--font-mono`, the type scale, the leading set, weight, tracking, an eight-step
-space ramp with a role layer over it, shape, motion and the eyebrow treatment. A hard-coded
+`--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
+eight-step space ramp with a role layer over it, shape, motion and the eyebrow treatment. Six of
+them are declared there as a `-default` and resolved below the block, which is the course layer;
+see "The course contract" above. A hard-coded
 `1.05rem` in a rule is a value a second design cannot reach, which is the fork this hub already
 paid once to remove. **A rule never reads a `--sp-1` to `--sp-8` ramp step**: those are the defaults the role
 tokens are built from, and a ramp step in a rule puts a reading-rhythm distance and a chrome
@@ -250,8 +252,11 @@ withdrawing a design is deleting its entry: no deploy and no page edit. Three ch
 declares the whole token set, and a design-axis token is declared in a design block and nowhere else
 (a design block is `(0,2,0)` and would out-argue a media-query override in every viewport). A course
 sheet that restates a design token must therefore write `:root[data-course="..."]`; a bare
-`[data-course="..."]` is `(0,1,0)` and loses. `references/widgets.md`, "The design axis", is the
-author-facing summary.
+`[data-course="..."]` is `(0,1,0)` and loses. That spelling is necessary and not sufficient: a
+course block and a design block are both `(0,2,0)`, so for the six tokens both of them want, the
+design writes a `-default` and the course writes the token, and the six resolution lines sit below
+the design block rather than in it. See "The course contract" above.
+`references/widgets.md`, "The design axis", is the author-facing summary.
 
 **Four of the reading axes are derived, and the block after the design axis is where.** They are
 not independent, so offering them as four settings would let a reader move one control and silently
