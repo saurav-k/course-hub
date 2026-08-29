@@ -714,6 +714,7 @@ CONTRACT = """
       'body face': getComputedStyle(document.body).fontFamily,
       'body size': getComputedStyle(document.body).fontSize,
       'measure': rootStyle.getPropertyValue('--measure').trim(),
+      'measure characters': rootStyle.getPropertyValue('--measure-chars').trim(),
       'ui face': rootStyle.getPropertyValue('--font-ui').trim()
     };
   }
@@ -741,12 +742,12 @@ CONTRACT = """
      writes none of the reader-reachable tokens, so nothing it declares can
      out-argue an inline --*-user property. */
   root.setAttribute('data-course', 'fixture-full-course');
-  root.style.setProperty('--fs-body-user', '21px');
-  root.style.setProperty('--measure-user', '60rem');
+  root.style.setProperty('--fs-body-user', '1.3125rem');
+  root.style.setProperty('--measure-chars-user', '60');
   await settle();
   states['reader controls'] = readState();
   root.style.removeProperty('--fs-body-user');
-  root.style.removeProperty('--measure-user');
+  root.style.removeProperty('--measure-chars-user');
 
   sheet.remove();
   states['restored'] = await underCourse(original);
@@ -1223,9 +1224,16 @@ def _contract_claims(states: dict[str, dict[str, str]], root_size: float) -> lis
 
     # A course declares none of the reader-reachable tokens, so the reader keeps
     # every control while a course block is in force.
+    #
+    # Both are written the way the panel writes them: the body size in rem, on
+    # the reference scale the stylesheet's own default uses, and the measure in
+    # real characters. The measure is asserted on --measure-chars rather than on
+    # the width it derives, so the claim stays about the reader's number
+    # reaching the token and does not also restate the face's advance constant,
+    # which `scripts/type_invariants.py` is the guard on.
     claims += [
         Claim("reader controls", "body size", "21px", states["reader controls"]["body size"]),
-        Claim("reader controls", "measure", "60rem", states["reader controls"]["measure"]),
+        Claim("reader controls", "measure characters", "60", states["reader controls"]["measure characters"]),
     ]
 
     # Removing the block restores the page exactly. The kill switch is lossless.

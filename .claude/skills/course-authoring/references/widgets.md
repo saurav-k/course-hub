@@ -818,6 +818,54 @@ No deploy, no page edit, and the fallback was measured to restore the original e
 Mermaid cuts every label box to a measurement it takes at render time, and it takes that measurement in the face `hub.js` hands it - `--font-ui`, the chrome role, which is also what `hub.css` paints diagrams with.
 Test a design change by *switching*, never by loading: a diagram with stale metrics renders correctly on the next reload, which is how the defect survives review.
 
+## The reader control panel
+
+`hub.js` builds one panel and it reaches every page, because every page already links the shared assets.
+Nothing about it is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
+
+**Six controls, and three axes that are deliberately not among them.**
+The six are the ground (mode and palette), the body size, the reading face, the measure, the line spacing and the density.
+A control earns its place when readers genuinely differ on it, when the reader can perceive the difference and judge it, and when a wrong setting is recoverable.
+The display face, the mono face and the eyebrow treatment fail all three in the same way: a reader sets one once out of curiosity and never returns to it, and they are exactly the axes a *course* has every reason to differ on, so they are author tokens on the course contract instead.
+The accent is not a seventh control either.
+It is carried by the palette the reader already chooses and rotated per course, and expanding it into a colour picker would put a contrast criterion in the reader's hands.
+
+**A control is an input to a derivation, never a setting of its own.**
+The four couplings in "The derived axes" above are why: a reader who set a measure of 72 and then changed the face would move their line length without touching the measure control.
+So the measure names real characters, the body size names apparent size on the Source Serif 4 reference scale, the code size follows the reading face on its own, and the leading nudges above a wide measure unless the reader has stated one.
+`--measure`, `--fs-body`, `--fs-mono` and the per-face constants are outputs and no control writes one.
+
+**Every control writes a `--*-user` property or a registered axis attribute, and nothing else.**
+Two of the reader's choices are attributes rather than properties, because what they carry does not compose into a single value: `data-body-face` selects a family together with the three measured constants that have to travel with it, and `data-motion` selects a block of rules.
+Check 11 in `scripts/validate_site.py` gates both halves - hub.js may write no other attribute on `<html>` and no property that is not a `--*-user` one hub.css resolves.
+
+**Density scales the reading column's rhythm and reaches nothing else, and that is structural rather than promised.**
+It writes the twenty prose-rhythm roles as `calc(var(--x-default) * 0.75)`, so a design that restates a role is scaled rather than overruled, and the only names it *can* write are ones hub.css resolves.
+There is no headroom in the chrome for a compact mode: one control already fails WCAG 2.2 SC 2.5.8, seven more pass on the spacing exception alone, and the smallest compliant control has two pixels of margin.
+
+**The panel moves, by pointer and by keyboard.**
+The title bar is the drag surface and the grip inside it takes the arrow keys, with Shift for a finer step and Home or Enter to put the panel back where it started.
+A panel only a mouse can move is a panel some readers cannot move at all.
+
+**Its position is an intention, and what is rendered is that intention clamped into the viewport in front of the reader.**
+The band it is held inside is measured off the sticky topbar and the pre-production strip rather than assumed, so it can never be parked under either.
+The clamp does not write back, so a coordinate chosen on a wide display comes back when the wide display does, and on a phone the panel is re-seated rather than stranded.
+Only the re-seat glides; a move the reader is aiming lands at once, and `[data-motion="reduced"]` zeroes the glide with every other transition.
+
+**The panel is a non-modal dialog, and that follows from it being movable.**
+It carries `role="dialog"` and `aria-labelledby` and it does not carry `aria-modal`, because a reader parks it in order to keep reading with it open and telling a screen reader the page behind it is inert would be a lie.
+For the same reason focus is not trapped and a click on the page does not close it.
+Focus moves into the panel when it opens; Escape and the close control both shut it, and both return focus to the opening button only when focus was inside the panel, so a reader who has tabbed back into the page keeps their place.
+
+**The panel passes the floors it enforces.**
+Its labels are `--ink` or `--ink-soft` and never faint ink on a recessed surface at a small size - the comment on the copy button in `hub.css` records that this codebase has already failed that once.
+Every control clears 24 by 24 CSS pixels, which is why the range thumb is drawn rather than inherited: the browser's own is about 16px square.
+`scripts/focus_walk.py` opens the panel and presses Tab through all of it in both modes.
+
+**"Back to this course's defaults" is exact.**
+It removes every `--*-user` property, every reader axis attribute and the panel's own position, which leaves the stylesheet's own values with nothing to unwind.
+That is a property of the three-layer rule rather than a feature of the button: a reader value that competed with a token instead of feeding one would have to be unwound rather than removed.
+
 ## The course contract
 
 A course declares its identity through **seven tokens, in one block, and through nothing else**.
