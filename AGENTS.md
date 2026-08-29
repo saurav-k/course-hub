@@ -175,23 +175,29 @@ and every later change to the hub sheet stops at that course's pages.
 **Anything a reader can set has three layers, and never fewer.** `hub.css` declares a
 `--x-default`, `hub.js` writes only a `--x-user` property inline on `<html>`, and one resolved
 token `--x: var(--x-user, var(--x-default))` is what every rule reads. Only that resolution line
-may read a `--*-user` property, and no reader control may write anything else. The reason is
+may read a `--*-user` property, and no reader control may write anything else. What sits after the
+comma is the stylesheet's own answer and is not always a `-default`: a derived axis falls back to
+its derivation, as `--lh-body` and `--measure` do. What is fixed is the head - a reader value is
+read by one custom property, once, and by exactly one declaration in the sheet. The reason is
 measured: the two reading preferences were applied as inline styles until 2026-08, an inline style
 beats every rule that is not `!important`, and a reader who had widened the column was pinned there
 for good. It also means a value with a viewport override belongs in a `-default` inside the media
 query, not in a second rule on the element - `body { font-size: ... }` at a breakpoint would sit
 after the body rule and out-argue the reader. The block at the head of `hub.css` states the rule in
 full. Twenty-four tokens carry the form today and they are exactly the reader-reachable ones:
-`--font-body`, `--fs-body`, `--lh-body`, `--measure` and the twenty prose-rhythm space roles.
+`--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm space roles.
 Everything else is a one-layer design token, because a `--*-user` layer on a value no control can
 write is dead weight that still has to be kept right in every media query.
+**The reading face is the one reader choice that is not a `--*-user` property.** It is a registered
+axis attribute, `data-body-face`, because three measured constants have to travel with the family
+and a single value cannot carry them; see the derived axes below.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries 304 of them: the three faces by role
-plus `--font-ui` for chrome, the type scale, the leading set, weight, tracking, an eight-step space
-ramp with a role layer over it, shape, motion and the eyebrow treatment. A hard-coded `1.05rem` in a
-rule is a value a second design cannot reach, which is the fork this hub already paid once to
-remove. **A rule never reads a `--sp-1` to `--sp-8` ramp step**: those are the defaults the role
+near the head of `hub.css`, marked "the design axis", carries 301 of them: `--font-display`,
+`--font-ui` and `--font-mono`, the type scale, the leading set, weight, tracking, an eight-step
+space ramp with a role layer over it, shape, motion and the eyebrow treatment. A hard-coded
+`1.05rem` in a rule is a value a second design cannot reach, which is the fork this hub already
+paid once to remove. **A rule never reads a `--sp-1` to `--sp-8` ramp step**: those are the defaults the role
 tokens are built from, and a ramp step in a rule puts a reading-rhythm distance and a chrome
 distance on one token, which is what the split exists to prevent. Six role tokens are the reading
 column's rhythm and a later density control may scale those and nothing else; the chrome is
@@ -212,6 +218,26 @@ sheet that restates a design token must therefore write `:root[data-course="..."
 `[data-course="..."]` is `(0,1,0)` and loses. `references/widgets.md`, "The design axis", is the
 author-facing summary.
 
+**Four of the reading axes are derived, and the block after the design axis is where.** They are
+not independent, so offering them as four settings would let a reader move one control and silently
+move a second. The measure names real characters and its width is computed, because `ch` is the
+advance of the digit zero and one `ch` of Source Serif 4 is .5049em against a .4479em character;
+the body size names apparent size on the Source Serif 4 scale, because the same nominal size is 21%
+larger to the eye in Inter; the code size follows the reading face's x-height, because x-height
+parity against JetBrains Mono is .822em under a serif and .993em under a sans; and the leading gets
+a nudge above 80 characters that any explicit reader choice suppresses. All four are pure CSS, so a
+page with the script blocked computes exactly what a page with it computes.
+
+**A face is a name plus three measured constants** - average prose advance, x-height per em and
+apparent-size factor - and the four are declared together in one `data-body-face` entry. Adding a
+face means adding an entry, never setting `--font-body` on its own, and never picking a constant
+out of a report: `scripts/type_invariants.py` refuses an entry that names a family without all
+three, measures the advance from a committed corpus of real hub prose, and holds invariants M1 (a
+`--measure-chars` of N realises N plus or minus one characters at 55, 68, 80 and 85) and M2 (the
+code size stays inside .85 to .90 of the prose under a serif). It also re-runs the reflow matrix
+and proves the whole layer with `hub.js` blocked. It is the third CI check and it takes about four
+seconds. The three figures published for Source Serif 4's advance disagree, and M1 is what settles
+that: `.4065` fails it by five to eight characters.
 Every page also loads its course `outline.js`, generated by `scripts/gen_outline.py`, which is
 what the sidebar reads. `llm-evolution-course` ships `routes.js` instead; see
 `llm-evolution-course/routes/README.md`.
