@@ -312,9 +312,18 @@
     return scale;
   }
 
+  /* `--font-ui` and not `--sans`: the role, not the registry. `hub.css` paints
+     every diagram with `.mermaid { font-family: var(--font-ui) }`, so a design
+     that moves the chrome face moves what the reader sees. Mermaid measures
+     each label from this value instead, and the two must be the same face or
+     every box is cut to the wrong width - which is the clipping defect one
+     layer further back, latent until the first design moves that face. Today
+     `--font-ui` is `var(--sans)` and the two spellings resolve identically; a
+     custom property holding a var() is substituted at computed-value time, so
+     `getPropertyValue` hands back the whole stack either way. */
   function mermaidVars() {
     var vars = {
-      fontFamily: getComputedStyle(root).getPropertyValue('--sans').trim() || 'sans-serif',
+      fontFamily: getComputedStyle(root).getPropertyValue('--font-ui').trim() || 'sans-serif',
       fontSize: '15px',
       background: token('--surface-3'),
       primaryColor: token('--accent2-soft'),
@@ -450,7 +459,7 @@
 
   function printVars() {
     var vars = {
-      fontFamily: getComputedStyle(root).getPropertyValue('--sans').trim() || 'sans-serif',
+      fontFamily: getComputedStyle(root).getPropertyValue('--font-ui').trim() || 'sans-serif',
       fontSize: '15px',
       background: '#ffffff',
       primaryColor: '#ffffff', primaryTextColor: '#000000', primaryBorderColor: '#000000',
@@ -508,8 +517,8 @@
        measuring element has to carry the same font as the finished diagram.
        Left to itself `render()` measures inside a bare container in the body
        serif, and every label comes out a shade too wide for the box that was
-       cut for it. This is an off-screen `.mermaid`, so the `--sans` rule that
-       governs the real diagrams governs the measurement too. */
+       cut for it. This is an off-screen `.mermaid`, so the `--font-ui` rule
+       that governs the real diagrams governs the measurement too. */
     var stage = el('div', 'mermaid');
     stage.style.cssText = 'position:absolute;left:-99999px;top:0;visibility:hidden';
     document.body.appendChild(stage);
