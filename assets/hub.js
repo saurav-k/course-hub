@@ -6,7 +6,8 @@
    wrong colours.
 
    What it does, in order:
-     1. head phase   - restore mode + palette from localStorage
+     1. head phase   - restore mode, palette and the two reading
+                       preferences from localStorage
      2. mount phase  - build the rail from window.COURSE_OUTLINE,
                        build the topbar controls and settings popover,
                        and the pre-production bar when the host says so
@@ -24,6 +25,44 @@
     read:    'coursehub.read',      // { courseKey: [lesson file names] }
     legacy:  'llmcourse-theme'      // what the first design system wrote
   };
+
+  /* ---------- the two reading preferences ----------
+     Each one is a named step, not a raw length. Two properties follow from
+     that and both matter.
+
+     A stored step is validated against this table exactly as a palette key is,
+     so a value from a step that was later withdrawn falls back to the default
+     rather than leaving one reader with a page nobody else can see.
+
+     And the value reaches the page as a `--*-user` custom property on <html>,
+     which is the only thing a reader is allowed to write. hub.css resolves
+     --measure and --fs-body from these; see the three-layer note there. Until
+     2026-08 these were applied as an inline `--measure` on <html> and an inline
+     `font-size` on <body>, which beat every stylesheet rule that was not
+     !important and pinned a reader who had turned them on. Never write a
+     resolved token from here.
+
+     `legacy` and `on` carry the one-time migration from those two keys. A
+     stored `wide=1` becomes the step that reproduces 52rem and a stored `big=1`
+     the step that reproduces 1.3125rem, so a reader who had them on sees the
+     same page after the migration as before it. */
+  var READING = {
+    measure: {
+      store:  'coursehub.measure',
+      prop:   '--measure-user',
+      steps:  { normal: null, wide: '52rem' },
+      legacy: 'coursehub.wide',
+      on:     'wide'
+    },
+    bodysize: {
+      store:  'coursehub.bodysize',
+      prop:   '--fs-body-user',
+      steps:  { normal: null, big: '1.3125rem' },
+      legacy: 'coursehub.big',
+      on:     'big'
+    }
+  };
+  var READING_KEYS = Object.keys(READING);
 
   var PALETTES = [
     { key: 'paper',     label: 'Paper',     note: 'Warm cream, rust links, deep teal. The house identity.' },
@@ -60,6 +99,31 @@
   var palette = get(STORE.palette);
   if (PALETTE_KEYS.indexOf(palette) === -1) palette = 'paper';
   root.setAttribute('data-palette', palette);
+
+  /* The two reading preferences, restored here rather than when the appearance
+     panel is built, so a reader who widened the column or asked for larger type
+     gets it with the first paint instead of a step after it. */
+  function readStep(axis) {
+    var step = get(axis.store);
+    if (step === null) {
+      // one-time migration from the inline-style era; see READING above
+      if (get(axis.legacy) === '1') { step = axis.on; set(axis.store, step); }
+      drop(axis.legacy);
+    }
+    return Object.prototype.hasOwnProperty.call(axis.steps, step) ? step : 'normal';
+  }
+
+  function applyStep(axis, step) {
+    var value = axis.steps[step];
+    if (value) root.style.setProperty(axis.prop, value);
+    else root.style.removeProperty(axis.prop);
+  }
+
+  var reading = {};
+  READING_KEYS.forEach(function (name) {
+    reading[name] = readStep(READING[name]);
+    applyStep(READING[name], reading[name]);
+  });
 
   /* The third axis: which course this page belongs to. Mode and palette are the
      reader's choices; this one is a property of the page, and it is what stops
@@ -784,12 +848,8 @@
 
     var prefGroup = el('div', 'set-group');
     prefGroup.appendChild(el('h3', null, 'Reading'));
-    prefGroup.appendChild(toggleRow('Wider text column', 'coursehub.wide', function (on) {
-      root.style.setProperty('--measure', on ? '52rem' : '');
-    }));
-    prefGroup.appendChild(toggleRow('Larger type', 'coursehub.big', function (on) {
-      document.body.style.fontSize = on ? '1.3125rem' : '';
-    }));
+    prefGroup.appendChild(readingRow('Wider text column', 'measure'));
+    prefGroup.appendChild(readingRow('Larger type', 'bodysize'));
     var note = el('p', 'set-note',
       'Your choice is remembered in this browser and applies to every course in the hub.');
     prefGroup.appendChild(note);
@@ -797,15 +857,19 @@
     return panel;
   }
 
-  function toggleRow(label, key, apply) {
+  /* Two steps today, a checkbox for each. The row reads the step the head phase
+     already resolved rather than the store, so the panel and the page can never
+     disagree about what is on. */
+  function readingRow(label, name) {
+    var axis = READING[name];
     var row = el('label', 'set-row');
     var box = el('input');
     box.type = 'checkbox';
-    box.checked = get(key) === '1';
-    if (box.checked) apply(true);
+    box.checked = reading[name] !== 'normal';
     box.addEventListener('change', function () {
-      set(key, box.checked ? '1' : '0');
-      apply(box.checked);
+      reading[name] = box.checked ? axis.on : 'normal';
+      set(axis.store, reading[name]);
+      applyStep(axis, reading[name]);
     });
     row.appendChild(box);
     row.appendChild(el('span', null, label));
