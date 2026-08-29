@@ -45,7 +45,10 @@
   function paint() {
     var cells = document.querySelectorAll('[data-token]');
     Array.prototype.forEach.call(cells, function (cell) {
-      var value = valueOf(cell);
+      // A multi-part value is written across two lines in the stylesheet and
+      // comes back with the newline in it, which would break a table row in
+      // half. The value is the same value on one line.
+      var value = valueOf(cell).replace(/\s+/g, ' ');
       // A token that resolves to nothing here is not a fault to hide. The
       // pre-production bar's height is set only where the hostname says
       // preprod, and saying so is more useful than an empty cell.
@@ -110,14 +113,21 @@
     return Object.keys(found).length ? found : null;
   }
 
+  /* A rule is read for its own declarations and then walked for the rules
+     inside it. Both, never one or the other: since CSS nesting shipped, an
+     ordinary style rule carries an empty `cssRules` list rather than none at
+     all, and an empty list is still an object. Treating that as "this is a
+     container, skip its declarations" walked past every token in the file and
+     reported the whole stylesheet as unreadable. */
   function collect(rules, found) {
     for (var r = 0; r < rules.length; r += 1) {
       var rule = rules[r];
-      if (rule.cssRules) { collect(rule.cssRules, found); continue; }
-      if (!rule.style) continue;
-      var match;
-      DECLARATION.lastIndex = 0;
-      while ((match = DECLARATION.exec(rule.cssText)) !== null) found[match[1]] = true;
+      if (rule.style) {
+        var match;
+        DECLARATION.lastIndex = 0;
+        while ((match = DECLARATION.exec(rule.style.cssText)) !== null) found[match[1]] = true;
+      }
+      if (rule.cssRules && rule.cssRules.length) collect(rule.cssRules, found);
     }
   }
 
