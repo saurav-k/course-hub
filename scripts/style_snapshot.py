@@ -49,8 +49,9 @@ chosen explicitly and the operating system asking for the opposite, because that
 is the state the hub's mode-layer ordering was written for. The agreeing state
 is checked too, as assertion A1 below, rather than stored twice.
 
-*Two assertions run beside the snapshot, and neither is stored.* They are the
-two render states that a single capture cannot see.
+*Three assertions run beside the snapshot, and none is stored.* The first two
+are render states that a single capture cannot see; the third is the course
+contract, which is a promise rather than a state.
 
     A1  system parity. A page with no ``data-mode`` and the operating system
         asking for a mode computes exactly what the same page computes with that
@@ -60,6 +61,17 @@ two render states that a single capture cannot see.
         to another computes exactly what the same page computes when loaded on
         that setting directly. A failure means a rule that only matches on the
         first paint, or one that only matches after a change.
+
+    A3  the course contract. Two throwaway courses are registered in an injected
+        stylesheet and worn in turn on one published page. A registration
+        carrying only `--course-hue` moves the accent and nothing else; one
+        carrying all seven author tokens moves the display face, the mono face
+        and the eyebrow treatment and still nothing else; an unregistered course
+        name changes nothing at all; the reader's two controls keep working
+        underneath; and removing the block restores the page exactly. A failure
+        means a token the documentation promises is a token no rule reads. It
+        runs once, not per page, because it proves a mechanism rather than a
+        page.
 
 There is no dependency and no build. Chrome is driven over its own pipe
 transport with the standard library alone: NUL-delimited JSON on file
@@ -642,6 +654,108 @@ SWITCH = """
 """
 
 
+CONTRACT = """
+(async function () {
+  var root = document.documentElement;
+  var original = root.getAttribute('data-course');
+
+  /* The fixture has to sit where a real registration sits, which is inside
+     hub.css and therefore *before* everything the sheet declares after it. An
+     injected <style> appended to the head is the last stylesheet in the
+     document and wins every tie on source order, so a fixture placed there
+     would pass while a real course registered in hub.css silently lost to a
+     design block. Inserting it ahead of the sheet is if anything stricter than
+     reality, so it can over-report and never under-report. */
+  var sheet = document.createElement('style');
+  sheet.id = '__course-contract-fixture';
+  sheet.textContent =
+    ':root[data-course="fixture-hue-only-course"] { --course-hue: 137; }' +
+    ':root[data-course="fixture-full-course"] {' +
+    '  --course-hue: -37;' +
+    '  --font-display: var(--mono);' +
+    '  --font-mono: var(--serif);' +
+    '  --eyebrow-family: var(--serif);' +
+    '  --eyebrow-tracking: .3em;' +
+    '  --eyebrow-case: none;' +
+    '  --eyebrow-size: .78rem;' +
+    '}';
+
+  /* Three probes in the closed vocabulary, so what is measured is the rule a
+     page actually carries and not a token read back out of :root. The accent is
+     read off the page's own wordmark, which is authored markup on every page. */
+  var probe = document.createElement('div');
+  probe.id = '__course-contract-probe';
+  probe.innerHTML = '<p class="eyebrow">Course eyebrow</p><h1>Heading</h1><code>code</code>';
+  document.body.appendChild(probe);
+
+  var eyebrow = probe.querySelector('.eyebrow');
+  var heading = probe.querySelector('h1');
+  var code = probe.querySelector('code');
+  var wordmark = document.querySelector('.spine .home');
+
+  function settle() {
+    return new Promise(function (done) {
+      requestAnimationFrame(function () { requestAnimationFrame(done); });
+    });
+  }
+
+  function readState() {
+    var rootStyle = getComputedStyle(root);
+    var eyebrowStyle = getComputedStyle(eyebrow);
+    return {
+      'accent': wordmark ? getComputedStyle(wordmark).color : 'no wordmark on this page',
+      'display face': getComputedStyle(heading).fontFamily,
+      'mono face': getComputedStyle(code).fontFamily,
+      'eyebrow family': eyebrowStyle.fontFamily,
+      'eyebrow size': eyebrowStyle.fontSize,
+      'eyebrow tracking': eyebrowStyle.letterSpacing,
+      'eyebrow case': eyebrowStyle.textTransform,
+      'eyebrow weight': eyebrowStyle.fontWeight,
+      'body face': getComputedStyle(document.body).fontFamily,
+      'body size': getComputedStyle(document.body).fontSize,
+      'measure': rootStyle.getPropertyValue('--measure').trim(),
+      'ui face': rootStyle.getPropertyValue('--font-ui').trim()
+    };
+  }
+
+  async function underCourse(name) {
+    if (name === null) root.removeAttribute('data-course');
+    else root.setAttribute('data-course', name);
+    await settle();
+    return readState();
+  }
+
+  var states = {};
+  states['house'] = await underCourse(original);
+  states['no course'] = await underCourse(null);
+  var rootSize = parseFloat(getComputedStyle(root).fontSize);
+
+  var hub = document.querySelector('link[rel="stylesheet"][href*="hub.css"]');
+  if (!hub) return { 'error': 'the page links no hub.css, so A3 cannot place its fixture' };
+  hub.parentNode.insertBefore(sheet, hub);
+  states['hue only'] = await underCourse('fixture-hue-only-course');
+  states['seven tokens'] = await underCourse('fixture-full-course');
+  states['unregistered'] = await underCourse('fixture-unregistered-course');
+
+  /* The reader keeps every control while the course block is in force: a course
+     writes none of the reader-reachable tokens, so nothing it declares can
+     out-argue an inline --*-user property. */
+  root.setAttribute('data-course', 'fixture-full-course');
+  root.style.setProperty('--fs-body-user', '21px');
+  root.style.setProperty('--measure-user', '60rem');
+  await settle();
+  states['reader controls'] = readState();
+  root.style.removeProperty('--fs-body-user');
+  root.style.removeProperty('--measure-user');
+
+  sheet.remove();
+  states['restored'] = await underCourse(original);
+  probe.remove();
+
+  return { 'states': states, 'rootSize': rootSize };
+})()
+"""
+
 @dataclass(frozen=True)
 class Difference:
     """One computed value that moved, named the way a fix needs it named."""
@@ -1008,6 +1122,154 @@ def capture_page(capture: Capture, page: str, assertions: bool) -> tuple[dict, l
     return captures, findings
 
 
+def contract_page(sample: list[str]) -> str:
+    """The page A3 runs on: the first lesson in the sample.
+
+    A lesson rather than a course map, because the wordmark A3 reads the accent
+    from is authored into every lesson's spine, and because a lesson is what a
+    reader of a course actually holds open.
+    """
+    for page in sample:
+        if "/lessons/" in page:
+            return page
+    raise RuntimeError("the sample contains no lesson page, so A3 has nothing to run on")
+
+
+def _near(measured: str, expected: float) -> bool:
+    """Two lengths in px agree to the hundredth, which is finer than any paint."""
+    try:
+        return abs(float(measured.replace("px", "")) - expected) < 0.01
+    except ValueError:
+        return False
+
+
+@dataclass(frozen=True)
+class Claim:
+    """One thing A3 asserts about one registration.
+
+    Most claims are an equality: this property computes exactly that value.
+    A few are the opposite - the accent has to *move*, and a registration that
+    changed nothing would be a passing test of a broken mechanism - so the
+    direction is a field rather than a convention in the expected string.
+    """
+
+    state: str
+    prop: str
+    expected: str
+    measured: str
+    must_differ: bool = False
+
+    def holds(self) -> bool:
+        if self.must_differ:
+            return self.measured != self.expected
+        if self.measured == self.expected:
+            return True
+        return self.expected.endswith("px") and _near(self.measured, float(self.expected[:-2]))
+
+    def as_difference(self, page: str) -> Difference:
+        wanted = f"anything but {self.expected}" if self.must_differ else self.expected
+        return Difference(page, f"A3 {self.state}", "the registration", self.prop, wanted, self.measured)
+
+
+def _unchanged(state: str, house: dict[str, str], measured: dict[str, str], *, except_for: str) -> list[Claim]:
+    """Every property but one computes what the house computes."""
+    return [
+        Claim(state, prop, value, measured[prop])
+        for prop, value in sorted(house.items())
+        if prop != except_for
+    ]
+
+
+def _contract_claims(states: dict[str, dict[str, str]], root_size: float) -> list[Claim]:
+    """Every claim A3 makes.
+
+    The two faces and the eyebrow family are compared against another face the
+    same page already computes, rather than against a font name, so the
+    assertion keeps holding when the registry changes what a role points at.
+    """
+    house = states["house"]
+    full = states["seven tokens"]
+    size = 0.78 * root_size
+
+    # A hue on its own moves the accent and nothing else. That is the whole
+    # promise of the cheapest registration there is.
+    claims = [Claim("hue only", "accent", house["accent"], states["hue only"]["accent"], must_differ=True)]
+    claims += _unchanged("hue only", house, states["hue only"], except_for="accent")
+
+    # All seven: the three faces and the eyebrow move, and the four values a
+    # course may never reach do not.
+    claims += [
+        Claim("seven tokens", "accent", house["accent"], full["accent"], must_differ=True),
+        Claim("seven tokens", "display face", house["mono face"], full["display face"]),
+        Claim("seven tokens", "mono face", house["body face"], full["mono face"]),
+        Claim("seven tokens", "eyebrow family", house["body face"], full["eyebrow family"]),
+        Claim("seven tokens", "eyebrow size", f"{size:.4g}px", full["eyebrow size"]),
+        Claim("seven tokens", "eyebrow tracking", f"{0.3 * size:.4g}px", full["eyebrow tracking"]),
+        Claim("seven tokens", "eyebrow case", "none", full["eyebrow case"]),
+        # Not on the author surface, so a course must not be able to move it.
+        Claim("seven tokens", "eyebrow weight", house["eyebrow weight"], full["eyebrow weight"]),
+        Claim("seven tokens", "body face", house["body face"], full["body face"]),
+        Claim("seven tokens", "body size", house["body size"], full["body size"]),
+        Claim("seven tokens", "measure", house["measure"], full["measure"]),
+        Claim("seven tokens", "ui face", house["ui face"], full["ui face"]),
+    ]
+
+    # A course folder nobody registered is dull, never broken: it wears the
+    # palette accent unrotated, which is what a page with no course wears.
+    claims.append(
+        Claim("unregistered", "accent", states["no course"]["accent"], states["unregistered"]["accent"])
+    )
+    claims += _unchanged("unregistered", house, states["unregistered"], except_for="accent")
+
+    # A course declares none of the reader-reachable tokens, so the reader keeps
+    # every control while a course block is in force.
+    claims += [
+        Claim("reader controls", "body size", "21px", states["reader controls"]["body size"]),
+        Claim("reader controls", "measure", "60rem", states["reader controls"]["measure"]),
+    ]
+
+    # Removing the block restores the page exactly. The kill switch is lossless.
+    claims += [
+        Claim("restored", prop, value, states["restored"][prop]) for prop, value in sorted(house.items())
+    ]
+    return claims
+
+
+def assert_course_contract(capture: Capture, page: str) -> list[Difference]:
+    """A3: the course contract, proved on a published page.
+
+    ``scripts/validate_site.py`` checks that a registration is well formed. It
+    cannot see what the browser then does with it, which is the half that
+    matters: a token nothing reads is a token that documents a promise the sheet
+    does not keep. So A3 registers two throwaway courses in a stylesheet it
+    injects, wears each one in turn, and reads the result off three probes in
+    the closed vocabulary plus the page's own wordmark.
+
+    Nothing here is stored. The fixture is removed before the assertion ends and
+    the page is left exactly as it was found, which the ``restored`` state
+    proves rather than assumes.
+    """
+    capture.emulate("dark")
+    capture.seed(PALETTES[0], MODES[0])
+    capture.load(page, PALETTES[0], MODES[0])
+    measured = capture.chrome.evaluate(CONTRACT)
+    if not isinstance(measured, dict):
+        raise RuntimeError("A3 read nothing back from the page")
+
+    if "error" in measured:
+        raise RuntimeError(f"A3 on {page}: {measured['error']}")
+
+    states = measured["states"]
+    if states["house"]["accent"].startswith("no wordmark"):
+        raise RuntimeError(f"A3 needs a page with a .spine .home wordmark; {page} has none")
+
+    return [
+        claim.as_difference(page)
+        for claim in _contract_claims(states, measured["rootSize"])
+        if not claim.holds()
+    ]
+
+
 def run(write: bool, assertions: bool) -> int:
     sample = read_sample()
     gaps = sample_gaps(sample)
@@ -1041,6 +1303,12 @@ def run(write: bool, assertions: bool) -> int:
             else:
                 moved += compare(page, target.read_text(encoding="utf-8"), produced)
             print(f"  {page}", flush=True)
+
+        # A3 runs once rather than per page: it proves a mechanism, not a
+        # page, and a mechanism proved twenty-two times is nineteen minutes
+        # spent on the same answer.
+        if assertions:
+            failed_assertions += assert_course_contract(capture, contract_page(sample))
     finally:
         chrome.close()
         server.shutdown()

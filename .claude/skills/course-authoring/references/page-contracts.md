@@ -93,7 +93,7 @@ A chapter that cannot hold its topics under the ceiling is several chapters, and
 
 A **lab page** carries at least one `.lab` with a real goal, real commands, and a measurable outcome, and closes with a `ul.checklist` rather than only a quiz.
 Prefer invocations that actually run. Note where a flag is version-sensitive.
-The lab classes are styled today only in `llm-inference-course/assets/course-extras.css`; a second course that wants them promotes the rules into `assets/hub.css` rather than forking the file. See [`widgets.md`](widgets.md).
+The lab classes live in `assets/hub.css`, promoted there from `llm-inference-course`'s own sheet when a second course wanted them; any course may use them and no course restyles them. See [`widgets.md`](widgets.md).
 
 ## A lecture hub page
 

@@ -22,7 +22,7 @@ The genuine deltas. Some examples of what belongs here, from courses that have t
 - A rule about what may be assumed, such as never re-teaching a concept the learner has twelve years of.
 - A required section shape per topic, where a chapter indexes many topics rather than developing one.
 - A fixed meaning for one of the shared chart colours, where this course's figures use `m-alarm` for one thing throughout.
-- A rule that only holds because this course ships an `assets/course-extras.css`, naming what is in it and why it could not go in `assets/hub.css`.
+- Any of the seven course-contract tokens this course declares beyond `--course-hue`, and why. A new course ships no stylesheet of its own.
 
 Delete the ones that do not apply. An empty deltas list is a legitimate outcome and a good sign.
 
