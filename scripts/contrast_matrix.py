@@ -14,7 +14,7 @@ rotation holds OKLCH lightness and chroma constant, but WCAG relative luminance
 is not OKLCH lightness, so a hue rotation moves the measured ratio. The shipped
 offsets are presumed sound and nothing had established it.
 
-    6 palettes  x  2 modes  x  19 course hues  =  228 reachable combinations
+    7 palettes  x  2 modes  x  19 course hues  =  266 reachable combinations
 
 **Which pairs are checked, and why not all of them.** A floor on a pair nobody
 can see is noise, and noise is how a gate gets ignored, so the pair table is
@@ -81,8 +81,22 @@ PARITY_PAGES: tuple[tuple[str, str, str, str], ...] = (
 
 COURSE_SELECTOR: re.Pattern[str] = re.compile(r':root\[data-course="(?P<course>[a-z0-9-]+)"\]')
 
-# Every background a reader can find text on.
-SURFACES: tuple[str, ...] = ("--bg", "--surface", "--surface-2", "--surface-3", "--rail-bg", "--code-bg")
+# Every background a reader can find *prose* on. The two code grounds are not
+# here, and that is a measurement rather than an omission.
+#
+# `--code-bg` is the plate behind a `pre` and `--code-inline-bg` is the chip
+# behind an inline `code`. They were one token until the press palette needed a
+# dark plate under light prose, and while they were one it was right to treat
+# that ground as general. They are not general. Walking every text node of the
+# harness sample and recording the ground actually behind it - the same method
+# that built this table in the first place - finds exactly one ink on each:
+# `--code-ink` on the plate and `--code-inline-ink` on the chip, on 20 pages, in
+# both a palette that states the two the same (paper: 104 nodes, all code ink)
+# and one that states them apart (press: 3 on the plate, 101 on the chip). No
+# other ink reaches either. So each plate is checked against its own ink, at the
+# body floor, in the pair table below, and a floor on a pair nobody can see is
+# the noise this table exists to keep out.
+SURFACES: tuple[str, ...] = ("--bg", "--surface", "--surface-2", "--surface-3", "--rail-bg")
 
 # The derived tints. A callout, a practice block, a key number and the rail's
 # current-lesson chip are all ink on one of these.
@@ -113,7 +127,8 @@ PAIRS: tuple[tuple[str, tuple[str, ...], float, str], ...] = (
     ("--gold", SURFACES + ("--gold-soft",), FLOOR_TEXT, "the key-idea tag"),
     ("--ok", SURFACES + ("--ok-soft",), FLOOR_TEXT, "success and read state"),
     ("--warn", SURFACES + ("--warn-soft",), FLOOR_TEXT, "error and danger"),
-    ("--code-ink", ("--code-bg",), FLOOR_BODY, "code body text"),
+    ("--code-ink", ("--code-bg",), FLOOR_BODY, "code body text on the plate"),
+    ("--code-inline-ink", ("--code-inline-bg",), FLOOR_BODY, "inline code text on the chip"),
     ("--accent-ink", ("--accent",), FLOOR_TEXT, "text on the accent, and the pressed mode card"),
     ("--course-accent", SURFACES + ("--course-soft",), FLOOR_TEXT,
      "the wordmark, a section number, the rail's current lesson"),

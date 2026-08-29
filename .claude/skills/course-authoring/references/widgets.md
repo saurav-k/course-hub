@@ -50,7 +50,7 @@ Five rules, all of them load-bearing.
 - **`hub.js` loads in the head, without `defer`.** It writes `data-mode`, `data-palette` and `data-course` onto `<html>` before the first paint, so a deferred copy means every page flashes the wrong colours.
 - **`../outline.js` after it.** That is what the sidebar rail reads, and it is generated: `python3 scripts/gen_outline.py <course>`. A routed course loads `../routes.js` first and then its hand-written `../outline.js`; `gen_outline.py` refuses to run against one.
 - **The Mermaid script tag goes on a page if and only if that page contains a `.mermaid` block.** It must come before `hub.js`, which claims the render from it in its head phase.
-- **No `<button class="theme-btn">`.** `hub.js` deletes a legacy one and mounts the real appearance control, which offers three modes and six palettes. Writing one is dead markup.
+- **No `<button class="theme-btn">`.** `hub.js` deletes a legacy one and mounts the real appearance control, which offers three modes, seven palettes and two designs. Writing one is dead markup.
 
 **The spine is one row that never wraps, and it changes shape twice on the way down.**
 Below 1040px nothing in it may be squeezed except the wordmark, which clips to an ellipsis rather than running out over the next link.
@@ -466,6 +466,16 @@ A `<br/>` inside `.math` is an ordinary line break and is correct there; the ent
 The copy button is injected by `hub.js` into every `<pre>`. Do not add one.
 The caption names the file and says what it is, so a reader knows whether to run it or read it.
 
+**The plate and the chip are two token pairs.**
+A `<pre>` reads `--code-bg` and `--code-ink`; an inline `<code>` reads `--code-inline-bg` and `--code-inline-ink`.
+Six palettes state the same values twice, so the two look identical on them.
+Press states them apart: a dark plate for a block of code, deep rust on warm paper for a word of it inside a sentence, which is what the reference site does and what one shared pair could not express.
+Both pairs carry body text, so `scripts/contrast.py` holds both to 7:1.
+Neither is yours to write in a page - `hub.css` owns both rules - and neither is a design-axis token, because both are colour.
+
+**Both sizes are one token, `--fs-mono`, and it is written in `em`.**
+So block and inline code track the prose around them, and a change to the reader's body size or reading face moves both together.
+
 ## Retrieval practice
 
 ```html
@@ -665,14 +675,15 @@ The groups, and what each is for.
 | Group | Count | What a rule reads |
 |---|---|---|
 | Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. `--font-body` is set by the face registry rather than in this block; see the derived axes below. |
-| Type scale | 60 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
+| Type scale | 62 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
 | Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. `--lh-body` carries the measure nudge; see the derived axes below. |
 | Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
 | Tracking | 14 | Negative on display type, positive on anything set in capitals. |
-| Space | 173 | Two layers; see below. |
-| Shape | 11 | The radii, the four border widths, and the shadow *shape* - its colour stays on the mode layer. |
+| Space | 176 | Two layers; see below. |
+| Reading frame | 3 | `--measure-chars-default`, the column width in real characters, and `--wide-left` / `--wide-right`, unitless shares summing to 1 that say how the breakout band sits around it. `.5` and `.5` centres the prose; `0` and `1` grows figures from its left edge. The rule does the arithmetic, because `--measure-wide` differs by element. |
+| Shape | 17 | The seven radii, the four border widths, and the six that are the shadow *shape* - its colour stays on the mode layer. |
 | Focus ring | 5 | `--focus-ring-color`, `--focus-ring-width`, `--focus-ring-style` and the two offsets; see below. |
-| Motion | 10 | Six durations, two easings, two lift distances. |
+| Motion | 11 | Six durations, two easings, two lift distances and one slide distance. `--motion-slide` is `0px` in House; a design whose signature gesture is horizontal sets it and every lesson card follows. |
 | Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
 
 **Six of those tokens carry two names.**
@@ -692,6 +703,9 @@ That is a hard limit rather than a note: seven pointer targets in the chrome pas
 `hub.css` declares a `-default`, `hub.js` writes only a `--*-user` property inline on `<html>`, and one resolved token `--x: var(--x-user, var(--x-default))` is what every rule reads.
 Only that resolution line may read a `--*-user` property, and only as the head of its own fallback: what follows the comma is a `-default` for a token a control sets directly and the derivation itself for a derived axis.
 Twenty-four tokens carry the form today, and they are the ones a reader control can reach: `--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm roles.
+**A resolution line never sits inside a design block.** A design block is `(0,2,0)`, so a resolution line written in one would be a second resolution line for the same reader value and source order between two designs would decide which answered.
+The twenty rhythm roles resolve at a bare `:root` just after the design blocks, in the shape of the course layer, and the design writes only the `-default`.
+The `var()` still picks up the design's value, because substitution reads the computed value of the `-default` on the element rather than the declaration beside it.
 The rest are one-layer design tokens.
 The reading face is the one reader choice that is not a `--*-user` property, because three measured constants have to travel with the family; it is the registered axis attribute `data-body-face` instead.
 The consequence for a media query: a token with a `-user` layer must be restated as its `-default` inside the query, never as the token, or the query out-argues the reader.
@@ -707,7 +721,7 @@ You should not need to write one at all - `hub.css` already covers `a`, `button`
 
 **Contrast is measured, not asserted.**
 `scripts/contrast.py` checks the colours the palette layer states outright - every registered ground is inside its lightness band, every ink clears 7:1 and sits on the right side of the L\* 48.9 crossover, every other palette colour clears the floor its role carries - and it runs inside `validate_site.py`, so it gates every pull request.
-`scripts/contrast_matrix.py` measures what needs a browser: the nine `color-mix()` tints and the per-course accent, over six palettes, two modes and every registered course hue.
+`scripts/contrast_matrix.py` measures what needs a browser: the nine `color-mix()` tints and the per-course accent, over every registered palette, two modes and every registered course hue.
 Both print every number, pass or fail: `python3 scripts/contrast.py --report` is the command to run while choosing a colour, and both carry a `--self-test` or a recorded-breach list so a gate that stops biting says so.
 The floors are WCAG 2.2: 7:1 body text, 4.5:1 every other text, 3:1 borders, focus rings and chart marks.
 
@@ -793,15 +807,51 @@ A `FontFace` built in script carries its own `display`, so it is never subject t
 And setting the attribute only inside the callback means the reader never sees the fallback flash on a control they just used, and never sees a measure computed from one face while another is on screen.
 The control panel owns that code; this note owns the contract it has to keep.
 
+## The palette axis
+
+A palette is the colour half of the system, and it is the only place in `hub.css` that states a literal colour.
+Seven are registered - Paper, Slate, Ink, Sage, Harbor, Aubergine and Press - and each states **18 raw values twice**, once as `--l-*` for light and once as `--d-*` for dark.
+The mode layer maps one of the two sets onto the semantic tokens every rule reads, and it is written once for the whole system, so adding a palette is a block of values plus one entry in the `PALETTES` array in `hub.js`.
+
+Sixteen of the eighteen are colours. The other two are the ground treatment and the reading pane, and they work together.
+
+`--*-wash` is a `background-image` value painted on the canvas, `none` on six of the seven palettes and two faint radial gradients on Press.
+A ground that is a flat fill reads as a screen colour; a ground with a wash reads as paper.
+
+`--*-pane` is what the reading column paints behind the prose.
+Six palettes state their own `--surface`, which is what that column has always been.
+Press states `transparent`, so the prose sits directly on the washed paper and cards and callouts read as lighter veils over it - the reference site's own arrangement, which has no separate reading pane at all.
+Text on a Press page therefore sits on `--bg` rather than on `--surface`, and both grounds are checked.
+
+Both are a palette's rather than a design's because both are colour, and both are stated by every palette rather than by the one that uses them, because a palette is data the framework consumes and never a name the framework knows.
+
+**Do not name a raw value.** `--l-*` and `--d-*` exist for the mode layer and for the appearance panel's own swatches. Everything else reads a semantic token.
+
+**Every colour is measured before it is registered.**
+`scripts/contrast.py` runs inside `validate_site.py` and holds every registered ground inside its lightness band, every ink to 7:1 on the right side of the L\* 48.9 crossover, and every other stated colour to the floor its role carries.
+`scripts/contrast_matrix.py` runs in the browser job and measures the nine `color-mix()` tints and the per-course accent over every palette, both modes and every registered course hue.
+A palette that fails is a palette to fix. The band is arithmetic, not taste.
+
 ## The design axis
 
 The block above is a *design*, and `house` is its name.
 `hub.js` writes `data-design` on `<html>` in its head phase, beside `data-mode` and `data-palette`, before the first paint.
 The token block is written once under two selectors, `:root, :root[data-design="house"]`, exactly as the Paper palette is: the bare arm is what a page gets with no script at all, and the attribute arm is what the axis selects.
 
+**Two designs are registered.**
+`house` is what every reader had before the axis existed, and it is the fallback a withdrawn design falls through to.
+`press` is the form half of the reference look: a display serif set at or below 1.0 leading with tracking graded by size, prose set loose against it, monospace on every eyebrow, capitals always tracked, a 68-character column, figures growing from the prose's left edge, softer radii, a shadow that pools rather than drops, and one signature gesture that is horizontal.
+Sixty of its 317 tokens differ from House; the rest are House's, restated in full.
+Its colour half is the `press` *palette*, not part of it, so a reader may wear either without the other.
+
 **A design carries no colour.**
-Type, rhythm, shape, motion and the eyebrow treatment are the design's; the 14 raw colours are the palette's and the light-or-dark mapping is the mode's.
-That split is why a second design costs no row in the contrast matrix, and it is why the reference look's warm paper will ship as a seventh palette rather than as part of a design.
+Type, rhythm, shape, motion and the eyebrow treatment are the design's; the 16 raw colours and the ground treatment are the palette's, and the light-or-dark mapping is the mode's.
+That split is why a second design costs no row in the contrast matrix, and it is why the reference look's warm paper ships as a seventh palette rather than as part of a design.
+
+**A design is data, and nothing branches on its name.**
+No function in `hub.js` and no rule in `hub.css` knows a design by name; the registry is a plain array and the blocks are keyed on the attribute.
+The same is true of a palette.
+That is what keeps the door open to designs, palettes and course templates arriving from somewhere other than these two files.
 
 **Adding a design is a block of the same tokens under a new attribute value, plus one entry in the `DESIGNS` registry in `hub.js`.**
 Three checks in `scripts/validate_site.py` hold the two halves together, so none of this is left to review:
@@ -809,6 +859,12 @@ Three checks in `scripts/validate_site.py` hold the two halves together, so none
 - every registered design has a block and every block is registered, so the picker can offer nothing that resolves to nothing;
 - every design declares the *whole* token set, compared against the default design's, in both directions - a design that declares half of it inherits the other half and looks nearly right;
 - a design-axis token is declared in a design block and nowhere else, because a design block is `(0,2,0)` against a bare `:root` and would out-argue a media-query override in every viewport.
+
+**What a design may not reach, and why.**
+The body size is resolved outside every design block, because the 720px arm has to be able to move it and a design block would out-argue that arm.
+The reading face is a registry entry carrying three measured constants, and a design has no way to supply them, so the face registry sits *after* the design blocks and has the last word.
+Colour is the palette's.
+Everything else - the whole type scale, the leading set, the weights, the tracking, the space ramp and its roles, the reading frame, the shape, the motion vocabulary and the eyebrow treatment - is the design's, on paper as well as on screen.
 
 **Withdrawing a design is deleting its registry entry.**
 The picker stops offering it and a reader who had chosen it falls through to the registered default, because the head phase validates a stored key against the registry exactly as it does a palette key.

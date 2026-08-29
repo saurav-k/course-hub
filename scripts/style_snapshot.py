@@ -5,7 +5,7 @@
 page reaches the design system. It cannot see what the design system then does.
 This can. It loads a fixed sample of pages in headless Chrome and records the
 computed value of every property that matters, for every class in the closed
-widget vocabulary, across ``{6 palettes} x {light, dark}``, and writes the whole
+widget vocabulary, across ``{7 palettes} x {light, dark}``, and writes the whole
 lot as a committed snapshot.
 
 A later change proves itself by producing a zero diff against that snapshot,
@@ -103,7 +103,7 @@ COVERAGE_FILE: Path = BASELINE_DIR / "COVERAGE.txt"
 
 VIEWPORT: tuple[int, int] = (1280, 900)
 
-PALETTES: tuple[str, ...] = ("paper", "slate", "ink", "sage", "harbor", "aubergine")
+PALETTES: tuple[str, ...] = ("paper", "slate", "ink", "sage", "harbor", "aubergine", "press")
 MODES: tuple[str, ...] = ("light", "dark")
 
 # Every property that decides how a component looks, and nothing that follows
