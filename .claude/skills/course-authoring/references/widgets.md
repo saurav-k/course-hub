@@ -796,10 +796,10 @@ The design therefore writes `--x-default`, a course writes `--x`, and every rule
 The resolution line at bare `:root` is `(0,1,0)`, so a course block wins it wherever either one appears in the file.
 `--course-hue` needs no such layer, because a design carries no colour and nothing else may write it.
 
-Two of the constraints have to be checked by eye, and the pull request says how you checked them.
-The first is whether the hue is legible: rotation preserves OKLCH lightness and chroma but the gamut is not a cylinder, so at some hues the browser clips the result.
-[`new-course.md`](../new-course.md) carries the canvas readback that measures it.
-The second is the eyebrow: `uppercase` on a long label is a defect the validator can only see once the page exists, and it is a rule you keep while you write, not a check you run afterwards.
+`validate_site.py` checks every constraint in that table except one, and the exception is the hue itself.
+Rotation preserves OKLCH lightness and chroma, but the gamut is not a cylinder, so at some hues the browser clips the result and quietly changes what the reader sees.
+Choosing a hue and proving it is therefore yours, and the pull request says how you did it: [`new-course.md`](../new-course.md) carries the canvas readback that measures it.
+The eyebrow rule is checked, but only once a page exists, so keep it while you write rather than finding out afterwards: two to four words is the target and about five is the limit.
 
 ### What you may rely on
 
@@ -840,7 +840,7 @@ No course gets a fourth.
 
 Two of them carry a hazard worth knowing before you change a shared rule.
 `llm-evolution-course` still restyles shared elements - `.stub-note h4`, `.routecard` and `.route-map .module` among them - so grep every `*.css` in the repository for a selector before you touch it, never just `hub.css`.
-`statistical-foundations-ml-course` sets `.parts` and `.pn` in literal `rem` values and literal family names, which is exactly the restatement the table above forbids: a design that moves the type scale will not move those two rules, and the course's cards will drift out of step with everything around them.
+`statistical-foundations-ml-course` sets `.parts` and `.pn` in literal `rem` sizes and spacings, and names `--sans` and `--mono` from the registry rather than a role token, which is exactly the restatement the table above forbids: a design that moves the type scale or the face roles will not move those two rules, and the course's cards will drift out of step with everything around them.
 Neither is repaired here.
 They are recorded so the next change to either is made with its eyes open.
 
