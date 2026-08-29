@@ -1576,6 +1576,14 @@
   var PANEL_STEP = 20;     // one arrow key
   var PANEL_FINE = 4;      // one arrow key with Shift held
 
+  /* Where the panel was last put, which is not always where it is. A framework
+     move glides, and `getBoundingClientRect` during a glide reports the frame
+     the panel is passing through rather than the place it is going to. Reading
+     that back is what made two arrow presses in quick succession add up to one:
+     the second read a position still in flight and stepped from there. So the
+     intended position is held here and the rendered one is never asked. */
+  var placed = null;
+
   function panelBounds(panel) {
     var spine = document.querySelector('.spine');
     var flag = document.querySelector('.preprod-flag');
@@ -1594,9 +1602,19 @@
 
   function place(panel, x, y) {
     var limit = panelBounds(panel);
-    panel.style.left = Math.min(Math.max(x, limit.minX), limit.maxX) + 'px';
-    panel.style.top = Math.min(Math.max(y, limit.minY), limit.maxY) + 'px';
+    placed = {
+      x: Math.min(Math.max(x, limit.minX), limit.maxX),
+      y: Math.min(Math.max(y, limit.minY), limit.maxY)
+    };
+    panel.style.left = placed.x + 'px';
+    panel.style.top = placed.y + 'px';
     panel.setAttribute('data-moved', '');
+  }
+
+  function at(panel) {
+    if (placed) return placed;
+    var box = panel.getBoundingClientRect();
+    return { x: box.left, y: box.top };
   }
 
   function storedPosition() {
@@ -1611,9 +1629,21 @@
 
   function placeFromStore() {
     if (!settingsEl || settingsEl.hidden) return;
-    var at = storedPosition();
-    if (at) place(settingsEl, at.x, at.y);
+    var stored = storedPosition();
+    if (stored) place(settingsEl, stored.x, stored.y);
     else goHome();
+  }
+
+  /* The viewport changed under a panel the reader placed. It glides back into
+     reach rather than jumping, because a panel that teleports on a rotation
+     reads as a bug and a panel that slides reads as the framework putting it
+     somewhere it fits. `data-settling` is what carries the glide, and every
+     direct move takes it off again: a step the reader is aiming must land where
+     they aimed it, at once. */
+  function reseat() {
+    if (!settingsEl || settingsEl.hidden) return;
+    settingsEl.setAttribute('data-settling', '');
+    placeFromStore();
   }
 
   /* The way back. Removing the two lengths hands the panel to the stylesheet's
@@ -1622,15 +1652,15 @@
      here. */
   function goHome() {
     if (!settingsEl) return;
+    placed = null;
     settingsEl.style.left = '';
     settingsEl.style.top = '';
     settingsEl.removeAttribute('data-moved');
     drop(STORE.panel);
   }
 
-  function rememberPosition(panel) {
-    var box = panel.getBoundingClientRect();
-    set(STORE.panel, JSON.stringify({ x: Math.round(box.left), y: Math.round(box.top) }));
+  function rememberPosition() {
+    if (placed) set(STORE.panel, JSON.stringify({ x: Math.round(placed.x), y: Math.round(placed.y) }));
   }
 
   function wireDrag(panel, bar, grip, shut) {
@@ -1645,12 +1675,13 @@
       // The close control lives in the strip and is not part of the handle.
       if (shut.contains(event.target)) return;
       suppressClick = false;
-      var box = panel.getBoundingClientRect();
+      panel.removeAttribute('data-settling');
+      var from = at(panel);
       dragging = {
         id: event.pointerId,
-        grabX: event.clientX - box.left,
-        grabY: event.clientY - box.top,
-        was: { x: box.left, y: box.top },
+        grabX: event.clientX - from.x,
+        grabY: event.clientY - from.y,
+        was: from,
         wasMoved: panel.hasAttribute('data-moved'),
         dragged: false
       };
@@ -1671,7 +1702,7 @@
       if (!dragging || event.pointerId !== dragging.id) return;
       panel.removeAttribute('data-dragging');
       if (dragging.dragged) {
-        rememberPosition(panel);
+        rememberPosition();
         // A drag that ends on the grip fires a click there too, and putting the
         // panel back the instant it was placed is the opposite of what the
         // reader asked for. The next press clears this whether a click came or
@@ -1698,9 +1729,10 @@
       else if (event.key === 'ArrowDown') dy = step;
       else if (event.key === 'Home') { goHome(); event.preventDefault(); return; }
       else return;
-      var box = panel.getBoundingClientRect();
-      place(panel, box.left + dx, box.top + dy);
-      rememberPosition(panel);
+      panel.removeAttribute('data-settling');
+      var from = at(panel);
+      place(panel, from.x + dx, from.y + dy);
+      rememberPosition();
       // Arrow keys scroll the page by default, and a panel that moves while the
       // page slides under it is a control nobody can aim.
       event.preventDefault();
@@ -1730,7 +1762,7 @@
     /* A stored position outlives the viewport it was chosen in. Re-seating it
        on every resize is what stops a reader who rotated a tablet, or came back
        on a smaller screen, finding the panel parked off the edge. */
-    window.addEventListener('resize', placeFromStore);
+    window.addEventListener('resize', reseat);
   }
 
   /* ---------- the panel reads the page back, never its own memory ----------
