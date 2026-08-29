@@ -27,12 +27,16 @@ Mermaid CDN never answers and no diagram renders. ``hub.js`` guards every
 ``window.mermaid`` call, so the pages are correct without it, and a harness that
 depends on a third party is a harness that goes red for reasons of its own.
 
-*Layout-computed geometry is left out.* ``width`` and ``height`` are recorded by
-nothing here, because they follow the text. A paragraph added to a sample page
-would move them, the snapshot would need refreshing on a prose pull request, and
-a tool that cries wolf is a tool reviewers learn to ignore. ``max-width``,
-``min-height`` and the whole box model are recorded, so a measure or a spacing
-token that moves is still caught.
+*Layout-computed geometry is left out, and what is left of it is rounded.*
+``width`` and ``height`` are recorded by nothing here, because they follow the
+text: a paragraph added to a sample page would move them, the snapshot would
+need refreshing on a prose pull request, and a tool that cries wolf is a tool
+reviewers learn to ignore. The seven properties that survive but are still
+resolved from measured text - grid tracks, margins, ``max-width``,
+``min-height`` - are recorded to the nearest whole pixel, because the same
+stylesheet lays the same column out a fifth of a pixel differently on a Linux
+runner than on a Mac and the snapshot has to compare equal on both. The rest of
+the box model, and line height, are recorded exactly.
 
 *A class is sampled once per element shape per page.* Every element carrying a
 documented class is grouped by its tag and its own class list, and the first of
@@ -223,6 +227,29 @@ QUIET: dict[str, str] = {
     "overflow-x": "visible",
     "overflow-y": "visible",
 }
+
+# Seven properties Chrome resolves from measured text rather than from what the
+# stylesheet said. A grid track sized to its content, a margin written `auto`, a
+# measure written in `ch`: all of them come back a fifth of a pixel different on
+# a Linux runner than on a Mac, because the same font rasterises differently.
+# The snapshot is committed and has to compare equal on both, so these are
+# recorded to the nearest whole pixel - a hair finer than the smallest change
+# anyone writes into a stylesheet, and coarser than the noise. Two values a
+# pixel apart stay a pixel apart after rounding, so nothing the harness is for
+# is lost. Everything else is recorded exactly, line height included.
+MEASURED: frozenset[str] = frozenset(
+    {
+        "grid-template-columns",
+        "margin-top",
+        "margin-right",
+        "margin-bottom",
+        "margin-left",
+        "max-width",
+        "min-height",
+    }
+)
+
+FRACTIONAL_PIXELS: re.Pattern[str] = re.compile(r"(\d+\.\d+)px")
 
 HTML_BLOCK: re.Pattern[str] = re.compile(r"```html\n(?P<body>.*?)```", re.DOTALL)
 CLASS_ATTRIBUTE: re.Pattern[str] = re.compile(r'class="(?P<names>[^"]+)"')
@@ -706,9 +733,8 @@ class Capture:
         """
         previous: object = None
         for _ in range(attempts):
-            value = self.chrome.evaluate(self._probe)
+            value = normalise(self.chrome.evaluate(self._probe))
             if value == previous:
-                assert isinstance(value, dict)
                 return value
             previous = value
             self.chrome.evaluate(
@@ -755,6 +781,22 @@ def baseline_path(page: str) -> Path:
     the page without anyone having to read it.
     """
     return BASELINE_DIR / Path(page).with_suffix(".txt")
+
+
+def normalise(captured: object) -> dict[str, dict[str, dict[str, str]]]:
+    """One page's capture, with the platform's sub-pixel opinion taken out.
+
+    Applied the moment the values leave the browser, so the snapshot, the two
+    assertions and the settle comparison all read the same numbers.
+    """
+    assert isinstance(captured, dict)
+    for shapes in captured.values():
+        for record in shapes.values():
+            for prop in MEASURED:
+                record[prop] = FRACTIONAL_PIXELS.sub(
+                    lambda found: f"{round(float(found.group(1)))}px", record[prop]
+                )
+    return captured
 
 
 def fold(record: dict[str, str]) -> dict[str, str]:
