@@ -697,6 +697,13 @@ CUSTOM_DECLARATION: re.Pattern[str] = re.compile(r"(?P<name>--[a-z0-9-]+)\s*:(?P
 
 USER_PROPERTY: re.Pattern[str] = re.compile(r"var\(\s*(?P<name>--[a-z0-9-]+-user)\b")
 
+# A resolution line reads the reader's value as the head of its own fallback
+# chain. What follows the comma is the stylesheet's own answer - a `-default`
+# for a token a control sets directly, a computation for a derived axis - and
+# is not this check's business. What is its business is that nothing else in
+# the declaration reaches the reader's value.
+RESOLUTION_HEAD: re.Pattern[str] = re.compile(r"^var\(\s*--[a-z0-9-]+-user\s*,")
+
 ROOT_ALIAS: re.Pattern[str] = re.compile(
     r"var\s+(?P<name>[A-Za-z_$][\w$]*)\s*=\s*document\.documentElement\b"
 )
@@ -903,11 +910,29 @@ def check_three_layer_rule() -> list[Problem]:
     The stylesheet may resolve a ``--*-user`` layer no control writes yet - the
     reading controls arrive after the tokens they read - but a control that
     writes a name nothing resolves is a preference that reaches no pixel.
+
+    What a resolution line is allowed to look like. The check first read the
+    single literal ``--x: var(--x-user, var(--x-default))``, which was every
+    resolution line the sheet then had. A derived axis cannot take that shape
+    and the specification writes both exceptions out: ``--fs-body-ref`` resolves
+    ``--fs-body-user`` under a different name because the reader's number is on
+    a reference scale, and ``--lh-body`` falls back to a computation rather than
+    to a bare default because the leading nudges with the measure. So the form
+    is stated by its three properties instead of by one spelling, and each is
+    the reason the rule exists:
+
+    - only a **custom property** may read one, never ``max-width:
+      var(--measure-user)``, which is the same defect and the likelier spelling;
+    - it reads **exactly one**, as the head of its own fallback chain, so the
+      reader's value is an input to that token and to nothing else;
+    - and **exactly one declaration in the sheet reads it**, which is what the
+      definite article in "the resolution line" means. That last one the single
+      literal never checked at all: two rules could both carry it and both pass.
     """
     problems: list[Problem] = []
     source = HUB_JS.read_text(encoding="utf-8")
 
-    resolved: set[str] = set()
+    resolved: dict[str, list[str]] = {}
     for rule in hub_rules():
         # Every declaration, not only the custom ones: `max-width:
         # var(--measure-user)` on an ordinary property is the same defect and
@@ -918,14 +943,25 @@ def check_three_layer_rule() -> list[Problem]:
                 continue
             name, _, value = declaration.partition(":")
             name = name.strip()
-            if read == {f"{name}-user"} and "".join(value.split()) == f"var({name}-user,var({name}-default))":
-                resolved.add(f"{name}-user")
+            user = next(iter(read))
+            if name.startswith("--") and len(read) == 1 and RESOLUTION_HEAD.match(value.strip()):
+                resolved.setdefault(user, []).append(name)
                 continue
             problems.append(
                 Problem(
                     "assets/hub.css",
-                    f'"{name}" reads {", ".join(sorted(read))} outside a resolution line; the only permitted form is '
-                    f"--x: var(--x-user, var(--x-default))",
+                    f'"{name}" reads {", ".join(sorted(read))} outside a resolution line; a reader value may be '
+                    "read only by one custom property, once, as var(--x-user, <the default or the derivation>)",
+                )
+            )
+
+    for user, names in sorted(resolved.items()):
+        if len(names) > 1:
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f'{user} is resolved by {len(names)} declarations ({", ".join(sorted(names))}); '
+                    "a reader value has one resolution line and every rule reads that",
                 )
             )
 

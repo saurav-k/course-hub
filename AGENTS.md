@@ -175,7 +175,10 @@ and every later change to the hub sheet stops at that course's pages.
 **Anything a reader can set has three layers, and never fewer.** `hub.css` declares a
 `--x-default`, `hub.js` writes only a `--x-user` property inline on `<html>`, and one resolved
 token `--x: var(--x-user, var(--x-default))` is what every rule reads. Only that resolution line
-may read a `--*-user` property, and no reader control may write anything else. The reason is
+may read a `--*-user` property, and no reader control may write anything else. What sits after the
+comma is the stylesheet's own answer and is not always a `-default`: a derived axis falls back to
+its derivation, as `--lh-body` and `--measure` do. What is fixed is the head - a reader value is
+read by one custom property, once, and by exactly one declaration in the sheet. The reason is
 measured: the two reading preferences were applied as inline styles until 2026-08, an inline style
 beats every rule that is not `!important`, and a reader who had widened the column was pinned there
 for good. It also means a value with a viewport override belongs in a `-default` inside the media

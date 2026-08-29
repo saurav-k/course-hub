@@ -678,7 +678,7 @@ That is a hard limit rather than a note: seven pointer targets in the chrome pas
 
 **A reader-settable value has three layers; nothing else does.**
 `hub.css` declares a `-default`, `hub.js` writes only a `--*-user` property inline on `<html>`, and one resolved token `--x: var(--x-user, var(--x-default))` is what every rule reads.
-Only that resolution line may read a `--*-user` property.
+Only that resolution line may read a `--*-user` property, and only as the head of its own fallback: what follows the comma is a `-default` for a token a control sets directly and the derivation itself for a derived axis.
 Twenty-four tokens carry the form today, and they are the ones a reader control can reach: `--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm roles.
 The rest are one-layer design tokens.
 The reading face is the one reader choice that is not a `--*-user` property, because three measured constants have to travel with the family; it is the registered axis attribute `data-body-face` instead.
