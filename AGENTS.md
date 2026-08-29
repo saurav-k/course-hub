@@ -62,9 +62,21 @@ If you are looking at a hub page with no bar, you are looking at the live site.
 
    ```bash
    python3 scripts/validate_site.py
+   python3 scripts/check_pages_gate.py
    ```
 
-   If it fails, fix it. Do not open a pull request you know is red.
+   If either fails, fix it. Do not open a pull request you know is red.
+   `check_pages_gate.py` gates on the difference from
+   `scripts/check-pages-baseline.txt`, so it fails on a defect you introduced
+   and not on the debt that was already there. A failure it fixed also fails,
+   with the one-line refresh command; that is how the list only shrinks.
+
+   Touching `assets/hub.css`, `assets/hub.js` or a course's
+   `course-extras.css` adds a third command, and it needs Chrome:
+
+   ```bash
+   python3 scripts/style_snapshot.py
+   ```
 
 ## Before you write anything
 
@@ -212,6 +224,20 @@ against `elsewhere`: both arrive as a `gaps` entry in the same inventory and the
 claims, so **NO EQUIVALENT is reserved for `absent`** and a cell must never imply a cloud cannot do
 something it demonstrably can. Which gaps are which is a list the research directory holds, not
 something to read out of the prose - the wording does not separate them.
+
+**Prove a change to any of those sheets rather than arguing it.**
+`scripts/style_snapshot.py` loads a fixed sample of pages in headless Chrome and
+records the computed value of every property that matters, for every class in
+the closed widget vocabulary, across six palettes and both modes. The snapshot
+is committed under `scripts/style-baseline/`, so the answer to "did that
+refactor move anything" is a diff rather than a judgement, and the harness names
+the page, the element shape and the property when something did move. It also
+checks the two render states a single capture cannot see: a page with no
+`data-mode` under the operating system's preference must compute what the
+explicit choice computes, and a page switched after load must compute what the
+same page computes when loaded on that setting directly. Read the script's
+docstring before changing it; the sample, the property list and the two
+assertions each carry the reason they are shaped that way.
 
 Twelve traps in that design system, all found on the published site:
 
