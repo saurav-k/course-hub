@@ -81,6 +81,14 @@ If you are looking at a hub page with no bar, you are looking at the live site.
    python3 scripts/focus_walk.py
    ```
 
+   Two branches that each add a check collide in `validate_site.py` on the numbers rather than on
+   the code: both claim the next slot in the module docstring's list, both bump its "N checks"
+   opening line, and both edit the "Checks 9 to N read the two shared asset files" sentence. Git
+   reports it as one conflict and either side taken whole silently drops a check from `main()`.
+   Keep both, renumber the later one, and count the list again. The same collision waits in
+   `.github/workflows/validate.yml`, where two branches each append a step to the `Computed style`
+   job, and in the widget reference, where two sections get inserted at one point.
+
 ## Before you write anything
 
 Read, in this order:
