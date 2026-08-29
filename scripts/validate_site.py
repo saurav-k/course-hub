@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Nine checks, all deterministic and offline:
+Twelve checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -22,6 +22,23 @@ Nine checks, all deterministic and offline:
    ``figure.cmatrix`` frame, and every vendor link is well formed. Pass
    ``--vendor-links`` to also fetch each vendor link and fail on a dead one - the
    default run stays offline and deterministic.
+9. The design registry in ``assets/hub.js`` and the ``:root[data-design="..."]``
+   blocks in ``assets/hub.css`` name the same set of designs, so the appearance
+   panel can offer nothing that resolves to nothing and the stylesheet can carry
+   no block nobody can reach.
+10. Every design declares the whole token set, compared against the default
+   design's, and a design-axis token is declared in a design block and nowhere
+   else. A half-declared design inherits the other one's values and looks nearly
+   right; a token declared a second time outside a design block is out-specified
+   by every design block and goes silently dead.
+11. The three-layer property rule: no rule in ``hub.css`` reads a ``--*-user``
+   property outside its own resolution line, and no control in ``hub.js`` writes
+   anything on ``<html>`` but a ``--*-user`` property or a registered axis
+   attribute.
+
+Checks 9 to 11 read the two shared asset files rather than the pages. What the
+design system then *renders* is the computed-style harness's job; see
+``scripts/style_snapshot.py``.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -600,9 +617,9 @@ def check_pages_link_the_design_system() -> list[Problem]:
 
     1. ``assets/hub.css`` is linked, in the head, at the page's own depth.
     2. ``assets/hub.js`` is loaded, in the head. It writes ``data-mode``,
-       ``data-palette`` and ``data-course`` onto ``<html>`` before the first
-       paint, so a copy that runs after ``</head>`` means a colour flash on
-       every load.
+       ``data-palette``, ``data-design`` and ``data-course`` onto ``<html>``
+       before the first paint, so a copy that runs after ``</head>`` means a
+       colour flash, or a flash of the wrong form, on every load.
     3. A course that ships an ``assets/course-extras.css`` links it from every
        one of its pages, after the hub sheet and never before it. Those three
        sheets restyle shared elements, so a page that misses the link is styled
@@ -645,6 +662,305 @@ def check_pages_link_the_design_system() -> list[Problem]:
         elif hub_css in head_links and head_links.index(wanted_extras) < head_links.index(hub_css):
             problems.append(
                 Problem(relative(page), "links course-extras.css before hub.css; the course sheet layers after the hub sheet")
+            )
+    return problems
+
+
+# ---------------------------------------------------------------------------
+# The design system's own three checks: the axis registry, token completeness
+# and the three-layer property rule. Everything below parses the two shared
+# asset files and needs no browser, which is why it belongs here rather than in
+# the computed-style harness.
+# ---------------------------------------------------------------------------
+
+HUB_CSS: Path = REPO_ROOT / "assets" / "hub.css"
+HUB_JS: Path = REPO_ROOT / "assets" / "hub.js"
+
+# The attributes ``hub.js`` may write on ``<html>``. Three are the reader's own
+# axes, one is derived from the URL and one from the hostname. A control that
+# writes anything else has stepped outside the axis contract.
+AXIS_ATTRIBUTES: frozenset[str] = frozenset(
+    {"data-mode", "data-palette", "data-design", "data-course", "data-env"}
+)
+
+CSS_COMMENT: re.Pattern[str] = re.compile(r"/\*.*?\*/", re.DOTALL)
+
+DESIGN_REGISTRY: re.Pattern[str] = re.compile(r"var DESIGNS\s*=\s*\[(?P<body>.*?)\];", re.DOTALL)
+
+DESIGN_KEY: re.Pattern[str] = re.compile(r"key:\s*'(?P<key>[^']+)'")
+
+DESIGN_ARM: re.Pattern[str] = re.compile(r':root\[data-design="(?P<key>[^"]+)"\]\s*$')
+
+DESIGN_ATTRIBUTE: re.Pattern[str] = re.compile(r'\[data-design="(?P<key>[^"]*)"\]')
+
+CUSTOM_DECLARATION: re.Pattern[str] = re.compile(r"(?P<name>--[a-z0-9-]+)\s*:(?P<value>[^;}]*)")
+
+USER_PROPERTY: re.Pattern[str] = re.compile(r"var\(\s*(?P<name>--[a-z0-9-]+-user)\b")
+
+ROOT_ALIAS: re.Pattern[str] = re.compile(
+    r"var\s+(?P<name>[A-Za-z_$][\w$]*)\s*=\s*document\.documentElement\b"
+)
+
+READING_PROPERTY: re.Pattern[str] = re.compile(r"prop:\s*'(?P<name>--[a-z0-9-]+)'")
+
+
+@dataclass(frozen=True)
+class Rule:
+    """One flat CSS rule: its selector list and the declarations inside it."""
+
+    selector: str
+    body: str
+
+
+def css_rules(source: str) -> list[Rule]:
+    """Every rule in a stylesheet, with at-rules flattened into their contents.
+
+    Comments go first, so a selector quoted in prose is never mistaken for a
+    real one, and brace depth is tracked so a rule inside ``@media`` is found
+    rather than swallowed by the query around it.
+    """
+    rules: list[Rule] = []
+
+    def walk(chunk: str) -> None:
+        start = 0
+        depth = 0
+        head = 0
+        for index, character in enumerate(chunk):
+            if character == "{":
+                if depth == 0:
+                    head = index
+                depth += 1
+            elif character == "}":
+                depth -= 1
+                if depth:
+                    continue
+                selector = chunk[start:head].strip()
+                body = chunk[head + 1 : index]
+                walk(body) if selector.startswith("@") else rules.append(Rule(selector, body))
+                start = index + 1
+
+    walk(CSS_COMMENT.sub("", source))
+    return rules
+
+
+def hub_rules() -> list[Rule]:
+    """``assets/hub.css``, parsed once for the three checks that read it."""
+    if not _PARSED_HUB_CSS:
+        _PARSED_HUB_CSS.extend(css_rules(HUB_CSS.read_text(encoding="utf-8")))
+    return _PARSED_HUB_CSS
+
+
+_PARSED_HUB_CSS: list[Rule] = []
+
+
+def declares_a_design(rule: Rule) -> str | None:
+    """The design a rule declares the tokens of, or ``None``.
+
+    A design block carries the attribute as the whole of one selector arm.
+    ``:root[data-design="press"] .card`` styles one element and is not the
+    design's token declaration, so it is not one of these.
+    """
+    for arm in rule.selector.split(","):
+        found = DESIGN_ARM.search(arm.strip())
+        if found:
+            return found.group("key")
+    return None
+
+
+def declared_properties(body: str) -> set[str]:
+    """The custom properties one rule declares. A read has no colon after it."""
+    return {match.group("name") for match in CUSTOM_DECLARATION.finditer(body)}
+
+
+def registered_designs() -> list[str]:
+    """The design keys ``hub.js`` offers, in registry order.
+
+    The first entry is the registered default: an unknown stored key falls back
+    to it, so it is the design a reader lands on unless they choose another.
+    """
+    match = DESIGN_REGISTRY.search(HUB_JS.read_text(encoding="utf-8"))
+    return [] if match is None else [key.group("key") for key in DESIGN_KEY.finditer(match.group("body"))]
+
+
+def design_blocks() -> dict[str, Rule]:
+    """Every ``:root[data-design="..."]`` token block in ``hub.css``."""
+    return {key: rule for rule in hub_rules() if (key := declares_a_design(rule))}
+
+
+def check_design_registry_and_blocks() -> list[Problem]:
+    """The design registry and the design blocks name the same set.
+
+    ``hub.js`` holds the registry the picker is built from and the head phase
+    validates a stored key against; ``hub.css`` holds one token block per
+    design. Neither half can check the other at runtime, and each failure is
+    silent in its own way. A key with no block is a design the picker offers
+    that resolves to nothing, so a reader who chooses it gets the default and no
+    explanation. A block with no key is a design nobody can reach: dead weight
+    that reads as working code and goes stale unnoticed.
+    """
+    problems: list[Problem] = []
+    registry = registered_designs()
+    blocks = design_blocks()
+
+    if not registry:
+        return [Problem("assets/hub.js", "no DESIGNS registry found; the design axis has no registered value")]
+    if not blocks:
+        return [Problem("assets/hub.css", 'no :root[data-design="..."] block found; the design axis resolves to nothing')]
+
+    for key in registry:
+        if key not in blocks:
+            problems.append(
+                Problem("assets/hub.css", f'design "{key}" is registered in hub.js but has no :root[data-design="{key}"] block')
+            )
+    for key in sorted(blocks):
+        if key not in registry:
+            problems.append(
+                Problem("assets/hub.js", f'design "{key}" has a block in hub.css but no entry in the DESIGNS registry; nothing can reach it')
+            )
+
+    # Any other spelling of the attribute names a design too - a descendant
+    # selector inside a media query, most easily - and must name a registered one.
+    for rule in hub_rules():
+        if declares_a_design(rule):
+            continue  # already compared against the registry above
+        for found in DESIGN_ATTRIBUTE.finditer(rule.selector):
+            if found.group("key") not in registry:
+                problems.append(
+                    Problem("assets/hub.css", f'selector "{rule.selector[:60]}" names design "{found.group("key")}", which is not registered')
+                )
+    return problems
+
+
+def check_design_token_completeness() -> list[Problem]:
+    """Every design declares the whole token set, and owns it alone.
+
+    Two failures, and both leave a page that looks nearly right.
+
+    A design that declares only part of the set inherits the rest from the bare
+    ``:root`` arm. That is the trap the theme tokens sprang once, when a token
+    added to ``:root`` alone silently kept its light value in dark mode,
+    multiplied here by the number of designs. So the default design's block is
+    the contract and every other design matches it exactly, in both directions:
+    a token only one design declares is a token every other design is missing.
+
+    And a design-axis token is declared in a design block and nowhere else. A
+    design block is ``(0,2,0)`` against a bare ``:root`` at ``(0,1,0)``, so a
+    second declaration of one of these tokens - in a media query, most easily -
+    would be out-argued in every viewport and that override would go silently
+    dead. ``--fs-body-default`` in the 720px block is the shape of the bug, and
+    is why the body size is resolved outside the design block rather than in it.
+    """
+    problems: list[Problem] = []
+    registry = registered_designs()
+    blocks = design_blocks()
+    if not registry or registry[0] not in blocks:
+        return problems  # the registry check reports this; do not report it twice
+
+    contract = declared_properties(blocks[registry[0]].body)
+    if not contract:
+        return [Problem("assets/hub.css", f'the default design "{registry[0]}" declares no tokens')]
+
+    for key in registry[1:]:
+        rule = blocks.get(key)
+        if rule is None:
+            continue
+        declared = declared_properties(rule.body)
+        for label, names in (("does not declare", contract - declared), ("declares, and the default design does not", declared - contract)):
+            if names:
+                listing = ", ".join(sorted(names)[:6]) + (" ..." if len(names) > 6 else "")
+                problems.append(Problem("assets/hub.css", f'design "{key}" {label} {listing}'))
+
+    for rule in hub_rules():
+        if declares_a_design(rule):
+            continue
+        for name in sorted(declared_properties(rule.body) & contract):
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f'{name} is a design-axis token and is declared again by "{rule.selector[:60]}"; '
+                    "a design block out-specifies that rule and would kill it silently",
+                )
+            )
+    return problems
+
+
+def check_three_layer_rule() -> list[Problem]:
+    """The reader's layer stays an input to a token and never a competitor.
+
+    A configurable value exists in three layers: a ``-default`` the stylesheet
+    owns, a ``--*-user`` property only ``hub.js`` writes inline on ``<html>``,
+    and one resolved token that every rule reads. The rule exists because an
+    inline ``--measure`` beat every stylesheet rule that was not ``!important``
+    and pinned a reader who had widened the column, and it can rot from either
+    end.
+
+    A rule in ``hub.css`` that reads a ``--*-user`` property re-creates the trap
+    one layer down, so only the resolution lines may name one. A control in
+    ``hub.js`` that writes anything on ``<html>`` other than a ``--*-user``
+    property or a registered axis attribute is a reader value no design can ever
+    out-argue.
+
+    The stylesheet may resolve a ``--*-user`` layer no control writes yet - the
+    reading controls arrive after the tokens they read - but a control that
+    writes a name nothing resolves is a preference that reaches no pixel.
+    """
+    problems: list[Problem] = []
+    source = HUB_JS.read_text(encoding="utf-8")
+
+    resolved: set[str] = set()
+    for rule in hub_rules():
+        # Every declaration, not only the custom ones: `max-width:
+        # var(--measure-user)` on an ordinary property is the same defect and
+        # the more likely spelling of it.
+        for declaration in rule.body.split(";"):
+            read = {match.group("name") for match in USER_PROPERTY.finditer(declaration)}
+            if not read:
+                continue
+            name, _, value = declaration.partition(":")
+            name = name.strip()
+            if read == {f"{name}-user"} and "".join(value.split()) == f"var({name}-user,var({name}-default))":
+                resolved.add(f"{name}-user")
+                continue
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f'"{name}" reads {", ".join(sorted(read))} outside a resolution line; the only permitted form is '
+                    f"--x: var(--x-user, var(--x-default))",
+                )
+            )
+
+    aliases = {match.group("name") for match in ROOT_ALIAS.finditer(source)}
+    written: set[str] = set()
+    for alias in sorted(aliases):
+        for attribute in re.finditer(rf"\b{re.escape(alias)}\.(?:set|remove)Attribute\(\s*'([^']*)'", source):
+            if attribute.group(1) not in AXIS_ATTRIBUTES:
+                problems.append(
+                    Problem("assets/hub.js", f'writes "{attribute.group(1)}" on <html>, which is not a registered axis attribute')
+                )
+        for call in re.finditer(rf"\b{re.escape(alias)}\.style\.(?:set|remove)Property\(\s*(?P<argument>[^,)]+)", source):
+            argument = call.group("argument").strip()
+            if argument.startswith("'") and argument.endswith("'"):
+                written.add(argument.strip("'"))
+            elif argument.endswith(".prop"):
+                # The reading table's own field. Every value it can hold is read here.
+                written |= {match.group("name") for match in READING_PROPERTY.finditer(source)}
+            else:
+                problems.append(
+                    Problem(
+                        "assets/hub.js",
+                        f"writes a custom property on <html> named by `{argument}`, which this check cannot read; "
+                        "name it with a literal or through the reading table's `prop` field",
+                    )
+                )
+
+    for name in sorted(written):
+        if not name.endswith("-user"):
+            problems.append(
+                Problem("assets/hub.js", f"writes {name} on <html>; a reader control may write only a --*-user property")
+            )
+        elif name not in resolved:
+            problems.append(
+                Problem("assets/hub.js", f"writes {name}, which no resolution line in hub.css reads; the reader's value reaches nothing")
             )
     return problems
 
@@ -1032,6 +1348,9 @@ def main() -> int:
         + check_no_local_markdown_links()
         + check_comparison_matrix()
         + check_pages_link_the_design_system()
+        + check_design_registry_and_blocks()
+        + check_design_token_completeness()
+        + check_three_layer_rule()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
