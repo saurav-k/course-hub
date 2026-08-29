@@ -33,9 +33,8 @@ Fourteen checks, all deterministic and offline:
    by every design block and goes silently dead.
 11. The three-layer property rule: no rule in ``hub.css`` reads a ``--*-user``
    property outside its own resolution line, and no control in ``hub.js`` writes
-   anything on ``<html>`` but a ``--*-user`` property or a registered axis
-   attribute.
-
+   anything on ``<html>`` but a ``--*-user`` property, a registered axis
+   attribute, or the printed sheet's identity.
 12. The course contract: every course folder is registered exactly once in
    ``assets/hub.css``, in the documented block shape, declaring only the seven
    author tokens and only values inside their stated ranges; the six tokens a
@@ -44,15 +43,17 @@ Fourteen checks, all deterministic and offline:
    of its own beyond the three grandfathered ones; and no eyebrow set in
    capitals runs past five words in a segment. What the registered hue then
    looks like needs a browser and is asserted in ``scripts/style_snapshot.py``.
-
 13. The accessibility floor, by the arithmetic half of checks G1, G2 and G3 in
    ``scripts/contrast.py``: every registered ground is inside its lightness band,
    every ink clears 7:1 and sits on the right side of the L* 48.9 crossover, and
    every colour a palette states clears the floor its role carries. The derived
    tints and the per-course accent need a browser and are measured by
    ``scripts/contrast_matrix.py`` in the style job instead.
+14. Every custom property a ``@page`` margin box reads is declared somewhere in
+   ``hub.css``. A margin box that resolves to nothing prints an empty running
+   foot, in the one render state no screen check can see.
 
-Checks 9 to 13 read the two shared asset files rather than the pages. What the
+Checks 9 to 14 read the shared asset files rather than the pages. What the
 design system then *renders* is the computed-style harness's job; see
 ``scripts/style_snapshot.py``.
 
@@ -728,6 +729,12 @@ ROOT_ALIAS: re.Pattern[str] = re.compile(
 
 READING_PROPERTY: re.Pattern[str] = re.compile(r"prop:\s*'(?P<name>--[a-z0-9-]+)'")
 
+CUSTOM_READ: re.Pattern[str] = re.compile(r"var\(\s*(?P<name>--[a-z0-9-]+)")
+
+PAGE_AT_RULE: re.Pattern[str] = re.compile(r"@page\s*\{")
+
+PRINT_AT_RULE: re.Pattern[str] = re.compile(r"@media\s+print\s*\{")
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -743,6 +750,13 @@ def css_rules(source: str) -> list[Rule]:
     Comments go first, so a selector quoted in prose is never mistaken for a
     real one, and brace depth is tracked so a rule inside ``@media`` is found
     rather than swallowed by the query around it.
+
+    An at-rule body may hold declarations *and* nested rules - ``@page`` holds
+    ``margin`` beside its margin boxes - and those loose declarations sit in
+    front of the next rule's selector. Everything up to the last semicolon is
+    therefore dropped rather than glued on: without it ``@page`` handed back
+    ``Rule("margin: 14mm; @bottom-left", ...)``, a selector no check can read
+    and one that could carry a token declaration past every check here.
     """
     rules: list[Rule] = []
 
@@ -759,7 +773,7 @@ def css_rules(source: str) -> list[Rule]:
                 depth -= 1
                 if depth:
                     continue
-                selector = chunk[start:head].strip()
+                selector = chunk[start:head].rsplit(";", 1)[-1].strip()
                 body = chunk[head + 1 : index]
                 walk(body) if selector.startswith("@") else rules.append(Rule(selector, body))
                 start = index + 1
@@ -909,6 +923,85 @@ def check_design_token_completeness() -> list[Problem]:
     return problems
 
 
+def at_rule_bodies(source: str, opener: re.Pattern[str]) -> list[str]:
+    """Every body of the at-rule ``opener`` matches, with braces balanced.
+
+    ``css_rules`` flattens at-rules away, and a ``@page`` margin box is nothing
+    but declarations, so it leaves no rule behind for the two checks below to
+    read. This reads the raw block instead.
+    """
+    stripped = CSS_COMMENT.sub("", source)
+    bodies: list[str] = []
+    for found in opener.finditer(stripped):
+        depth = 0
+        for index in range(found.end() - 1, len(stripped)):
+            if stripped[index] == "{":
+                depth += 1
+            elif stripped[index] == "}":
+                depth -= 1
+                if depth == 0:
+                    bodies.append(stripped[found.end() : index])
+                    break
+    return bodies
+
+
+def page_margin_reads() -> set[str]:
+    """Every custom property a ``@page`` block reads."""
+    return {
+        match.group("name")
+        for body in at_rule_bodies(HUB_CSS.read_text(encoding="utf-8"), PAGE_AT_RULE)
+        for match in CUSTOM_READ.finditer(body)
+    }
+
+
+def print_declares() -> set[str]:
+    """Every custom property declared inside ``@media print``."""
+    return {
+        match.group("name")
+        for body in at_rule_bodies(HUB_CSS.read_text(encoding="utf-8"), PRINT_AT_RULE)
+        for match in CUSTOM_DECLARATION.finditer(body)
+    }
+
+
+def page_identity_properties() -> set[str]:
+    """The properties ``hub.js`` may write on ``<html>`` that are not the
+    reader's.
+
+    A ``@page`` margin box can reach nothing about the document except a custom
+    property on the root element - not its title, not a heading, and in Chrome
+    not ``string()`` either, which renders on the first page and then stops. So
+    the identity of a printed sheet has to arrive as a custom property, and
+    that is the single exception to the rule below that ``hub.js`` writes only
+    reader properties.
+
+    The exception is granted by construction rather than by a list, and it
+    needs both halves present: the property is read by a ``@page`` block, and
+    it is also declared inside ``@media print``, which is the fallback that
+    keeps the foot printing on a page with the script removed. A property with
+    only one of the two is not an identity and gets no exception.
+    """
+    return page_margin_reads() & print_declares()
+
+
+def check_page_margin_boxes() -> list[Problem]:
+    """Every property a ``@page`` margin box reads is declared somewhere.
+
+    A margin box whose ``content`` resolves to nothing prints an empty running
+    foot. No error is raised, no check downstream can see it, and the defect is
+    invisible on screen by definition - it exists only on paper, which is the
+    render state nobody looks at. So the declaration is checked here.
+    """
+    declared: set[str] = set()
+    for rule in hub_rules():
+        declared |= declared_properties(rule.body)
+    declared |= print_declares()
+
+    return [
+        Problem("assets/hub.css", f"@page reads {name}, which nothing in the stylesheet declares; the margin box prints empty")
+        for name in sorted(page_margin_reads() - declared)
+    ]
+
+
 def check_three_layer_rule() -> list[Problem]:
     """The reader's layer stays an input to a token and never a competitor.
 
@@ -924,6 +1017,12 @@ def check_three_layer_rule() -> list[Problem]:
     ``hub.js`` that writes anything on ``<html>`` other than a ``--*-user``
     property or a registered axis attribute is a reader value no design can ever
     out-argue.
+
+    There is one exception and it is not a reader value at all: the identity a
+    ``@page`` margin box prints on every sheet, which can reach the document
+    only as a custom property. ``page_identity_properties`` derives it from the
+    stylesheet rather than from a list here, so the exception cannot outlive the
+    mechanism that needs it.
 
     The stylesheet may resolve a ``--*-user`` layer no control writes yet - the
     reading controls arrive after the tokens they read - but a control that
@@ -1007,7 +1106,10 @@ def check_three_layer_rule() -> list[Problem]:
                     )
                 )
 
+    identities = page_identity_properties()
     for name in sorted(written):
+        if name in identities:
+            continue  # the printed sheet's identity; see page_identity_properties
         if not name.endswith("-user"):
             problems.append(
                 Problem("assets/hub.js", f"writes {name} on <html>; a reader control may write only a --*-user property")
@@ -1929,6 +2031,7 @@ def main() -> int:
         + check_three_layer_rule()
         + check_course_contract()
         + check_contrast_floor()
+        + check_page_margin_boxes()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
