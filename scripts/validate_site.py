@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Twelve checks, all deterministic and offline:
+Thirteen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -36,7 +36,16 @@ Twelve checks, all deterministic and offline:
    anything on ``<html>`` but a ``--*-user`` property or a registered axis
    attribute.
 
-Checks 9 to 11 read the two shared asset files rather than the pages. What the
+12. The course contract: every course folder is registered exactly once in
+   ``assets/hub.css``, in the documented block shape, declaring only the seven
+   author tokens and only values inside their stated ranges; the six tokens a
+   design also declares keep their two names, so a design and a course never
+   contend for one; no two courses hold one hue; no course ships a stylesheet
+   of its own beyond the three grandfathered ones; and no eyebrow set in
+   capitals runs past five words in a segment. What the registered hue then
+   looks like needs a browser and is asserted in ``scripts/style_snapshot.py``.
+
+Checks 9 to 12 read the two shared asset files rather than the pages. What the
 design system then *renders* is the computed-style harness's job; see
 ``scripts/style_snapshot.py``.
 
@@ -1370,6 +1379,465 @@ def check_matrix_vendor_links_live() -> list[Problem]:
     return problems
 
 
+# ---------------------------------------------------------------------------
+# The course contract
+#
+# A course declares its identity through seven tokens in one block keyed on the
+# `data-course` attribute, and through nothing else. `assets/hub.css` carries
+# the mechanism and the reasoning under "the course contract"; the widget
+# reference carries the author-facing version. This is the enforcement, and it
+# is deliberately the cheap half: registration is static text, so a script can
+# read it, while what the resulting accent looks like needs a browser and lives
+# in `scripts/style_snapshot.py`.
+# ---------------------------------------------------------------------------
+
+HUB_STYLESHEET: Path = REPO_ROOT / "assets" / "hub.css"
+
+# The seven-token author surface, in the order the specification states it.
+COURSE_TOKENS: tuple[str, ...] = (
+    "--course-hue",
+    "--font-display",
+    "--font-mono",
+    "--eyebrow-family",
+    "--eyebrow-tracking",
+    "--eyebrow-case",
+    "--eyebrow-size",
+)
+
+# The six a design also wants to write. Each is split in two so the two writers
+# never contend: the design writes the `-default`, a course writes the token.
+# `--course-hue` is not among them, because a design carries no colour.
+COURSE_LAYERED_TOKENS: tuple[str, ...] = COURSE_TOKENS[1:]
+
+# The three that name a face rather than a value.
+COURSE_FACE_TOKENS: tuple[str, ...] = ("--font-display", "--font-mono", "--eyebrow-family")
+
+# The registry of loaded families, and the four role aliases over it. A course
+# names one of these; a literal font stack in a course block is a course
+# shipping type, which the contract forbids.
+FAMILY_TOKENS: tuple[str, ...] = ("--sans", "--serif", "--mono")
+ROLE_TOKENS: tuple[str, ...] = ("--font-body", "--font-display", "--font-ui", "--font-mono")
+
+# `--eyebrow-tracking` runs 0em to 0.34em, and `--eyebrow-size` sits in the
+# `--fs-xs` band, which is 10px to 12.5px, written here in rem at the 16px root.
+TRACKING_BAND: tuple[float, float] = (0.0, 0.34)
+EYEBROW_SIZE_BAND_REM: tuple[float, float] = (0.625, 0.78125)
+
+# A course sheet is grandfathered, never a precedent. These three exist, they
+# carry genuinely course-specific widgets, and no fourth may be added: a new
+# widget belongs in the hub sheet, where one owner keeps it.
+GRANDFATHERED_COURSE_SHEETS: frozenset[str] = frozenset(
+    {
+        "llm-evolution-course/assets/course-extras.css",
+        "llm-inference-course/assets/course-extras.css",
+        "statistical-foundations-ml-course/assets/course-extras.css",
+    }
+)
+
+# Two courses shipped on the same hue and therefore wear the same accent. Moving
+# a published hue changes what a reader already knows a course looks like, so it
+# is recorded here rather than repaired by a validator. Any new collision fails,
+# so this set can only shrink.
+ACCEPTED_HUE_COLLISIONS: frozenset[frozenset[str]] = frozenset(
+    {frozenset({"aws-course", "llm-efficiency-course"})}
+)
+
+# Capitals read 9.53% to 19.01% slower than lowercase, so `--eyebrow-case:
+# uppercase` is defensible on a two to four word label and nowhere else. These
+# 22 eyebrows run past five words in capitals and predate the rule. Each is one
+# eyebrow on one page, almost all of them a course landing page's tagline.
+# Rewriting them is a content change on 22 pages and belongs to whoever owns
+# that prose; the list fails a new one, and fails an entry that has been fixed,
+# so it only ever gets shorter.
+LONG_UPPERCASE_EYEBROWS: dict[str, int] = {
+    "agent-engineering-course/index.html": 1,
+    "ai-system-design-course/index.html": 1,
+    "aws-course/index.html": 1,
+    "azure-course/index.html": 1,
+    "cloud-comparison-course/index.html": 1,
+    "coding-harness-course/index.html": 1,
+    "gcp-course/index.html": 1,
+    "herdr-course/index.html": 1,
+    "index.html": 1,
+    "llm-efficiency-course/index.html": 1,
+    "llm-efficiency-course/lessons/0008-speculative-decoding-buys-bandwidth-with-compute.html": 1,
+    "llm-efficiency-course/lessons/0009-case-study-glm-on-two-dgx-sparks.html": 1,
+    "llm-efficiency-course/lessons/0010-case-study-mac-studio-256gb.html": 1,
+    "llm-evolution-course/index.html": 1,
+    "llm-inference-course/index.html": 1,
+    "oci-course/index.html": 1,
+    "probability-you-build-course/lessons/0408-week-5-problems.html": 1,
+    "production-systems-course/index.html": 1,
+    "staff-ai-course/index.html": 1,
+    "statistical-foundations-ml-course/lessons/0020-conditional-probability.html": 1,
+    "statistical-foundations-ml-course/lessons/0039-practice-independence-and-conditioning.html": 1,
+    "statistical-foundations-ml-course/lessons/0040-practice-counting-and-arrangements.html": 1,
+}
+
+# An eyebrow is looked at rather than read, which is what makes capitals
+# defensible. Five words is the limit the specification states as "about five",
+# and the house target is two to four.
+EYEBROW_WORD_LIMIT: int = 5
+
+CSS_COMMENT: re.Pattern[str] = re.compile(r"/\*.*?\*/", re.DOTALL)
+COURSE_BLOCK: re.Pattern[str] = re.compile(r"([^{}]*\[data-course=[^{}]*)\{([^{}]*)\}")
+COURSE_BLOCK_SELECTOR: re.Pattern[str] = re.compile(r'^:root\[data-course="[^"]+"\]$')
+DECLARATION: re.Pattern[str] = re.compile(r"(--[\w-]+)\s*:\s*([^;]+)")
+UNITLESS_NUMBER: re.Pattern[str] = re.compile(r"^-?(?:\d+(?:\.\d+)?|\.\d+)$")
+FACE_REFERENCE: re.Pattern[str] = re.compile(r"^var\(\s*(--[\w-]+)\s*\)$")
+LENGTH: re.Pattern[str] = re.compile(r"^(-?(?:\d+(?:\.\d+)?|\.\d+))(em|rem|px)?$")
+EYEBROW_ELEMENT: re.Pattern[str] = re.compile(r'class="eyebrow"[^>]*>(.*?)</', re.DOTALL)
+EYEBROW_SEPARATOR: re.Pattern[str] = re.compile(r"&middot;|&bull;|&mdash;|&ndash;|\u00b7|\u2022|\|")
+TAG: re.Pattern[str] = re.compile(r"<[^>]+>")
+
+
+def hub_stylesheet() -> str:
+    """The hub sheet with its comments removed, so an example cannot be read as a rule."""
+    return CSS_COMMENT.sub("", HUB_STYLESHEET.read_text(encoding="utf-8"))
+
+
+def declarations(body: str) -> list[tuple[str, str]]:
+    """Every custom property declared in one rule body, in source order."""
+    return [(name, value.strip()) for name, value in DECLARATION.findall(body)]
+
+
+def course_blocks(source: str) -> list[tuple[str, str, str]]:
+    """Every rule keyed on ``data-course``, as (selector, course folder, body)."""
+    blocks: list[tuple[str, str, str]] = []
+    for selector, body in COURSE_BLOCK.findall(source):
+        selector = " ".join(selector.split())
+        named = re.findall(r'data-course="([^"]+)"', selector)
+        blocks.append((selector, named[0] if named else "", body))
+    return blocks
+
+
+def registrations(source: str) -> dict[str, dict[str, str]]:
+    """The declared identity of every registered course, keyed on its folder."""
+    found: dict[str, dict[str, str]] = {}
+    for _, course, body in course_blocks(source):
+        if course:
+            found.setdefault(course, {}).update(dict(declarations(body)))
+    return found
+
+
+def _face_problems(course: str, token: str, value: str) -> list[Problem]:
+    where = f"assets/hub.css [data-course=\"{course}\"]"
+    reference = FACE_REFERENCE.match(value)
+    if reference is None:
+        return [
+            Problem(
+                where,
+                f"{token} is {value!r}; a course names a face in the registry, "
+                f"as var(--serif) or var(--font-mono), never a font stack of its own",
+            )
+        ]
+    named = reference.group(1)
+    if named == token:
+        return [Problem(where, f"{token} names itself, which resolves to nothing")]
+    if named not in FAMILY_TOKENS + ROLE_TOKENS:
+        return [
+            Problem(
+                where,
+                f"{token} names {named}, which is not a registered face; "
+                f"the registry is {', '.join(FAMILY_TOKENS)} and the roles over it "
+                f"are {', '.join(ROLE_TOKENS)}",
+            )
+        ]
+    return []
+
+
+def _value_problems(course: str, token: str, value: str) -> list[Problem]:
+    where = f"assets/hub.css [data-course=\"{course}\"]"
+    if token in COURSE_FACE_TOKENS:
+        return _face_problems(course, token, value)
+
+    if token == "--course-hue":
+        if UNITLESS_NUMBER.match(value):
+            return []
+        return [
+            Problem(
+                where,
+                f"--course-hue is {value!r}; it must be a unitless number. Inside a "
+                f"relative colour `h` is a number and not an angle, so calc(h + 25deg) "
+                f"is a type error and silently drops the whole declaration",
+            )
+        ]
+
+    if token == "--eyebrow-case":
+        if value in {"uppercase", "none"}:
+            return []
+        return [Problem(where, f"--eyebrow-case is {value!r}; it is `uppercase` or `none`")]
+
+    if token == "--eyebrow-tracking":
+        if value == "var(--tracking-eyebrow)":
+            return []
+        measured = LENGTH.match(value)
+        low, high = TRACKING_BAND
+        if measured is not None and measured.group(2) in {"em", None}:
+            if low <= float(measured.group(1)) <= high:
+                return []
+        return [
+            Problem(
+                where,
+                f"--eyebrow-tracking is {value!r}; it is an em value between "
+                f"{low}em and {high}em, or var(--tracking-eyebrow)",
+            )
+        ]
+
+    if token == "--eyebrow-size":
+        if value == "var(--fs-xs)":
+            return []
+        measured = LENGTH.match(value)
+        low, high = EYEBROW_SIZE_BAND_REM
+        if measured is not None:
+            size = float(measured.group(1))
+            if measured.group(2) == "px":
+                size = size / 16
+            if measured.group(2) in {"rem", "px"} and low <= size <= high:
+                return []
+        return [
+            Problem(
+                where,
+                f"--eyebrow-size is {value!r}; it sits in the --fs-xs band, "
+                f"{low}rem to {high}rem (10px to 12.5px), or names var(--fs-xs)",
+            )
+        ]
+
+    return []
+
+
+def _registration_problems(source: str) -> list[Problem]:
+    """Every course folder is registered exactly once, in the documented shape."""
+    problems: list[Problem] = []
+    seen: dict[str, int] = {}
+
+    for selector, course, body in course_blocks(source):
+        if not course:
+            problems.append(
+                Problem("assets/hub.css", f"a rule keys on data-course but names none: {selector}")
+            )
+            continue
+        expected = f':root[data-course="{course}"]'
+        if selector != expected:
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f"course block is written {selector!r}; it must be written "
+                    f"{expected!r}, which is (0,2,0) and therefore wins the "
+                    f"resolution line whatever the source order",
+                )
+            )
+        seen[course] = seen.get(course, 0) + 1
+        for token, value in declarations(body):
+            if token not in COURSE_TOKENS:
+                problems.append(
+                    Problem(
+                        f"assets/hub.css [data-course=\"{course}\"]",
+                        f"{token} is not on the author surface. A course declares only "
+                        f"{', '.join(COURSE_TOKENS)}",
+                    )
+                )
+                continue
+            problems += _value_problems(course, token, value)
+
+    for course, count in sorted(seen.items()):
+        if count > 1:
+            problems.append(
+                Problem("assets/hub.css", f"{course} is registered {count} times; one block per course")
+            )
+
+    folders = {course.name for course in course_directories()}
+    for course in sorted(folders - set(seen)):
+        problems.append(
+            Problem(
+                "assets/hub.css",
+                f"{course} has no registration, so it wears the plain palette accent "
+                f"and is told apart from no other course",
+            )
+        )
+    for course in sorted(set(seen) - folders):
+        problems.append(
+            Problem("assets/hub.css", f"{course} is registered but there is no such course folder")
+        )
+    return problems
+
+
+def _hue_problems(declared: dict[str, dict[str, str]]) -> list[Problem]:
+    """Two courses on one hue wear one accent, which is the thing the hue exists to prevent."""
+    by_hue: dict[str, list[str]] = {}
+    for course, tokens in declared.items():
+        hue = tokens.get("--course-hue", "")
+        if UNITLESS_NUMBER.match(hue):
+            by_hue.setdefault(str(float(hue)), []).append(course)
+
+    problems: list[Problem] = []
+    for hue, courses in sorted(by_hue.items()):
+        if len(courses) > 1 and frozenset(courses) not in ACCEPTED_HUE_COLLISIONS:
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f"{' and '.join(sorted(courses))} both hold --course-hue {hue}, so they "
+                    f"wear the same accent in every palette and both modes. Split a gap on "
+                    f"the circle instead; the 25-degree grid is full",
+                )
+            )
+    return problems
+
+
+def _layer_problems(source: str) -> list[Problem]:
+    """The six shared tokens keep two names, so a design and a course never contend.
+
+    The token is resolved once, at bare ``:root``, from its ``-default``. A
+    course block may override it, because that is the course layer. Nothing else
+    may write it: a design block and a course block are both (0,2,0), and two
+    writers on one name is a contest the cascade settles silently on source
+    order.
+    """
+    problems: list[Problem] = []
+    writers: dict[str, list[tuple[str, str]]] = {token: [] for token in COURSE_LAYERED_TOKENS}
+    defaults: set[str] = set()
+
+    for selector, body in re.findall(r"([^{}]*)\{([^{}]*)\}", source):
+        selector = " ".join(selector.split())
+        for token, value in declarations(body):
+            if token.endswith("-default"):
+                defaults.add(token)
+            elif token in writers:
+                writers[token].append((selector, value))
+
+    for token in COURSE_LAYERED_TOKENS:
+        default = f"{token}-default"
+        if default not in defaults:
+            problems.append(
+                Problem("assets/hub.css", f"{token} has no {default}; a design has nothing to write")
+            )
+        resolved = [
+            value for selector, value in writers[token] if selector == ":root"
+        ]
+        if resolved != [f"var({default})"]:
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f"{token} must be resolved exactly once, at bare :root, as "
+                    f"var({default}); found {resolved!r}",
+                )
+            )
+        for selector, _value in writers[token]:
+            if selector == ":root" or COURSE_BLOCK_SELECTOR.match(selector):
+                continue
+            problems.append(
+                Problem(
+                    "assets/hub.css",
+                    f"{selector} writes {token}. Only the resolution line at bare :root "
+                    f"and a course identity block may; anything else writes "
+                    f"{token}-default instead",
+                )
+            )
+    return problems
+
+
+def _course_sheet_problems() -> list[Problem]:
+    """A course ships no CSS of its own; the three that do are grandfathered."""
+    problems: list[Problem] = []
+    for course in course_directories():
+        for sheet in sorted(course.rglob("*.css")):
+            name = relative(sheet)
+            if name not in GRANDFATHERED_COURSE_SHEETS:
+                problems.append(
+                    Problem(
+                        name,
+                        "a course ships no stylesheet of its own. Three exist and they are "
+                        "grandfathered, not a precedent: a widget a second course could want "
+                        "belongs in assets/hub.css, where it has one owner",
+                    )
+                )
+    for name in sorted(GRANDFATHERED_COURSE_SHEETS):
+        if not (REPO_ROOT / name).is_file():
+            problems.append(
+                Problem(
+                    "scripts/validate_site.py",
+                    f"{name} is recorded as grandfathered but is gone; drop it from "
+                    f"GRANDFATHERED_COURSE_SHEETS",
+                )
+            )
+    return problems
+
+
+def eyebrow_strings(page: Path) -> list[str]:
+    """The text of every eyebrow on a page, tags removed and whitespace folded."""
+    source = page.read_text(encoding="utf-8", errors="replace")
+    return [
+        " ".join(TAG.sub(" ", found).split()) for found in EYEBROW_ELEMENT.findall(source)
+    ]
+
+
+def eyebrow_is_long(text: str) -> bool:
+    """An eyebrow is measured by its longest segment, not by its whole line.
+
+    A segmented label - ``Week 6 · Lesson 3 of 9 · ranking against detecting`` -
+    is four short labels a reader looks at one at a time, so counting the words
+    across the separators would condemn the shape the hub actually uses.
+    """
+    segments = [part for part in EYEBROW_SEPARATOR.split(text) if part.strip()]
+    return max((len(part.split()) for part in segments), default=0) > EYEBROW_WORD_LIMIT
+
+
+def _eyebrow_problems(declared: dict[str, dict[str, str]]) -> list[Problem]:
+    """Capitals are defensible on a short label and nowhere else."""
+    lowercase = {
+        course
+        for course, tokens in declared.items()
+        if tokens.get("--eyebrow-case") == "none"
+    }
+
+    counted: dict[str, int] = {}
+    for page in html_pages():
+        name = relative(page)
+        course = name.split("/", 1)[0] if "/" in name else ""
+        if course in lowercase:
+            continue
+        found = sum(1 for text in eyebrow_strings(page) if eyebrow_is_long(text))
+        if found:
+            counted[name] = found
+
+    problems: list[Problem] = []
+    for name, found in sorted(counted.items()):
+        recorded = LONG_UPPERCASE_EYEBROWS.get(name, 0)
+        if found > recorded:
+            problems.append(
+                Problem(
+                    name,
+                    f"{found - recorded} eyebrow(s) run past {EYEBROW_WORD_LIMIT} words in a "
+                    f"single segment while --eyebrow-case is uppercase. Capitals read 9.53% "
+                    f"to 19.01% slower; the house target is two to four words",
+                )
+            )
+    for name, recorded in sorted(LONG_UPPERCASE_EYEBROWS.items()):
+        found = counted.get(name, 0)
+        if found < recorded:
+            problems.append(
+                Problem(
+                    "scripts/validate_site.py",
+                    f"{name} now has {found} over-long uppercase eyebrow(s), not {recorded}. "
+                    f"Lower or delete its entry in LONG_UPPERCASE_EYEBROWS so the list "
+                    f"only ever gets shorter",
+                )
+            )
+    return problems
+
+
+def check_course_contract() -> list[Problem]:
+    source = hub_stylesheet()
+    declared = registrations(source)
+    return (
+        _registration_problems(source)
+        + _hue_problems(declared)
+        + _layer_problems(source)
+        + _course_sheet_problems()
+        + _eyebrow_problems(declared)
+    )
+
+
 def main() -> int:
     problems = (
         check_courses_are_registered()
@@ -1387,6 +1855,7 @@ def main() -> int:
         + check_design_registry_and_blocks()
         + check_design_token_completeness()
         + check_three_layer_rule()
+        + check_course_contract()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
