@@ -399,7 +399,13 @@
       else root.style.setProperty(role.prop, 'calc(var(' + role.prop.replace('-user', '-default') + ') * ' + factor + ')');
     });
   }
-  applyDensityFactor(entry(DENSITIES, density).factor);
+  /* Only when there is something to write. The head phase has written nothing
+     yet, so a factor of 1 here would be twenty removeProperty calls against an
+     inline style that is empty - twenty writes to <html> on every one of 796
+     page loads, for every reader, to reach the state the page was already in.
+     The panel's own path still removes, because by then something may be there. */
+  var densityFactor = entry(DENSITIES, density).factor;
+  if (densityFactor !== 1) applyDensityFactor(densityFactor);
 
   /* Motion. Absent means follow the operating system, which is the state every
      page was in before this control existed. */
