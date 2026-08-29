@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Fourteen checks, all deterministic and offline:
+Fifteen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -52,12 +52,12 @@ Fourteen checks, all deterministic and offline:
 14. Every custom property a ``@page`` margin box reads is declared somewhere in
    ``hub.css``. A margin box that resolves to nothing prints an empty running
    foot, in the one render state no screen check can see.
-13. Every width media query, in ``hub.css`` and in every course sheet, names a
+15. Every width media query, in ``hub.css`` and in every course sheet, names a
    medium. A width feature is answered by the page box in print, and the printed
    page box is narrower than the hub's smallest breakpoint, so an unqualified
    one silently lays the paper out as a phone.
 
-Checks 9 to 14 read the shared asset files rather than the pages. What the
+Checks 9 to 15 read the shared asset files rather than the pages. What the
 design system then *renders* is the computed-style harness's job; see
 ``scripts/style_snapshot.py``.
 
