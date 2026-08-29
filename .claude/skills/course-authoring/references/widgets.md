@@ -687,3 +687,30 @@ The consequence for a media query: a token with a `-user` layer must be restated
 **A course sheet restates tokens; it never restates rules.**
 The three `course-extras.css` files are layered after the hub sheet, so a copy of a hub rule in one of them wins on source order and every later change to the hub sheet stops at that course's pages.
 Setting `--radius` or `--fs-note` under a course's own selector reaches the same pixels and keeps one owner.
+Write that selector as `:root[data-course="your-course"]`, which is the spelling `hub.css` already uses for `--course-hue`.
+A bare `[data-course="..."]` is `(0,1,0)` and loses to a design block, so the course's own value would go silently dead the day a second design ships.
+
+## The design axis
+
+The block above is a *design*, and `house` is its name.
+`hub.js` writes `data-design` on `<html>` in its head phase, beside `data-mode` and `data-palette`, before the first paint.
+The token block is written once under two selectors, `:root, :root[data-design="house"]`, exactly as the Paper palette is: the bare arm is what a page gets with no script at all, and the attribute arm is what the axis selects.
+
+**A design carries no colour.**
+Type, rhythm, shape, motion and the eyebrow treatment are the design's; the 14 raw colours are the palette's and the light-or-dark mapping is the mode's.
+That split is why a second design costs no row in the contrast matrix, and it is why the reference look's warm paper will ship as a seventh palette rather than as part of a design.
+
+**Adding a design is a block of the same tokens under a new attribute value, plus one entry in the `DESIGNS` registry in `hub.js`.**
+Three checks in `scripts/validate_site.py` hold the two halves together, so none of this is left to review:
+
+- every registered design has a block and every block is registered, so the picker can offer nothing that resolves to nothing;
+- every design declares the *whole* token set, compared against the default design's, in both directions - a design that declares half of it inherits the other half and looks nearly right;
+- a design-axis token is declared in a design block and nowhere else, because a design block is `(0,2,0)` against a bare `:root` and would out-argue a media-query override in every viewport.
+
+**Withdrawing a design is deleting its registry entry.**
+The picker stops offering it and a reader who had chosen it falls through to the registered default, because the head phase validates a stored key against the registry exactly as it does a palette key.
+No deploy, no page edit, and the fallback was measured to restore the original exactly.
+
+**A design moves faces, so anything measured at render time is repainted through `whenFontsReady`.**
+Mermaid cuts every label box to a measurement it takes at render time, and it takes that measurement in the face `hub.js` hands it - `--font-ui`, the chrome role, which is also what `hub.css` paints diagrams with.
+Test a design change by *switching*, never by loading: a diagram with stale metrics renders correctly on the next reload, which is how the defect survives review.
