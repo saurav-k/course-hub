@@ -205,7 +205,12 @@ def strip_suffixes(link: str) -> str:
 
 
 def course_directories() -> list[Path]:
-    """Course folders are the top-level directories that ship a page."""
+    """The top-level directories that ship a page.
+
+    Every one of them is registered on the hub landing page and holds to the
+    page contract, which is why this is what most checks here iterate. Not all
+    of them teach; see :func:`teaching_courses`.
+    """
     return sorted(
         entry
         for entry in REPO_ROOT.iterdir()
@@ -213,6 +218,28 @@ def course_directories() -> list[Path]:
         and not entry.name.startswith(".")
         and entry.name not in {"assets", "scripts"}
     )
+
+
+def is_course(folder: Path) -> bool:
+    """A top-level folder that teaches, as opposed to one that does not.
+
+    ``design-system/`` is a single reference page about the design system
+    itself. It has no lessons, so it has no identity to register in the course
+    contract and no accent hue to be told apart by, and the sheet it does ship
+    is that one page's own scaffolding rather than a course reaching for rules
+    the hub sheet should own.
+
+    The test is the ``lessons/`` directory, because that is what a course *is*
+    here and every one of them has one. Deliberately structural rather than a
+    list of names: a list has to be edited by whoever adds the next course, and
+    the failure mode of forgetting is a course that quietly stops being checked.
+    """
+    return folder.is_dir() and (folder / "lessons").is_dir()
+
+
+def teaching_courses() -> list[Path]:
+    """The course folders the course contract applies to."""
+    return [folder for folder in course_directories() if is_course(folder)]
 
 
 def html_pages() -> list[Path]:
@@ -2001,7 +2028,7 @@ def _registration_problems(source: str) -> list[Problem]:
                 Problem("assets/hub.css", f"{course} is registered {count} times; one block per course")
             )
 
-    folders = {course.name for course in course_directories()}
+    folders = {course.name for course in teaching_courses()}
     for course in sorted(folders - set(seen)):
         problems.append(
             Problem(
@@ -2094,7 +2121,7 @@ def _layer_problems(source: str) -> list[Problem]:
 def _course_sheet_problems() -> list[Problem]:
     """A course ships no CSS of its own; the three that do are grandfathered."""
     problems: list[Problem] = []
-    for course in course_directories():
+    for course in teaching_courses():
         for sheet in sorted(course.rglob("*.css")):
             name = relative(sheet)
             if name not in GRANDFATHERED_COURSE_SHEETS:
