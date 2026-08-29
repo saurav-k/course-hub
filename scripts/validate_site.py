@@ -1816,7 +1816,13 @@ def eyebrow_is_long(text: str) -> bool:
 
 
 def _eyebrow_problems(declared: dict[str, dict[str, str]]) -> list[Problem]:
-    """Capitals are defensible on a short label and nowhere else."""
+    """Capitals are defensible on a short label and nowhere else.
+
+    Only a course's own ``--eyebrow-case: none`` exempts its pages. A design
+    that turned capitals off would exempt them too, for as long as the reader
+    kept that design, and a page has to be right under the house default rather
+    than under one setting of a control the reader can move.
+    """
     lowercase = {
         course
         for course, tokens in declared.items()

@@ -1134,63 +1134,95 @@ def _near(measured: str, expected: float) -> bool:
         return False
 
 
-def _contract_expectations(states: dict[str, dict[str, str]], root_size: float) -> list[tuple[str, str, str, str]]:
-    """Every claim A3 makes, as (state, property, expected, measured).
+@dataclass(frozen=True)
+class Claim:
+    """One thing A3 asserts about one registration.
+
+    Most claims are an equality: this property computes exactly that value.
+    A few are the opposite - the accent has to *move*, and a registration that
+    changed nothing would be a passing test of a broken mechanism - so the
+    direction is a field rather than a convention in the expected string.
+    """
+
+    state: str
+    prop: str
+    expected: str
+    measured: str
+    must_differ: bool = False
+
+    def holds(self) -> bool:
+        if self.must_differ:
+            return self.measured != self.expected
+        if self.measured == self.expected:
+            return True
+        return self.expected.endswith("px") and _near(self.measured, float(self.expected[:-2]))
+
+    def as_difference(self, page: str) -> Difference:
+        wanted = f"anything but {self.expected}" if self.must_differ else self.expected
+        return Difference(page, f"A3 {self.state}", "the registration", self.prop, wanted, self.measured)
+
+
+def _unchanged(state: str, house: dict[str, str], measured: dict[str, str], *, except_for: str) -> list[Claim]:
+    """Every property but one computes what the house computes."""
+    return [
+        Claim(state, prop, value, measured[prop])
+        for prop, value in sorted(house.items())
+        if prop != except_for
+    ]
+
+
+def _contract_claims(states: dict[str, dict[str, str]], root_size: float) -> list[Claim]:
+    """Every claim A3 makes.
 
     The two faces and the eyebrow family are compared against another face the
     same page already computes, rather than against a font name, so the
     assertion keeps holding when the registry changes what a role points at.
     """
     house = states["house"]
-    claims: list[tuple[str, str, str, str]] = []
+    full = states["seven tokens"]
+    size = 0.78 * root_size
 
     # A hue on its own moves the accent and nothing else. That is the whole
     # promise of the cheapest registration there is.
-    hue_only = states["hue only"]
-    claims.append(("hue only", "accent", "moved from " + house["accent"], hue_only["accent"]))
-    for prop, value in sorted(house.items()):
-        if prop != "accent":
-            claims.append(("hue only", prop, value, hue_only[prop]))
+    claims = [Claim("hue only", "accent", house["accent"], states["hue only"]["accent"], must_differ=True)]
+    claims += _unchanged("hue only", house, states["hue only"], except_for="accent")
 
-    # All seven, and the four things a course may never reach.
-    full = states["seven tokens"]
-    size = 0.78 * root_size
+    # All seven: the three faces and the eyebrow move, and the four values a
+    # course may never reach do not.
     claims += [
-        ("seven tokens", "accent", "moved from " + house["accent"], full["accent"]),
-        ("seven tokens", "display face", house["mono face"], full["display face"]),
-        ("seven tokens", "mono face", house["body face"], full["mono face"]),
-        ("seven tokens", "eyebrow family", house["body face"], full["eyebrow family"]),
-        ("seven tokens", "eyebrow size", f"{size:.4g}px", full["eyebrow size"]),
-        ("seven tokens", "eyebrow tracking", f"{0.3 * size:.4g}px", full["eyebrow tracking"]),
-        ("seven tokens", "eyebrow case", "none", full["eyebrow case"]),
+        Claim("seven tokens", "accent", house["accent"], full["accent"], must_differ=True),
+        Claim("seven tokens", "display face", house["mono face"], full["display face"]),
+        Claim("seven tokens", "mono face", house["body face"], full["mono face"]),
+        Claim("seven tokens", "eyebrow family", house["body face"], full["eyebrow family"]),
+        Claim("seven tokens", "eyebrow size", f"{size:.4g}px", full["eyebrow size"]),
+        Claim("seven tokens", "eyebrow tracking", f"{0.3 * size:.4g}px", full["eyebrow tracking"]),
+        Claim("seven tokens", "eyebrow case", "none", full["eyebrow case"]),
         # Not on the author surface, so a course must not be able to move it.
-        ("seven tokens", "eyebrow weight", house["eyebrow weight"], full["eyebrow weight"]),
-        ("seven tokens", "body face", house["body face"], full["body face"]),
-        ("seven tokens", "body size", house["body size"], full["body size"]),
-        ("seven tokens", "measure", house["measure"], full["measure"]),
-        ("seven tokens", "ui face", house["ui face"], full["ui face"]),
+        Claim("seven tokens", "eyebrow weight", house["eyebrow weight"], full["eyebrow weight"]),
+        Claim("seven tokens", "body face", house["body face"], full["body face"]),
+        Claim("seven tokens", "body size", house["body size"], full["body size"]),
+        Claim("seven tokens", "measure", house["measure"], full["measure"]),
+        Claim("seven tokens", "ui face", house["ui face"], full["ui face"]),
     ]
 
     # A course folder nobody registered is dull, never broken: it wears the
-    # palette accent unrotated, which is what a page with no course wears, and
-    # everything else is the house.
-    unregistered = states["unregistered"]
-    claims.append(("unregistered", "accent", states["no course"]["accent"], unregistered["accent"]))
-    for prop, value in sorted(house.items()):
-        if prop != "accent":
-            claims.append(("unregistered", prop, value, unregistered[prop]))
+    # palette accent unrotated, which is what a page with no course wears.
+    claims.append(
+        Claim("unregistered", "accent", states["no course"]["accent"], states["unregistered"]["accent"])
+    )
+    claims += _unchanged("unregistered", house, states["unregistered"], except_for="accent")
 
     # A course declares none of the reader-reachable tokens, so the reader keeps
     # every control while a course block is in force.
-    reader = states["reader controls"]
     claims += [
-        ("reader controls", "body size", "21px", reader["body size"]),
-        ("reader controls", "measure", "60rem", reader["measure"]),
+        Claim("reader controls", "body size", "21px", states["reader controls"]["body size"]),
+        Claim("reader controls", "measure", "60rem", states["reader controls"]["measure"]),
     ]
 
     # Removing the block restores the page exactly. The kill switch is lossless.
-    for prop, value in sorted(house.items()):
-        claims.append(("restored", prop, value, states["restored"][prop]))
+    claims += [
+        Claim("restored", prop, value, states["restored"][prop]) for prop, value in sorted(house.items())
+    ]
     return claims
 
 
@@ -1219,19 +1251,11 @@ def assert_course_contract(capture: Capture, page: str) -> list[Difference]:
     if states["house"]["accent"].startswith("no wordmark"):
         raise RuntimeError(f"A3 needs a page with a .spine .home wordmark; {page} has none")
 
-    findings: list[Difference] = []
-    for state, prop, expected, actual in _contract_expectations(states, measured["rootSize"]):
-        if expected.startswith("moved from "):
-            if actual != expected[len("moved from "):]:
-                continue
-            findings.append(
-                Difference(page, f"A3 {state}", "the registration", prop, expected, actual)
-            )
-            continue
-        if actual == expected or (expected.endswith("px") and _near(actual, float(expected[:-2]))):
-            continue
-        findings.append(Difference(page, f"A3 {state}", "the registration", prop, expected, actual))
-    return findings
+    return [
+        claim.as_difference(page)
+        for claim in _contract_claims(states, measured["rootSize"])
+        if not claim.holds()
+    ]
 
 
 def run(write: bool, assertions: bool) -> int:
