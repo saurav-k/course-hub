@@ -71,6 +71,14 @@ window.COURSE_OUTLINE = {
         {
           "title": "One 256 GB Mac Runs the Same Model Alone",
           "href": "lessons/0010-case-study-mac-studio-256gb.html"
+        },
+        {
+          "title": "Your Own Sizing Worksheet",
+          "href": "lessons/0011-capstone-your-own-sizing-worksheet.html"
+        },
+        {
+          "title": "QLoRA Fine-Tuning Lab",
+          "href": "lessons/0012-qlora-fine-tuning-lab.html"
         }
       ]
     }

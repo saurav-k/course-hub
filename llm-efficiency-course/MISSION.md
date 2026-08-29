@@ -28,13 +28,13 @@ And the failure that would still be failure with every page accurate: a recipe c
 
 ## Structure
 
-Eleven lesson pages in four modules, single reading order, not routed. 900 to 1,400 prose words per page. One shape: lesson.
+Thirteen lesson pages in five modules (Module 05: Apply It - the capstone worksheet and the QLoRA lab), single reading order, not routed. 900 to 1,400 prose words per page. One shape: lesson.
 
 ## The ladder
 
 - **Foundation** (`pill easy`): `0000`, `0001` - arrive cold; every term defined here or on an earlier page.
 - **Working** (`pill med`): `0002` through `0006`, `0008` - has the foundation; gets a mechanism and its trade-off directly.
-- **Frontier** (`pill hard`): `0007`, `0009`, `0010` - has the working pages; handles live hardware case studies and a family survey.
+- **Frontier** (`pill hard`): `0007`, `0009`, `0010`, `0011`, `0012` - has the working pages; handles live hardware case studies and a family survey.
 
 ## Constraints
 

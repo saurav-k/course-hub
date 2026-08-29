@@ -21,7 +21,7 @@ Quizzes follow the worked idea, never precede it. The practice problem always re
 
 ## Structure decisions
 
-- Lessons, not chapters: each page develops one mechanism. The two case-study pages reuse every prior mechanism in one worked deployment, which is what makes the shape lesson rather than reference.
+- Lessons, not chapters: each page develops one mechanism. The two case-study pages and the Module 05 capstone and lab reuse every prior mechanism in one worked deployment, which is what makes the shape lesson rather than reference.
 - The wider-PEFT page sits after QLoRA, not before, because DoRA and IA3 only make sense once low-rank updates and 4-bit bases are in hand.
 - Mac case study after the Spark case study: the cluster page introduces the KV-budget and parallelism concepts the solo-machine page reuses.
 

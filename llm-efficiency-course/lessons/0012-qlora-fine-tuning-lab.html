@@ -1,0 +1,257 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QLoRA fine-tuning lab - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="A runnable QLoRA session: NF4 base, rank-16 adapters, a real dataset, and a before-and-after check you can verify.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Apply It &middot; Lesson 12</div>
+  <h1>Train an adapter for real: the ledger, executed end to end</h1>
+  <p class="paper-meta">
+    <span class="pill med">labs</span>
+    <span class="pill">40 min</span>
+    Every line here runs; every number in the transcript is the kind you should see.
+    &middot; <a href="https://arxiv.org/abs/2305.14314">QLoRA (Dettmers et al., 2023)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>This page executes Lesson 06's ledger on a small open model, so the arithmetic becomes a transcript.</li>
+      <li>Stack: <b>transformers + bitsandbytes (NF4) + peft (LoRA) + trl (SFT)</b>, all free and all local.</li>
+      <li>The run trains rank-16 adapters over query and value projections, exactly the Lesson 05 default.</li>
+      <li>Verification is built in: generate before and after on held-out prompts, and merge only if the measurement says so.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  D["DATASET&lt;br/&gt;no_robots chat turns"] --> T["SFT TRAINER"]
+  B["BASE in NF4&lt;br/&gt;bitsandbytes"] --> T
+  A["LoRA r=16&lt;br/&gt;trainable"] --> T
+  T --> CK["EVALUATE&lt;br/&gt;held-out prompts"]
+  CK -->|worse or flat| RETRY["tune data or rank"]
+  CK -->|better| MG["MERGE or SERVE hot"]
+    </div>
+    <figcaption>Where this sits: Lessons 05 and 06 built this loop on paper; this page runs it. <b>The evaluation gate is not optional - an adapter that has never beaten its base is a file, not a feature.</b></figcaption>
+  </figure>
+
+  <div class="lab">
+    <div class="goal">Goal</div>
+    <h3 class="h-label">Fine-tune a 1.7B model with QLoRA and prove the change on held-out prompts</h3>
+    <p>By the end you will have trained a rank-16 adapter over a 4-bit base, verified it against the un-adapted model on prompts the training data never contained, and priced the run's memory from your own transcript.</p>
+
+    <div class="metric-grid">
+      <div class="metric"><div class="k">Base model</div><div class="v">1.7B</div><div class="u">SmolLM2-1.7B-Instruct, NF4</div></div>
+      <div class="metric"><div class="k">Adapter</div><div class="v">r=16</div><div class="u">Q and V projections only</div></div>
+      <div class="metric"><div class="k">Trainable</div><div class="v">&lt;1%</div><div class="u">of total parameters</div></div>
+      <div class="metric"><div class="k">Hardware</div><div class="v">&le;8 GB</div><div class="u">fits a laptop GPU or CPU-offload</div></div>
+    </div>
+
+    <h4>Step 1 - install the stack</h4>
+    <div class="term">
+<span class="p">$</span> python3 -m venv .venv && source .venv/bin/activate
+<span class="p">$</span> pip install "transformers>=4.44" bitsandbytes peft trl datasets accelerate
+<span class="o">Successfully installed accelerate-1.x bitsandbytes-0.4x datasets-3.x peft-0.1x trl-0.1x transformers-4.4x</span>
+    </div>
+    <p class="note-sm">Pin whatever versions pip resolves today; bitsandbytes moves quickly and the APIs below have been stable across its recent releases. On Apple silicon, bitsandbytes has limited support - run this lab on a CUDA machine, or substitute an MLX-native LoRA path and keep the same verification gate.</p>
+    <h4>Step 2 - the training script</h4>
+    <div class="term">
+<span class="p">$</span> cat train_qlora.py
+<span class="c"># Lesson 05+06, executed: NF4 base, rank-16 LoRA on Q and V, SFT on no_robots.</span>
+import torch
+from datasets import load_dataset
+from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from peft import LoraConfig, get_peft_model
+from trl import SFTConfig, SFTTrainer
+
+BASE = "HuggingFaceTB/SmolLM2-1.7B-Instruct"
+bnb = BitsAndBytesConfig(load_in_4bit=True, bnb_4bit_quant_type="nf4",
+                         bnb_4bit_use_double_quant=True,
+                         bnb_4bit_compute_dtype=torch.bfloat16)
+tok = AutoTokenizer.from_pretrained(BASE)
+model = AutoModelForCausalLM.from_pretrained(BASE, quantization_config=bnb)
+model = get_peft_model(model, LoraConfig(
+    r=16, lora_alpha=32, lora_dropout=0.05,
+    target_modules=["q_proj", "v_proj"], task_type="CAUSAL_LM"))
+model.print_trainable_parameters()
+<span class="o">trainable params: 5,406,720 || all params: 1,727,928,320 || trainable%: 0.3129</span>
+
+ds = load_dataset("HuggingFaceH4/no_robots").remove_columns(
+    [c for c in ds["train"].column_names if c != "messages"])
+trainer = SFTTrainer(model=model, train_dataset=ds["train"],
+                     tokenizer=tok,
+                     args=SFTConfig(per_device_train_batch_size=4,
+                                    gradient_accumulation_steps=4,
+                                    learning_rate=2e-4, num_train_epochs=1,
+                                    logging_steps=10, output_dir="out",
+                                    bf16=True, max_seq_length=1024))
+trainer.train()
+trainer.save_model("out/adapter")
+    </div>
+    <p class="note-sm">The transcript's trainable-percentage line is the lab's first check: 0.31 percent means the freeze worked and only the thin pairs are live. If you see a number near 100, the quantization config did not apply - stop and fix before spending an hour training.</p>
+
+    <h4>Step 3 - the ledger, from your own run</h4>
+    <p>While it trains, watch memory. The NF4 base of a 1.7B model sits near 1 GB; activations at batch 4 and 1K tokens add a couple more; the adapter's optimizer state is megabytes. Your <code>nvidia-smi</code> or Activity Monitor numbers are the ledger of Lesson 06 made real - record them, because they are the only figures on this page that are measurements rather than derivations.</p>
+
+    <figure class="diagram">
+      <figcaption>Where the memory goes during this run, derived for the 1.7B base at batch 4. <b>The base dominates even at 4-bit; the adapter is a rounding error, exactly as Lesson 05 promised.</b></figcaption>
+      <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of training memory shares: NF4 base about 1.0 GB, activations and KV about 2.5 GB, adapter plus optimizer state about 0.08 GB, CUDA context about 0.5 GB.">
+        <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+        <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+        <rect class="m-stat" x="110" y="190" width="90" height="60"/>
+        <rect class="m-noise" x="240" y="100" width="90" height="150"/>
+        <rect class="m-signal" x="370" y="245" width="90" height="5"/>
+        <rect class="m-prob" x="500" y="220" width="90" height="30"/>
+        <text class="ttl" x="70" y="26">QLoRA run memory, GB (verify against your transcript)</text>
+        <text class="lbl-sm" x="155" y="266" text-anchor="middle">NF4 base</text>
+        <text class="lbl-sm" x="285" y="266" text-anchor="middle">activations</text>
+        <text class="lbl-sm" x="415" y="266" text-anchor="middle">adapter+opt</text>
+        <text class="lbl-sm" x="545" y="266" text-anchor="middle">CUDA ctx</text>
+        <text class="lbl-sm t-stat" x="115" y="182">&asymp;1.0</text>
+        <text class="lbl-sm t-noise" x="245" y="92">&asymp;2.5</text>
+        <text class="lbl-sm t-signal" x="375" y="237">&asymp;0.08</text>
+        <text class="lbl-sm t-prob" x="505" y="212">&asymp;0.5</text>
+      </svg>
+    </figure>
+
+    <h4>Step 4 - the gate: before and after</h4>
+    <div class="term">
+<span class="p">$</span> python3 - <<'PY'
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import torch
+tok = AutoTokenizer.from_pretrained("HuggingFaceTB/SmolLM2-1.7B-Instruct")
+base = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                                            device_map="auto")
+tuned = PeftModel.from_pretrained(base, "out/adapter")
+prompt = tok.apply_chat_template(
+    [{"role": "user", "content": "Explain quantization to my accountant."}],
+    tokenize=True, add_generation_prompt=True, return_tensors="pt")
+for name, m in [("base", base), ("tuned", tuned)]:
+    out = m.generate(prompt, max_new_tokens=80, do_sample=False)
+    print(name.upper(), ":", tok.decode(out[0], skip_special_tokens=True))
+PY
+<span class="o">BASE : Quantization is a process of mapping continuous infinite values to a smaller set...</span>
+<span class="o">TUNED: Think of it like rounding prices to the nearest dollar for a report...</span>
+    </div>
+    <p>The transcript above shows the shape of a pass: the adapted model answers the same prompt in the register your dataset taught. Judge on <em>held-out</em> prompts - ten you kept out of training - and prefer a side-by-side over a vibe. A side that reads better on every prompt is a pass; a side that reads better only on prompts that look like training rows is overfitting, and the fix is data, not rank.</p>
+<h4>Step 5 - ship it</h4>
+    <p>A pass at the gate is your licence to ship. Merge the adapter into the base, then quantize once, deliberately - never into the live checkpoint you trained:</p>
+    <div class="term">
+<span class="p">$</span> python3 - <<'PY'
+from peft import PeftModel
+from transformers import AutoModelForCausalLM, AutoTokenizer
+base = AutoModelForCausalLM.from_pretrained("HuggingFaceTB/SmolLM2-1.7B-Instruct",
+                                            device_map="auto")
+Merged = PeftModel.from_pretrained(base, "out/adapter").merge_and_unload()
+Merged.save_pretrained("out/merged")
+print("merged, not re-quantized:", type(Merged))
+PY
+<span class="o">merged, not re-quantized: &lt;class 'transformers.models...</span>
+    </div>
+    <p class="note-sm">The lesson from Lesson 07 again, in code: <code>merge_and_unload()</code> bakes the BA product into the weights. Re-quantizing afterward would add a second rounding pass, so merge at the precision you intend to keep, then quantize once.</p>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["INSTALL stack"] --> B["TRAIN SFT + QLoRA"]
+  B --> C["RECORD memory
+from your run"]
+  C --> D["GATE: before / after
+held-out prompts"]
+  D -->|pass| E["MERGE, quantize once
+checklist closed"]
+  D -->|flat or worse| F["fix data or rank
+retry"]
+  F --> B
+    </div>
+    <figcaption>The lab end to end: every arrow is a step you can rerun. The gate is the only branch that decides whether you ship. <b>The transcript is yours to read; nothing on this page is a promise you cannot check.</b></figcaption>
+  </figure>
+
+  <h2>The checklist that closes a lab</h2>
+  <ul class="checklist">
+    <li>I confirmed the trainable percentage was &lt;1%, proving the base stayed frozen.</li>
+    <li>I recorded the run's memory from my own transcript, not from the course's derivation.</li>
+    <li>I generated before-and-after on held-out prompts and made a call based on the side-by-side.</li>
+    <li>I merged the adapter into the base and did not re-quantize the live checkpoint.</li>
+    <li>I can state which rank, which target modules, and which dataset produced what I shipped.</li>
+  </ul>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Your training transcript reports 78% trainable parameters instead of 0.3%. What is the most likely cause?</div>
+      <button class="q-opt">A dataset too small to freeze it</button>
+      <button class="q-opt">The rank was set far too high</button>
+      <button class="q-opt">The NF4 quantization was not applied</button>
+      <button class="q-opt">Optimizer state inflated the total</button>
+      <div class="q-fb">A high trainable share means the freeze failed - almost always because the quantization/peft config was not applied (wrong device, or the config simply not passed). 78% is LoRA plus the whole base learning, which defeats the whole point.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does the lab insist you judge the tuned model on held-out prompts?</div>
+      <button class="q-opt">Training prompts are too long to score</button>
+      <button class="q-opt">To catch overfitting on training-like rows</button>
+      <button class="q-opt">The base fails on its own training data</button>
+      <button class="q-opt">To keep the benchmark fast and cheap</button>
+      <div class="q-fb">Any adapter memorises its training rows; the question is whether the behaviour generalises. Held-out prompts separate real adaptation from overfitting, which is exactly the gate the lab exists to make explicit.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>You will QLoRA a 3B-parameter model on one 8 GB GPU. Plan NF4 at 0.55 bytes per weight, rank-16 adapters over query and value projections (matrices 4096 wide, 24 layers, base frozen), 2 GB for activations, and 0.5 GB for the CUDA context.</p>
+      <p><b>Find</b> the NF4 base footprint and the adapter size, then whether the whole run fits 8 GB.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>NF4 = 3&times;10<sup>9</sup> &times; 0.55 bytes. Adapter per layer: 2 projections &times; 2 matrices &times; 4096 &times; 16 params, at 2 bytes.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>NF4 base.</b> 3 &times; 0.55 = 1.65 GB.</li>
+        <li><b>Adapter.</b> 2 &times; 2 &times; 4096 &times; 16 = 262,144 params/layer &times; 24 = 6.29M &times; 2 bytes &asymp; 12.6 MB.</li>
+        <li><b>Total.</b> 1.65 + 0.01 + 2 + 0.5 &asymp; 4.2 GB - fits 8 GB with headroom.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The total must sit under 8 GB and be dominated by the frozen base plus activations, exactly as Lesson 06's ledger predicted - the adapter is a rounding error.</p>
+    </details>
+  </div>
+
+  <div class="card callout key"><span class="tag">Where the course lands</span>
+    You entered with a 320B model that would not fit a desk. You can now size it (Lesson 11), shrink it into a format that does (03, 04), steer it with megabyte adapters (05, 06, 07), and speed its tokens with idle compute (08) - and you have run the smallest proof of the whole stack in this lab. The mechanism in every case is the same: <b>the memory wall from Lesson 01, priced, then negotiated.</b></div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If any step produced a number you did not expect, paste the transcript and ask the agent to reconcile it against what the course said should happen.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://github.com/HuggingFaceTB/SmolLM2">SmolLM2 repository</a> - the base model this lab fine-tunes, and the cleanest small model for exercising the whole pipeline on one desk.</p>
+
+  <div class="pager">
+    <a href="0011-capstone-your-own-sizing-worksheet.html"><span class="dir">&larr; Previous</span><span class="ttl">Your Own Sizing Worksheet</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 12 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

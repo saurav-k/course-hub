@@ -22,8 +22,7 @@ Reference sheets read alongside and are not positions: `reference/glossary.html`
 
 ## Planned but unwritten
 
-- **Capstone: your own sizing worksheet** - position reserved at lesson 0011 (claimed 2026-08-27 at course creation): a worked worksheet the reader fills for hardware and a model of their choosing. Nothing exists yet; nothing else may take 0011.
-- **Fine-tuning lab: QLoRA on your own corpus** - position reserved at lesson 0012 (claimed 2026-08-27): a lab page with a runnable adapter-training session once a canonical small-model recipe is verified end to end.
+All originally planned positions are now written. The course reserves open slots after 0012 for any future session; nothing is currently planned or in progress.
 
 ## Adding a session to this course
 
