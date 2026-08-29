@@ -196,6 +196,28 @@
      hostname is empty and the page looks exactly like the live one. */
   if (location.hostname.indexOf('preprod') !== -1) root.setAttribute('data-env', 'preprod');
 
+  /* The printed sheet's identity, for the running foot `hub.css` sets in the
+     `@page` margin. A margin box can reach nothing about the document except a
+     custom property on the root element: `string()`, the standard way to run a
+     heading into one, renders on the first page only in Chrome, which is the
+     one sheet that never needed it. So the title becomes a CSS string here.
+
+     `hub.css` declares a fallback, so a page with the script removed still
+     prints a foot; this beats it because an inline property beats a rule. The
+     stage is folded in on pre-production, which is what lets the print block
+     drop the warning strip altogether rather than flowing it to the last page:
+     every sheet now says where it came from instead of one of them.
+
+     A CSS string, not a bare word - a backslash or a quotation mark in a
+     lesson title would otherwise end the string early and take the whole
+     declaration with it, and the foot would print empty with nothing said. */
+  function cssString(text) {
+    return '"' + String(text).replace(/\s+/g, ' ').trim().replace(/[\\"]/g, '\\$&') + '"';
+  }
+  var printId = document.title || 'Course Hub';
+  if (root.getAttribute('data-env') === 'preprod') printId = 'PRE-PRODUCTION - ' + printId;
+  root.style.setProperty('--print-id', cssString(printId));
+
   /* Mermaid renders itself on DOMContentLoaded unless told otherwise, and it
      would do so before the palette tokens have been read, producing a diagram
      in its own stock colours. Claim the render here, while the page is still
