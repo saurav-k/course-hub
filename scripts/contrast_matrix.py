@@ -14,7 +14,7 @@ rotation holds OKLCH lightness and chroma constant, but WCAG relative luminance
 is not OKLCH lightness, so a hue rotation moves the measured ratio. The shipped
 offsets are presumed sound and nothing had established it.
 
-    6 palettes  x  2 modes  x  19 course hues  =  228 reachable combinations
+    7 palettes  x  2 modes  x  19 course hues  =  266 reachable combinations
 
 **Which pairs are checked, and why not all of them.** A floor on a pair nobody
 can see is noise, and noise is how a gate gets ignored, so the pair table is

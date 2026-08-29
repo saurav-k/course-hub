@@ -57,7 +57,7 @@ Then look anyway. A diagram that parses can still say the wrong thing.
 ### The rest of the browser pass
 
 - **Every diagram legible at its authored size.** A wide Mermaid diagram scaled down to fit the reading column is unreadable, and its own caption will be larger than its labels. The figure should scroll inside its box rather than shrink. Check the widest figure on the page, and check it can be reached by keyboard: `hub.js` gives a box that genuinely overflows a tab stop and takes it back when the column grows.
-- **Both modes and more than one palette.** Six palettes and three modes exist, and the accent each course wears is the palette's accent rotated by that course's hue. A colour that reads on cream can disappear on near-black, and a literal hex in a hand-authored SVG is the usual cause.
+- **Both modes and more than one palette.** Seven palettes and three modes exist, and the accent each course wears is the palette's accent rotated by that course's hue. A colour that reads on cream can disappear on near-black, and a literal hex in a hand-authored SVG is the usual cause.
 - **Print preview.** Diagrams carry their colours inside the SVG, so `hub.js` draws an ink-on-paper copy of each one while the browser is idle and swaps it in on `beforeprint`. If a figure prints in screen colours or as raw graph source, that mechanism is what broke.
 - **360px wide.** The figure may scroll; the page body may not. Horizontal scroll on the body is a bug every time.
 - **Every quiz answered.** Click the right option and confirm it goes green; click a wrong one and read the feedback you wrote. A `data-answer` off by one is invisible until someone clicks it.

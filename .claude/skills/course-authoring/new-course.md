@@ -134,7 +134,7 @@ Then three registrations, none of which the course can do for itself:
    `staff-ai-course/learning-records/0001-choosing-the-hue.md` carries the method and a measured comparison table for four shipped hues; compare a candidate against that table.
    A course with no line at all silently wears the plain palette accent, which is dull rather than broken.
 
-   Check the candidate against every palette in both modes before you ship it: six palettes times two modes is what "verified" means here.
+   Check the candidate against every palette in both modes before you ship it: seven palettes times two modes is what "verified" means here.
    Looking is the check, and there is a cheaper one worth doing first, because hue rotation preserves lightness and chroma while the OKLCH gamut is not a cylinder: at some hues the rotated colour falls outside sRGB and the browser clips it, which quietly changes what the reader sees.
    Render the candidate against all twelve combinations, read the painted pixel back through a canvas, and compare its chroma with the unrotated accent's.
    The seven original hues lose between 0 and 8 percent of their chroma on average, and up to 55 percent in their worst cell, so a candidate inside that range is no worse than what is already published.

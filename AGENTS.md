@@ -262,6 +262,12 @@ query, not in a second rule on the element - `body { font-size: ... }` at a brea
 after the body rule and out-argue the reader. The block at the head of `hub.css` states the rule in
 full. Twenty-four tokens carry the form today and they are exactly the reader-reachable ones:
 `--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm space roles.
+**A resolution line never sits inside a design block.** A design block is `(0,2,0)`, so a line
+written in one would be a second resolution line for the same reader value and source order between
+two interchangeable designs would decide which answered. The twenty rhythm roles therefore resolve
+at a bare `:root` just after the design blocks, in the shape of the course layer; the design writes
+only the `-default`, and `var()` still picks it up because substitution reads the computed value of
+that property rather than the declaration beside it.
 Six further tokens carry a two-name form for the same reason on a different axis, and that is the
 course contract above.
 Everything else is a one-layer design token, because a `--*-user` layer on a value no control can
@@ -273,9 +279,10 @@ rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub
 attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries 301 of them: `--font-display`,
+near the head of `hub.css`, marked "the design axis", carries 317 of them: `--font-display`,
 `--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
-eight-step space ramp with a role layer over it, shape, motion and the eyebrow treatment. Six of
+eight-step space ramp with a role layer over it, the reading frame, shape, motion and the eyebrow
+treatment. Six of
 them are declared there as a `-default` and resolved below the block, which is the course layer;
 see "The course contract" above. A hard-coded
 `1.05rem` in a rule is a value a second design cannot reach, which is the fork this hub already
@@ -286,11 +293,16 @@ column's rhythm and a later density control may scale those and nothing else; th
 permanently out of its reach, because seven pointer targets there pass SC 2.5.8 only on the spacing
 exception. `references/widgets.md`, "The design tokens", is the author-facing summary.
 
-**The design axis is the third reader axis, and one design is registered.** `data-design` selects a
-block of the token set above, and that block is written once under two
+**The design axis is the third reader axis, and two designs are registered.** `data-design` selects
+a block of the token set above, and the default block is written once under two
 selectors, `:root, :root[data-design="house"]`, exactly as the Paper palette is: the bare arm is
-what a page with no script gets, the attribute arm is what the axis selects. **A design carries no
-colour** - that is the palette and mode axes - so a design costs no row in the contrast matrix. The
+what a page with no script gets, the attribute arm is what the axis selects. `press` is the second,
+the form half of the reference look, whose colour half is the `press` palette; either can be worn
+without the other. **A design carries no
+colour** - that is the palette and mode axes - so a design costs no row in the contrast matrix. What
+a design also may not reach is the body size, which is resolved outside every design block so the
+720px arm can move it, and the reading face, whose registry sits after the design blocks because a
+face is a name plus three measured constants a design cannot supply. The
 registry lives in `hub.js` as `DESIGNS`, an unknown stored key falls back to the first entry, and
 withdrawing a design is deleting its entry: no deploy and no page edit. Three checks in
 `validate_site.py` hold the halves together - registry and blocks name the same set, every design
@@ -302,6 +314,25 @@ course block and a design block are both `(0,2,0)`, so for the six tokens both o
 design writes a `-default` and the course writes the token, and the six resolution lines sit below
 the design block rather than in it. See "The course contract" above.
 `references/widgets.md`, "The design axis", is the author-facing summary.
+
+**A palette states 17 raw values twice, and the seventeenth is not a colour.** Seven palettes are
+registered. Sixteen of the seventeen are the `--l-*` / `--d-*` colour pairs the mode layer maps onto
+the semantic tokens; the seventeenth is `--*-wash`, the ground treatment, a `background-image` value
+painted on the canvas and on the reading pane. It is `none` on six palettes and two 5% radial
+gradients on `press`, because a ground that is a flat fill reads as a screen colour and one with a
+wash reads as paper. It is stated by every palette rather than only by the one that uses it, for the
+same reason the sixteen are. Two of the sixteen are new with `press`: `--*-code-inline-bg` and
+`--*-code-inline-ink`, so a design with a dark code plate does not drag inline code dark with it.
+Both pairs carry body text and `scripts/contrast.py` holds both to 7:1.
+
+**A palette and a design are data, and nothing branches on either name.** No function in `hub.js`
+and no rule in `hub.css` knows one by name: the two registries are plain arrays, the blocks are
+keyed on the attribute, and the appearance panel builds its three grids by iterating. Registering
+either must stay a block of values plus one array entry, and withdrawing either must stay one
+deleted line. Never write `if (design === 'house')`, never key a rule on a palette name outside its
+own value block, and never state a count of them in prose that a seventh or an eighth would falsify.
+The captain's stated direction is that designs, palettes, fonts and course templates come from a
+database rather than from these files; that is not work to do now, and it is a door not to close.
 
 **Four of the reading axes are derived, and the block after the design axis is where.** They are
 not independent, so offering them as four settings would let a reader move one control and silently
@@ -400,7 +431,7 @@ something to read out of the prose - the wording does not separate them.
 
 **Prove a change to any of those sheets rather than arguing it.** `scripts/style_snapshot.py` loads
 a fixed sample of pages in headless Chrome and records the computed value of every property that
-matters, for every class in the closed widget vocabulary, across six palettes and both modes. The
+matters, for every class in the closed widget vocabulary, across seven palettes and both modes. The
 snapshot is committed under `scripts/style-baseline/`, so the answer to "did that refactor move
 anything" is a diff rather than a judgement, and the harness names the page, the element shape and
 the property when something did move. It also checks the two render states a single capture cannot
@@ -419,7 +450,7 @@ needs no browser: every registered `--bg` is inside its band (light L\* 88 to 99
 every `--ink` clears 7:1 and sits on the correct side of the crossover, and every other colour a
 palette states clears the floor its role carries. `scripts/contrast_matrix.py` runs in the style
 job and measures what only a browser can resolve - the nine `color-mix()` tints and the per-course
-accent - over six palettes, two modes and every registered course hue, because an OKLCH rotation
+accent - over every registered palette, two modes and every registered course hue, because an OKLCH rotation
 holds OKLCH lightness constant and WCAG luminance is not OKLCH lightness. **Both carry a list of
 recorded breaches and neither list may grow**: a new breach fails, a recorded one that gets worse
 fails, and a recorded one that is fixed fails until its line is deleted. `--report` and the plain
