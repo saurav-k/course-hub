@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Thirteen checks, all deterministic and offline:
+Fourteen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -45,7 +45,14 @@ Thirteen checks, all deterministic and offline:
    capitals runs past five words in a segment. What the registered hue then
    looks like needs a browser and is asserted in ``scripts/style_snapshot.py``.
 
-Checks 9 to 12 read the two shared asset files rather than the pages. What the
+13. The accessibility floor, by the arithmetic half of checks G1, G2 and G3 in
+   ``scripts/contrast.py``: every registered ground is inside its lightness band,
+   every ink clears 7:1 and sits on the right side of the L* 48.9 crossover, and
+   every colour a palette states clears the floor its role carries. The derived
+   tints and the per-course accent need a browser and are measured by
+   ``scripts/contrast_matrix.py`` in the style job instead.
+
+Checks 9 to 13 read the two shared asset files rather than the pages. What the
 design system then *renders* is the computed-style harness's job; see
 ``scripts/style_snapshot.py``.
 
@@ -74,6 +81,8 @@ from pathlib import Path
 from urllib import request as _urlrequest
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
+
+import contrast
 
 REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 
@@ -1010,6 +1019,30 @@ def check_three_layer_rule() -> list[Problem]:
     return problems
 
 
+def check_contrast_floor() -> list[Problem]:
+    """The accessibility floor, over the colours ``hub.css`` states outright.
+
+    A ground of a given lightness bounds the best contrast any ink can reach on
+    it, and that bound is arithmetic. The framework prevents the dead band
+    rather than warning about it: the ground is a discrete registered choice, so
+    no reader input can land inside the band, and this is the check that keeps
+    the registered set outside it.
+
+    ``scripts/contrast.py`` carries the arithmetic, the three checks and a
+    ``--self-test`` that proves each one fails on a deliberately bad input. It
+    lives beside this file rather than inside it because the browser half of the
+    same floor imports it too, and because a check with its own command is a
+    check a palette author can run while choosing a colour.
+    """
+    registry = contrast.registrations()
+    if not registry:
+        return [Problem("assets/hub.css", "no palette block found; the parser and the stylesheet disagree")]
+    return [
+        Problem(f"assets/hub.css [{finding.check} {finding.where}]", finding.detail)
+        for finding in contrast.check_all(registry)
+    ]
+
+
 def check_no_local_markdown_links() -> list[Problem]:
     """The deploy syncs the repository minus ``*.md``, so a page that links a
     local Markdown file works from disk and returns a 404 on the published site."""
@@ -1895,6 +1928,7 @@ def main() -> int:
         + check_design_token_completeness()
         + check_three_layer_rule()
         + check_course_contract()
+        + check_contrast_floor()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
@@ -1915,6 +1949,14 @@ def main() -> int:
             f"Note: {total} title defect(s) waived ({listing}). SWEEP_PENDING is debt "
             "and its entry leaves scripts/check_titles.py when the sweep lands; FROZEN "
             "is a course nobody may edit, so its entry is permanent."
+        )
+
+    breaches = contrast.recorded_breaches(contrast.registrations())
+    if breaches:
+        print(
+            f"Note: {len(breaches)} registered ground outside its lightness band is recorded as "
+            f"debt ({', '.join(breaches)}). It is a palette to correct, not a band to widen; "
+            "the record is in scripts/contrast.py and it may only ever get shorter."
         )
 
     print(f"Course Hub validation passed: {len(html_pages())} pages checked.")
