@@ -404,6 +404,7 @@ class Session:
     def __init__(self, chrome: Chrome, origin: str) -> None:
         self.chrome = chrome
         self.origin = origin
+        self._seed: str | None = None
         chrome.page("Page.enable")
         chrome.page("Runtime.enable")
         chrome.page("Network.enable")
@@ -416,6 +417,33 @@ class Session:
 
     def block(self, patterns: list[str]) -> None:
         self.chrome.page("Network.setBlockedURLs", {"urls": patterns})
+
+    def seed_face(self, face: str | None) -> None:
+        """Choose the reading face before the first paint, the way a panel would."""
+        if self._seed is not None:
+            self.chrome.page("Page.removeScriptToEvaluateOnNewDocument", {"identifier": self._seed})
+            self._seed = None
+        if face is None:
+            return
+        # A document-start script runs before <html> exists, so it waits for it
+        # rather than assuming it. That lands the attribute at the same moment
+        # hub.js's head phase lands data-mode and data-palette: before the first
+        # paint, and before any rule has been resolved against the old value.
+        source = (
+            "(function () {"
+            "  var apply = function () {"
+            "    if (!document.documentElement) return false;"
+            f"    document.documentElement.setAttribute('data-body-face', {face!r});"
+            "    return true;"
+            "  };"
+            "  if (apply()) return;"
+            "  var watch = new MutationObserver(function () { if (apply()) watch.disconnect(); });"
+            "  watch.observe(document, { childList: true, subtree: true });"
+            "})();"
+        )
+        self._seed = self.chrome.page(
+            "Page.addScriptToEvaluateOnNewDocument", {"source": source}
+        )["identifier"]
 
     def load(self) -> None:
         self.chrome.drain()
@@ -539,6 +567,28 @@ def check_reflow(rows: list[dict], viewport: int, report: bool) -> list[str]:
     return failures
 
 
+def check_face_switch(at_load: dict, switched: dict, report: bool) -> list[str]:
+    """Both render states, for the axis this issue adds.
+
+    A page that chose the sans face before its first paint and a page switched
+    to it after load must compute the same thing. A failure means a rule that
+    only matches on the first paint, or one that only matches after a change -
+    the defect that survives review because it looks right on the next reload.
+    """
+    if report:
+        print("\n  The sans face, chosen at load against switched after load")
+    failures: list[str] = []
+    for key in ("fontFamily", "fontSize", "lineHeight", "monoSize", "column", "faceAdvance"):
+        if report:
+            print(f"      {key:<22} {at_load[key]}")
+        if at_load[key] != switched[key]:
+            failures.append(
+                f"face switch: {key} is {at_load[key]} when the face is chosen at load "
+                f"and {switched[key]} when it is switched after it"
+            )
+    return failures
+
+
 def check_script_free(scripted: dict, bare: dict, report: bool) -> list[str]:
     """Every derivation is CSS, so removing the script must move none of them."""
     if report:
@@ -596,6 +646,15 @@ def main() -> int:
             failures += check_reflow(rows, viewport, arguments.report)
 
         session.viewport(1280)
+        session.seed_face("sans")
+        session.load()
+        at_load = json.loads(str(chrome.evaluate(DERIVED)))
+        session.seed_face(None)
+        session.load()
+        chrome.evaluate("document.documentElement.setAttribute('data-body-face', 'sans')")
+        switched = json.loads(str(chrome.evaluate(DERIVED)))
+        failures += check_face_switch(at_load, switched, arguments.report)
+
         session.block(["*hub.js*"])
         session.load()
         bare = json.loads(str(chrome.evaluate(DERIVED)))
