@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Eight checks, all deterministic and offline:
+Nine checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -574,6 +574,81 @@ def waived_title_defects() -> dict[str, int]:
     return waived
 
 
+def split_head(source: str) -> tuple[str, str]:
+    """A page split at the end of its ``<head>``.
+
+    Everything the design system needs runs before the first paint, so where a
+    tag sits is as load-bearing as whether it is there at all. A page with no
+    closing tag is treated as all head, which fails on its own terms below
+    rather than passing by accident.
+    """
+    end = source.lower().find("</head>")
+    return (source, "") if end == -1 else (source[:end], source[end:])
+
+
+def check_pages_link_the_design_system() -> list[Problem]:
+    """Every page reaches the one design system, at its own depth in the tree.
+
+    There is one stylesheet and one script and every page links both, which is
+    what lets the whole hub be restyled by editing two files. Nothing else in
+    this validator can see that: a pull request could strip the ``<link>`` from
+    every page and the deploy would sync an unstyled site to the bucket.
+
+    Three facts are checked, and all three are the same defect wearing different
+    clothes - a page authored from a stale template, or a find-and-replace that
+    walked one directory too far.
+
+    1. ``assets/hub.css`` is linked, in the head, at the page's own depth.
+    2. ``assets/hub.js`` is loaded, in the head. It writes ``data-mode``,
+       ``data-palette`` and ``data-course`` onto ``<html>`` before the first
+       paint, so a copy that runs after ``</head>`` means a colour flash on
+       every load.
+    3. A course that ships an ``assets/course-extras.css`` links it from every
+       one of its pages, after the hub sheet and never before it. Those three
+       sheets restyle shared elements, so a page that misses the link is styled
+       by rules its neighbours do not have.
+    """
+    problems: list[Problem] = []
+    extras_courses = {
+        course.name
+        for course in course_directories()
+        if (course / "assets" / "course-extras.css").is_file()
+    }
+
+    for page in html_pages():
+        parts = page.relative_to(REPO_ROOT).parts
+        head, tail = split_head(page.read_text(encoding="utf-8", errors="replace"))
+        head_links = LINK_PATTERN.findall(head)
+        hub_css = "../" * (len(parts) - 1) + "assets/hub.css"
+
+        for asset in ("hub.css", "hub.js"):
+            wanted = "../" * (len(parts) - 1) + f"assets/{asset}"
+            in_head = [href for href in head_links if href.endswith(f"assets/{asset}")]
+            if wanted in in_head:
+                continue
+            if in_head:
+                problems.append(
+                    Problem(relative(page), f"reaches {asset} at the wrong depth -> {in_head[0]}, expected {wanted}")
+                )
+            elif any(href.endswith(f"assets/{asset}") for href in LINK_PATTERN.findall(tail)):
+                problems.append(Problem(relative(page), f"loads {asset} after </head>; it must run before the first paint"))
+            else:
+                problems.append(Problem(relative(page), f"does not reach assets/{asset}; the page would publish unstyled"))
+
+        if parts[0] not in extras_courses:
+            continue
+        wanted_extras = "../" * (len(parts) - 2) + "assets/course-extras.css"
+        if wanted_extras not in head_links:
+            problems.append(
+                Problem(relative(page), f"its course ships a course-extras.css but the page does not link {wanted_extras}")
+            )
+        elif hub_css in head_links and head_links.index(wanted_extras) < head_links.index(hub_css):
+            problems.append(
+                Problem(relative(page), "links course-extras.css before hub.css; the course sheet layers after the hub sheet")
+            )
+    return problems
+
+
 def check_no_local_markdown_links() -> list[Problem]:
     """The deploy syncs the repository minus ``*.md``, so a page that links a
     local Markdown file works from disk and returns a 404 on the published site."""
@@ -956,6 +1031,7 @@ def main() -> int:
         + check_local_links_resolve()
         + check_no_local_markdown_links()
         + check_comparison_matrix()
+        + check_pages_link_the_design_system()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
