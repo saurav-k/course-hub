@@ -38,7 +38,9 @@ borders also clear their floors on the same ground. Those are the tokens that
 fail first, never the body ink.
 
 **What is here and what is not.** This module reads the raw palette layer, which
-is fourteen literal hexes per palette per mode and nothing else. The tokens that
+is sixteen literal hexes per palette per mode, plus one ground treatment that is
+a background-image rather than a colour and is therefore not this module's. The
+tokens that
 are *derived* - the nine ``color-mix()`` tints, and the per-course accent, which
 is an OKLCH hue rotation whose sRGB gamut mapping is the browser's - cannot be
 resolved without a browser, and are measured by ``scripts/contrast_matrix.py``
@@ -108,11 +110,14 @@ RECORDED_BREACHES: dict[str, float] = {"ink/dark": 2.43}
 # with color-mix() and belong to the browser half.
 PAINTED_ON: tuple[str, ...] = ("bg", "surface", "surface-2")
 
-# The fourteen raw colours every palette states twice. Order is the stylesheet's.
+# The sixteen raw colours every palette states twice. Order is the stylesheet's.
+# The plate and the chip are two pairs because a block of code may be dark on a
+# light page while a chip of code inside a sentence may not, and both carry body
+# text, so both are held to the body floor below.
 PALETTE_TOKENS: tuple[str, ...] = (
     "bg", "surface", "surface-2", "ink", "ink-soft", "ink-faint",
     "accent", "accent-ink", "accent-2", "gold", "ok", "warn",
-    "code-bg", "code-ink",
+    "code-bg", "code-ink", "code-inline-bg", "code-inline-ink",
 )
 
 # Every text pair the raw layer can state on its own: the ink, what it is painted
@@ -127,6 +132,7 @@ TEXT_PAIRS: tuple[tuple[str, tuple[str, ...], float, str], ...] = (
     ("warn", PAINTED_ON, FLOOR_TEXT, "error and danger"),
     ("accent-ink", ("accent",), FLOOR_TEXT, "text painted on the accent"),
     ("code-ink", ("code-bg",), FLOOR_BODY, "code body text"),
+    ("code-inline-ink", ("code-inline-bg",), FLOOR_BODY, "inline code text"),
 )
 
 PALETTE_BLOCK: re.Pattern[str] = re.compile(
@@ -235,7 +241,7 @@ def parse_registrations(css: str) -> list[Registration]:
     """Every palette block in ``hub.css``, split into its light and dark halves.
 
     The palette layer is the one place in the stylesheet that states a literal
-    colour, and every palette states the same twenty-eight properties and
+    colour, and every palette states the same thirty-four properties and
     nothing else. That discipline is what lets this be a parse rather than a
     browser run.
     """
@@ -446,6 +452,7 @@ def _sample(**overrides: RGB) -> Registration:
         "accent": (0xA6, 0x3A, 0x24), "accent-ink": (0xFF, 0xFA, 0xF7), "accent-2": (0x15, 0x58, 0x5C),
         "gold": (0x7A, 0x5A, 0x0A), "ok": (0x1A, 0x6E, 0x35), "warn": (0xA6, 0x3A, 0x24),
         "code-bg": (0xF4, 0xF1, 0xE8), "code-ink": (0x2B, 0x2B, 0x28),
+        "code-inline-bg": (0xF4, 0xF1, 0xE8), "code-inline-ink": (0x2B, 0x2B, 0x28),
     }
     colours.update(overrides)
     return Registration("sample", "light", colours)
@@ -467,6 +474,12 @@ def self_test() -> int:
         ("a dark ink too weak for AAA", _sample(ink=(0x70, 0x70, 0x70)), "G2", "body floor"),
         ("an accent below 4.5:1", _sample(accent=(0xC0, 0x7A, 0x60)), "G3", "--accent on"),
         ("a faint ink below 4.5:1", _sample(**{"ink-faint": (0x9A, 0x9A, 0x92)}), "G3", "--ink-faint on"),
+        (
+            "an inline code chip below the body floor",
+            _sample(**{"code-inline-ink": (0xA6, 0x3A, 0x24)}),
+            "G3",
+            "--code-inline-ink on",
+        ),
     ]
 
     failures: list[str] = []

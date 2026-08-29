@@ -210,7 +210,8 @@
     { key: 'ink',       label: 'Ink',       note: 'Near-monochrome, maximum contrast.' },
     { key: 'sage',      label: 'Sage',      note: 'Soft green paper, pine accent, low glare.' },
     { key: 'harbor',    label: 'Harbor',    note: 'Blue-grey daylight with deep teal and coral.' },
-    { key: 'aubergine', label: 'Aubergine', note: 'Violet-grey with plum and old gold.' }
+    { key: 'aubergine', label: 'Aubergine', note: 'Violet-grey with plum and old gold.' },
+    { key: 'press',     label: 'Press',     note: 'Unbleached paper, one rust in two steps, a dark code plate.' }
   ];
   var PALETTE_KEYS = PALETTES.map(function (p) { return p.key; });
 
@@ -233,9 +234,15 @@
      `llmcourse-theme` key migrated once above - and a third meaning would be a
      maintenance trap.
 
-     One design is registered on purpose. The axis and the second design are
-     separate pieces of work, so the plumbing is debuggable before any design
-     judgement is in play, and every reader keeps exactly the page they had.
+     Two designs are registered. `house` is what every reader had before the
+     axis existed and is the fallback below; `press` is the form half of the
+     reference look, whose colour half is the `press` palette above. The two
+     halves are on two axes on purpose, so either can be worn without the
+     other and neither multiplies the other's checks.
+
+     This array is data and nothing in the framework branches on what is in it.
+     Registering a design is one entry here plus one token block in hub.css;
+     no function in this file, and no rule in that one, knows a design by name.
 
      Withdrawing a design is one line and needs no deploy: delete its entry.
      The picker stops offering it, and a reader who had chosen it falls through
@@ -243,7 +250,8 @@
      The default is the first entry rather than a literal, so withdrawing the
      default is the same one-line edit as withdrawing any other. */
   var DESIGNS = [
-    { key: 'house', label: 'House', note: 'Serif prose, sans headings and chrome. The hub as it reads today.' }
+    { key: 'house', label: 'House', note: 'Serif prose, sans headings and chrome. The hub as it reads today.' },
+    { key: 'press', label: 'Press', note: 'Serif display set tight, mono eyebrows, a 68-character column.' }
   ];
   var DESIGN_KEYS = DESIGNS.map(function (d) { return d.key; });
 
