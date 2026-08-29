@@ -922,6 +922,21 @@
     syncSettings();
   }
 
+  /* Switching between the two registered faces costs no fetch. Both are on
+     every page already - `--font-body` resolves to one of them and the chrome
+     pulls Inter regardless - so the attribute is all this has to write.
+
+     A THIRD face is the case that changes it, and the contract is not this
+     function's to invent: `references/widgets.md`, "The faces, and what a page
+     pays for them", states it and assigns the code here. A face nobody has
+     picked should not be fetched, and a `@font-face` rule cannot say that,
+     because the browser decides from the rendered content and for a registered
+     face that is always. So the control loads it with the CSS Font Loading API
+     and sets the attribute inside the callback - never before it - or the
+     reader sees the fallback flash on a control they just used and a measure
+     computed from one face while another is on screen. A `FontFace` built in
+     script also carries its own `display`, so it is never subject to the
+     descriptor on any rule and never silently dropped. */
   function applyFace(next) {
     face = next;
     set(STORE.face, next);
