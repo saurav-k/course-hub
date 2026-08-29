@@ -52,6 +52,10 @@ Fourteen checks, all deterministic and offline:
 14. Every custom property a ``@page`` margin box reads is declared somewhere in
    ``hub.css``. A margin box that resolves to nothing prints an empty running
    foot, in the one render state no screen check can see.
+13. Every width media query, in ``hub.css`` and in every course sheet, names a
+   medium. A width feature is answered by the page box in print, and the printed
+   page box is narrower than the hub's smallest breakpoint, so an unqualified
+   one silently lays the paper out as a phone.
 
 Checks 9 to 14 read the shared asset files rather than the pages. What the
 design system then *renders* is the computed-style harness's job; see
@@ -735,6 +739,8 @@ PAGE_AT_RULE: re.Pattern[str] = re.compile(r"@page\s*\{")
 
 PRINT_AT_RULE: re.Pattern[str] = re.compile(r"@media\s+print\s*\{")
 
+MEDIA_QUERY: re.Pattern[str] = re.compile(r"@media(?P<prelude>[^{]*)\{")
+
 
 @dataclass(frozen=True)
 class Rule:
@@ -981,6 +987,48 @@ def page_identity_properties() -> set[str]:
     only one of the two is not an identity and gets no exception.
     """
     return page_margin_reads() & print_declares()
+
+
+def stylesheets() -> list[Path]:
+    """The hub sheet and every course sheet layered after it."""
+    return [HUB_CSS] + sorted(REPO_ROOT.glob("*/assets/course-extras.css"))
+
+
+def check_width_queries_name_a_medium() -> list[Problem]:
+    """A width media query says which medium it is about.
+
+    A width feature is answered by the page box in print, and the printed page
+    box is narrow: A4 inside the browser's own margins is about 717px and US
+    Letter about 739px. An unqualified ``@media (max-width: 720px)`` therefore
+    applies to one paper and not the other, and an unqualified
+    ``@media (max-width: 1040px)`` applies to both - which is how the rail's
+    drawer arm, and the fixed 35%-black scrim it paints, reached every sheet of
+    every printed lesson. Nothing on screen was wrong, so nothing on screen
+    could catch it.
+
+    The rule is therefore that a width query names ``screen`` or ``print``
+    rather than leaving the medium open. It is checked here rather than in the
+    computed-style harness because the harness holds the viewport at 1280px:
+    the narrow arms do not match there in any medium, so the one state that
+    shows the defect is the one state it cannot capture.
+    """
+    problems: list[Problem] = []
+    for sheet in stylesheets():
+        source = CSS_COMMENT.sub("", sheet.read_text(encoding="utf-8"))
+        for found in MEDIA_QUERY.finditer(source):
+            prelude = " ".join(found.group("prelude").split())
+            if "width" not in prelude:
+                continue
+            if re.search(r"\b(screen|print|all)\b", prelude):
+                continue
+            problems.append(
+                Problem(
+                    str(sheet.relative_to(REPO_ROOT)),
+                    f'"@media {prelude}" names no medium, so the printed page box answers it too; '
+                    "say `screen and` unless paper is meant",
+                )
+            )
+    return problems
 
 
 def check_page_margin_boxes() -> list[Problem]:
@@ -2032,6 +2080,7 @@ def main() -> int:
         + check_course_contract()
         + check_contrast_floor()
         + check_page_margin_boxes()
+        + check_width_queries_name_a_medium()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
