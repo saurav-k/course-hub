@@ -767,20 +767,22 @@ A reader control that switches the body face would therefore do nothing at all u
 `block` and `fallback` only add invisible text, because the faces arrive 1.4s to 1.9s after first paint on a Slow 4G connection, which is inside the swap period both of them end with anyway.
 
 **Loading a face on demand is a different mechanism, and it is not governed by that descriptor.**
-A face the reader might switch to should not be fetched before they switch, and a `@font-face` rule cannot express that: the browser decides, from the rendered content, when to fetch.
-The control that offers the face therefore loads it itself, with the CSS Font Loading API, and applies it only once the load has settled:
+Both registry faces are on every page already - `--font-body` resolves to Source Serif 4 or to Inter, and the chrome pulls Inter regardless - so switching between the two today costs no fetch at all.
+A *third* face is the case that needs this note.
+It should not be fetched before the reader picks it, and a `@font-face` rule cannot express that: the browser decides from the rendered content when to fetch, which for a registered face is always.
+The control that offers the face therefore loads it itself, with the CSS Font Loading API, and selects it only once the load has settled:
 
 ```js
 var face = new FontFace('Some Face', "url('../../assets/fonts/some-face.woff2') format('woff2')", { display: 'swap', weight: '400 700' });
 face.load().then(function (loaded) {
   document.fonts.add(loaded);
-  root.style.setProperty('--font-body-user', "'Some Face', " + fallbackStack);
+  root.setAttribute('data-body-face', 'someface');   // the registry entry, with its three constants
 });
 ```
 
 Two properties follow, and both are the point.
 A `FontFace` built in script carries its own `display`, so it is never subject to the descriptor on any `@font-face` rule and never silently dropped.
-And writing `--font-body-user` only inside the callback means the reader never sees the fallback flash on a control they just used.
+And setting the attribute only inside the callback means the reader never sees the fallback flash on a control they just used, and never sees a measure computed from one face while another is on screen.
 The control panel owns that code; this note owns the contract it has to keep.
 
 ## The design axis

@@ -299,10 +299,11 @@ every weight the hub uses - and `assets/fonts/README.md` carries the one command
 only the lower bound of the axis may move. `validate_site.py` holds a total ceiling and a
 latin-cut ceiling, refuses a face with no `font-display`, and refuses `font-display: optional`:
 a face that misses the first-paint deadline is dropped for the life of that page load, and
-`document.fonts.load()` does not bring it back, so a reader control that switches the body face
-would do nothing at all. **A face the reader might switch to is loaded in script**, through the
-CSS Font Loading API, and applied only once the load settles; a `FontFace` built that way
-carries its own `display` and is never subject to the descriptor above.
+`document.fonts.load()` does not bring it back, so the `data-body-face` axis would do nothing at
+all until the next navigation. Both registry faces are on every page
+already, so switching between them costs no fetch; **a third face is loaded in script**, through
+the CSS Font Loading API, with `data-body-face` set only once the load settles - a `FontFace`
+built that way carries its own `display` and is never subject to the descriptor above.
 `references/widgets.md`, "The faces, and what a page pays for them", is the author-facing
 summary.
 
