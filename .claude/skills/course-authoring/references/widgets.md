@@ -761,7 +761,9 @@ A page with no italic in its prose fetches 152.8K; a page with `<em>` in its pro
 
 **`font-display` is `swap` on every face, and it is the only value this hub may use.**
 The validator refuses `optional`, and the reason is measured rather than argued.
-`optional` does remove the swap - it took a lesson page's font-attributable layout shift from 0.29 to zero on a throttled first load - but a face that misses the first-paint deadline is then dropped for the life of that page load.
+`optional` does remove the swap, and there is very little left to remove: the font-attributable layout shift on a throttled first load measures 0.00002 on the hub landing page and 0.0011 on the worst lesson, because the derived apparent-size layer leaves the fallback and the webfont occupying nearly the same space.
+It was 0.29 on that lesson before the derived layer landed, so the swap is cheap because of a fix rather than by nature.
+The reason `optional` is refused is separate: a face that misses the first-paint deadline is dropped for the life of that page load.
 Chrome will not apply it afterwards and `document.fonts.load()` does not bring it back: after the drop, a probe set in `"Source Serif 4"` measures exactly as wide as one set in a family that does not exist.
 A reader control that switches the body face would therefore do nothing at all until the next navigation.
 `block` and `fallback` only add invisible text, because the faces arrive 1.4s to 1.9s after first paint on a Slow 4G connection, which is inside the swap period both of them end with anyway.
