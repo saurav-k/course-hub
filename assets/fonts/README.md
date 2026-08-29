@@ -17,7 +17,21 @@ relative to the stylesheet, so one declaration serves every page depth.
 | `jetbrains-mono-latin-ext.woff2` | JetBrains Mono | 400-800 | latin-ext | 11.3K |
 
 Each `-ext` subset is gated by `unicode-range`, so an English page never downloads it.
-Measured across the 796 published pages, 34 of them carry a character that needs one.
+
+Every one of the eight is reached by at least one page, so none is dead weight. Counted
+across the 796 published pages, by where a character that needs the cut actually sits:
+
+| cut | pages that reach it |
+|---|---|
+| serif latin, sans latin | 796, every page |
+| mono latin | 608, the pages carrying `<code>` or `<pre>` |
+| serif italic latin | 559, the pages carrying `<em>` or `<i>` |
+| serif latin-ext, sans latin-ext | 34 |
+| mono latin-ext | 5 |
+| serif italic latin-ext | 2 |
+
+The last three rows are the point of `unicode-range` rather than an argument against the
+files: those pages fetch the cut and the other 762 never ask for it.
 
 ## What a reader actually downloads
 
