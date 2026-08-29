@@ -1,12 +1,12 @@
 /* ============================================================
    Course Hub - the one shared runtime.
 
-   Loaded from <head> without defer, so the persisted mode and palette
-   are on <html> before the first paint and no page ever flashes the
-   wrong colours.
+   Loaded from <head> without defer, so the persisted mode, palette and
+   design are on <html> before the first paint and no page ever flashes
+   the wrong colours or the wrong form.
 
    What it does, in order:
-     1. head phase   - restore mode, palette and the two reading
+     1. head phase   - restore mode, palette, design and the two reading
                        preferences from localStorage
      2. mount phase  - build the rail from window.COURSE_OUTLINE,
                        build the topbar controls and settings popover,
@@ -21,6 +21,7 @@
   var STORE = {
     mode:    'coursehub.mode',      // "light" | "dark" | "" (follow the system)
     palette: 'coursehub.palette',   // a palette key
+    design:  'coursehub.design',    // a design key
     rail:    'coursehub.rail',      // "on" | "off"
     read:    'coursehub.read',      // { courseKey: [lesson file names] }
     legacy:  'llmcourse-theme'      // what the first design system wrote
@@ -74,6 +75,39 @@
   ];
   var PALETTE_KEYS = PALETTES.map(function (p) { return p.key; });
 
+  /* ---------- the design registry ----------
+     A design is the form: the type scale, the leading, the weights, the
+     tracking, the space ramp, the radii, the border weights, the shadow shape,
+     the motion vocabulary and the eyebrow treatment. It carries no colour at
+     all - that is the palette and mode axes - so registering a design costs no
+     row in the contrast matrix.
+
+     Each key here has a `:root[data-design="key"]` block in hub.css declaring
+     the whole token set, and each such block is registered here. Neither half
+     is trusted: `scripts/validate_site.py` fails the pull request on a key
+     with no block, a block nobody can reach, and a block that declares only
+     part of the set and would silently inherit the rest.
+
+     The attribute is `data-design` rather than `data-theme` because "theme"
+     already means two other things in this codebase - the dead `theme-btn`
+     still in the source of 128 pages and removed at mount, and the
+     `llmcourse-theme` key migrated once above - and a third meaning would be a
+     maintenance trap.
+
+     One design is registered on purpose. The axis and the second design are
+     separate pieces of work, so the plumbing is debuggable before any design
+     judgement is in play, and every reader keeps exactly the page they had.
+
+     Withdrawing a design is one line and needs no deploy: delete its entry.
+     The picker stops offering it, and a reader who had chosen it falls through
+     to the default below, which was measured to restore the original exactly.
+     The default is the first entry rather than a literal, so withdrawing the
+     default is the same one-line edit as withdrawing any other. */
+  var DESIGNS = [
+    { key: 'house', label: 'House', note: 'Serif prose, sans headings and chrome. The hub as it reads today.' }
+  ];
+  var DESIGN_KEYS = DESIGNS.map(function (d) { return d.key; });
+
   var root = document.documentElement;
 
   /* ---------- storage that never throws ----------
@@ -100,6 +134,21 @@
   if (PALETTE_KEYS.indexOf(palette) === -1) palette = 'paper';
   root.setAttribute('data-palette', palette);
 
+  /* The third reader axis: the form. Written here, in the head phase, for the
+     same reason the palette is - the attribute has to be on <html> before the
+     first paint or the page shows one design and settles into another.
+
+     The stored value is validated against the registry and an unknown one
+     falls back to the registered default, which is the guard that makes the
+     kill switch work: a reader who chose a design that was later withdrawn
+     lands on the default rather than on a page nobody else can see and nobody
+     else can reproduce. Storage that raises returns null through `get`, which
+     is not a registered key either, so a reader with storage blocked gets the
+     same default and the same correct page. */
+  var design = get(STORE.design);
+  if (DESIGN_KEYS.indexOf(design) === -1) design = DESIGNS[0].key;
+  root.setAttribute('data-design', design);
+
   /* The two reading preferences, restored here rather than when the appearance
      panel is built, so a reader who widened the column or asked for larger type
      gets it with the first paint instead of a step after it. */
@@ -125,8 +174,8 @@
     applyStep(READING[name], reading[name]);
   });
 
-  /* The third axis: which course this page belongs to. Mode and palette are the
-     reader's choices; this one is a property of the page, and it is what stops
+  /* The fourth axis: which course this page belongs to. Mode, palette and
+     design are the reader's choices; this one is a property of the page, and it is what stops
      seven courses on one design system from looking interchangeable. The course
      is its folder, which is in the path on the live site, on a bucket prefix and
      on disk alike, so nothing has to be written into any page. The last match
@@ -137,7 +186,7 @@
   var courseHits = location.pathname.match(/[^/]+-course(?=\/)/g);
   if (courseHits) root.setAttribute('data-course', courseHits[courseHits.length - 1]);
 
-  /* The fourth axis: which stage of the hub this page was served from. One
+  /* The fifth axis: which stage of the hub this page was served from. One
      repository publishes to two buckets, so the answer is a property of the
      host, not of anything a page could carry. Stamping it here, in the head
      phase, lets hub.css paint the warning bar with the first paint rather than
@@ -546,7 +595,7 @@
 
   /* ============================================================
      APPLYING A CHOICE
-     One function for both axes: set the attribute, persist it, repaint the
+     One function per axis: set the attribute, persist it, repaint the
      diagrams. Nothing here reloads the page.
      ============================================================ */
   function applyMode(next) {
@@ -559,6 +608,29 @@
     root.setAttribute('data-palette', next);
     set(STORE.palette, next);
     renderMermaid();
+    syncSettings();
+  }
+
+  /* The design repaints through `whenFontsReady`, which is the one thing that
+     separates it from the two axes above. Mode and palette move colours, and a
+     colour cannot change a text measurement. A design moves the faces, and
+     Mermaid cuts every label box to a measurement it takes at render time: a
+     repaint that starts before the new face is applied measures in the old one
+     and clips the last word of 380 published flowcharts, which is the defect
+     `whenFontsReady` was written for. It renders correctly on the next reload,
+     so this has to be tested by switching rather than by loading. */
+  function applyDesign(next) {
+    root.setAttribute('data-design', next);
+    set(STORE.design, next);
+    /* `document.fonts.ready` answers for the fonts the document needs *now*,
+       and a browser only discovers it needs a new face while it lays the page
+       out. Read a layout property first, so the attribute above has been laid
+       out and any face the new design asks for is already in flight when
+       `whenFontsReady` asks. Without the flush the promise can be the settled
+       one from the previous design and the wait is a no-op. One forced reflow,
+       once per switch, against a whole page of clipped diagrams. */
+    void root.offsetWidth;
+    whenFontsReady(renderMermaid);
     syncSettings();
   }
 
@@ -898,6 +970,30 @@
     palGroup.appendChild(palCards);
     panel.appendChild(palGroup);
 
+    /* The design group, in the shape of the palette group above and reusing
+       its classes rather than inventing a pair the widget vocabulary does not
+       know. It carries no swatch: a design has no colour to preview, which is
+       the whole point of the split, and a swatch here would say otherwise.
+       The column count follows the registry, as the mode group's already does,
+       so one design reads as one full-width card rather than as half a row. */
+    var designGroup = el('div', 'set-group');
+    designGroup.appendChild(el('h3', null, 'Design'));
+    var designCards = el('div', 'pal-cards');
+    designCards.style.gridTemplateColumns = 'repeat(' + DESIGNS.length + ', 1fr)';
+    DESIGNS.forEach(function (item) {
+      var card = el('button', 'pal-card');
+      card.type = 'button';
+      card.dataset.design = item.key;
+      card.appendChild(el('span', 'pal-name', item.label));
+      card.appendChild(el('span', 'pal-note', item.note));
+      card.addEventListener('click', function () { applyDesign(item.key); });
+      designCards.appendChild(card);
+    });
+    designGroup.appendChild(designCards);
+    designGroup.appendChild(el('p', 'set-note',
+      'A design sets type, rhythm and shape. Colour is the palette above, so the two choose independently.'));
+    panel.appendChild(designGroup);
+
     var prefGroup = el('div', 'set-group');
     prefGroup.appendChild(el('h3', null, 'Reading'));
     prefGroup.appendChild(readingRow('Wider text column', 'measure'));
@@ -934,9 +1030,17 @@
     Array.prototype.forEach.call(settingsEl.querySelectorAll('.mode-card'), function (card) {
       card.setAttribute('aria-pressed', String(card.dataset.mode === currentMode));
     });
+    /* Two groups share the `.pal-card` shape, so each is asked for by the
+       attribute that says which axis it selects. A bare `.pal-card` query
+       would compare a design card's undefined palette against the live one and
+       report every design as unpressed. */
     var currentPalette = root.getAttribute('data-palette');
-    Array.prototype.forEach.call(settingsEl.querySelectorAll('.pal-card'), function (card) {
+    Array.prototype.forEach.call(settingsEl.querySelectorAll('.pal-card[data-palette]'), function (card) {
       card.setAttribute('aria-pressed', String(card.dataset.palette === currentPalette));
+    });
+    var currentDesign = root.getAttribute('data-design');
+    Array.prototype.forEach.call(settingsEl.querySelectorAll('.pal-card[data-design]'), function (card) {
+      card.setAttribute('aria-pressed', String(card.dataset.design === currentDesign));
     });
   }
 
