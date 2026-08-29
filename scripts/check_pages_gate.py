@@ -30,6 +30,7 @@ Exit code 0 means the failure list is exactly the recorded one.
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -49,21 +50,43 @@ HEADER: str = """# Every failure check_pages.py reports on this tree today.
 """
 
 
+SUMMARY: re.Pattern[str] = re.compile(r"^checked (?P<pages>\d+) page\(s\): (?P<fails>\d+) failure")
+
+
 def current_failures() -> list[str]:
-    """Every FAIL line the checker reports, as ``where: detail``."""
+    """Every FAIL line the checker reports, as ``where: detail``.
+
+    The checker's last line is its own count, and this insists on finding it.
+    A checker that stopped early - it raises rather than reports on a page that
+    is missing something it dereferences - exits 1 with no findings at all, and
+    exit 1 with no findings is indistinguishable from a clean gate reading a
+    stale baseline. So the summary line is the proof that it ran to the end, and
+    its count has to agree with what was parsed out of the output.
+    """
     if not CHECKER.is_file():
         raise SystemExit(f"the page checker is missing: {CHECKER.relative_to(REPO_ROOT)}")
     finished = subprocess.run(
         [sys.executable, str(CHECKER)], capture_output=True, text=True, cwd=REPO_ROOT
     )
-    if finished.returncode not in (0, 1):
-        raise SystemExit(f"the page checker exited {finished.returncode}:\n{finished.stderr}")
-    failures = [
+    failures = sorted(
         line.strip()[len("FAIL") :].strip()
         for line in finished.stdout.splitlines()
         if line.strip().startswith("FAIL")
-    ]
-    return sorted(failures)
+    )
+    summary = next(
+        (SUMMARY.match(line) for line in finished.stdout.splitlines() if SUMMARY.match(line)), None
+    )
+    if summary is None:
+        raise SystemExit(
+            "the page checker did not finish, so its findings cannot be trusted:\n"
+            f"{finished.stderr.strip() or finished.stdout.strip()}"
+        )
+    if int(summary.group("fails")) != len(failures):
+        raise SystemExit(
+            f"the page checker counted {summary.group('fails')} failure(s) "
+            f"and printed {len(failures)}; the output format has changed"
+        )
+    return failures
 
 
 def recorded_failures() -> list[str]:
