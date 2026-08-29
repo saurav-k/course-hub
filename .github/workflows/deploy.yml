@@ -1,15 +1,29 @@
 name: Publish to S3
 
 # Publishing happens here and only here. Nobody deploys from a laptop.
-# A merge into main is the single trigger; workflow_dispatch is the manual
-# re-publish escape hatch when the bucket and the branch have drifted apart.
+#
+# The hub has two stages and one repository:
+#   main -> pre-production, the review site nobody outside the team reads
+#   prod -> production, the live hub
+#
+# A merge into main publishes to pre-production. Promotion to production is a
+# separate, human act: the captain opens a pull request from main into prod and
+# merges it in the GitHub UI. That merge is a push to prod, which is what fires
+# the production publish. Nothing automates the step between the two stages.
+#
+# workflow_dispatch is the manual re-publish escape hatch when a bucket and its
+# branch have drifted apart. Anything that is not prod publishes to
+# pre-production, so a dispatch can never reach the live hub by accident.
 on:
   push:
-    branches: [main]
+    branches: [main, prod]
   workflow_dispatch:
 
+# One publish at a time per stage. Grouping by branch keeps a pre-production
+# sync from queueing behind a production one, which are different buckets and
+# never race.
 concurrency:
-  group: publish-to-s3
+  group: publish-to-s3-${{ github.ref_name }}
   cancel-in-progress: false
 
 permissions:
@@ -35,10 +49,46 @@ jobs:
     needs: validate
     runs-on: ubuntu-latest
     environment:
-      name: production
+      name: ${{ github.ref_name == 'prod' && 'production' || 'pre-production' }}
       url: ${{ steps.site.outputs.url }}
     steps:
       - uses: actions/checkout@v7
+
+      # The stage is decided from the branch and nothing else, and the bucket
+      # comes from a repository variable exactly as the single-stage workflow
+      # read it. An unset variable stops the job with a message naming it,
+      # rather than syncing the whole hub into "s3://".
+      - name: Choose the stage and its bucket
+        id: target
+        env:
+          PROD_BUCKET: ${{ vars.S3_BUCKET }}
+          PREPROD_BUCKET: ${{ vars.S3_BUCKET_PREPROD }}
+        run: |
+          set -euo pipefail
+          if [ "${GITHUB_REF_NAME}" = "prod" ]; then
+            stage="production"
+            bucket="${PROD_BUCKET}"
+            variable="S3_BUCKET"
+            cache="public, max-age=300"
+          else
+            stage="pre-production"
+            bucket="${PREPROD_BUCKET}"
+            variable="S3_BUCKET_PREPROD"
+            # The review site exists to show the last change. A cached copy of
+            # the previous one defeats it, so pre-production revalidates on
+            # every request and production keeps its five-minute cache.
+            cache="no-cache"
+          fi
+          if [ -z "${bucket}" ]; then
+            echo "::error::Repository variable ${variable} is not set, so the ${stage} bucket is unknown. Add it under Settings > Secrets and variables > Actions > Variables."
+            exit 1
+          fi
+          {
+            echo "stage=${stage}"
+            echo "bucket=${bucket}"
+            echo "cache=${cache}"
+          } >> "${GITHUB_OUTPUT}"
+          echo "Publishing ${GITHUB_REF_NAME} to ${stage}: s3://${bucket}"
 
       - name: Assume the deploy role
         uses: aws-actions/configure-aws-credentials@v6
@@ -47,11 +97,15 @@ jobs:
           aws-region: ${{ vars.AWS_REGION }}
           role-session-name: course-hub-deploy-${{ github.run_id }}
 
+      # robots.txt is bucket configuration, not site content: pre-production
+      # carries one that blocks every crawler and production carries none. It is
+      # therefore not in the repository, and --delete would remove it on the
+      # first sync, so it is excluded from the filter and survives untouched.
       - name: Sync the hub to the bucket
         run: |
           aws s3 sync . "s3://${S3_BUCKET}" \
             --delete \
-            --cache-control "public, max-age=300" \
+            --cache-control "${CACHE_CONTROL}" \
             --exclude "*.md" \
             --exclude ".git/*" \
             --exclude ".github/*" \
@@ -62,18 +116,21 @@ jobs:
             --exclude "LICENSE" \
             --exclude "LICENSE-CONTENT" \
             --exclude ".DS_Store" \
+            --exclude "robots.txt" \
             --exclude "*/learning-records/*"
         env:
-          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_BUCKET: ${{ steps.target.outputs.bucket }}
+          CACHE_CONTROL: ${{ steps.target.outputs.cache }}
 
       - name: Publish the site URL
         id: site
         run: |
           url="http://${S3_BUCKET}.s3-website.${AWS_REGION}.amazonaws.com/"
           echo "url=${url}" >> "$GITHUB_OUTPUT"
-          echo "### Course Hub published" >> "$GITHUB_STEP_SUMMARY"
+          echo "### Course Hub published to ${STAGE}" >> "$GITHUB_STEP_SUMMARY"
           echo "" >> "$GITHUB_STEP_SUMMARY"
           echo "${url}" >> "$GITHUB_STEP_SUMMARY"
         env:
-          S3_BUCKET: ${{ vars.S3_BUCKET }}
+          S3_BUCKET: ${{ steps.target.outputs.bucket }}
+          STAGE: ${{ steps.target.outputs.stage }}
           AWS_REGION: ${{ vars.AWS_REGION }}
