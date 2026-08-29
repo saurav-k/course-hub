@@ -659,6 +659,13 @@ CONTRACT = """
   var root = document.documentElement;
   var original = root.getAttribute('data-course');
 
+  /* The fixture has to sit where a real registration sits, which is inside
+     hub.css and therefore *before* everything the sheet declares after it. An
+     injected <style> appended to the head is the last stylesheet in the
+     document and wins every tie on source order, so a fixture placed there
+     would pass while a real course registered in hub.css silently lost to a
+     design block. Inserting it ahead of the sheet is if anything stricter than
+     reality, so it can over-report and never under-report. */
   var sheet = document.createElement('style');
   sheet.id = '__course-contract-fixture';
   sheet.textContent =
@@ -723,7 +730,9 @@ CONTRACT = """
   states['no course'] = await underCourse(null);
   var rootSize = parseFloat(getComputedStyle(root).fontSize);
 
-  document.head.appendChild(sheet);
+  var hub = document.querySelector('link[rel="stylesheet"][href*="hub.css"]');
+  if (!hub) return { 'error': 'the page links no hub.css, so A3 cannot place its fixture' };
+  hub.parentNode.insertBefore(sheet, hub);
   states['hue only'] = await underCourse('fixture-hue-only-course');
   states['seven tokens'] = await underCourse('fixture-full-course');
   states['unregistered'] = await underCourse('fixture-unregistered-course');
@@ -1246,6 +1255,9 @@ def assert_course_contract(capture: Capture, page: str) -> list[Difference]:
     measured = capture.chrome.evaluate(CONTRACT)
     if not isinstance(measured, dict):
         raise RuntimeError("A3 read nothing back from the page")
+
+    if "error" in measured:
+        raise RuntimeError(f"A3 on {page}: {measured['error']}")
 
     states = measured["states"]
     if states["house"]["accent"].startswith("no wordmark"):
