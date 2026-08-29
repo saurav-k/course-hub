@@ -104,7 +104,7 @@ scripts/gen_outline.py      generates a course outline.js from its index.html
 
 <course-name>/
   index.html             the course map; every lesson is linked from here
-  assets/                optional course-extras.css only, for rules unique to this course
+  assets/                three courses only, a grandfathered course-extras.css
   outline.js             generated from index.html by scripts/gen_outline.py; the sidebar reads it
   lessons/NNNN-kebab.html    the lessons, zero-padded and in teaching order
   reference/*.html       print-friendly cheat sheets and glossaries
@@ -167,7 +167,7 @@ These keep the courses consistent, so read the course's own `MISSION.md`, `NOTES
 - **Quiz options must match in length.** If the correct answer is visibly longer than the distractors, the formatting gives it away.
 - **Number lessons `NNNN-kebab-case.html`,** continuing the existing sequence in that course. Do not renumber existing lessons; their URLs are public.
 - **Register the lesson.** Add it to the course `index.html`. The validator fails the pull request if you forget.
-- **Link the hub design system.** From a lesson, link `../../assets/hub.css`, then `../../assets/hub.js` and `../outline.js` in the head. Do not inline a private copy, and do not add a second stylesheet unless the rule is genuinely unique to this course, in which case put it in `<course>/assets/course-extras.css`. A course owns only its palette, not the design system.
+- **Link the hub design system.** From a lesson, link `../../assets/hub.css`, then `../../assets/hub.js` and `../outline.js` in the head. Do not inline a private copy, and do not add a second stylesheet: three courses carry a grandfathered `course-extras.css` and no course gets a fourth. A course owns the seven tokens of the course contract, not the design system; see the widget reference.
 - **Regenerate the outline.** After adding or renaming a lesson, run `python3 scripts/gen_outline.py <course-name>` and commit the result. The validator fails the pull request if the outline and the lessons on disk disagree.
 - **Use relative links only.** Courses are siblings under one bucket root, so cross-course links look like `../../llm-papers-course/index.html`. Absolute paths break the site.
 - **Cite primary sources.** Link the paper, the RFC, or the vendor documentation - not a blog post summarising it. Add anything new to the course `RESOURCES.md`.

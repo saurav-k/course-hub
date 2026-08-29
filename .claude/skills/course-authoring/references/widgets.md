@@ -6,7 +6,8 @@ Nothing here is a suggestion about shape: `assets/hub.css` styles these class na
 
 There is **one** design system and one copy of it.
 The old `assets/course.css` / `course.js` pair and its per-course forks are gone.
-Three courses still layer an `assets/course-extras.css` after the hub sheet for rules genuinely unique to them, and those files restyle shared elements, so grep every `*.css` in the repository before you change any selector.
+Three courses still layer an `assets/course-extras.css` after the hub sheet, and those files restyle shared elements, so grep every `*.css` in the repository before you change any selector.
+Those three are grandfathered and no course gets a fourth: see "The course contract" at the foot of this file.
 
 Adding a widget is a three-part pull request: the CSS in `assets/hub.css`, the entry here, and the first use.
 
@@ -45,7 +46,7 @@ Adding a widget is a three-part pull request: the CSS in `assets/hub.css`, the e
 
 Five rules, all of them load-bearing.
 
-- **One stylesheet, `assets/hub.css`.** Add `<link rel="stylesheet" href="../assets/course-extras.css">` immediately after it, and only if that course already has one or the rule you need is genuinely unique to that course. A course owns its palette hue and its extras, never the design system.
+- **One stylesheet, `assets/hub.css`.** Add `<link rel="stylesheet" href="../assets/course-extras.css">` immediately after it only when that course already has one; three do, they are grandfathered, and no course gets a fourth. A course owns the seven tokens of the course contract, never the design system.
 - **`hub.js` loads in the head, without `defer`.** It writes `data-mode`, `data-palette` and `data-course` onto `<html>` before the first paint, so a deferred copy means every page flashes the wrong colours.
 - **`../outline.js` after it.** That is what the sidebar rail reads, and it is generated: `python3 scripts/gen_outline.py <course>`. A routed course loads `../routes.js` first and then its hand-written `../outline.js`; `gen_outline.py` refuses to run against one.
 - **The Mermaid script tag goes on a page if and only if that page contains a `.mermaid` block.** It must come before `hub.js`, which claims the render from it in its head phase.
@@ -667,6 +668,10 @@ The groups, and what each is for.
 | Motion | 10 | Six durations, two easings, two lift distances. |
 | Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
 
+**Six of those tokens carry two names.**
+`--font-display`, `--font-mono` and the four eyebrow tokens a course may set are written by a design as `--x-default` and by a course as `--x`, so the two writers never contend; every rule still reads `--x`.
+See "The course contract" at the foot of this file.
+
 **Space has two layers and a rule only ever reads the second.**
 Layer one is `--sp-1` to `--sp-8`, a ramp of ratio about 1.41 anchored on `.5rem`, which is the modal spacing value in the sheet; every step is a local maximum of the measured distribution.
 Layer two is the roles: the reading column's rhythm, the component insets, the gap ladder and the offset ladder.
@@ -723,7 +728,10 @@ A control that wrote one would put back exactly the coupling this block removes.
 The three `course-extras.css` files are layered after the hub sheet, so a copy of a hub rule in one of them wins on source order and every later change to the hub sheet stops at that course's pages.
 Setting `--radius` or `--fs-note` under a course's own selector reaches the same pixels and keeps one owner.
 Write that selector as `:root[data-course="your-course"]`, which is the spelling `hub.css` already uses for `--course-hue`.
-A bare `[data-course="..."]` is `(0,1,0)` and loses to a design block, so the course's own value would go silently dead the day a second design ships.
+A bare `[data-course="..."]` is `(0,1,0)` and loses to a design block, so the course's own value would go silently dead.
+The spelling is necessary and not sufficient: a course block and a design block are both `(0,2,0)`, so for the six tokens both of them want, the design writes a `-default` and the course writes the token.
+See "The course contract" below.
+A new course has no sheet to do either in: it declares the seven tokens of the course contract and nothing else.
 
 ## The design axis
 
@@ -749,3 +757,94 @@ No deploy, no page edit, and the fallback was measured to restore the original e
 **A design moves faces, so anything measured at render time is repainted through `whenFontsReady`.**
 Mermaid cuts every label box to a measurement it takes at render time, and it takes that measurement in the face `hub.js` hands it - `--font-ui`, the chrome role, which is also what `hub.css` paints diagrams with.
 Test a design change by *switching*, never by loading: a diagram with stale metrics renders correctly on the next reload, which is how the defect survives review.
+
+## The course contract
+
+A course declares its identity through **seven tokens, in one block, and through nothing else**.
+The block is keyed on the `data-course` attribute `hub.js` writes onto `<html>` from the URL path, and it sits in `assets/hub.css` with the other registrations under "the course contract".
+Adding a course adds no framework code, and every control the framework offers works on the new course automatically, because every control operates on tokens the new course inherits.
+
+```css
+:root[data-course="statistical-foundations-ml-course"] {
+  --course-hue: -50;                  /* required */
+  --font-display: var(--serif);       /* optional */
+  --font-mono: var(--mono);           /* optional */
+  --eyebrow-family: var(--font-mono); /* optional */
+  --eyebrow-tracking: .18em;          /* optional */
+  --eyebrow-case: uppercase;          /* optional */
+  --eyebrow-size: var(--fs-xs);       /* optional */
+}
+```
+
+| Token | Required | Constraint |
+|---|---|---|
+| `--course-hue` | yes | A unitless number. Never a `deg` value: inside a relative colour `h` is a number and not an angle, so `calc(h + 25deg)` is a type error that drops the whole declaration in silence. |
+| `--font-display` | no | A face in the registry, named as `var(--serif)` or `var(--font-mono)`, never a font stack of your own. |
+| `--font-mono` | no | A face in the registry. |
+| `--eyebrow-family` | no | A face in the registry. |
+| `--eyebrow-tracking` | no | `0em` to `.34em`, or `var(--tracking-eyebrow)`. |
+| `--eyebrow-case` | no | `uppercase` or `none`, and `uppercase` only on a label of about five words or fewer. |
+| `--eyebrow-size` | no | Inside the `--fs-xs` band, `.625rem` to `.78125rem`, or `var(--fs-xs)`. |
+
+Three of the seven are deliberately absent from the reader's panel.
+The display face, the mono face and the eyebrow treatment decide a heading voice and a two to four word label, so a reader has no basis on which to choose them and would set them once and forget them, while a course has every reason to differ on them.
+They are author-level for that reason, and for no other.
+
+**Six of the seven carry two names, and a course writes the shorter one.**
+A design block and a course block are both `(0,2,0)`, so if they wrote the same property the cascade would settle the contest silently on source order.
+The design therefore writes `--x-default`, a course writes `--x`, and every rule reads `--x`.
+The resolution line at bare `:root` is `(0,1,0)`, so a course block wins it wherever either one appears in the file.
+`--course-hue` needs no such layer, because a design carries no colour and nothing else may write it.
+
+Two of the constraints have to be checked by eye, and the pull request says how you checked them.
+The first is whether the hue is legible: rotation preserves OKLCH lightness and chroma but the gamut is not a cylinder, so at some hues the browser clips the result.
+[`new-course.md`](../new-course.md) carries the canvas readback that measures it.
+The second is the eyebrow: `uppercase` on a long label is a defect the validator can only see once the page exists, and it is a rule you keep while you write, not a check you run afterwards.
+
+### What you may rely on
+
+Every line here is measured on published pages, and it is a promise rather than a description.
+
+| Guarantee | Where it lives |
+|---|---|
+| Every colour on a page comes from a semantic token. There is not one literal hex colour in any published page. | The theme blocks in `assets/hub.css` |
+| The three grid zones. `main.wrap` is one grid with the named lines `text`, `wide` and `full`: prose sits at the measure, figures and tables and code break out. | "Page chrome", above |
+| The closed widget vocabulary, styled by the hub sheet and documented in this file. Nothing outside it is authored by hand. | This file |
+| Type, rhythm and shape are tokens, so a rule reads a token rather than a literal. | "The design tokens", above |
+| The six legacy aliases `--paper`, `--paper-2`, `--card-bg`, `--rule`, `--maxw` and `--readw` keep resolving. | `assets/hub.css` |
+| The eight-colour chart ramp stays palette-independent, so a course that teaches "statistics is teal" keeps that whichever palette the reader picked. | "Inline SVG, for anything quantitative", above |
+| `--gold` and `--ok` are never aliased to each other in any palette, because the capability matrix uses them for two states that make opposite claims. | "The capability matrix", above |
+| `.h-sub` and `.h-label` hold visual rank separately from outline rank, so a heading can be retagged for outline order without being redesigned. | "Headings", above |
+| Mermaid follows the tokens for free: a new palette needs no colour table. | "Mermaid, for structure", above |
+| Diagrams print as ink on paper, from a copy drawn ahead of time during browser idle. | `assets/hub.js` |
+| A page renders fully styled and readable with no script at all. Anything the script adds is an enhancement, never a requirement. | Measured, and protected by every issue in this series |
+| A lesson URL never changes. | `AGENTS.md`, hard rule 6 |
+
+### What is forbidden
+
+| Forbidden | Why |
+|---|---|
+| A course shipping its own colour, type, spacing or component shape in CSS. | If a course can ship a design, seventeen courses ship seventeen designs and the hub is back to the six byte-identical `course.css` forks it already paid to remove. |
+| A course sheet at all, beyond the three that already exist. | A widget a second course could want has one owner, and that owner is `assets/hub.css`. `validate_site.py` fails a fourth sheet. |
+| A course-local rule that restates type or spacing the design axis owns. | Measured: a course sheet sets `.metric .v` to 24px, a design rule at `:root[data-design=...] .metric .v` computes 48px and wins at `(0,2,2)` against `(0,1,1)`, and the course's considered typography is gone with nothing to warn. |
+| A literal colour in a page or in an SVG. | Zero exist today. It reads in one mode, vanishes in the other, and cannot follow the print stylesheet. |
+| New markup for a new design. | A design expressible as CSS over the existing markup costs three files. The same design plus one required wrapper `<div>` costs 796 pages and a migration no validator can check. This is the line to hold in every design review. |
+| Uppercase body text, or a heading that runs to a full line in capitals. | Capitals read 9.53% to 19.01% slower than lowercase, and 90% of readers prefer lowercase. An eyebrow is looked at rather than read, which is why it is the one exception. |
+| A token invented under a course's own selector. | The author surface is these seven. Anything else in a course block is a fork with a shorter name, and `validate_site.py` fails it. |
+
+### The three course sheets are grandfathered, not a precedent
+
+`llm-evolution-course`, `llm-inference-course` and `statistical-foundations-ml-course` each ship an `assets/course-extras.css`, layered after the hub sheet.
+They predate this contract and they stay, because their pages link them.
+No course gets a fourth.
+
+Two of them carry a hazard worth knowing before you change a shared rule.
+`llm-evolution-course` still restyles shared elements - `.stub-note h4`, `.routecard` and `.route-map .module` among them - so grep every `*.css` in the repository for a selector before you touch it, never just `hub.css`.
+`statistical-foundations-ml-course` sets `.parts` and `.pn` in literal `rem` values and literal family names, which is exactly the restatement the table above forbids: a design that moves the type scale will not move those two rules, and the course's cards will drift out of step with everything around them.
+Neither is repaired here.
+They are recorded so the next change to either is made with its eyes open.
+
+### What CI checks
+
+`check_course_contract()` in `scripts/validate_site.py` reads the registrations straight out of `assets/hub.css` and fails on a hue with a unit, a token that is not one of the seven, a face that is not in the registry, a value outside its range, two courses on one hue, a course folder with no registration, a fourth course sheet, a design block writing a course token, and an eyebrow set in capitals that runs past five words in a segment.
+Assertion A3 in `scripts/style_snapshot.py` proves the other half in a browser: it registers two throwaway courses, wears each in turn, and checks that a hue alone moves the accent and nothing else, that all seven move the two faces and the eyebrow and still nothing else, that an unregistered name is dull rather than broken, that the reader's controls keep working underneath, and that removing the block restores the page exactly.

@@ -116,8 +116,8 @@ Do not infer the house style from this file. Infer it from the lessons.
 
 Create a top-level folder with its own `index.html` and `lessons/`. It needs no `assets/`
 folder unless it has rules of its own; it links the hub design system like every other course.
-Generate its `outline.js` before opening the pull request, give it a hue in the course-accent
-block of `assets/hub.css`, write its `MISSION.md` before any lesson, and add a card for it in
+Generate its `outline.js` before opening the pull request, register it under the course
+contract in `assets/hub.css`, write its `MISSION.md` before any lesson, and add a card for it in
 the hub `index.html`. Nothing else is needed: the pipeline syncs the whole hub, so merging the pull request publishes the new course on its own.
 
 Give it the five instruction files before the first lesson is written:
@@ -152,13 +152,46 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 - Do not change `.github/workflows/` or `scripts/` unless the task is explicitly about the pipeline.
 - If the task needs a decision you cannot make from the repository - a course's direction, a licence question, a deployment change - stop and ask. Do not guess.
 
+## The course contract
+
+A course declares its identity through **seven tokens, in one block keyed on `data-course`, and
+through nothing else**. `--course-hue` is required; `--font-display`, `--font-mono`,
+`--eyebrow-family`, `--eyebrow-tracking`, `--eyebrow-case` and `--eyebrow-size` are optional.
+Adding a course adds no framework code, and every control the framework offers works on the new
+course automatically. The block and its reasoning are in `assets/hub.css` under "the course
+contract"; the author-facing statement, including what an author may rely on, is
+`.claude/skills/course-authoring/references/widgets.md`, "The course contract"; the registration
+procedure with a worked example is that skill's `new-course.md`. Do not restate any of it here.
+
+Four things are forbidden, and each is checked rather than asked for.
+
+- **A course ships no CSS of its own.** The three `course-extras.css` sheets are grandfathered
+  and no course gets a fourth: a widget a second course could want has one owner and it is
+  `hub.css`.
+- **A course declares nothing but the seven tokens**, and nothing outside their stated ranges. A
+  hue is unitless, because inside a relative colour `h` is a number and `calc(h + 25deg)` is a
+  type error that drops the whole declaration in silence.
+- **A design block never writes a course token.** The six tokens both axes want carry two names:
+  a design writes `--x-default`, a course writes `--x`, every rule reads `--x`, and the
+  resolution line at bare `:root` is (0,1,0) so a course block at (0,2,0) wins it whatever the
+  source order. Two writers on one name is a contest the cascade settles silently, which is how a
+  course sheet's 24px lost to a design rule's 48px with nothing to warn.
+- **Uppercase is for a label of about five words or fewer**, because capitals read 9.53% to
+  19.01% slower than lowercase. There is no all-caps option for body text or for a heading that
+  runs to a full line, and there must never be one.
+
+`check_course_contract()` in `scripts/validate_site.py` checks the registration; assertion A3 in
+`scripts/style_snapshot.py` proves in a browser that each token reaches the rules that read it and
+reaches nothing else.
+
 ## Editing the shared assets
 
 There is now **one** design system and one copy of it: `assets/hub.css` plus `assets/hub.js`,
 linked by every page in the hub. The old `assets/course.css` / `course.js` pair and its six
-byte-identical copies are gone. A course owns only its palette, not the design system: the three
-`assets/course-extras.css` files that remain, in `llm-evolution-course`, `llm-inference-course` and
-`statistical-foundations-ml-course`, are layered *after* the hub sheet and carry only rules
+byte-identical copies are gone. A course owns the seven tokens of the course contract, not the
+design system: the three `assets/course-extras.css` files that remain, in `llm-evolution-course`,
+`llm-inference-course` and `statistical-foundations-ml-course`, are layered *after* the hub sheet
+and carry only rules
 genuinely unique to those courses. `llm-evolution-course`'s is the one that still restyles shared
 elements - `.stub-note h4`, `.routecard`, `.route-map .module` among them - so before you change
 any element or widget selector, grep **every** `*.css` in the repository for it, not just
@@ -186,6 +219,8 @@ query, not in a second rule on the element - `body { font-size: ... }` at a brea
 after the body rule and out-argue the reader. The block at the head of `hub.css` states the rule in
 full. Twenty-four tokens carry the form today and they are exactly the reader-reachable ones:
 `--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm space roles.
+Six further tokens carry a two-name form for the same reason on a different axis, and that is the
+course contract above.
 Everything else is a one-layer design token, because a `--*-user` layer on a value no control can
 write is dead weight that still has to be kept right in every media query.
 **The reading face is the one reader choice that is not a `--*-user` property.** It is a registered
@@ -262,8 +297,8 @@ hue against every palette surface in both modes before you ship it. Pick the off
 not just on the offset grid: -175 and +175 differ by only 10 degrees of actual hue, so a full
 offset list can collide once it wraps past 180. **The 25-degree grid is now full** - read the block
 as absolute hue and every step is taken - so a new course splits a 25-degree gap rather than
-extending outwards, and `new-course.md`'s "extend the grid" advice no longer applies. Choose which
-gap by whose pages your reader actually holds open beside yours, then prove the candidate with the
+extending outwards. Choose which gap by whose pages your reader actually holds open beside yours,
+then prove the candidate with the
 canvas readback: `staff-ai-course/learning-records/0001-choosing-the-hue.md` carries the method and
 a measured comparison table for four shipped hues. Compare against that table, not against the
 paragraph in `hub.css`, whose "worst of the 84 course accents" figures were measured when the hub
