@@ -269,8 +269,13 @@
   }
   if (mode === 'light' || mode === 'dark') root.setAttribute('data-mode', mode);
 
+  /* The registered default is the first entry rather than a literal, as the
+     design registry's already is, so withdrawing the default palette is the
+     same one-line edit as withdrawing any other and no code names a palette.
+     The panel's reset reads the same first entry, so the two can never
+     disagree about what "the default" means. */
   var palette = get(STORE.palette);
-  if (PALETTE_KEYS.indexOf(palette) === -1) palette = 'paper';
+  if (PALETTE_KEYS.indexOf(palette) === -1) palette = PALETTES[0].key;
   root.setAttribute('data-palette', palette);
 
   /* The third reader axis: the form. Written here, in the head phase, for the
