@@ -221,6 +221,26 @@ A `mindmap` and a `timeline` take their branch colours from Mermaid's own twelve
 `hub.js` supplies that scale from the `--branch-0..7` tokens and `hub.css` pins the mindmap root disc, so both follow the palette.
 A diagram type that appears in a colour following neither the palette nor those tokens is that bug resurfacing.
 
+#### A colour of its own, in a `classDef`
+
+Most diagrams need none: every node already carries the palette.
+Where one node genuinely means something different from another - kept against dropped, a constant against a term you can shrink - write a `classDef` and give it a **token**, never a hex literal.
+
+```
+  classDef keep fill:var(--ok-soft),stroke:var(--ok)
+  classDef drop fill:var(--warn-soft),stroke:var(--warn)
+```
+
+Mermaid's own grammar rejects a parenthesis in a `classDef` value, so `hub.js` resolves the token on the way in, from the same probe that themes the rest of the diagram.
+The result follows the palette, both modes and every repaint, and the printed copy comes out black on white with the rest of the page.
+**A hex literal cannot do any of that**: it is one mode's answer written down, and the mode it is wrong in is the one nobody checked. Two published diagrams carried a near-white fill under near-white labels in dark mode, at 1.1:1, until this existed.
+
+Three rules.
+
+- **Name a semantic token, not a raw one.** `--ok`, `--warn`, `--gold`, `--accent-2`, `--surface-2`, `--line-strong` and their `-soft` partners. The raw `--l-*` and `--d-*` layer belongs to the terminal transcript and to nothing else.
+- **Do not set `color`.** The label already takes `--ink` from the theme, in both modes. Setting it is how a fill and its label drift apart later.
+- **Spell the token correctly.** A name the stylesheet does not declare is left exactly as written, so Mermaid fails to parse it and draws a red error box. That is deliberate: a visible failure beats a colour quietly taken from somewhere else.
+
 ### Inline SVG, for anything quantitative
 
 Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot.

@@ -196,6 +196,40 @@
     return asHex(getComputedStyle(probe).color);
   }
 
+  /* An undeclared custom property is invalid at computed-value time, and for
+     `color` that means `inherit`, so the probe would hand back the surrounding
+     text colour and report a confident wrong answer. Ask the cascade whether
+     the name exists before trusting it. */
+  function tokenExists(name) {
+    return getComputedStyle(root).getPropertyValue(name).trim() !== '';
+  }
+
+  /* ---------- a token inside a Mermaid classDef ----------
+     Mermaid's flowchart grammar rejects a parenthesis in a classDef value, so
+     `classDef keep fill:var(--ok-soft)` never reaches the renderer: it is a
+     parse error, and Mermaid draws a red error box rather than logging
+     anything. A diagram that needs a colour of its own therefore had to write
+     a hex literal, which is theme-blind by construction and wrong in one of the
+     two modes - a near-white fill under near-white labels in dark, on the
+     published site.
+
+     The source keeps the honest spelling and the token is resolved on the way
+     in, from the same probe that themes the rest of the diagram. So a classDef
+     follows the palette, both modes and every repaint like everything else, and
+     an author writes the token they already know.
+
+     A name the stylesheet does not declare is left as it was written. That
+     turns a typo into the red error box the author sees at once, instead of a
+     colour quietly taken from whatever the probe inherited. */
+  var TOKEN_DECL = /\b([a-z-]+)\s*:\s*var\(\s*(--[a-z0-9-]+)\s*\)/gi;
+
+  function resolveTokens(source, forProperty) {
+    return source.replace(TOKEN_DECL, function (whole, property, name) {
+      if (!tokenExists(name)) return whole;
+      return property + ':' + forProperty(property.toLowerCase(), name);
+    });
+  }
+
   /* ============================================================
      MERMAID - themed from the live tokens, re-rendered in place
      ============================================================ */
@@ -304,8 +338,12 @@
         // page collapses under the reader and the scroll position jumps.
         var box = node.getBoundingClientRect();
         if (box.height) node.style.minHeight = box.height + 'px';
-        node.textContent = node.dataset.mmd;
       }
+      // The stash keeps the token spelling, so every repaint resolves against
+      // the mode and palette in force at that moment rather than the first one.
+      node.textContent = resolveTokens(node.dataset.mmd, function (property, name) {
+        return token(name);
+      });
       node.removeAttribute('data-processed');
     });
     var release = function () {
@@ -347,6 +385,19 @@
      ============================================================ */
   var PRINT_FILL = ['#ffffff', '#eeeeee', '#f7f7f7', '#e4e4e4', '#fbfbfb', '#ebebeb', '#f2f2f2', '#e8e8e8'];
   var PRINT_EDGE = ['#000000', '#555555', '#222222', '#777777', '#333333', '#666666', '#111111', '#888888'];
+
+  /* A token named in a classDef is resolved for paper by the role it is used
+     for, not by a second colour table. hub.css's print block already flattens
+     every semantic token to black ink on white paper, and the copy below is
+     drawn in the screen medium where that block does not apply, so a table here
+     would only be a duplicate of it that could go stale. A fill is the paper
+     and everything else is the ink, which is the same answer the print block
+     gives for --ok against --warn or --ok-soft against --warn-soft. */
+  var PRINT_ROLE = { fill: '#ffffff' };
+
+  function printToken(property) {
+    return PRINT_ROLE[property] || '#000000';
+  }
 
   function printVars() {
     var vars = {
@@ -430,6 +481,7 @@
       index += 1;
       var source = node.dataset.mmd;
       if (!source) { step(); return; }
+      source = resolveTokens(source, printToken);
       var drawn;
       try {
         drawn = window.mermaid.render('mmd-print-' + index, source, stage);
