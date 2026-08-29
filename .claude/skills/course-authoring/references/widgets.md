@@ -863,3 +863,45 @@ They are recorded so the next change to either is made with its eyes open.
 
 `check_course_contract()` in `scripts/validate_site.py` reads the registrations straight out of `assets/hub.css` and fails on a hue with a unit, a token that is not one of the seven, a face that is not in the registry, a value outside its range, two courses on one hue, a course folder with no registration, a fourth course sheet, a design block writing a course token, and an eyebrow set in capitals that runs past five words in a segment.
 Assertion A3 in `scripts/style_snapshot.py` proves the other half in a browser: it registers two throwaway courses, wears each in turn, and checks that a hue alone moves the accent and nothing else, that all seven move the two faces and the eyebrow and still nothing else, that an unregistered name is dull rather than broken, that the reader's controls keep working underneath, and that removing the block restores the page exactly.
+
+## Printing
+
+A lesson prints. Readers do print them, the paper is the third render state, and a rule that fixes one of the three can break another.
+`hub.css` carries one `PAPER` block near the end, and everything below is what an author has to know about it.
+
+**Paper is a set of token overrides, not a second stylesheet.**
+The block redefines the semantic colour tokens - one ground, one ink - and every existing rule follows.
+So a widget that reads tokens prints correctly with no work, and a widget that hard-codes a colour prints wrong with no warning.
+That is the whole reason the sheet forbids a literal: a literal is unreachable from the print block by construction.
+
+**A width media query names its medium.**
+Write `@media screen and (max-width: 720px)`, never `@media (max-width: 720px)`.
+A width feature is answered by the *page box* in print, and the page box is narrow: A4 inside the browser's own margins is about 717px and US Letter about 739px.
+An unqualified query therefore straddles the hub's own breakpoint, so the same lesson lays out as a phone on one paper and as a laptop on the other.
+This is not theoretical. It is how the rail's drawer arm reached paper, and with it a `position: fixed` scrim carrying a literal `rgb(0 0 0 / .35)` that repeated on every single printed sheet: a 35% black rectangle over all 37 pages of a lesson, in a hub whose readers print.
+Check 15 in `validate_site.py` fails an unqualified width query in `hub.css` or in any course sheet.
+
+**Every sheet says what it is.**
+`@page` margin boxes carry the identity on the left and `counter(page) " / " counter(pages)` on the right.
+The identity is `--print-id`, a custom property `hub.js` writes from `document.title` and `hub.css` declares a fallback for, so a page with the script removed still prints an identified sheet.
+It is the one property `hub.js` may write on `<html>` that is not a reader's, and check 14 holds the two halves together.
+`string-set` with `string()` is the standard way to run a heading into a margin box and was measured first: Chrome renders it on the first page and then stops, which is the one sheet that never needed it.
+
+**Eight print tokens sit in the design block** with the rest of the type and space scale, so a second design sets its own paper: `--fs-print-body`, `--fs-print-foot`, `--fs-print-url`, `--sp-print-page`, `--sp-print-foot`, `--sp-print-figure`, `--sp-print-row` and `--sp-print-cell`.
+Colour is not among them. A design carries no colour on paper any more than on screen.
+
+**What the block does to each widget, and why.**
+
+| Widget | On paper | Why |
+|---|---|---|
+| Chrome: topbar, rail, appearance panel, pager, copy buttons, reading bar, pre-production strip | Gone | Nothing on paper can be clicked. The running foot carries what the pre-production strip was there to say, on every sheet rather than one. |
+| `pre`, `.term`, `.math`, `.diagram`, `table` | Wrap or fit; never scroll | A box that scrolls sideways on screen is cut at the sheet edge on paper, and the rest of the line is not merely unreachable, it is gone. |
+| A Mermaid diagram | Scaled to fit the page box, both dimensions | `hub.js` draws its ink-on-paper copy off-screen with no column to fit, so it arrives at its natural size: the widest on the sample was 884px against a 587px column and the tallest 1270px against a page box near 1017px. `--sp-print-figure` is in `vh`, which is the page box in print, so one cap fits both papers. |
+| An absolute link | Prints its destination after the text | Paper cannot be clicked. Relative links do not, because `../index.html` tells a reader nothing the link text does not, and the capability matrix is exempt, because 700 vendor URLs would bury the table it is trying to be. |
+| A quiz | Question and options, no answer | A printed lesson has to still be answerable. `.q-fb` is hidden until the reader answers, and paper leaves that alone: a question already answered prints its feedback, one not yet answered prints as a question. |
+| A practice problem | Solution open | The opposite of the quiz, deliberately. A solution sits behind a disclosure the reader chose, and printing is a request for the whole document; `hub.js` opens each one and restores it afterwards. |
+| The capability matrix | Five columns, service names and cell states, no prose | The stacked phone layout printed as 105 pages. It is now 23, at the width of the page box rather than the reading measure, and the four cell states still read as shapes once colour is gone. |
+
+**Verify a print change by printing.**
+Neither CI check can see paper: `validate_site.py` does not render, and `style_snapshot.py` holds the viewport at 1280px, where the narrow arms match in no medium at all.
+Produce a PDF at A4 *and* at US Letter, look at it, and check that no ink reaches the edge of a sheet.

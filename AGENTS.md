@@ -370,7 +370,7 @@ comments and both cost an afternoon: a computed style read straight after the ke
 and looks exactly like the browser's ring, and `blur()` does not move the sequential focus
 navigation starting point, so a walk after a click silently covers two thirds of the page.
 
-Twelve traps in that design system, all found on the published site:
+Thirteen traps in that design system, all found on the published site:
 
 - **Theme tokens are declared four times** (`:root`, the `prefers-color-scheme: dark` block, and
   the two explicit-choice selectors, because the toggle must beat the OS). A token added to
@@ -456,6 +456,18 @@ Twelve traps in that design system, all found on the published site:
   `rem`, and do not add a `pre` size inside a media query - the small-screen `.78rem` was that same
   defect a second time. The value is a constant today and becomes a function of the reader's body
   face when the face registry lands; the call sites do not change when it does.
+- **A width media query is answered by the printed page box, so every one of them says `screen`.**
+  A4 inside the browser's own margins is about 717px and US Letter about 739px, which straddles the
+  hub's own 720px breakpoint: unqualified, the same lesson laid out as a phone on one paper and as a
+  laptop on the other, and the 1040px drawer arm applied to both. That arm paints
+  `body[data-rail="on"]::after`, a `position: fixed` pseudo-element carrying a literal
+  `rgb(0 0 0 / .35)` that no token override can reach and that the browser repeats on every printed
+  page - so every lesson printed with a 35% black rectangle over all of it, on every sheet, in a hub
+  whose readers print. Nothing on screen was wrong, which is why it survived. `validate_site.py`
+  check 15 now fails an unqualified width query, in `hub.css` and in every course sheet, and the
+  PAPER block at the end of `hub.css` states paper's own values. **Paper is the third render state**:
+  a rule that fixes one of screen, paper and the switched state can break another, and neither CI
+  check renders a page, so prove a print change with a PDF at A4 *and* at US Letter and look at it.
 
 Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
 tolerate Mermaid's async draw. `hub.js` drives the render itself and awaits `mermaid.run()`, so it
