@@ -1,0 +1,158 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two DGX Sparks run a 320B MoE at NVFP4 - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="The full deployment worked end to end: fit math, the 200 GbE link, pipeline parallelism, and expected rates.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Making It Fast, Then Deploying It &middot; Lesson 09</div>
+  <h1>Two Sparks clear the bar: the 320B MoE fits, pipelines, and streams</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">13 min</span>
+    The worked deployment: every number derived, every lever from Lessons 01-08 doing its job.
+    &middot; <a href="https://build.nvidia.com/spark/connect-two-sparks">Connect Two Sparks playbook</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two DGX Sparks join over a 200 GbE QSFP cable into one 256 GB pool (<a href="https://build.nvidia.com/spark/connect-two-sparks">playbook</a>).</li>
+      <li>The FP8 file does not fit; an <b>NVFP4 checkpoint at ~160 GiB derived</b> does, leaving ~90 GB for KV cache and runtime.</li>
+      <li><b>Pipeline parallelism</b> - not tensor parallelism - splits the 45 layers across the two nodes, because the cable is narrow.</li>
+      <li>Expected: roughly 20-30 tokens per second solo with MTP drafting, a budget of several concurrent 32-64K sessions - derived, not measured.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  N1["SPARK 1&lt;br/&gt;128 GB&lt;br/&gt;layers 1-23&lt;br/&gt;KV shard A"] -->|200 GbE&lt;br/&gt;QSFP| N2["SPARK 2&lt;br/&gt;128 GB&lt;br/&gt;layers 24-45&lt;br/&gt;KV shard B"]
+  U["AGENT&lt;br/&gt;OpenAI-compatible&lt;br/&gt;endpoint"] --> N1
+  N2 --> O["TOKENS OUT&lt;br/&gt;~20-30 /s with MTP&lt;br/&gt;(derived)"]
+    </div>
+    <figcaption>Where this sits: the file is split by layers across the cable, one pipeline stage per node. Every token flows through both nodes; the weights do not. <b>The deployment is a storage victory enabled by quantization, a speed victory enabled by MoE and MTP, and a networking problem solved by choosing the right split.</b></figcaption>
+  </figure>
+  <h2>1. The fit ledger</h2>
+  <p>Start from the two ledgers of Lesson 02 and the formats of Lesson 04. The 256 GB pool minus a realistic 10 GB per node for the operating system and runtime leaves about 236 GB. The FP8 file needs ~306 GiB: it does not fit, full stop. An NVFP4 checkpoint at ~160 GiB derived does, and the remainder budgets the KV cache:</p>
+  <div class="math">
+    KV budget &asymp; 236 GB &minus; 160 GiB &minus; ~8 GB buffers &asymp; ~68 GB
+    <span class="gloss">Read as: <b>KV budget</b>: memory left for the per-token caches that make conversation possible. How much context that buys depends on the model's per-token KV cost, which its hybrid attention design keeps low - the recipe's own TP=4 figures imply a multi-million-token KV pool at data-center scale (<a href="https://recipes.vllm.ai/zai-org/GLM-5.3-Flash">recipe</a>). On the desk budget, plan tens of concurrent 32-64K sessions rather than a million-token monologue.</span>
+  </div>
+
+  <h2>2. Why pipeline, not tensor, parallelism</h2>
+  <p>Tensor parallelism shreds each layer across all devices and synchronises them several times <em>per layer</em>. Over the 200 GbE cable - 25 GB/s each way - those per-layer all-reduces would dominate the step. Pipeline parallelism instead hands whole layers: Spark 1 runs layers 1-23, ships one small activation per token to Spark 2, and Spark 2 runs layers 24-45. The cable crosses once per token instead of a hundred-odd times.</p>
+  <p>The price of pipelining is the <b>bubble</b>: while one stage works, the other waits. With a batch of concurrent requests the stages interleave and the bubble shrinks - another reason desk deployments serve a small fleet of agents rather than one stream. Quantization interacts kindly here too: NVFP4 halves the activation bytes crossing the cable versus FP8, and pipeline splits tolerate the link's latency in a way tensor splits cannot.</p>
+
+  <figure class="diagram">
+    <figcaption>The speed stack, derived from the course's own arithmetic. Each bar is one lever's contribution to the solo streaming rate. <b>No single lever gets you here; the stack does - and every label traces to a lesson.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Cumulative bar chart of expected solo decode rate: BF16 baseline near 1 token per second, FP8 near 15, NVFP4 near 30, and with MTP drafting around 45 to 60 tokens per second.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-noise" x="110" y="246" width="100" height="4"/>
+      <rect class="m-stat" x="240" y="178" width="100" height="72"/>
+      <rect class="m-signal" x="370" y="136" width="100" height="114"/>
+      <rect class="m-prob" x="500" y="98" width="100" height="152"/>
+      <text class="ttl" x="70" y="26">Solo streaming rate by lever stack, tok/s (derived)</text>
+      <text class="lbl-sm" x="160" y="266" text-anchor="middle">BF16</text>
+      <text class="lbl-sm" x="290" y="266" text-anchor="middle">FP8</text>
+      <text class="lbl-sm" x="420" y="266" text-anchor="middle">NVFP4</text>
+      <text class="lbl-sm" x="550" y="266" text-anchor="middle">+ MTP</text>
+      <text class="lbl-sm t-noise" x="115" y="238">&asymp;1</text>
+      <text class="lbl-sm t-stat" x="245" y="170">&asymp;15</text>
+      <text class="lbl-sm t-signal" x="375" y="128">&asymp;30</text>
+      <text class="lbl-sm t-prob" x="505" y="90">&asymp;45-60</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">18B active &divide; bytes per token, &times; acceptance gain</text>
+    </svg>
+  </figure>
+  <h2>3. What it costs, and what to verify first</h2>
+  <p>The honest caveats. Every rate on this page is derived from bandwidth arithmetic; no published benchmark of this model on GB10 hardware existed when the course was written, and the first thing to do after racking the cluster is run <code>vllm bench serve</code> at your real concurrency and replace these numbers with yours. NVFP4 checkpoints for a days-old model are community work until the publisher ships one - validate on your own workload. And the bubble plus the cable put a ceiling on burst parallelism: expect the six-agent fleet of your dreams to share roughly 20-35 tokens per second of aggregate decode without drafting, and to plan sessions around it.</p>
+
+<figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  C["QSFP cable&lt;br/&gt;200 GbE"] --> N["netplan IPs + SSH keys"]
+  N --> R["ray or vLLM multi-node"]
+  R --> S["NVFP4 weights split&lt;br/&gt;layers 1-23 / 24-45"]
+  S --> V["serve + bench at&lt;br/&gt;your real concurrency"]
+    </div>
+    <figcaption>The deployment order, straight from the playbook: link, address, authenticate, distribute, serve. <b>Bench before you believe any derived number on this page.</b></figcaption>
+  </figure>
+
+    <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does pipeline parallelism beat tensor parallelism across a 200 GbE cable for this model?</div>
+      <button class="q-opt">Tensor splitting cannot divide MoE layers</button>
+      <button class="q-opt">The cable crosses once per token, not per layer</button>
+      <button class="q-opt">Pipelining doubles the KV cache capacity</button>
+      <button class="q-opt">Tensor parallelism would require NVFP4</button>
+      <div class="q-fb">Tensor parallelism synchronises devices several times per layer - hundreds of cable crossings per token. Pipeline crosses once. MoE layers can be tensor-split; the cable just makes it prohibitively chatty.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Where does most of the 256 GB pool go after the NVFP4 weights are resident?</div>
+      <button class="q-opt">OS reservations on both of the nodes</button>
+      <button class="q-opt">The MTP draft, nearly target-sized</button>
+      <button class="q-opt">KV cache and buffers, ~68 GB derived</button>
+      <button class="q-opt">A second weight copy for redundancy</button>
+      <div class="q-fb">The MTP head is one small layer, not a copy of the network. The OS share is the 20 GB already subtracted; the rest of the pool's life is the KV budget - which is what your concurrency and context lengths spend.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+    <div class="p-stem">
+      <p>You plan four concurrent agent sessions at 48K context each. Assume a KV cost of 0.3 MB per token of context for this model's hybrid attention (a planning figure, not a measurement), and everything else from the lesson's ledger.</p>
+      <p><b>Find</b> the KV memory the plan needs, whether it fits the ~68 GB budget, and the largest single 1M-context session's KV cost by the same figure.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>4 &times; 48,000 &times; 0.3 MB for the plan; 1,000,000 &times; 0.3 MB for the monologue.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Fleet.</b> 4 &times; 48,000 &times; 0.3 MB &asymp; 57.6 GB - fits the ~68 GB budget, barely, with little headroom for growth.</li>
+        <li><b>Monologue.</b> 1,000,000 &times; 0.3 MB = 300 GB - does not fit, by more than the whole cluster's memory.</li>
+        <li><b>Reading it.</b> The million-token context is a data-center feature; desk deployments live on many modest sessions. Cap contexts at what the KV budget prices, not at what the model card declares.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The fleet figure must be linear in sessions and context; doubling either doubles it - and 57.6 &lt; 68 &lt; 300 keeps the verdicts consistent.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0010-case-study-mac-studio-256gb.html">One 256 GB Mac Runs the Same Model Alone</a></b> re-runs the same ledger on one machine with more bandwidth and no cable - and prices the difference.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the pipeline-versus-tensor choice is muddy, ask the agent to count cable crossings per token for both schemes at 45 layers.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://build.nvidia.com/spark/connect-two-sparks">Connect Two Sparks playbook</a> - the physical and network setup this page's cluster assumes, straight from NVIDIA.</p>
+
+  <div class="pager">
+    <a href="0008-speculative-decoding-buys-bandwidth-with-compute.html"><span class="dir">&larr; Previous</span><span class="ttl">Speculative Decoding Trades Spare Compute for Bandwidth</span></a>
+    <a class="nxt" href="0010-case-study-mac-studio-256gb.html"><span class="dir">Next &rarr;</span><span class="ttl">One 256 GB Mac Runs the Same Model Alone</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 09 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

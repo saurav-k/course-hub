@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRA steers a frozen model with two small matrices - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="Why a low-rank update can retrain a 320B model's behaviour, and what a rank buys per megabyte.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Steering a Frozen Model &middot; Lesson 05</div>
+  <h1>LoRA steers a frozen model with two small matrices</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    The low-rank adaptation mechanism, from its premise to its memory bill.
+    &middot; <a href="https://arxiv.org/abs/2106.09685">LoRA (Hu et al., 2021)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Fine-tuning's naive cost is not the weights themselves but the <b>optimizer state</b> - several multiples of the weights, held in memory during training.</li>
+      <li><b>LoRA</b> freezes every original weight and learns a small <b>low-rank update</b> instead: two thin matrices whose product approximates the change.</li>
+      <li>The <b>rank</b> is the dial: bigger rank means more capacity to change behaviour and more adapter megabytes - but always a rounding error beside the base model.</li>
+      <li>What it costs: expressive power is capped by the rank, and quality depends on choosing which layers get adapters.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["FROZEN WEIGHT MATRIX W&lt;br/&gt;e.g. 8192 x 8192"] --> X["same input x"]
+  A["A: rank x 8192&lt;br/&gt;thin"] --> B["B: 8192 x rank&lt;br/&gt;thin"]
+  X --> A
+  X --> W
+  B --> ADD["ADD&lt;br/&gt;Wx + BAx"]
+  W --> ADD
+  ADD --> Y["output y&lt;br/&gt;new behaviour"]
+    </div>
+    <figcaption>Where this sits: the frozen matrix keeps the model's knowledge; the trainable BA pair carries the entire behavioural change. Only A and B ever receive gradients. <b>You retrain the model's habits without touching its memory of the world.</b></figcaption>
+  </figure>
+  <h2>1. Why naive fine-tuning is a memory bomb</h2>
+  <p>Count what full fine-tuning of a model actually holds in memory during training. The weights themselves - one copy. The <b>gradients</b> - a second copy of equal size. And the <b>optimizer state</b>: Adam keeps a momentum estimate and a variance estimate per parameter, two more copies, usually in higher precision than the weights. Four to six copies of a 320B-parameter model is not a desk budget; it is a data-center line item. That is the wall LoRA was built against.</p>
+  <p>The LoRA premise is that the <em>change</em> a fine-tune makes is simpler than the model it changes. Adapting a model to your house style, your tool-calling format, your domain vocabulary - that is a low-dimensional adjustment, not a rewrite of world knowledge. So the update to each weight matrix is written as a product of two thin matrices, and only those two learn anything (<a href="https://arxiv.org/abs/2106.09685">LoRA paper</a>).</p>
+
+  <h2>2. What a rank buys</h2>
+  <p>The <b>rank</b> r is the thin dimension of the pair. For an 8192-by-8192 weight matrix, a full fine-tune trains about 67 million parameters; LoRA at rank 16 trains two matrices of 8192-by-16 - about 262 thousand, a 256-fold reduction. Across every adapted layer, the adapter for a 320B model stays in the megabyte-to-gigabyte range depending on rank and coverage. The dial is honest in both directions: doubling the rank doubles adapter size and doubles what behaviours the update can express, and empirical practice lands most instruction-style adaptations comfortably at single-digit to double-digit ranks.</p>
+
+  <figure class="diagram">
+    <figcaption>Adapter memory for one 8192-by-8192 matrix at rank 16 versus the matrix itself, with the multiplier that matters for a 320B base. <b>At any sane rank the adapter is invisible next to the base - the fight is over quality, never storage.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing memory: full fine-tune of one 8192 by 8192 matrix needs weights, gradients, and Adam state at about 802 megabytes total, while a rank 16 LoRA adapter is about 0.5 megabytes.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-noise" x="160" y="44" width="110" height="206"/>
+      <rect class="m-signal" x="400" y="249" width="110" height="1"/>
+      <text class="ttl" x="70" y="26">One 8192x8192 matrix: train it all vs LoRA rank 16</text>
+      <text class="lbl-sm" x="215" y="266" text-anchor="middle">full fine-tune</text>
+      <text class="lbl-sm" x="455" y="266" text-anchor="middle">LoRA adapter</text>
+      <text class="lbl-sm t-noise" x="170" y="36">&asymp;802 MB</text>
+      <text class="lbl-sm t-signal" x="410" y="241">&asymp;0.5 MB</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">weights + grads + Adam state vs two thin matrices</text>
+    </svg>
+  </figure>
+
+  <h2>3. Choosing the layers, and what it costs</h2>
+  <p>You do not have to adapt every matrix. Attention's query and value projections are the classic starting set; adding the feed-forward networks increases coverage of factual-style change. Each added target multiplies adapter size roughly linearly and adds training cost per step. The bill for LoRA is a capacity ceiling: if your task genuinely needs new knowledge rather than new behaviour, a rank-16 update cannot hold it, and the failure is quiet - the adapter interpolates instead of learning. Start small, measure on held-out examples, grow the rank or coverage only when the measurement says so.</p>
+<figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  L["45 layers"] --> QV["Q and V projections&lt;br/&gt;the classic start"]
+  QV --> FF["+ feed-forward&lt;br/&gt;for factual change"]
+  FF --> M["measure on held-out examples"]
+  M -->|stalls| MORE["raise rank or coverage"]
+  M -->|passes| DONE["ship the adapter"]
+    </div>
+    <figcaption>Coverage grows only when measurement demands it: start at attention, add feed-forward when facts must move, and let held-out examples argue. <b>The measurement, not the megabytes, drives the ladder.</b></figcaption>
+  </figure>
+
+    <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does full fine-tuning need roughly four copies of the weights in memory while LoRA needs essentially one?</div>
+      <button class="q-opt">LoRA compresses weights in training</button>
+      <button class="q-opt">Full fine-tune keeps two data copies</button>
+      <button class="q-opt">Gradients and Adam match weight size</button>
+      <button class="q-opt">LoRA pages weights to disk per step</button>
+      <div class="q-fb">Gradients are the same size as the weights, and Adam's momentum and variance estimates add two more copies. LoRA's trainable set is thousands of times smaller, so those copies shrink with it.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your rank-16 adapter improves style but teaches the model nothing about your private API. What does that failure tell you?</div>
+      <button class="q-opt">The task needed knowledge, not behaviour</button>
+      <button class="q-opt">The rank was too high for the data</button>
+      <button class="q-opt">The base was frozen the wrong way</button>
+      <button class="q-opt">LoRA cannot encode API documentation</button>
+      <div class="q-fb">Low-rank updates reshape behaviour well and store knowledge poorly - the capacity ceiling from the lesson. More rank helps marginally; retrieval over the documents usually helps more.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>You adapt every query and value projection of the course model: 45 layers, each with two matrices of 8192 by 8192. Rank 32, stored in 16-bit halves.</p>
+      <p><b>Find</b> the adapter's total size in megabytes.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>Per matrix: 2 &times; 8192 &times; 32 parameters. Two matrices per projection, two projections per layer, 45 layers.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Per matrix pair.</b> 2 &times; 8192 &times; 32 = 524,288 parameters; at 2 bytes each &asymp; 1 MB.</li>
+        <li><b>Per layer.</b> Q and V make two pairs: &asymp; 2 MB.</li>
+        <li><b>Total.</b> 45 layers &times; 2 MB = about 90 MB - for an adapter that steers a 320B model.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Ninety megabytes is roughly 0.03 percent of even the 306 GiB base - invisible next to it, as the lesson promised.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0006-qlora-fine-tunes-in-4-bit.html">QLoRA Fine-Tunes a Model That Does Not Fit Unfrozen</a></b> attacks the remaining copy - the frozen base itself - and puts the whole training run in desk memory.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the low-rank premise feels like a trick, ask the agent to re-derive the rank-16 parameter count for a 4096-by-4096 matrix and compare it against the full update.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://arxiv.org/abs/2106.09685">LoRA paper</a> - Section 4 measures exactly the rank-versus-quality trade this page prices.</p>
+
+  <div class="pager">
+    <a href="0004-pick-the-format-gguf-fp8-nvfp4.html"><span class="dir">&larr; Previous</span><span class="ttl">The Format Decides Where the Model Runs</span></a>
+    <a class="nxt" href="0006-qlora-fine-tunes-in-4-bit.html"><span class="dir">Next &rarr;</span><span class="ttl">QLoRA Fine-Tunes a Model That Does Not Fit Unfrozen</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 05 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

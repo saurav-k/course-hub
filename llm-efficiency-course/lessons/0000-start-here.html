@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Three levers decide the desk - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="The course in miniature: three levers - shrink, steer, speculate - decide whether a 320B model runs on hardware you already own.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Wall &middot; Lesson 00</div>
+  <h1>Three levers decide whether a frontier model fits on your desk</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    The on-ramp: the hardware, the model, and the three ideas the other ten pages develop.
+    &middot; <a href="https://huggingface.co/zai-org/GLM-5.3-Flash">GLM-5.3-Flash model card</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Running a big open model locally used to mean a server rack, because weights are huge and generation is slow for a reason most people misdiagnose.</li>
+      <li>The reason is <b>memory bandwidth</b>, not compute - and bandwidth, not FLOPs, is what desk hardware lacks.</li>
+      <li>Three levers answer it: <b>shrink</b> the weights (quantization), <b>steer</b> behaviour without unfreezing (LoRA/QLoRA), and <b>speculate</b> several tokens per step (speculative decoding).</li>
+      <li>Each lever has a bill: quality, a training-run cost, or wasted compute. This course teaches you to price all three.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["THE WALL&lt;br/&gt;bandwidth limits every token"] --> S["SHRINK&lt;br/&gt;quantization"]
+  W --> T["STEER&lt;br/&gt;LoRA / QLoRA"]
+  W --> P["SPECULATE&lt;br/&gt;draft-and-verify"]
+  S --> D["DEPLOY&lt;br/&gt;2x DGX Spark or&lt;br/&gt;one 256 GB Mac"]
+  T --> D
+  P --> D
+    </div>
+    <figcaption>Where this sits: every page of this course is one box in this figure. The wall explains the problem; the three levers attack it; the case studies assemble them. <b>Desk hardware runs frontier models when you pull all three levers together, not any one alone.</b></figcaption>
+  </figure>
+  <h2>1. The machine on your desk, stated honestly</h2>
+  <p>The course follows two concrete machines. The first is a pair of NVIDIA DGX Spark units: each carries a GB10 Grace Blackwell chip, 128 GB of unified memory shared between CPU and GPU, and a memory bandwidth of 273 GB/s (<a href="https://www.nvidia.com/en-us/products/workstations/dgx-spark/">NVIDIA DGX Spark</a>). A two-hundred-gigabit ConnectX-7 port lets one cable join the pair into a single 256 GB pool (<a href="https://build.nvidia.com/spark/connect-two-sparks">Connect Two Sparks</a>). The second is a Mac Studio with 256 GB of unified memory, in the roughly 800 GB/s bandwidth class of the Apple-silicon Ultra chips (<a href="https://www.apple.com/newsroom/2022/06/apple-introduces-m2-ultra/">Apple M2 Ultra, 800 GB/s</a>).</p>
+  <p>The model they run is GLM-5.3-Flash, released in August 2026 under the MIT licence: 320 billion total parameters, 18 billion active per token, 45 layers that route each token through 8 of 288 experts, a one-million-token context window, and a built-in multi-token prediction draft layer (<a href="https://huggingface.co/zai-org/GLM-5.3-Flash">model card</a>). It approaches Claude Opus 4.8 on coding and agentic benchmarks, which is why it is the right running example: it is the kind of model you would actually want on a desk.</p>
+
+  <figure class="diagram">
+    <figcaption>The course keeps returning to this comparison. Note what the desk machines lack even against a data-center GPU: bandwidth, not capacity. <b>Capacity is the problem you can buy; bandwidth is the problem you must design around.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar comparison of memory bandwidth for a DGX Spark at 273 GB per second, a Mac Studio 256 GB near 800, and an H100 near 3350, with capacity noted below each.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-stat" x="130" y="196" width="90" height="54"/>
+      <rect class="m-signal" x="310" y="126" width="90" height="124"/>
+      <rect class="m-prob" x="490" y="48" width="90" height="202"/>
+      <text class="ttl" x="70" y="26">Unified memory bandwidth, GB/s (bars to scale)</text>
+      <text class="lbl-sm" x="175" y="266" text-anchor="middle">DGX Spark</text>
+      <text class="lbl-sm" x="355" y="266" text-anchor="middle">Mac Studio 256 GB</text>
+      <text class="lbl-sm" x="535" y="266" text-anchor="middle">H100 80 GB</text>
+      <text class="lbl-sm t-stat" x="140" y="188">273</text>
+      <text class="lbl-sm t-signal" x="320" y="118">~800</text>
+      <text class="lbl-sm t-prob" x="500" y="40">~3,350</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">capacity: 128 GB &middot; 256 GB &middot; 80 GB</text>
+    </svg>
+  </figure>
+
+  <h2>2. The three levers, named once</h2>
+  <p><b>Shrink.</b> Quantization stores each weight in fewer bits: from two bytes down to one, or half a byte, or a quarter. Lesson 03 works the arithmetic of what that costs in rounding error, and Lesson 04 turns it into a format decision - GGUF, FP8, or NVFP4 - that decides where a model can physically load.</p>
+  <p><b>Steer.</b> Post-training a 320B model the naive way means holding optimizer states for every parameter. LoRA instead freezes the model and learns two small matrices per touched layer; QLoRA keeps the frozen base in 4-bit so the whole undertaking fits in the memory you have. Lessons 05, 06, and 07 cover LoRA, QLoRA, and the wider adapter family including DoRA, IA3, and merging.</p>
+  <p><b>Speculate.</b> Decode is bandwidth-bound and your silicon sits mostly idle behind it. Speculative decoding drafts several tokens cheaply and checks them all in one weight-reading pass. On desk hardware, where the gap between bandwidth and compute is widest, this is the lever that multiplies. Lesson 08 derives its formula, including the multi-token prediction layer GLM-5.3-Flash ships with.</p>
+  <h2>3. How the course teaches</h2>
+  <p>Every page earns its idea with arithmetic you can redo on paper: a model's footprint from parameter count and bytes per weight, a token rate from bandwidth divided by bytes per token, an adapter's size from two matrix ranks. Numbers derived in this course are labelled as derivations, because no published benchmark of this exact model on this exact hardware existed when the course was written - the resources file lists exactly what would settle each open number.</p>
+  <p>The order is load-bearing. The wall comes first because every later trade-off is priced in bandwidth. Quantization precedes QLoRA because QLoRA is quantization plus adapters. Speculation comes last because its payoff is largest exactly when the wall from Lesson 01 is strictest. The two case studies reuse every page before them; nothing in a case study is new machinery.</p>
+
+<figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  Q["QUANTIZATION&lt;br/&gt;smaller file"] --> S["SERVE&lt;br/&gt;one box or two"]
+  P["PEFT&lt;br/&gt;custom behaviour"] --> S
+  SD["SPECULATION&lt;br/&gt;faster tokens"] --> S
+  S --> W["WORKLOAD DECIDES&lt;br/&gt;solo or fleet"]
+    </div>
+    <figcaption>The full assembly in one figure: each lever feeds one serving decision, and the workload - not preference - picks the machine. <b>Read the rest of the course as the derivation of every arrow here.</b></figcaption>
+  </figure>
+
+    <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A DGX Spark has 128 GB of memory but only 273 GB/s of bandwidth. Which limit does that bandwidth number actually gate?</div>
+      <button class="q-opt">How large a model can be loaded at once</button>
+      <button class="q-opt">How many bytes can be read per second</button>
+      <button class="q-opt">How fast the CPU cores can run</button>
+      <button class="q-opt">How long the context window is</button>
+      <div class="q-fb">Bandwidth gates the reading rate, which is what decode does constantly. Loading a model is gated by capacity (128 GB); the context window is a software configuration; the CPU clock is a different subsystem entirely.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does this course treat the two case-study machines as a pair rather than picking a winner?</div>
+      <button class="q-opt">The Mac cannot run it unquantized</button>
+      <button class="q-opt">NVIDIA requires exactly two units</button>
+      <button class="q-opt">Cluster capacity versus single-box speed</button>
+      <button class="q-opt">The model needs 256 GB in every format</button>
+      <div class="q-fb">Two Sparks buy 256 GB of pooled capacity over a 200 GbE link at 273 GB/s per node; the Mac keeps all 256 GB local at a higher bandwidth. The final lesson prices both and lets your workload decide.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill easy">foundation</span></div>
+    <div class="p-stem">
+      <p>A hypothetical model has 10 billion active parameters per token, and at 8-bit storage each parameter occupies one byte. Generating one token requires reading every active parameter once.</p>
+      <div class="math">
+        rate &asymp; bandwidth &divide; bytes per token
+        <span class="gloss">Read as: the ceiling token rate equals the memory bandwidth divided by the bytes that must be read to produce one token. <b>bandwidth</b>: 273 GB/s on a Spark. <b>bytes per token</b>: active parameters times bytes per parameter, here 10 billion &times; 1.</span>
+      </div>
+      <p><b>Find</b> the ideal ceiling rate on a Spark, then judge how a realistic rate of about a third of that ceiling would feel for interactive coding.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>Divide 273 by 10. Keep the units honest: gigabytes per second divided by gigabytes per token gives tokens per second.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Bytes per token.</b> 10 &times; 10<sup>9</sup> parameters &times; 1 byte = 10 GB per token.</li>
+        <li><b>Ceiling rate.</b> 273 GB/s &divide; 10 GB/token = 27.3 tokens per second, ideal.</li>
+        <li><b>Realistic.</b> About a third of the ceiling - say 9-10 tokens per second - after overheads later lessons itemise. Comfortable to watch, sluggish for a chatty agent.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The ceiling must exceed the realistic figure, and both must fall as bytes per token rise - which is exactly the lever Lesson 03 pulls.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0001-generation-is-a-bandwidth-problem.html">Generation Is a Bandwidth Problem</a></b> derives the bytes-per-token walk from the transformer's decode loop, so the ceiling above stops being an assertion and becomes arithmetic.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the ceiling-rate idea did not land, ask the agent to re-derive Practice 1 with a 20-billion-parameter model at 4 bits per weight, and to explain which lever would move the answer.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://huggingface.co/zai-org/GLM-5.3-Flash">GLM-5.3-Flash model card</a> - the architecture block, the licence, and the local-serving links that every later page builds on.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0001-generation-is-a-bandwidth-problem.html"><span class="dir">Next &rarr;</span><span class="ttl">Generation Is a Bandwidth Problem</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 00 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

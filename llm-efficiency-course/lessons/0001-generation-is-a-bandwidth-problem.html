@@ -1,0 +1,153 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Generation is a bandwidth problem - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="Why decoding one token means reading every active weight from memory, and why FLOPs are not the bottleneck.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Wall &middot; Lesson 01</div>
+  <h1>Generating a token is a memory-bandwidth problem, not a compute problem</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">9 min</span>
+    The physics every later page prices its trade-offs in.
+    &middot; <a href="https://build.nvidia.com/spark/serve-llms-with-vllm">Serve LLMs with vLLM (Spark playbook)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Generation has two phases: <b>prefill</b> reads your whole prompt once (compute-heavy) and <b>decode</b> emits tokens one at a time (memory-bound).</li>
+      <li>Each decoded token requires reading essentially every <b>active weight</b> from memory - the whole network takes one walk per token.</li>
+      <li>So the ceiling token rate is <b>bandwidth &divide; bytes per token</b>, and FLOPs sit mostly idle behind it.</li>
+      <li>Batching shares one weight-walk across many requests, which is why aggregate throughput rises with concurrency while every individual stream slows.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  A["PROMPT ARRIVES&lt;br/&gt;prefill: read it once&lt;br/&gt;compute-bound"] --> B["DECODE LOOP&lt;br/&gt;one token per step&lt;br/&gt;read every active weight"]
+  B --> B
+  B --> E["DONE&lt;br/&gt;end of sequence"]
+    </div>
+    <figcaption>Where this sits: prefill is a burst; decode is a marathon of weight walks. Everything this course does to a model - shrinking it, drafting with it - is aimed at making that marathon cheaper per token. <b>The decode loop, not the prompt, is where your time goes.</b></figcaption>
+  </figure>
+  <h2>1. Two phases, two bottlenecks</h2>
+  <p>When you press enter on a prompt, the server does two different jobs. <b>Prefill</b> reads your entire prompt through the network at once - every token in parallel - to fill the KV cache. That is matrix-multiply territory: compute-bound, and on any modern accelerator it finishes fast. <b>Decode</b> then emits your answer one token at a time, and each token must pass through every active layer of the network before the next one can start.</p>
+  <p>Here is the part that surprises people. To produce decode step <em>t+1</em>, the hardware must read essentially every active weight again. The previous step's weights are already in registers and caches, but they produced a different token; the matrix multiplications for this step need the numbers again, from memory. Compute is cheap relative to that walk: one token costs roughly two FLOPs per active parameter - for an 18B-active model, about 36 GFLOPs - which even a modest GPU finishes in microseconds. Reading the weights it multiplies costs milliseconds on desk bandwidth.</p>
+
+  <figure class="diagram">
+    <figcaption>Time per decode step for an 18B-active model at 8-bit storage, on a 273 GB/s Spark. Compute contributes microseconds; the weight walk contributes all the milliseconds. <b>The FLOPs are nearly free; the bytes are the bill.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two stacked bars comparing time per decode step: compute takes microseconds while the memory weight walk takes about 66 milliseconds, dominating the total.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-noise" x="180" y="46" width="90" height="198"/>
+      <rect class="m-signal" x="380" y="248" width="90" height="2"/>
+      <text class="ttl" x="70" y="26">Where one decode step spends its time (18B active, 8-bit, Spark)</text>
+      <text class="lbl-sm" x="225" y="266" text-anchor="middle">weight walk</text>
+      <text class="lbl-sm" x="425" y="266" text-anchor="middle">compute</text>
+      <text class="lbl-sm t-noise" x="190" y="38">&asymp;66 ms (derived: 18 GB &divide; 273 GB/s)</text>
+      <text class="lbl-sm t-signal" x="390" y="240">&micro;seconds</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">axis: 0 to 70 ms</text>
+    </svg>
+  </figure>
+
+  <h2>2. The ceiling, and what shares it</h2>
+  <p>Divide bandwidth by bytes per token and you get the ceiling rate. At 8-bit storage, an 18B-active model must read about 18 GB per token: 273 &divide; 18 &asymp; 15 tokens per second ideal, realistically nearer 10 once attention, the router, and cache traffic take their share. That single division is the most important line in this course.</p>
+  <p>Concurrency behaves the way it does because of this walk. Serve six requests at once and the server still reads the weights once per step - the walk is shared - so aggregate throughput rises even as each individual stream waits its turn. But the KV caches grow with every concurrent session, eating the capacity that was going to hold experts, and each stream's latency climbs. On desk hardware the useful concurrency is small, and Lesson 09 budgets it explicitly.</p>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    Every optimisation in this course is a sentence about that division: make bytes per token smaller (quantization), make some steps read nothing new (speculative decoding), or accept slower streams for more aggregate work (batching). Nothing else moves the number.</div>
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Your prompt
+  participant P as Prefill pass
+  participant D as Decode loop
+  U->>P: 4,000 tokens at once
+  P->>D: KV cache filled&lt;br/&gt;one burst, compute-bound
+  loop until the answer ends
+    D->>D: read active weights&lt;br/&gt;emit one token
+  end
+    </div>
+    <figcaption>The two phases as a timeline. Prefill is one parallel burst over your prompt; decode is a loop where each iteration re-reads the weights for exactly one token. <b>Prompt length barely affects answer speed; answer length drives it.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your model streams at 8 tokens per second solo. Six colleagues each start their own session on the same server. What happens?</div>
+      <button class="q-opt">Each stream slows; aggregate rises</button>
+      <button class="q-opt">Each stream keeps its solo rate</button>
+      <button class="q-opt">The sixth session gets rejected</button>
+      <button class="q-opt">Aggregate drops below the solo rate</button>
+      <div class="q-fb">The weight walk is shared, so aggregate rises with concurrency - but the walk plus six KV caches must all fit in the same bandwidth, so each stream gets less. Rejection and aggregate collapse do not happen until memory runs out.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Doubling the prompt from 2,000 to 4,000 tokens most affects which phase?</div>
+      <button class="q-opt">Decode, the loop runs twice as often</button>
+      <button class="q-opt">Neither; prompts are effectively free</button>
+      <button class="q-opt">Decode, because the weights grow</button>
+      <button class="q-opt">Prefill, reading twice as many once</button>
+      <div class="q-fb">Prefill scales with prompt length; the decode loop's per-step cost does not care how long the prompt was. Prompts are not free - they are just paid in a compute-bound phase, and only once.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill easy">foundation</span></div>
+    <div class="p-stem">
+      <p>GLM-5.3-Flash has 18 billion active parameters. At 4-bit storage with overhead, budget half a byte per parameter.</p>
+      <p><b>Find</b> the ideal ceiling rate on a 273 GB/s Spark, and compare it with the 8-bit ceiling of about 15 tokens per second from the lesson.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>Bytes per token: 18 billion &times; 0.5 bytes. Then divide 273 by that.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Bytes per token.</b> 18 &times; 10<sup>9</sup> &times; 0.5 = 9 GB per token.</li>
+        <li><b>Ceiling.</b> 273 &divide; 9 &asymp; 30 tokens per second ideal - double the 8-bit ceiling.</li>
+        <li><b>Reading it.</b> Halving the bytes per weight doubles the speed ceiling. This is why quantization, next module, is a throughput lever and not only a storage lever.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Halving bytes per token must double the rate; 30 is twice 15.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0002-moe-total-versus-active-parameters.html">A 320B MoE Reads Like an 18B Model</a></b> splits the weight walk from the storage requirement, and the running model enters the course.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the batching behaviour confused you, ask the agent to walk one decode step with six requests and count what is read once versus six times.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://build.nvidia.com/spark/serve-llms-with-vllm">Serve LLMs with vLLM playbook</a> - where continuous batching and memory utilisation meet this arithmetic on real Spark hardware.</p>
+
+  <div class="pager">
+    <a href="0000-start-here.html"><span class="dir">&larr; Previous</span><span class="ttl">Start Here</span></a>
+    <a class="nxt" href="0002-moe-total-versus-active-parameters.html"><span class="dir">Next &rarr;</span><span class="ttl">A 320B MoE Reads Like an 18B Model</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 01 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

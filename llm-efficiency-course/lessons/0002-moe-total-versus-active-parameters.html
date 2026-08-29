@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A 320B MoE reads like an 18B model - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="Total parameters decide what fits; active parameters decide how fast it runs. GLM-5.3-Flash splits the difference.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; The Wall &middot; Lesson 02</div>
+  <h1>A 320B MoE reads like an 18B model but loads like a 320B one</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Total versus active parameters, and why mixture-of-experts changes both sides of the ledger.
+    &middot; <a href="https://huggingface.co/zai-org/GLM-5.3-Flash">GLM-5.3-Flash model card</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>mixture-of-experts</b> model holds many expert networks but routes each token through only a few of them.</li>
+      <li><b>Total parameters</b> decide what must be stored in memory; <b>active parameters</b> decide what must be read per token.</li>
+      <li>GLM-5.3-Flash: 320B total, 18B active - 8 of 288 experts per token - so it speeds like a small dense model but loads like a giant.</li>
+      <li>The catch is capacity: all 288 experts must be resident, even though each token visits eight. Desk deployment is a capacity fight, and Lessons 03 and 04 are the weapons.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  T["TOKEN ARRIVES"] --> R["ROUTER&lt;br/&gt;picks 8 of 288 experts"]
+  R --> E1["expert 41"]
+  R --> E2["expert 117"]
+  R --> E3["expert 260&lt;br/&gt;+ 5 more"]
+  E1 --> M["MERGE&lt;br/&gt;weighted sum"]
+  E2 --> M
+  E3 --> M
+  M --> O["NEXT LAYER&lt;br/&gt;45 layers deep"]
+    </div>
+    <figcaption>Where this sits: per layer, the router sends each token down eight expert paths and merges the results. Across 45 layers the token touches 360 expert visits, yet the network holds 288 experts per layer. <b>You get 320B-scale knowledge with 18B-scale reading - if you can afford to store all of it.</b></figcaption>
+  </figure>
+  <h2>1. Two ledgers, one model</h2>
+  <p>Keep Lesson 01's division in hand: rate equals bandwidth divided by bytes per token. For a dense model, total and active parameters are the same number, so the model that knows the most is also the model that reads the most - capability and speed are welded together. Mixture-of-experts cuts the weld.</p>
+  <p>A MoE layer holds a set of expert feed-forward networks and a small router. For each token, the router scores all experts and sends the token down the top few - for GLM-5.3-Flash, 8 of 288 experts, across 45 layers, with the attention layers shared by every token (<a href="https://huggingface.co/zai-org/GLM-5.3-Flash">model card</a>). The two ledgers diverge:</p>
+  <div class="math">
+    bytes stored = total params &times; bytes per weight &nbsp;&nbsp;&middot;&nbsp;&nbsp; bytes read per token &asymp; active params &times; bytes per weight
+    <span class="gloss">Read as: <b>storage</b> is decided by every parameter in the file - all experts, whether or not this token visits them. <b>per-token reading</b> is decided only by the parameters this token actually touches - its 8 experts per layer plus the shared attention.</span>
+  </div>
+  <p>GLM-5.3-Flash: 320 billion total, 18 billion active. At 8-bit storage the file is about 306 GiB - derived, matching the vLLM recipe's figure (<a href="https://recipes.vllm.ai/zai-org/GLM-5.3-Flash">vLLM recipe</a>) - but each token reads roughly 18 GB. The model is a giant on disk and a mid-sized network in motion.</p>
+
+  <figure class="diagram">
+    <figcaption>The MoE gap, drawn. Storage follows the full 320B; the token's walk follows 18B. Every desk-deployment decision in this course lives in the tension between these two bars. <b>Fit is a capacity problem; speed is a reading problem; MoE gives you a small reading problem inside a large capacity problem.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing 320B total parameters to 18B active parameters per token for GLM 5.3 Flash, at 8-bit storage: about 306 GiB stored versus about 18 GiB read per token.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-stat" x="150" y="42" width="120" height="208"/>
+      <rect class="m-signal" x="390" y="239" width="120" height="11"/>
+      <text class="ttl" x="70" y="26">GLM-5.3-Flash at 8-bit: stored vs read per token</text>
+      <text class="lbl-sm" x="210" y="266" text-anchor="middle">stored (all experts)</text>
+      <text class="lbl-sm" x="450" y="266" text-anchor="middle">read per token</text>
+      <text class="lbl-sm t-stat" x="160" y="34">~306 GiB</text>
+      <text class="lbl-sm t-signal" x="400" y="231">~18 GiB</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">320B total &middot; 18B active &middot; 8 of 288 experts</text>
+    </svg>
+  </figure>
+  <h2>2. What the router costs and saves</h2>
+  <p>The router itself is tiny, but routing is not free in a subtler way: which experts a token visits depends on the token, so batching six requests together reads <em>different</em> experts for each - the walk is less shareable than a dense model's. MoE models still batch well because expert choices cluster, but the clean Lesson 01 picture of "one walk, shared six ways" gets fuzzier.</p>
+  <p>What MoE buys is the capability-speed weld cut. A dense 320B at 8-bit would read 320 GB per token: about one token per second even ideally on a Spark. The MoE reads 18 GB: fifteen. Same file, same knowledge, twenty times faster - bought entirely with storage you must be able to afford.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  participant T as token
+  participant L as layer 1..45
+  participant E as 288 experts per layer
+  T->>L: enter layer
+  L->>E: router picks 8
+  E-->>L: 8 expert outputs merged
+  Note over L: shared attention layers&lt;br/&gt;run for every token
+  L-->>T: hand to next layer
+    </div>
+    <figcaption>One token's journey, forty-five times over. Each layer re-routes from scratch, so a token meets different expert teams at every depth. <b>The 18B active figure is a per-layer average: 8 experts plus attention, times 45 layers.</b></figcaption>
+  </figure>
+
+  <div class="card callout warn">
+    The capacity trap: every desk-fit failure for this model is a storage failure, not a speed failure. Two Sparks pool 256 GB; at 8-bit the file alone is ~306 GiB, so it does not fit - no serving-time cleverness fixes that. Shrinking storage is the next module's subject, and it is mandatory, not optional.</div>
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A dense 320B model at 8-bit and GLM-5.3-Flash at 8-bit have nearly identical file sizes. Why do their speeds differ by roughly twenty times?</div>
+      <button class="q-opt">The MoE compresses weights harder</button>
+      <button class="q-opt">The dense one runs on slower chips</button>
+      <button class="q-opt">The MoE reads 18B active per token</button>
+      <button class="q-opt">The router caches expert outputs</button>
+      <div class="q-fb">Same file, different walk: 320 GB per token versus about 18 GB. No extra compression and no caching are involved - the routing itself decides what gets read.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Your Spark cluster reports the model loaded fine but produces barely one token per second. Which ledger did you get wrong?</div>
+      <button class="q-opt">Active params: a dense checkpoint</button>
+      <button class="q-opt">Storage: weights are paging off disk</button>
+      <button class="q-opt">Bandwidth: router reads all experts</button>
+      <button class="q-opt">Context: the KV cache filled up</button>
+      <div class="q-fb">One-token-per-second symptoms mean the per-token walk is reading from storage, not memory: a capacity failure. The router reads only 8 experts by construction.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>A MoE has 120 billion total parameters, 12 layers, and routes each token through 4 of 64 experts per layer. Attention parameters total 3 billion and are active for every token; the other 117 billion are expert parameters spread evenly.</p>
+      <p><b>Find</b> the active parameters per token.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>Experts per layer: 117 &divide; 12 &asymp; 9.75 billion. The token visits 4 of 64 of them per layer.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Experts per layer.</b> 117 billion &divide; 12 layers &asymp; 9.75 billion per layer.</li>
+        <li><b>Active expert parameters.</b> 9.75 &times; (4 &divide; 64) &asymp; 0.61 billion per layer; &times; 12 &asymp; 7.3 billion.</li>
+        <li><b>Total active.</b> 7.3 + 3 = about 10.3 billion active per token.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Active must sit far below total (10 of 120) and above the attention floor (3 billion), as it does.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0003-quantization-shrinks-weights-by-spending-error.html">Quantization Spends Rounding Error to Shrink Memory</a></b> attacks the storage ledger directly - the mandatory lever that makes this model load at all.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two-ledgers split is still fuzzy, ask the agent to recompute both ledgers for the Practice 1 model at 4-bit storage.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://huggingface.co/zai-org/GLM-5.3-Flash">GLM-5.3-Flash model card</a> - the architecture block that fixed every number on this page.</p>
+
+  <div class="pager">
+    <a href="0001-generation-is-a-bandwidth-problem.html"><span class="dir">&larr; Previous</span><span class="ttl">Generation Is a Bandwidth Problem</span></a>
+    <a class="nxt" href="0003-quantization-shrinks-weights-by-spending-error.html"><span class="dir">Next &rarr;</span><span class="ttl">Quantization Spends Rounding Error to Shrink Memory</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 02 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
