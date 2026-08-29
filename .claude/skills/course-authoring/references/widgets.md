@@ -657,9 +657,9 @@ The groups, and what each is for.
 
 | Group | Count | What a rule reads |
 |---|---|---|
-| Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. |
-| Type scale | 60 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. |
-| Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. |
+| Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. `--font-body` is set by the face registry rather than in this block; see the derived axes below. |
+| Type scale | 60 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
+| Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. `--lh-body` carries the measure nudge; see the derived axes below. |
 | Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
 | Tracking | 14 | Negative on display type, positive on anything set in capitals. |
 | Space | 173 | Two layers; see below. |
@@ -679,10 +679,45 @@ That is a hard limit rather than a note: seven pointer targets in the chrome pas
 **A reader-settable value has three layers; nothing else does.**
 `hub.css` declares a `-default`, `hub.js` writes only a `--*-user` property inline on `<html>`, and one resolved token `--x: var(--x-user, var(--x-default))` is what every rule reads.
 Only that resolution line may read a `--*-user` property.
-Twenty-four tokens carry the form today, and they are the ones a reader control can reach: `--font-body`, `--fs-body`, `--lh-body`, `--measure` and the twenty prose-rhythm roles.
+Twenty-four tokens carry the form today, and they are the ones a reader control can reach: `--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm roles.
 The rest are one-layer design tokens.
+The reading face is the one reader choice that is not a `--*-user` property, because three measured constants have to travel with the family; it is the registered axis attribute `data-body-face` instead.
 The consequence for a media query: a token with a `-user` layer must be restated as its `-default` inside the query, never as the token, or the query out-argues the reader.
 `--fs-body-default` in the 720px block is the worked example.
+
+## The derived axes
+
+Four of the reading axes are not independent, and each coupling is measured.
+A framework that offered the four as free settings would let a reader move one control and silently move a second, and then build a page that no single setting explains.
+So the block after the design axis derives all four, in CSS, with nothing left to the script.
+
+**The measure names real characters, and the width is computed.**
+`ch` is the advance of the digit zero rather than of a character, and the two part company by face: one `ch` of Source Serif 4 is `.5049em` against an average prose character of `.4479em`, so the `72ch` this sheet used to carry was 81 characters and not 72.
+A reader who set "72" and then changed the reading face would have moved their line length without touching the measure control.
+`--measure-chars` is the number a control sets and `--measure` is the width that follows from it.
+
+**The body size names apparent size, not nominal size.**
+Holding `font-size` at 19px and swapping Source Serif 4 for Inter makes the page about 21% larger to the eye, because the x-heights are `.4520` and `.5459` em.
+So `--fs-body-ref` is the reader's number on the Source Serif 4 reference scale and `--fs-body` is what the page renders.
+
+**The code size follows the reading face.**
+JetBrains Mono at x-height parity is `.822em` against a Source Serif 4 body and `.993em` against an Inter body, so one hard-coded mono size is wrong for one of the two faces.
+`--fs-mono` is derived from `--xh-body`, and it stays a ratio of `1em` so block and inline code keep tracking the prose that surrounds them.
+
+**The leading rises with the measure, as a nudge and never as a lock.**
+Above 80 characters, or above the design's own default measure if that is wider, `--lh-body` gains `.05` per 10 characters.
+A reader who has chosen a line spacing suppresses the nudge entirely, and nothing may move a control's visible position because another control moved.
+
+**A face is a name plus three measured constants.**
+The family, the average prose advance, the x-height per em and the apparent-size factor are declared together in one `:root[data-body-face="..."]` entry, because the three derivations cannot compute without all three numbers.
+Never set `--font-body` on its own, and never copy a constant out of a report: `scripts/type_invariants.py` refuses an entry that names a family without the other three, measures the advance from a committed corpus of real hub prose, and holds two invariants for every registered face.
+M1 requires a `--measure-chars` of N to realise N plus or minus one characters, at 55, 68, 80 and 85.
+M2 requires the code size to stay inside `.85` to `.90` of the prose under a serif reading face, at every body size the panel will offer.
+The registry must stay after any design block, for the same reason the mode layer sits after the palettes: an explicit reader choice and a design block have the same specificity, so source order decides.
+
+**Four tokens are outputs and nothing may write them.**
+`--measure`, `--fs-body`, `--fs-mono` and the per-face constants are computed from the controls above them.
+A control that wrote one would put back exactly the coupling this block removes.
 
 **A course sheet restates tokens; it never restates rules.**
 The three `course-extras.css` files are layered after the hub sheet, so a copy of a hub rule in one of them wins on source order and every later change to the hub sheet stops at that course's pages.
