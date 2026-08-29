@@ -810,13 +810,20 @@ The control panel owns that code; this note owns the contract it has to keep.
 ## The palette axis
 
 A palette is the colour half of the system, and it is the only place in `hub.css` that states a literal colour.
-Seven are registered - Paper, Slate, Ink, Sage, Harbor, Aubergine and Press - and each states **17 raw values twice**, once as `--l-*` for light and once as `--d-*` for dark.
+Seven are registered - Paper, Slate, Ink, Sage, Harbor, Aubergine and Press - and each states **18 raw values twice**, once as `--l-*` for light and once as `--d-*` for dark.
 The mode layer maps one of the two sets onto the semantic tokens every rule reads, and it is written once for the whole system, so adding a palette is a block of values plus one entry in the `PALETTES` array in `hub.js`.
 
-Sixteen of the seventeen are colours.
-The seventeenth is `--*-wash`, the **ground treatment**: a `background-image` value painted on the canvas and on the reading pane, `none` on six of the seven palettes and two faint radial gradients on Press.
+Sixteen of the eighteen are colours. The other two are the ground treatment and the reading pane, and they work together.
+
+`--*-wash` is a `background-image` value painted on the canvas, `none` on six of the seven palettes and two faint radial gradients on Press.
 A ground that is a flat fill reads as a screen colour; a ground with a wash reads as paper.
-It is a palette's rather than a design's because it is colour, and it is stated by every palette rather than by the one that uses it, because a palette is data the framework consumes and never a name the framework knows.
+
+`--*-pane` is what the reading column paints behind the prose.
+Six palettes state their own `--surface`, which is what that column has always been.
+Press states `transparent`, so the prose sits directly on the washed paper and cards and callouts read as lighter veils over it - the reference site's own arrangement, which has no separate reading pane at all.
+Text on a Press page therefore sits on `--bg` rather than on `--surface`, and both grounds are checked.
+
+Both are a palette's rather than a design's because both are colour, and both are stated by every palette rather than by the one that uses them, because a palette is data the framework consumes and never a name the framework knows.
 
 **Do not name a raw value.** `--l-*` and `--d-*` exist for the mode layer and for the appearance panel's own swatches. Everything else reads a semantic token.
 

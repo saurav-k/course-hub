@@ -315,15 +315,26 @@ design writes a `-default` and the course writes the token, and the six resoluti
 the design block rather than in it. See "The course contract" above.
 `references/widgets.md`, "The design axis", is the author-facing summary.
 
-**A palette states 17 raw values twice, and the seventeenth is not a colour.** Seven palettes are
-registered. Sixteen of the seventeen are the `--l-*` / `--d-*` colour pairs the mode layer maps onto
-the semantic tokens; the seventeenth is `--*-wash`, the ground treatment, a `background-image` value
-painted on the canvas and on the reading pane. It is `none` on six palettes and two 5% radial
-gradients on `press`, because a ground that is a flat fill reads as a screen colour and one with a
-wash reads as paper. It is stated by every palette rather than only by the one that uses it, for the
-same reason the sixteen are. Two of the sixteen are new with `press`: `--*-code-inline-bg` and
-`--*-code-inline-ink`, so a design with a dark code plate does not drag inline code dark with it.
-Both pairs carry body text and `scripts/contrast.py` holds both to 7:1.
+**A palette states 18 raw values twice, and two of them are not colours.** Seven palettes are
+registered. Sixteen of the eighteen are the `--l-*` / `--d-*` colour pairs the mode layer maps onto
+the semantic tokens. `--*-wash` is the ground treatment, a `background-image` painted on the canvas:
+`none` on six palettes and two 5% radial gradients on `press`, because a ground that is a flat fill
+reads as a screen colour and one with a wash reads as paper. `--*-pane` is what the reading column
+paints behind the prose: six palettes state their own `--surface`, and `press` states `transparent`
+so the prose sits on the washed paper with cards and callouts as lighter veils over it. Both are
+stated by every palette rather than only by the one that uses them, for the same reason the sixteen
+are. Two of the sixteen are new with `press`: `--*-code-inline-bg` and `--*-code-inline-ink`, so a
+design with a dark code plate does not drag inline code dark with it. Both pairs carry body text and
+`scripts/contrast.py` holds both to 7:1.
+
+**`main.wrap` must not gain a background that changes on a palette switch.** It is the scroller's
+big child, and repainting it on a switch exposes a Chromium behaviour the computed-style harness
+reads straight through: after a switch, an element inside a closed `<details>` keeps the computed
+style it had while every ancestor updates correctly. It is measured, not inferred - the harness
+printed the ancestor chain with the child a palette behind its parent - and it cannot be waited out,
+because the stale value is perfectly stable; polling it is worse, because each read re-caches it.
+That is why the reading pane is a palette value and why `press` paints none. Anything that gives
+that element a switch-varying background again owes assertion A2 a re-run.
 
 **A palette and a design are data, and nothing branches on either name.** No function in `hub.js`
 and no rule in `hub.css` knows one by name: the two registries are plain arrays, the blocks are
