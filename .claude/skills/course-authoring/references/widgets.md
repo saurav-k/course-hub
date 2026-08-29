@@ -950,3 +950,38 @@ Colour is not among them. A design carries no colour on paper any more than on s
 **Verify a print change by printing.**
 Neither CI check can see paper: `validate_site.py` does not render, and `style_snapshot.py` holds the viewport at 1280px, where the narrow arms match in no medium at all.
 Produce a PDF at A4 *and* at US Letter, look at it, and check that no ink reaches the edge of a sheet.
+## The design system reference page
+
+Everything above is also *rendered*, live, at [`design-system/index.html`](../../../../design-system/index.html): every token with the value the browser resolved for it and a specimen painted by that token itself, every widget beside its markup, every reader control working, and the accessibility floor as numbers.
+Open it when you are unsure what a token does, and copy the markup from it rather than from here.
+It cannot go stale in the way a written list can: nothing on it restates a value, and it counts the custom properties `assets/hub.css` declares against the names it carries and says on the page which ones it misses.
+
+**Two attributes name a token, and `validate_site.py` checks both.**
+`data-token` marks the cell the page fills with the resolved value; `data-spec` marks a specimen the page's own sheet paints with that same token.
+A name in either that `assets/hub.css` does not declare fails the pull request, so a rename cannot leave the reference describing something that is gone.
+Any page may use them; the reference page is simply the one that does.
+
+**Two classes belong to that page and to no lesson.**
+They are furniture for showing the system, not vocabulary for teaching with, and they live in `design-system/assets/course-extras.css` rather than in the hub sheet for exactly that reason.
+
+```html
+<span class="ds-spec" data-kind="colour" data-spec="--accent"></span>
+<span class="ds-spec" data-kind="size" data-spec="--fs-1">Handgloves</span>
+<code data-token="--fs-1">var(--fs-1)</code>
+
+<div class="ds-demo wide">
+  <div class="card tldr">...the widget, rendered...</div>
+  <div class="code-cap">the markup &middot; copy it, do not approximate it</div>
+  <pre><code>...the same markup, escaped...</code></pre>
+</div>
+```
+
+`.ds-spec` is one specimen and `data-kind` says which property it sets - one kind, one property, so a reader sees the token doing its own job rather than a picture of it.
+`.ds-demo` pairs a rendered widget with the markup that made it; the markup goes in an ordinary `pre`, so `hub.js` gives it the copy button every code block has.
+
+**Adding a token means adding a row there**, in the same pull request as the declaration and the first rule that reads it.
+Nothing forces it - a check that failed every sibling pull request adding a token would be a check people route around - but the page says out loud when a token is missing from it, and that line is the reason to go back.
+
+**Quotes inside a shown code block are written `&quot;`.**
+A reader sees the same characters and a copy takes the same text, because `textContent` decodes the entity.
+Written as plain quotes, `validate_site.py`'s link check reads a sample `href` as a link the page makes and fails on a file that was never meant to exist.
