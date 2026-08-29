@@ -71,11 +71,12 @@ If you are looking at a hub page with no bar, you are looking at the live site.
    no longer happens also fails, and it prints the one command that takes it out of the file; that is
    how the list only ever gets shorter.
 
-   Touching `assets/hub.css`, `assets/hub.js` or a course's `course-extras.css` adds three more
-   commands, and they need Chrome:
+   Touching `assets/hub.css`, `assets/hub.js` or a course's `course-extras.css` adds four more
+   commands, in the order the style job runs them, and they need Chrome:
 
    ```bash
    python3 scripts/style_snapshot.py
+   python3 scripts/type_invariants.py --report
    python3 scripts/contrast_matrix.py
    python3 scripts/focus_walk.py
    ```
