@@ -10,8 +10,22 @@ If you are an agent, also read [`AGENTS.md`](AGENTS.md), which adds the rules sp
 Nobody pushes to it, including the repository owner.
 Every change - a typo fix, a new lesson, a whole new course - lands through a pull request that a reviewer approves and that passes its checks.
 
-Merging into `main` triggers the publish workflow, which syncs the site to its S3 bucket.
-So a merged pull request is a live deployment. Treat it that way.
+## Two stages, two branches
+
+The hub publishes from one repository to two S3 buckets.
+
+| Branch | Stage | What it is |
+|---|---|---|
+| `main` | pre-production | the review site, closed to search engines, a red bar along the foot of every page |
+| `prod` | production | the live hub readers see |
+
+Merging into `main` triggers the publish workflow, which syncs the site to the pre-production bucket.
+So a merged pull request is a deployment to the review site, not to the live one. Treat it that way.
+
+Production moves only when the repository owner promotes it.
+He opens a pull request from `main` into `prod` and merges it in the GitHub UI; two branches in the same repository have no sync button, so the promotion pull request is the mechanism.
+That merge is a push to `prod`, and the push is what publishes the live hub.
+Nobody else pushes `prod`, and no coding agent goes near it.
 
 ## Workflow
 
@@ -53,7 +67,12 @@ So a merged pull request is a live deployment. Treat it that way.
    Say what changed, why, and what you checked in the browser.
 
 8. **Get it reviewed and merged.**
-   Once the checks are green and a reviewer approves, the merge publishes the site within a couple of minutes.
+   Once the checks are green and a reviewer approves, the merge publishes the pre-production site within a couple of minutes.
+
+9. **Check it on pre-production.**
+   Open the review site and look at what you changed on a real host rather than from disk.
+   Every page there carries a red pre-production bar; a page without one is the live site and you are in the wrong place.
+   The live hub gets your change when the repository owner promotes `main` into `prod`.
 
 ## Repository layout
 
@@ -62,7 +81,7 @@ index.html               the hub landing page; every course is a card here
 assets/                  the hub design system: hub.css, hub.js, fonts/. Every page links these.
 scripts/validate_site.py the structure and link checker that gates every pull request
 scripts/gen_outline.py   generates a course outline.js from its index.html
-.github/workflows/       validate on pull request, publish on merge to main
+.github/workflows/       validate on pull request, publish on push: main to pre-production, prod to production
 
 <course-name>/
   index.html             the course map; every lesson is linked from here

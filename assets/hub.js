@@ -8,7 +8,8 @@
    What it does, in order:
      1. head phase   - restore mode + palette from localStorage
      2. mount phase  - build the rail from window.COURSE_OUTLINE,
-                       build the topbar controls and settings popover
+                       build the topbar controls and settings popover,
+                       and the pre-production bar when the host says so
      3. wire phase   - quiz, copy buttons, reading progress, Mermaid
 
    Every page links this one file. There is no per-course runtime.
@@ -71,6 +72,16 @@
      palette accent unrotated. */
   var courseHits = location.pathname.match(/[^/]+-course(?=\/)/g);
   if (courseHits) root.setAttribute('data-course', courseHits[courseHits.length - 1]);
+
+  /* The fourth axis: which stage of the hub this page was served from. One
+     repository publishes to two buckets, so the answer is a property of the
+     host, not of anything a page could carry. Stamping it here, in the head
+     phase, lets hub.css paint the warning bar with the first paint rather than
+     after it. The live bucket has no "preprod" in its name, so on production
+     the attribute is absent, the bar is never built, and every rule that keys
+     off it is dead weight the browser never matches. Opened from disk,
+     hostname is empty and the page looks exactly like the live one. */
+  if (location.hostname.indexOf('preprod') !== -1) root.setAttribute('data-env', 'preprod');
 
   /* Mermaid renders itself on DOMContentLoaded unless told otherwise, and it
      would do so before the palette tokens have been read, producing a diagram
@@ -630,6 +641,19 @@
         current.scrollIntoView({ block: 'center' });
       }
     }
+  }
+
+  /* ---------- the pre-production warning bar ----------
+     A fixed strip along the foot of the viewport, so it stays in view at every
+     scroll position on all 781 pages without touching the body grid, the
+     sticky topbar or the rail's viewport arithmetic. */
+  function mountStageFlag() {
+    if (root.getAttribute('data-env') !== 'preprod') return;
+    var flag = el('div', 'preprod-flag');
+    flag.setAttribute('role', 'note');
+    flag.appendChild(el('b', null, 'Pre-production'));
+    flag.appendChild(el('span', null, 'This is the review site, not the live hub. Nothing here is published.'));
+    document.body.appendChild(flag);
   }
 
   /* ---------- topbar controls ---------- */
@@ -1197,6 +1221,7 @@
       document.body.dataset.rail = isWide() ? (get(STORE.rail) || 'on') : 'off';
     }
     mountTopbar(hasRail);
+    mountStageFlag();
     wireQuizzes();
     wireCopyButtons();
     wireMatrix();
