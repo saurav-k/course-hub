@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Fifteen checks, all deterministic and offline:
+Seventeen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -43,6 +43,7 @@ Fifteen checks, all deterministic and offline:
    of its own beyond the three grandfathered ones; and no eyebrow set in
    capitals runs past five words in a segment. What the registered hue then
    looks like needs a browser and is asserted in ``scripts/style_snapshot.py``.
+
 13. The accessibility floor, by the arithmetic half of checks G1, G2 and G3 in
    ``scripts/contrast.py``: every registered ground is inside its lightness band,
    every ink clears 7:1 and sits on the right side of the L* 48.9 crossover, and
@@ -56,10 +57,18 @@ Fifteen checks, all deterministic and offline:
    medium. A width feature is answered by the page box in print, and the printed
    page box is narrower than the hub's smallest breakpoint, so an unqualified
    one silently lays the paper out as a phone.
+16. The font contract: every ``@font-face`` reaches a woff2 that is on disk,
+   every woff2 on disk is named by a declaration, every face states a
+   ``font-display``, and the payload stays under the two recorded ceilings.
+17. Every token a page names, in a ``data-token`` or a ``data-spec`` attribute,
+   is a custom property ``assets/hub.css`` actually declares. Naming a token is
+   how ``design-system/index.html`` documents the system, and a rename in the
+   stylesheet would otherwise leave the reference page describing something that
+   no longer exists, with nothing red anywhere.
 
-Checks 9 to 15 read the shared asset files rather than the pages. What the
-design system then *renders* is the computed-style harness's job; see
-``scripts/style_snapshot.py``.
+Checks 9 to 16 read the shared asset files rather than the pages, and check 17
+reads both those and every page. What the design system then *renders* is the
+computed-style harness's job; see ``scripts/style_snapshot.py``.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
 which lets one pool of lessons be read along several named routes. That course
@@ -1267,6 +1276,61 @@ def check_contrast_floor() -> list[Problem]:
         for finding in contrast.check_all(registry)
     ]
 
+NAMED_TOKEN: re.Pattern[str] = re.compile(r'data-(?:token|spec)="(?P<name>--[a-z0-9-]+)"')
+
+
+def declared_tokens() -> set[str]:
+    """Every custom property ``assets/hub.css`` declares, anywhere in the file."""
+    return {name for rule in hub_rules() for name in declared_properties(rule.body)}
+
+
+def check_named_tokens_exist() -> list[Problem]:
+    """A page that names a token names one that is there.
+
+    ``design-system/index.html`` documents the framework by naming its tokens:
+    ``data-token`` marks the cell the page fills with the resolved value, and
+    ``data-spec`` marks the specimen its own stylesheet paints with that token.
+    Both are a reference into ``assets/hub.css``, and a reference can rot.
+
+    Nothing else would catch it. A renamed token leaves a ``var()`` that
+    substitutes to nothing, so the specimen paints nothing and the value cell
+    reports that the token is not set - on a page whose whole job is to be
+    right about what exists. The page still renders, every link still resolves,
+    and the computed-style harness records the new emptiness as the expected
+    answer the moment anyone re-records it.
+
+    So the check is on the name rather than on the pixel, it runs over every
+    page rather than over one, and it costs one pass of a regular expression.
+
+    Stylesheets are read as well as pages, because half of the reference lives
+    there: an attribute selector is how one specimen is painted with one token,
+    and a selector that matches nothing is the same rot with no page to show it.
+    """
+    declared = declared_tokens()
+    if not declared:
+        return [Problem("assets/hub.css", "declares no custom properties; the token layer is missing")]
+
+    sheets = [
+        sheet
+        for sheet in REPO_ROOT.rglob("*.css")
+        if not any(part.startswith(".") for part in sheet.relative_to(REPO_ROOT).parts)
+        and "node_modules" not in sheet.parts
+    ]
+
+    problems: list[Problem] = []
+    for source_file in html_pages() + sorted(sheets):
+        source = source_file.read_text(encoding="utf-8", errors="replace")
+        for name in sorted({match.group("name") for match in NAMED_TOKEN.finditer(source)}):
+            if name not in declared:
+                problems.append(
+                    Problem(
+                        relative(source_file),
+                        f"names {name}, which assets/hub.css does not declare; "
+                        "a renamed token leaves the reference describing something that is gone",
+                    )
+                )
+    return problems
+
 
 def check_no_local_markdown_links() -> list[Problem]:
     """The deploy syncs the repository minus ``*.md``, so a page that links a
@@ -2252,6 +2316,7 @@ def main() -> int:
         + check_page_margin_boxes()
         + check_width_queries_name_a_medium()
         + check_the_font_contract()
+        + check_named_tokens_exist()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
