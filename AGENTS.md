@@ -193,7 +193,7 @@ claims, so **NO EQUIVALENT is reserved for `absent`** and a cell must never impl
 something it demonstrably can. Which gaps are which is a list the research directory holds, not
 something to read out of the prose - the wording does not separate them.
 
-Ten traps in that design system, all found on the published site:
+Twelve traps in that design system, all found on the published site:
 
 - **Theme tokens are declared four times** (`:root`, the `prefers-color-scheme: dark` block, and
   the two explicit-choice selectors, because the toggle must beat the OS). A token added to
@@ -253,13 +253,32 @@ Ten traps in that design system, all found on the published site:
   `.chart :where(.ref)`, held at zero specificity so an `s-*` pairing still wins the colour. Before
   you add a chart class, check whether it sets a paint property or only modifies one, and **look at
   the figure** rather than trusting that the markup is present.
-- **A hand-authored chart's text is not clipped, it just leaves the box.** `svg.chart` scales its
+- **A hand-authored chart's text runs off the edge and is then cut there.** `svg.chart` scales its
   `viewBox` to the column, and SVG text neither wraps nor is bounded by the viewBox, so a caption
-  or axis note longer than the width simply runs off the right-hand edge - visible on screen and
-  invisible to every check in the repository, because the element is present and `getBBox` is
-  happy. At the `640` width these charts use, a `.lbl-sm` line runs out of room somewhere past
-  about ninety characters. Keep footnotes short or split them across two `<text>` elements, and
-  check the widest line in the rendered figure rather than in the source.
+  or axis note longer than the width simply leaves the box - and the browser's own `overflow:
+  hidden` on an outermost `<svg>` clips it at that edge, so the tail of the line is gone rather
+  than merely untidy. It is invisible to every check in the repository, because the element is
+  present and `getBBox` is happy. At the `640` width these charts use, a `.lbl-sm` line runs out of
+  room somewhere past about ninety characters. Keep footnotes short or split them across two
+  `<text>` elements, and check the widest line in the rendered figure rather than in the source.
+- **Three accessibility floors sit in `hub.css`, and each looks like a rule you could delete.**
+  `.chart text` pins `letter-spacing` and `word-spacing` to `normal !important`, so a reader's
+  text-spacing stylesheet cannot push a fixed-coordinate label past the clip above - which also
+  means **a tracking value added to a chart class does nothing**, because the pin outranks it.
+  `.mermaid svg foreignObject` carries `overflow: visible` on the screen sheet, not only in print,
+  because Mermaid writes each label's measured width onto the box and any later re-space clips what
+  no longer fits. `.spine .home` carries `min-height: 24px` because it was the hub's one SC 2.5.8
+  failure; seven neighbouring controls pass only on the spacing exception and the smallest
+  compliant one has 2px of headroom, so nothing in the topbar or the rail may be tightened to pay
+  for anything else.
+- **Code has one size token, `--fs-mono`, and it is written in `em` on purpose.** Both `pre` and
+  inline `code` read it, so both track whatever prose surrounds them: a custom property holding a
+  relative length is substituted unresolved and resolves at each use, which is exactly what a `rem`
+  cannot do. `pre` used to carry `.85rem` against inline code's `.86em` and the two rendered 17%
+  apart, with only the `em` half surviving a change to the body size. Do not re-express either in
+  `rem`, and do not add a `pre` size inside a media query - the small-screen `.78rem` was that same
+  defect a second time. The value is a constant today and becomes a function of the reader's body
+  face when the face registry lands; the call sites do not change when it does.
 
 Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
 tolerate Mermaid's async draw. `hub.js` drives the render itself and awaits `mermaid.run()`, so it
