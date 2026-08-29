@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LoRA is one point in a family of cheap adapters - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="Prompt tuning, prefix tuning, IA3, and DoRA: what each trades, and how to merge what you trained.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Steering a Frozen Model &middot; Lesson 07</div>
+  <h1>LoRA is one point in a family of cheap adapters - pick by where you inject</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">11 min</span>
+    The parameter-efficient family, ranked by what each one trains and where.
+    &middot; <a href="https://arxiv.org/abs/2106.09685">LoRA (Hu et al., 2021)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every parameter-efficient method answers the same question differently: <b>what is the smallest thing I can train that still changes the output?</b></li>
+      <li><b>Prompt and prefix tuning</b> train virtual tokens; <b>IA3</b> trains per-channel scales; <b>LoRA and DoRA</b> train low-rank matrix updates.</li>
+      <li>DoRA keeps LoRA's shape but decomposes the update into direction and magnitude, closing part of the quality gap to full fine-tuning.</li>
+      <li>When training ends you choose: keep the adapter hot-swappable, or <b>merge</b> it into the weights and pay nothing at inference.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  P["PROMPT TUNING&lt;br/&gt;train virtual tokens&lt;br/&gt;smallest, weakest"]
+  PR["PREFIX TUNING&lt;br/&gt;tokens per layer&lt;br/&gt;small, stronger"]
+  IA["IA3&lt;br/&gt;per-channel scales&lt;br/&gt;tiny, sharp"]
+  L["LoRA&lt;br/&gt;low-rank matrices&lt;br/&gt;the workhorse"]
+  DO["DoRA&lt;br/&gt;direction + magnitude&lt;br/&gt;closest to full"]
+  P --> PR --> IA --> L --> DO
+  DO --> F["FULL FINE-TUNE&lt;br/&gt;everything trains"]
+    </div>
+    <figcaption>Where this sits: the family is a spectrum ordered by how much of the network's computation the trained parameters can steer. <b>Move right only when the measurement on your held-out examples says the cheaper method stopped helping.</b></figcaption>
+  </figure>
+  <h2>1. The family, by what it trains</h2>
+  <p><b>Prompt tuning</b> prepends a handful of trainable virtual tokens and trains nothing else. The adapter is kilobytes, serving cost is a slightly longer sequence, and capacity is the lowest in the family - it nudges an already-capable model, it does not teach skills. <b>Prefix tuning</b> generalises it: trainable key-value prefixes inside every attention layer, so the injection point moves from the input to every depth. More capacity, more memory per layer, still no weight-matrix change.</p>
+  <p><b>IA3</b> trains one learned rescaling vector per channel inside attention and feed-forward blocks - reweighting existing computations rather than adding new ones. It is smaller than LoRA and sometimes sharper for narrow tasks, at the cost of expressive range. <b>DoRA</b> stays inside LoRA's shape but decomposes the weight update into a direction component and a magnitude component, training them separately; its published results sit measurably closer to full fine-tuning than plain LoRA at the same rank, for a little more training complexity (<a href="https://arxiv.org/abs/2106.09685">LoRA lineage</a>). For a desk practitioner the practical reading is: LoRA remains the default; DoRA is the upgrade when quality on held-out examples stalls.</p>
+
+  <h2>2. Merging: paying nothing at inference</h2>
+  <p>A trained LoRA adapter can ride along at inference - the BA product added to each forward pass - costing a small latency and one more file to manage. Or it can be <b>merged</b>: the product added once into the base weights, after which the model is a single file with the behaviour baked in and zero adapter overhead. The choice is an operational one, and it has a lifecycle:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Training
+  Training --> Evaluating
+  Evaluating --> Training
+  Evaluating --> HotSwappable
+  HotSwappable --> Serving
+  HotSwappable --> Merged
+  Merged --> Serving
+  Serving --> [*]
+    </div>
+    <figcaption>The adapter's lifecycle. Hot-swappable keeps many behaviours over one base and pays a latency tax per request; merged bakes one behaviour in and pays nothing. <b>Merge when a behaviour is settled; stay hot while you are still comparing.</b></figcaption>
+  </figure>
+
+  <p>Merging has one honest caveat from Lesson 03: an adapter trained on a 16-bit view of a 4-bit QLoRA base merges cleanly back into that 4-bit base only approximately, and re-quantization after merging adds a second rounding pass. Merge into the highest-precision copy of the base you keep, then quantize once, deliberately.</p>
+
+  <figure class="diagram">
+    <figcaption>Adapter size across the family for one 8192-by-8192 matrix, derived. The scale is logarithmic in spirit; the bars are drawn to a common axis. <b>Even the largest cheap adapter is a rounding error beside the base - family choice is about quality ceilings, not storage.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of adapter sizes in kilobytes for one 8192 by 8192 matrix: prompt tuning under 10, IA3 about 8, LoRA rank 16 about 256, DoRA rank 16 about 384, full fine-tune about 262144 kilobytes.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-signal" x="100" y="242" width="90" height="8"/>
+      <rect class="m-signal" x="220" y="242" width="90" height="8"/>
+      <rect class="m-signal" x="340" y="214" width="90" height="36"/>
+      <rect class="m-stat" x="460" y="196" width="90" height="54"/>
+      <text class="ttl" x="70" y="26">Trained parameters per 8192x8192 matrix, KB (derived)</text>
+      <text class="lbl-sm" x="145" y="266" text-anchor="middle">prompt</text>
+      <text class="lbl-sm" x="265" y="266" text-anchor="middle">IA3</text>
+      <text class="lbl-sm" x="385" y="266" text-anchor="middle">LoRA r16</text>
+      <text class="lbl-sm" x="505" y="266" text-anchor="middle">DoRA r16</text>
+      <text class="lbl-sm t-signal" x="105" y="234">&lt;10</text>
+      <text class="lbl-sm t-stat" x="470" y="188">&asymp;256 / &asymp;384</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">full fine-tune: &asymp;262,144 KB (off the chart)</text>
+    </svg>
+  </figure>
+  <h2>3. The selection rule</h2>
+  <p>Start at LoRA rank 16 over query and value projections - the family's proven default - and hold out examples before you train. If quality stalls, climb the ladder in both directions that matter: more rank or wider coverage inside LoRA, or DoRA for a better-shaped update. Step down to IA3 or prompt tuning only when you need many tiny behaviours over one shared base and can tolerate their ceilings. Never choose by parameter count alone: the family differs by capacity, and capacity is decided by your measurement, not by megabytes.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">You want many task behaviours, each switchable per request, over one deployed base model. Merge or stay hot?</div>
+      <button class="q-opt">Merge each into its own base copy</button>
+      <button class="q-opt">Prompt tuning only, it is smallest</button>
+      <button class="q-opt">Stay hot: one base, many adapters</button>
+      <button class="q-opt">Merge one and retrain every task</button>
+      <div class="q-fb">Merging bakes one behaviour per file; many behaviours want the hot path, paying its small latency tax per request. This is exactly the lifecycle fork from the page.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is DoRA's change to LoRA, in one sentence?</div>
+      <button class="q-opt">It trains the base model at lower precision</button>
+      <button class="q-opt">It splits updates into direction and magnitude</button>
+      <button class="q-opt">It swaps matrix adapters for virtual tokens</button>
+      <button class="q-opt">It merges finished adapters automatically</button>
+      <div class="q-fb">DoRA keeps LoRA's two-thin-matrices shape and factors the update into orientation and scale, which is why its quality sits closer to full fine-tuning at equal rank.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+    <div class="p-stem">
+      <p>You serve one 70B base to four teams. Each team's adapter is LoRA rank 16 over Q and V: 80 layers, two matrix pairs per layer, matrices 8192 by 8192, 16-bit halves. Merging would need a full extra copy of the base per team: 70B at 4-bit &asymp; 38.5 GB each.</p>
+      <p><b>Find</b> the memory cost of four hot adapters versus four merged copies, and the decision.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>Adapter per team: 80 &times; 2 pairs &times; 2 &times; 8192 &times; 16 parameters, times 2 bytes.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>One adapter.</b> 80 &times; 2 &times; 2 &times; 8192 &times; 16 &times; 2 bytes &asymp; 168 MB.</li>
+        <li><b>Hot path.</b> Four adapters &asymp; 0.7 GB over one base.</li>
+        <li><b>Merged path.</b> Four base copies &asymp; 154 GB - five times the memory for the same four behaviours.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Shared-base serving must win when behaviours outnumber bases, and 0.7 against 154 GB is the whole argument.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0008-speculative-decoding-buys-bandwidth-with-compute.html">Speculative Decoding Trades Spare Compute for Bandwidth</a></b> opens the final module: the lever that multiplies the serving rate you have been calculating since Lesson 01.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the family feels like trivia, ask the agent to rank the five methods by capacity for teaching a new tool-calling format, and justify each rank.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://arxiv.org/abs/2106.09685">LoRA paper</a> again - its related-work section frames the whole family the way this page ordered it.</p>
+
+  <div class="pager">
+    <a href="0006-qlora-fine-tunes-in-4-bit.html"><span class="dir">&larr; Previous</span><span class="ttl">QLoRA Fine-Tunes a Model That Does Not Fit Unfrozen</span></a>
+    <a class="nxt" href="0008-speculative-decoding-buys-bandwidth-with-compute.html"><span class="dir">Next &rarr;</span><span class="ttl">Speculative Decoding Trades Spare Compute for Bandwidth</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 07 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Speculative decoding trades spare compute for bandwidth - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="Draft several tokens, verify them in one pass: the acceptance-rate formula that predicts your speedup, including MTP.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Making It Fast, Then Deploying It &middot; Lesson 08</div>
+  <h1>Speculative decoding turns idle compute into bandwidth you did not have</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Draft-and-verify, the acceptance formula, and the MTP layer the course model ships with.
+    &middot; <a href="https://arxiv.org/abs/2211.17192">Leviathan et al., 2022</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Decode reads the weights once per token, and the compute units wait. That idle compute is a resource.</li>
+      <li><b>Speculative decoding</b> spends it: a cheap <b>draft</b> guesses several tokens, and the big model <b>verifies</b> all of them in one weight pass.</li>
+      <li>Expected tokens per pass is a closed-form function of the <b>acceptance rate</b> &alpha; and the draft length &gamma;.</li>
+      <li>Mis-drafted tokens are thrown away, so <b>output distribution is unchanged</b> - this is a speed lever that is not a quality lever.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  D["DRAFT MODEL&lt;br/&gt;cheap, reads little&lt;br/&gt;or an MTP head"] --> G["GUESS &gamma; TOKENS"]
+  G --> V["TARGET VERIFY&lt;br/&gt;one weight pass&lt;br/&gt;checks all &gamma;"]
+  V -->|accepted| K["KEEP the prefix&lt;br/&gt;+1 corrected token"]
+  V -->|first rejection| R["DISCARD the rest&lt;br/&gt;retry from there"]
+  K --> G
+  R --> G
+    </div>
+    <figcaption>Where this sits: the weight pass you were already paying for now certifies several tokens instead of producing one. The draft is nearly free because a small model reads few bytes. <b>Speedup equals how often the draft thinks like the target - times how much compute you can spare to let it try.</b></figcaption>
+  </figure>
+  <h2>1. The arithmetic of acceptance</h2>
+  <p>Let &alpha; be the probability the target model agrees with a drafted token - the <b>acceptance rate</b>. For a draft of &gamma; tokens, the expected number of tokens certified per verify pass is (Leviathan et al., 2022):</p>
+  <div class="math">
+    E[tokens per pass] = (1 &minus; &alpha;<sup>&gamma;+1</sup>) &divide; (1 &minus; &alpha;)
+    <span class="gloss">Read as: <b>&gamma;</b>: how many tokens the draft guesses ahead. <b>&alpha;</b>: how often the target keeps a drafted token. The whole sum is a truncated geometric series: you keep the first rejection's correction plus everything before it. At &alpha; = 1 the formula degenerates to &gamma; + 1 - a perfect draft wins everything.</span>
+  </div>
+  <p>Two regimes matter on desk hardware. When &alpha; is high - code completion, structured formats, any text the target finds predictable - drafting pays enormously. When the model is being genuinely creative, &alpha; falls, and every rejected token wasted draft compute that was, crucially, <em>free</em>: the target's weight pass happens either way. That asymmetry is the whole trick. Speculative decoding spends compute you were not using; it never spends bandwidth twice.</p>
+
+  <figure class="diagram">
+    <figcaption>Expected tokens per pass for &gamma; = 5, derived from the formula, against the no-draft baseline of exactly 1. <b>The curve is steep in the acceptance region where predictable text lives - and never below 1, since verification replaces the pass you were making anyway.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Line chart of expected tokens per pass against acceptance rate for a draft length of five: about 1.26 at alpha 0.5, 1.7 at 0.7, 2.7 at 0.85, 5.1 at 0.97, with a flat baseline line at one token.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <polyline class="s-noise thick" points="80,246 570,246"/>
+      <polyline class="s-signal thick" points="80,242 260,206 380,150 470,88 560,44"/>
+      <text class="ttl" x="70" y="26">Expected tokens per pass vs acceptance rate (&gamma; = 5, derived)</text>
+      <text class="lbl-sm" x="340" y="284" text-anchor="middle">acceptance rate &alpha;</text>
+      <text class="lbl-sm t-noise" x="80" y="238">baseline: 1.0</text>
+      <text class="lbl-sm t-signal" x="440" y="80">E = (1&minus;&alpha;&#8310;)&divide;(1&minus;&alpha;)</text>
+      <text class="lbl-sm" x="85" y="60">tokens per pass</text>
+    </svg>
+  </figure>
+
+  <h2>2. MTP: the draft built into the model</h2>
+  <p>A separate draft model is one option; the other is <b>multi-token prediction</b>. GLM-5.3-Flash ships with an MTP draft layer trained alongside the main network, so the draft is not a guess by a stranger - it is the target's own cheap opinion of its next few tokens (<a href="https://huggingface.co/zai-org/GLM-5.3-Flash">model card</a>). The vLLM serving recipe enables it with a speculative config of five draft tokens (<a href="https://recipes.vllm.ai/zai-org/GLM-5.3-Flash">recipe</a>). Self-drafting removes the second model from memory - precious capacity on a desk - and typically lifts &alpha; because the draft shares the target's representations.</p>
+
+  <div class="card callout key"><span class="tag">The key insight</span>
+    On a DGX Spark the compute-to-bandwidth ratio is extreme: roughly a petaFLOP of FP4 behind 273 GB/s. Every lever in Lessons 03-07 shrank bytes per token; speculation is the only lever that spends the surplus FLOPs, and it is worth the most exactly where the wall from Lesson 01 is thickest.</div>
+  <h2>3. What it costs</h2>
+  <p>The draft adds latency engineering: batches must wait for the draft's guesses, verification must align KV caches between draft and target, and at very high concurrency the spare compute disappears - every FLOP is already busy serving real tokens, and speculation's surplus vanishes. On a desk box serving one or two streams, surplus is abundant; on a server maxing its batch, it is not. Rejections also burn a little energy and bookkeeping. And the guarantee deserves restating: rejections are replaced by the target's own choice, so the output distribution matches plain decoding. You are buying speed with idle compute, not trading quality for it.</p>
+
+<figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  W["WHICH DRAFTER?"] --> A["separate small model&lt;br/&gt;extra memory, own voice"]
+  W --> B["MTP head&lt;br/&gt;no extra model, shared voice"]
+  A --> C["verify against target"]
+  B --> C
+    </div>
+    <figcaption>Two ways to source the draft: a stranger with its own weights, or the target itself through its MTP head. <b>The head wins on desk hardware because memory is the scarcest thing you have.</b></figcaption>
+  </figure>
+
+    <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">The draft model guesses 5 tokens; the target rejects the second. What ships to the user this step?</div>
+      <button class="q-opt">Nothing; the whole draft is redone</button>
+      <button class="q-opt">All five tokens, verified together</button>
+      <button class="q-opt">Only the target's own next token</button>
+      <button class="q-opt">The kept token plus the target's fix</button>
+      <div class="q-fb">Verification keeps the accepted prefix and appends the target's own choice at the first disagreement - exactly one wasted draft, no more. Output tokens always come from the target's distribution.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is speculative decoding worth the most on a DGX Spark rather than a saturated eight-GPU server?</div>
+      <button class="q-opt">Huge surplus compute behind narrow bandwidth</button>
+      <button class="q-opt">MTP exists only on Blackwell silicon</button>
+      <button class="q-opt">Servers cannot run draft models at all</button>
+      <button class="q-opt">Acceptance rates rise on smaller models</button>
+      <div class="q-fb">The lever spends idle compute. A server at high concurrency has converted its surplus into throughput already; a desk box decoding one stream has FLOPs standing idle behind 273 GB/s.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>Your workload shows an acceptance rate of &alpha; = 0.8. You serve one stream at 10 tokens per second without drafting, and the draft costs a negligible share of the step.</p>
+      <p><b>Find</b> the expected tokens per pass at &gamma; = 3 and &gamma; = 6, the resulting per-stream rates, and which draft length you would ship.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>E = (1 &minus; &alpha;<sup>&gamma;+1</sup>) &divide; (1 &minus; &alpha;). Compute for &gamma; = 3 and 6, then multiply by 10.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>&gamma; = 3.</b> E = (1 &minus; 0.8&#8308;) &divide; 0.2 = (1 &minus; 0.4096) &divide; 0.2 &asymp; 2.95 tokens per pass &rarr; &asymp; 30 tokens/s.</li>
+        <li><b>&gamma; = 6.</b> E = (1 &minus; 0.8&#8311;) &divide; 0.2 &asymp; 4.40 &rarr; &asymp; 44 tokens/s.</li>
+        <li><b>Decision.</b> Longer drafts keep helping while &alpha; stays high, but per-step draft cost grows too; measure both on the real workload and watch the marginal gain from 3 to 6 against the draft's latency.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> E must grow with &gamma; and approach &gamma; + 1 as &alpha; &rarr; 1; 2.95 &lt; 4.40 &lt; 7, as expected.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0009-case-study-glm-on-two-dgx-sparks.html">Two DGX Sparks Run a 320B MoE at NVFP4</a></b> assembles every mechanism so far into the course's first complete deployment.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the geometric series is opaque, ask the agent to enumerate a six-draft sequence outcome by outcome at &alpha; = 0.8 and average the results by hand.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://arxiv.org/abs/2211.17192">Leviathan et al., 2022</a> - Section 2 derives the formula and proves the output-distribution guarantee.</p>
+
+  <div class="pager">
+    <a href="0007-the-wider-peft-family.html"><span class="dir">&larr; Previous</span><span class="ttl">LoRA Is One Point in a Family of Cheap Adapters</span></a>
+    <a class="nxt" href="0009-case-study-glm-on-two-dgx-sparks.html"><span class="dir">Next &rarr;</span><span class="ttl">Two DGX Sparks Run a 320B MoE at NVFP4</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 08 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QLoRA fine-tunes in 4-bit - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="A 4-bit frozen base plus LoRA adapters plus paged optimizers: the memory ledger that fits fine-tuning on desk hardware.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Steering a Frozen Model &middot; Lesson 06</div>
+  <h1>QLoRA fine-tunes a model that does not fit unfrozen</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    NF4, double quantization, and paged optimizers - the three ideas that put training on a desk.
+    &middot; <a href="https://arxiv.org/abs/2305.14314">QLoRA (Dettmers et al., 2023)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>LoRA removed the optimizer state from the bill, but the frozen base model still sits in memory at full precision.</li>
+      <li><b>QLoRA</b> stores that frozen base in <b>NF4</b> - a 4-bit format built for weight distributions - and trains the adapters in higher precision on top.</li>
+      <li><b>Double quantization</b> shrinks even the scales, and <b>paged optimizers</b> spill training spikes to disk instead of crashing.</li>
+      <li>The bill: dequantization overhead during compute, and adapter quality trained against a 4-bit view of the world.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  B["FROZEN BASE&lt;br/&gt;stored in NF4&lt;br/&gt;4-bit"] --> DQ["DEQUANTIZE&lt;br/&gt;per group, on the fly"]
+  DQ --> MM["COMPUTE&lt;br/&gt;in higher precision"]
+  AD["LoRA A, B&lt;br/&gt;trainable, fp16"] --> MM
+  MM --> GR["GRADIENTS&lt;br/&gt;flow only to A, B"]
+  GR --> AD
+    </div>
+    <figcaption>Where this sits: Lesson 05 froze the model to shrink the trainable set; QLoRA freezes it into 4-bit to shrink the stored set too. <b>The base is a read-only, compressed library; the adapters are the only living part.</b></figcaption>
+  </figure>
+  <h2>1. NF4: a grid built for weights</h2>
+  <p>Lesson 03 established that a 4-bit grid has 15 or so usable points and that where you put them matters. <b>NF4</b> - NormalFloat4 - places those points at the quantiles of a standard normal distribution, because trained weights pile up around zero the way a bell curve does (<a href="https://arxiv.org/abs/2305.14314">QLoRA paper</a>). Every grid point then does useful work on real weight values instead of reserving resolution for regions weights rarely visit. QLoRA's published result is the load-bearing claim: a 4-bit NF4 base with adapters trained on top matches 16-bit full fine-tuning quality on its benchmarks - the storage saving is nearly free.</p>
+  <p><b>Double quantization</b> attacks the scales themselves. Lesson 03's groups each carry a scale, and at 32 bits per group of 64 weights that overhead is a few percent of the file. Quantizing the scales in 8-bit blocks with a second-level scale shrinks that overhead by roughly half. On a 306 GiB-class model every percentage point is GiB you get back for KV cache.</p>
+
+  <h2>2. The training ledger, itemised</h2>
+  <p>Put the whole run on one page for a 32B-class model, sized for desk arithmetic (derived):</p>
+  <figure class="diagram">
+    <figcaption>Training-memory ledger, derived for a 32B model: full fine-tune in BF16 versus QLoRA at rank 16. The axis is log-flavoured by the ratio; both bars are drawn to a common scale. <b>The frozen base at NF4 plus megabyte adapters fits where the naive version cannot even load.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of training memory for a 32B model: full fine-tune needs several copies, around 480 gigabytes; QLoRA needs about 17 gigabytes for the NF4 base plus adapters and activations.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-noise" x="160" y="44" width="110" height="206"/>
+      <rect class="m-signal" x="400" y="239" width="110" height="11"/>
+      <text class="ttl" x="70" y="26">Training memory, 32B model (derived)</text>
+      <text class="lbl-sm" x="215" y="266" text-anchor="middle">full fine-tune</text>
+      <text class="lbl-sm" x="455" y="266" text-anchor="middle">QLoRA</text>
+      <text class="lbl-sm t-noise" x="170" y="36">&asymp;480 GB</text>
+      <text class="lbl-sm t-signal" x="410" y="231">&asymp;17 GB</text>
+      <text class="lbl-sm" x="440" y="284" text-anchor="middle">weights + grads + Adam vs NF4 base + adapters + activations</text>
+    </svg>
+  </figure>
+  <p><b>Paged optimizers</b> close the ledger's risk line: training memory is spiky, and a long-sequence batch can transiently demand more than the average. QLoRA borrows the operating system's virtual-memory idea and lets optimizer state page to disk during spikes instead of crashing the run. On a desk machine with a large swap, that is the difference between an overnight job and an out-of-memory error at step 900.</p>
+
+  <h2>3. What it costs</h2>
+  <p>Every dequantization is compute you would not spend at 16-bit: each group's NF4 values are expanded to working precision on the fly during the forward and backward passes. Training runs slower per step than the same LoRA run over a 16-bit base. And the adapters learn against a slightly quantized view of the base - QLoRA's benchmarks say the effect is small, but your task is not their benchmark. The discipline stays the same as Lesson 05: hold out examples, measure before and after, and let the measurement price the saving.</p>
+<figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  B["NF4 base&lt;br/&gt;read-only"] --> DQ["dequantize group"]
+  DQ --> FW["forward pass"]
+  FW --> BW["backward pass"]
+  BW --> AU["update A, B only"]
+  AU --> DQ
+    </div>
+    <figcaption>One training step around the frozen base: expand, compute, flow gradients into the adapters alone, repeat. <b>The base never learns; only the thin pairs move.</b></figcaption>
+  </figure>
+
+    <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does NF4 spend its 15 grid points at a bell curve's quantiles rather than spacing them evenly?</div>
+      <button class="q-opt">Even spacing is impossible in 4 bits</button>
+      <button class="q-opt">Weights cluster near zero; place points there</button>
+      <button class="q-opt">It compresses the file better on disk</button>
+      <button class="q-opt">The GPU demands a normal distribution</button>
+      <div class="q-fb">Lesson 03's rule: the grid's resolution is the budget, and NF4 spends it where weights actually fall. Even spacing would waste points on empty regions of the range.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A training run crashes at step 900 with out-of-memory, though average memory seemed fine. Which QLoRA idea addresses exactly this?</div>
+      <button class="q-opt">Double quantization of the scales</button>
+      <button class="q-opt">NF4 storage of the frozen base</button>
+      <button class="q-opt">Freezing the base model entirely</button>
+      <button class="q-opt">Paged optimizers absorbing the spike</button>
+      <div class="q-fb">Average memory can hide transient spikes; paged optimizers absorb them by paging optimizer state, trading speed on those steps for not dying. The other three shrink steady-state memory, not spikes.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 15 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>You will QLoRA a 70B model on one 128 GB Spark. NF4 with overhead is 0.55 bytes per weight. Your KV budget for training sequences is 10 GB; adapters and optimizer state at rank 16 over Q and V total 3 GB; activations want 6 GB; the OS holds 6 GB.</p>
+      <p><b>Find</b> whether the run fits, and the largest model (at 0.55 bytes per weight) that would.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>Available for weights: 128 &minus; 10 &minus; 3 &minus; 6 &minus; 6 = 103 GB. Divide by 0.55.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>70B check.</b> 70 &times; 0.55 = 38.5 GB for weights. 38.5 + 25 &asymp; 63.5 GB total - fits with room to spare.</li>
+        <li><b>Largest model.</b> 103 GB &divide; 0.55 &asymp; 187 billion parameters.</li>
+        <li><b>Reading it.</b> The course model at 0.55 bytes per weight would want ~176 GB for weights alone - it does not fit a single Spark for training; Lesson 09's serving path is a different ledger.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The training limit must sit far below the serving limit for the same machine, because gradients, activations, and optimizer state join the bill - 187B versus the Lesson 09 serving math is exactly that gap.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0007-the-wider-peft-family.html">LoRA Is One Point in a Family of Cheap Adapters</a></b> widens the lens: what the other parameter-efficient methods trade, and how to merge an adapter when training is done.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the ledger confused you, ask the agent to rebuild it line by line for a 14B model on 32 GB and show which line dominates.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://arxiv.org/abs/2305.14314">QLoRA paper</a> - Section 3 defines NF4, double quantization, and paged optimizers in full.</p>
+
+  <div class="pager">
+    <a href="0005-lora-steers-a-frozen-model-with-two-small-matrices.html"><span class="dir">&larr; Previous</span><span class="ttl">LoRA Steers a Frozen Model with Two Small Matrices</span></a>
+    <a class="nxt" href="0007-the-wider-peft-family.html"><span class="dir">Next &rarr;</span><span class="ttl">LoRA Is One Point in a Family of Cheap Adapters</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 06 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

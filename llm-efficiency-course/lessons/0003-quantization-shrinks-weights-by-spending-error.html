@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Quantization spends rounding error to shrink memory - LLM Efficiency on Desk Hardware</title>
+<meta name="description" content="The scale-and-round arithmetic that halves a model's file, and the exact way the error enters.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">DESK EFFICIENCY</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Shrinking the Model &middot; Lesson 03</div>
+  <h1>Quantization buys smaller files by spending rounding error</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    The arithmetic of low-precision weights, and where the error actually hides.
+    &middot; <a href="https://arxiv.org/abs/2305.14314">QLoRA (Dettmers et al., 2023)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Quantization maps the model's continuous weights onto a small grid of representable values.</li>
+      <li>A <b>scale</b> stretches the grid over each group of weights; <b>rounding</b> snaps each weight to the nearest grid point.</li>
+      <li>Fewer bits means a coarser grid, so more error per weight - but weights as a population tolerate this remarkably well.</li>
+      <li>The cost is not uniform: a few <b>outlier</b> channels carry outsized magnitudes, and careful formats handle them with finer groups rather than more bits.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  W["FP weights&lt;br/&gt;2 bytes each&lt;br/&gt;306 GiB for the course model"] --> Q["CHOOSE FORMAT&lt;br/&gt;bits per weight"]
+  Q --> R["SCALE + ROUND&lt;br/&gt;grid per group"]
+  R --> F["4-BIT FILE&lt;br/&gt;~160 GiB derived"]
+  F --> S["FITS 2x SPARK&lt;br/&gt;256 GB pool"]
+    </div>
+    <figcaption>Where this sits: Lesson 02 left the model unable to fit two Sparks at 8-bit. This page is the lever that changes the file size, and Lesson 04 picks the exact format. <b>Quantization is the mandatory lever for this model - and it works by spending controlled error, not by deleting information at random.</b></figcaption>
+  </figure>
+  <h2>1. The scale-and-round arithmetic</h2>
+  <p>Take a group of weights - say 64 adjacent values in one tensor. Find the largest magnitude among them, choose how many bits you will spend, and derive a scale that stretches your grid across the group's range:</p>
+  <div class="math">
+    s = max(|w|) &divide; (2<sup>b&minus;1</sup> &minus; 1) &nbsp;&nbsp;&middot;&nbsp;&nbsp; w<sub>q</sub> = round(w &divide; s) &times; s
+    <span class="gloss">Read as: <b>s</b>: the scale - one grid spacing for this group. <b>b</b>: bits per weight, so a 4-bit grid holds 8 negative and 7 positive steps around zero. <b>w<sub>q</sub></b>: the stored-then-restored weight. Every weight snaps to the nearest grid point, and the snap is the entire cost.</span>
+  </div>
+  <p>The error any single weight can carry is at most half a grid spacing, s &divide; 2. Halve the bits and the grid gets roughly eight times coarser at the same range, so per-weight error grows - yet the model's answers barely move. Why? Each output sums thousands of weights, and rounding errors that are independent and roughly zero-centred partially cancel in the sum. The network's computation averages the noise away.</p>
+
+  <h2>2. Where the error hides: outliers</h2>
+  <p>The picture breaks when one weight in a group is enormous. The scale must stretch to cover the largest member, so every ordinary weight in that group lands on a coarse grid built for a giant - like pricing a shopping basket where one item costs a house. Transformer models have a few channels with exactly these outlier magnitudes, and naive per-tensor scales waste their entire grid on them.</p>
+  <p>The fix is finer grouping, not more bits. Scale per 64-weight group instead of per tensor, and a giant outlier ruins only its own group. Modern formats push this further: <b>NF4</b> assumes weights follow a normal distribution and places grid points where the weights actually are (<a href="https://arxiv.org/abs/2305.14314">QLoRA</a>), and 4-bit floating formats such as NVFP4 keep a floating-point layout so huge dynamic ranges survive. Lesson 04 compares them as products; the mechanism here is the same: control where the grid's resolution goes.</p>
+
+  <figure class="diagram">
+    <figcaption>The course model's file at four bits-per-weight choices, derived from 320B parameters. The line is the fit verdict for a 256 GB two-Spark pool. <b>Four bits is not a marginal saving - it is the difference between does-not-fit and fits.</b></figcaption>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of model file size in GiB at 8, 6, 4, and 3 bits per weight: about 306, 229, 160, and 115 GiB, with the 256 GB two-Spark pool marked as a band.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-stat" x="110" y="44" width="90" height="206"/>
+      <rect class="m-stat" x="230" y="97" width="90" height="153"/>
+      <rect class="m-signal" x="350" y="143" width="90" height="107"/>
+      <rect class="m-signal" x="470" y="174" width="90" height="76"/>
+      <line class="ref" x1="70" y1="80" x2="610" y2="80"/>
+      <text class="ttl" x="70" y="26">GLM-5.3-Flash file size by bits per weight (derived)</text>
+      <text class="lbl-sm" x="155" y="266" text-anchor="middle">8-bit</text>
+      <text class="lbl-sm" x="275" y="266" text-anchor="middle">6-bit</text>
+      <text class="lbl-sm" x="395" y="266" text-anchor="middle">4-bit</text>
+      <text class="lbl-sm" x="515" y="266" text-anchor="middle">3-bit</text>
+      <text class="lbl-sm t-stat" x="120" y="36">306 GiB</text>
+      <text class="lbl-sm t-signal" x="380" y="135">~160 / ~115 GiB</text>
+      <text class="lbl-sm" x="76" y="74">256 GB two-Spark pool</text>
+    </svg>
+  </figure>
+  <div class="card callout warn">
+    An honest limit: the quality cost of 4-bit is real but model-specific, and for GLM-5.3-Flash no published perplexity or benchmark comparison of its FP8 and 4-bit checkpoints existed when this course was written. The mechanism on this page says why you should expect a small, uneven degradation - concentrated in rare, outlier-heavy computations - not a uniform dumbing-down. Verify on your own workload before trusting any quantization below 4 bits.</div>
+
+<figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  T["WEIGHT TENSOR"] --> G["GROUP of 64"]
+  G --> S1["SCALE per group"]
+  G2["outlier group"] --> S1
+  S1 --> R["ROUND to grid"]
+  R --> F["4-BIT FILE + scales"]
+    </div>
+    <figcaption>The pipeline from tensor to file: grouping localises each scale, so one outlier damages only its own 64 weights. <b>Grouping is where the error budget is spent on purpose.</b></figcaption>
+  </figure>
+
+    <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">One weight in a group of 64 is vastly larger than the rest. What happens to the other 63 under a shared scale?</div>
+      <button class="q-opt">Nothing; each weight has its own scale</button>
+      <button class="q-opt">They are clipped to zero for safety</button>
+      <button class="q-opt">They gain precision as the scale grows</button>
+      <button class="q-opt">They lose precision as spacing grows</button>
+      <div class="q-fb">The scale must cover the group's largest magnitude, so the grid spacing grows and the ordinary weights snap to coarser points. The fix is finer groups, not more bits.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why do independent rounding errors mostly cancel across a layer's computation?</div>
+      <button class="q-opt">Quantization drops the smallest weights</button>
+      <button class="q-opt">Thousands of zero-centred errors cancel</button>
+      <button class="q-opt">The scale makes all errors positive</button>
+      <button class="q-opt">Errors only arise in attention layers</button>
+      <div class="q-fb">Rounding error is bounded by half a grid spacing and scattered in both directions across weights; a layer's outputs are large sums over those weights, so the noise partially averages away rather than accumulating coherently.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 10 minutes, with paper</span></h2>
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>A group of 8 weights has magnitudes: 0.02, 0.05, 0.11, 0.04, 3.20, 0.03, 0.08, 0.06. You quantize to a 3-bit signed grid (steps at 0, &plusmn;s, &plusmn;2s, &plusmn;3s, &plusmn;4s where s = max &divide; 4).</p>
+      <p><b>Find</b> the restored values of 0.05 and 3.20, and the relative error of the small weight.</p>
+    </div>
+    <details class="hint"><summary>Hint</summary>
+      <p>s = 3.20 &divide; 4 = 0.8. Snap 0.05 to the nearest multiple of 0.8.</p></details>
+    <details class="solution"><summary>Show the worked solution</summary>
+      <ol class="worked">
+        <li><b>Scale.</b> s = 3.20 &divide; 4 = 0.8.</li>
+        <li><b>Restore.</b> 3.20 snaps to 3.2 &times; ... the grid point 4s = 3.2 exactly. The 0.05 snaps to 0 (nearest point is 0, not 0.8).</li>
+        <li><b>Relative error.</b> |0.05 &minus; 0| &divide; 0.05 = 100% for the small weight; 0% for the giant.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The giant survives perfectly and the ordinary weights are destroyed - exactly the outlier pathology finer grouping exists to fix.</p>
+    </details>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0004-pick-the-format-gguf-fp8-nvfp4.html">The Format Decides Where the Model Runs</a></b> turns this arithmetic into named products - GGUF, FP8, NVFP4 - and a decision rule for your silicon.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the scale-and-round dance is unclear, ask the agent to quantize the Practice 1 group again at 4 bits and compare which weights survive.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://arxiv.org/abs/2305.14314">QLoRA paper</a> - Section 2's NF4 analysis is the clearest written account of why 4-bit grids can be placed where weights live.</p>
+
+  <div class="pager">
+    <a href="0002-moe-total-versus-active-parameters.html"><span class="dir">&larr; Previous</span><span class="ttl">A 320B MoE Reads Like an 18B Model</span></a>
+    <a class="nxt" href="0004-pick-the-format-gguf-fp8-nvfp4.html"><span class="dir">Next &rarr;</span><span class="ttl">The Format Decides Where the Model Runs</span></a>
+  </div>
+
+  <footer><p>LLM Efficiency on Desk Hardware &middot; Lesson 03 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
