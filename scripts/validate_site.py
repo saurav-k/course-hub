@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Seventeen checks, all deterministic and offline:
+Eighteen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -60,14 +60,17 @@ Seventeen checks, all deterministic and offline:
 16. The font contract: every ``@font-face`` reaches a woff2 that is on disk,
    every woff2 on disk is named by a declaration, every face states a
    ``font-display``, and the payload stays under the two recorded ceilings.
-17. Every token a page names, in a ``data-token`` or a ``data-spec`` attribute,
+17. Below 720px the topbar keeps the wordmark and the page's last link, so that
+   last anchor is the whole of a phone reader's navigation and is the one anchor
+   that may not also carry ``hide-sm``.
+18. Every token a page names, in a ``data-token`` or a ``data-spec`` attribute,
    is a custom property ``assets/hub.css`` actually declares. Naming a token is
    how ``design-system/index.html`` documents the system, and a rename in the
    stylesheet would otherwise leave the reference page describing something that
    no longer exists, with nothing red anywhere.
 
-Checks 9 to 16 read the shared asset files rather than the pages, and check 17
-reads both those and every page. What the design system then *renders* is the
+Checks 9 to 16 read the shared asset files rather than the pages; 17 reads the
+pages; and check 18 reads both. What the design system then *renders* is the
 computed-style harness's job; see ``scripts/style_snapshot.py``.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
