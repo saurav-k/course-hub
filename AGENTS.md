@@ -12,18 +12,39 @@ There is no build, no test suite, no package manifest, and no framework.
 Each top-level folder is a self-contained course of hand-authored HTML lessons.
 Your job here is almost always authoring or correcting teaching content, not shipping code.
 
-The hub is published as a static website on Amazon S3. A merge into `main` deploys it.
+The hub is published as a static website on Amazon S3, in two stages, from one repository.
+A merge into `main` publishes to **pre-production**, the review site.
+A push to `prod` publishes to **production**, the live hub.
+The section below states the flow; treat it as the deployment contract.
+
+## The two stages
+
+`main` is the staging branch and `prod` is the release branch.
+
+| Branch | Stage | Bucket | Who moves it |
+|---|---|---|---|
+| `main` | pre-production | `vars.S3_BUCKET_PREPROD` | any merged pull request |
+| `prod` | production | `vars.S3_BUCKET` | the captain, by hand |
+
+Nothing you do reaches readers. A merged pull request publishes to pre-production only.
+Promotion is a separate human act: the captain opens a pull request from `main` into `prod` and merges it in the GitHub UI, which is a push to `prod` and fires the production publish.
+There is no branch sync button for two branches in the same repository, so the promotion pull request is the mechanism, not a convenience.
+No agent opens that pull request, merges it, or pushes to `prod` for any reason.
+
+The pre-production site paints a red bar along the foot of every page.
+If you are looking at a hub page with no bar, you are looking at the live site.
 
 ## Hard rules
 
-1. **Never push to `main`.**
+1. **Never push to `main`, and never touch `prod` at all.**
    `main` is protected and every change lands through a pull request. Create a branch, commit, push the branch, open the pull request. Stop there.
+   `prod` is the release branch. Do not push it, do not merge into it, do not open the promotion pull request, and do not branch your work from it. Promotion to production is the captain's own act.
 
 2. **Never merge your own pull request.**
-   A human reviews and merges. Merging publishes the live site.
+   A human reviews and merges. Merging publishes the pre-production site, which the captain then reviews before he promotes it.
 
 3. **Never deploy directly.**
-   Do not run `aws s3 sync` or any other AWS command. Publishing belongs to `.github/workflows/deploy.yml` and to nothing else. This repository deliberately ships no deploy script and no bucket configuration, so there is nothing here for you to run.
+   Do not run `aws s3 sync` or any other AWS command, against either bucket. Publishing belongs to `.github/workflows/deploy.yml` and to nothing else. This repository deliberately ships no deploy script and no bucket configuration, so there is nothing here for you to run.
 
 4. **Never touch credentials.**
    Do not read, print, copy, or modify AWS profiles, tokens, or repository secrets. Do not add credentials to any file.
@@ -35,7 +56,7 @@ The hub is published as a static website on Amazon S3. A merge into `main` deplo
    Their URLs are public and linked. Add new numbers at the end of the sequence.
 
 7. **Never link a local `.md` file from a page.**
-   The deploy syncs everything except `*.md`, so the link works from disk and returns a 404 on the live site. Name the file in `<code>` instead. The validator fails the pull request on it.
+   The deploy syncs everything except `*.md`, so the link works from disk and returns a 404 on both published sites. Name the file in `<code>` instead. The validator fails the pull request on it.
 
 8. **Validate before you open the pull request.**
 
@@ -139,9 +160,12 @@ as an extra lesson of that module and shows up in the rail as a phantom entry un
 heading. It renders, every link resolves, and `validate_site.py` stays green. Link a lesson from the
 hero or from a card, never from below the last module.
 
-`hub.js` writes three attributes on `<html>` in its head phase, before the first paint:
-`data-mode` and `data-palette` are the reader's choices, and `data-course` is the course folder,
-read straight out of the URL. `hub.css` turns `data-course` into a hue offset and rotates the
+`hub.js` writes four attributes on `<html>` in its head phase, before the first paint:
+`data-mode` and `data-palette` are the reader's choices, `data-course` is the course folder,
+read straight out of the URL, and `data-env` is `preprod` when the hostname carries that word and
+absent otherwise, which is what paints the pre-production bar. Every `[data-env="preprod"]` rule in
+`hub.css` is therefore dead on the live site, so keep the warning bar keyed off that attribute and
+never give it a rule that can match without it. `hub.css` turns `data-course` into a hue offset and rotates the
 palette accent by it in OKLCH, so each course wears a distinguishable accent drawn from whichever
 palette the reader picked. **A new course needs a line in that block**; without one it falls back
 to the plain palette accent. The rotated value reaches the page as `--course-accent` and its 14%
