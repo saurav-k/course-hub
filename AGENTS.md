@@ -487,6 +487,17 @@ Thirteen traps in that design system, all found on the published site:
   a rule that fixes one of screen, paper and the switched state can break another, and neither CI
   check renders a page, so prove a print change with a PDF at A4 *and* at US Letter and look at it.
 
+- **`* { min-width: 0 }` at the head of the sheet takes the flex automatic minimum off every
+  element, and a `white-space: nowrap` flex item then spills instead of shrinking.** The reset
+  earns its place - it is what stops a long code line widening a grid or flex child - but the cost
+  is that a `.spine` link is laid out narrower than its own text and the text runs out of the box,
+  across the gap and over the next link. Nothing in the repository could see it: no box overlaps
+  another, the row reports no overflow, `scrollWidth` equals `clientWidth`, and the computed-style
+  harness records no geometry that moves. At 320px it was on 594 of the 796 pages, and on the
+  fullest topbar in the hub it lasted up to 864px. Measure a nowrap row on its **rendered text** -
+  a `Range` over each item's contents, intersected with the item's own box when the item clips -
+  and never on `getBoundingClientRect` alone, which calls the worst of it correct.
+
 Anything that has to run after Mermaid renders - accessible names, focusable scroll boxes - must
 tolerate Mermaid's async draw. `hub.js` drives the render itself and awaits `mermaid.run()`, so it
 does the pass when that promise settles. Re-run the pass on `load` and on resize: web fonts and
