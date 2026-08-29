@@ -57,10 +57,10 @@ Nobody else pushes `prod`, and no coding agent goes near it.
    ```
 
    It loads a fixed sample of pages in every palette and both modes and compares
-   every component's computed style against the committed snapshot. Nothing
-   moved is the answer you want. If something moved on purpose, re-record with
-   `--write`, commit the snapshot, and say in the pull request what moved and
-   why.
+   every component's computed style against the committed snapshot. `nothing
+   moved.` is the answer you want. If something moved on purpose, re-record it
+   with `--write`, commit the snapshot, and say in the pull request what moved
+   and why.
 
 5. **Preview in a browser.**
    There is no build step. Open the file directly:
@@ -92,15 +92,15 @@ Nobody else pushes `prod`, and no coding agent goes near it.
 ## Repository layout
 
 ```
-index.html               the hub landing page; every course is a card here
-assets/                  the hub design system: hub.css, hub.js, fonts/. Every page links these.
-scripts/validate_site.py the structure and link checker that gates every pull request
-scripts/check_pages_gate.py  runs the house-standard page checker against its recorded baseline
-scripts/style_snapshot.py    the computed-style harness; proves a stylesheet change moved nothing
-scripts/style-sample.txt     the fixed sample of pages the harness loads
-scripts/style-baseline/      the committed snapshot the harness compares against
-scripts/gen_outline.py   generates a course outline.js from its index.html
-.github/workflows/       validate on pull request, publish on push: main to pre-production, prod to production
+index.html                  the hub landing page; every course is a card here
+assets/                     the hub design system: hub.css, hub.js, fonts/. Every page links these.
+scripts/validate_site.py    the structure and link checker that gates every pull request
+scripts/check_pages_gate.py runs the house-standard page checker against its recorded baseline
+scripts/style_snapshot.py   the computed-style harness; proves a stylesheet change moved nothing
+scripts/style-sample.txt    the fixed sample of pages the harness loads
+scripts/style-baseline/     the committed snapshot the harness compares against
+scripts/gen_outline.py      generates a course outline.js from its index.html
+.github/workflows/          validate on pull request, publish on push: main to pre-production, prod to production
 
 <course-name>/
   index.html             the course map; every lesson is linked from here
