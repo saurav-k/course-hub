@@ -163,6 +163,37 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 - Do not change `.github/workflows/` or `scripts/` unless the task is explicitly about the pipeline.
 - If the task needs a decision you cannot make from the repository - a course's direction, a licence question, a deployment change - stop and ask. Do not guess.
 
+## The reader control panel
+
+`hub.js` builds one panel and it reaches every page, with no page markup anywhere. Six controls,
+plus motion in the accessibility defaults and one reset: ground (mode and palette), body size,
+reading face, measure, line spacing, density. Display face, mono face and eyebrow treatment are
+**not** reader controls and must not become them - a reader sets one once and never returns to it,
+while a course has every reason to differ on it, so they are author tokens on the course contract
+above. The accent is not a control either: expanding it into a picker would put a contrast
+criterion in the reader's hands.
+
+**Every control is an input to a derivation.** The measure names characters, the body size names
+apparent size, and `--measure`, `--fs-body`, `--fs-mono` and the per-face constants are outputs
+nothing may write. See the derived axes above for why the four are coupled.
+
+**The panel moves, by pointer and by keyboard**, and its position is stored as an intention that is
+clamped into whatever viewport is in front of the reader. The band is measured off the sticky
+topbar and the pre-production strip rather than assumed. It is a **non-modal** dialog - no
+`aria-modal`, no focus trap, and an outside click does not close it - because a reader parks it in
+order to keep reading with it open. Escape and the close control both return focus to the opening
+button, but only when focus was inside the panel.
+
+**Density is the one control with a hard limit.** It scales the twenty prose-rhythm roles and
+reaches nothing else, because there is no headroom in the chrome: one control already fails SC
+2.5.8, seven more pass on the spacing exception, and the smallest compliant control has 2px of
+margin. The limit is structural rather than promised - `hub.js` can only write `--*-user` names
+that `hub.css` resolves, and those are the twenty-four reader-reachable tokens.
+
+The author-facing statement, including the focus contract in full, is
+`.claude/skills/course-authoring/references/widgets.md`, "The reader control panel". Do not restate
+it here.
+
 ## The course contract
 
 A course declares its identity through **seven tokens, in one block keyed on `data-course`, and
@@ -234,9 +265,11 @@ Six further tokens carry a two-name form for the same reason on a different axis
 course contract above.
 Everything else is a one-layer design token, because a `--*-user` layer on a value no control can
 write is dead weight that still has to be kept right in every media query.
-**The reading face is the one reader choice that is not a `--*-user` property.** It is a registered
-axis attribute, `data-body-face`, because three measured constants have to travel with the family
-and a single value cannot carry them; see the derived axes below.
+**Two reader choices are not `--*-user` properties.** They are registered axis attributes, because
+what they carry does not compose into a single value: `data-body-face` selects a family together
+with the three measured constants that have to travel with it, and `data-motion` selects a block of
+rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub.js` may write no
+attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
 near the head of `hub.css`, marked "the design axis", carries 301 of them: `--font-display`,
@@ -328,10 +361,13 @@ as an extra lesson of that module and shows up in the rail as a phantom entry un
 heading. It renders, every link resolves, and `validate_site.py` stays green. Link a lesson from the
 hero or from a card, never from below the last module.
 
-`hub.js` writes five attributes on `<html>` in its head phase, before the first paint:
-`data-mode`, `data-palette` and `data-design` are the reader's choices, `data-course` is the course
+`hub.js` writes up to seven attributes on `<html>` in its head phase, before the first paint:
+`data-mode`, `data-palette`, `data-design`, `data-body-face` and `data-motion` are the reader's
+choices, `data-course` is the course
 folder, read straight out of the URL, and `data-env` is `preprod` when the hostname carries that word and
-absent otherwise, which is what paints the pre-production bar. Every `[data-env="preprod"]` rule in
+absent otherwise, which is what paints the pre-production bar. The two reading axes are written only
+when the reader has chosen something other than the registered default, so a page with no stored
+preference carries exactly the attributes it carried before those axes existed. Every `[data-env="preprod"]` rule in
 `hub.css` is therefore dead on the live site, so keep the warning bar keyed off that attribute and
 never give it a rule that can match without it. `hub.css` turns `data-course` into a hue offset and rotates the
 palette accent by it in OKLCH, so each course wears a distinguishable accent drawn from whichever
