@@ -89,6 +89,15 @@ NARROW_PAGE: str = "llm-inference-course/lessons/0014-inference-unit-economics.h
 # the run instead of hanging it.
 MAX_STOPS: int = 400
 
+# The floor on a walk, and it is deliberately far below what any of these pages
+# actually has. How many stops a page offers is decided by layout - a box only
+# takes a tab stop when it genuinely scrolls, and how much scrolls depends on
+# the renderer's own text metrics, which is why the same walk finds 419 stops on
+# a Mac and 384 on the CI runner. Asserting a count would be asserting a font.
+# What this catches is a walk that has collapsed: a page that stops taking focus
+# after three controls passes every per-stop check and proves nothing.
+MIN_STOPS: int = 8
+
 TAB_DOWN: dict[str, object] = {
     "type": "rawKeyDown", "key": "Tab", "code": "Tab",
     "windowsVirtualKeyCode": 9, "nativeVirtualKeyCode": 9,
@@ -282,8 +291,11 @@ def walk(chrome: Chrome, where: str, within: str | None = None) -> tuple[list[di
         stops.append(stop)
         failures += judge(where, stop, expected)
 
-    if not stops:
-        failures.append(Failure(where, "nothing took focus at all; the walk proved nothing"))
+    if len(stops) < MIN_STOPS:
+        failures.append(
+            Failure(where, f"only {len(stops)} stop(s) took focus, below the {MIN_STOPS} a walk of "
+                           "anything in this hub reaches. The walk collapsed rather than passed.")
+        )
     return stops, failures
 
 
