@@ -71,11 +71,13 @@ If you are looking at a hub page with no bar, you are looking at the live site.
    no longer happens also fails, and it prints the one command that takes it out of the file; that is
    how the list only ever gets shorter.
 
-   Touching `assets/hub.css`, `assets/hub.js` or a course's `course-extras.css` adds a third command,
-   and it needs Chrome:
+   Touching `assets/hub.css`, `assets/hub.js` or a course's `course-extras.css` adds three more
+   commands, and they need Chrome:
 
    ```bash
    python3 scripts/style_snapshot.py
+   python3 scripts/contrast_matrix.py
+   python3 scripts/focus_walk.py
    ```
 
 ## Before you write anything
@@ -330,6 +332,34 @@ see: a page with no `data-mode` under the operating system's preference must com
 explicit choice computes, and a page switched after load must compute what the same page computes
 when loaded on that setting directly. Read the script's docstring before changing it - the sample,
 the property list and the two assertions each carry the reason they are shaped that way.
+
+**The accessibility floor is measured, not asserted, and it is a gate.** A ground of a given
+lightness bounds the best contrast any ink can reach on it, which is arithmetic rather than taste:
+no ground between L\* 43.8 and 54.1 reaches AA with either of the hub's inks, and the two cross
+over at L\* 48.9. The framework *prevents* that band rather than warning about it - the ground is a
+discrete registered choice, a palette and a mode, so no reader input can land inside it - and three
+checks keep the registered set outside. `scripts/contrast.py` runs inside `validate_site.py` and
+needs no browser: every registered `--bg` is inside its band (light L\* 88 to 99, dark 3 to 16),
+every `--ink` clears 7:1 and sits on the correct side of the crossover, and every other colour a
+palette states clears the floor its role carries. `scripts/contrast_matrix.py` runs in the style
+job and measures what only a browser can resolve - the nine `color-mix()` tints and the per-course
+accent - over six palettes, two modes and every registered course hue, because an OKLCH rotation
+holds OKLCH lightness constant and WCAG luminance is not OKLCH lightness. **Both carry a list of
+recorded breaches and neither list may grow**: a new breach fails, a recorded one that gets worse
+fails, and a recorded one that is fixed fails until its line is deleted. `--report` and the plain
+run print every number, which is what to read while choosing a colour. **If a check fails, the
+answer is the palette, never the band.**
+
+**One focus ring, five tokens, every element that can take focus.** `--focus-ring-color` is
+`--accent-2` so the ring is never the link colour and never the fill of the control it surrounds;
+`--focus-ring-offset` is 2px and `--focus-ring-offset-box` the 3px a scroll container takes, and
+neither may be 0 because a ring on the border box of a scroll container is clipped by it. Always
+`:focus-visible`, never `:focus`. `scripts/focus_walk.py` presses real Tab keys through three
+pages, the appearance panel and a 700px viewport, in both modes, and fails on a stop that has no
+ring, wears the browser's own, or sits flat on the border box. Two traps live in that script's
+comments and both cost an afternoon: a computed style read straight after the key is half-applied
+and looks exactly like the browser's ring, and `blur()` does not move the sequential focus
+navigation starting point, so a walk after a click silently covers two thirds of the page.
 
 Twelve traps in that design system, all found on the published site:
 

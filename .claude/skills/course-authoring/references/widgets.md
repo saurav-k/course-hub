@@ -665,6 +665,7 @@ The groups, and what each is for.
 | Tracking | 14 | Negative on display type, positive on anything set in capitals. |
 | Space | 173 | Two layers; see below. |
 | Shape | 11 | The radii, the four border widths, and the shadow *shape* - its colour stays on the mode layer. |
+| Focus ring | 5 | `--focus-ring-color`, `--focus-ring-width`, `--focus-ring-style` and the two offsets; see below. |
 | Motion | 10 | Six durations, two easings, two lift distances. |
 | Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
 
@@ -689,6 +690,20 @@ The rest are one-layer design tokens.
 The reading face is the one reader choice that is not a `--*-user` property, because three measured constants have to travel with the family; it is the registered axis attribute `data-body-face` instead.
 The consequence for a media query: a token with a `-user` layer must be restated as its `-default` inside the query, never as the token, or the query out-argues the reader.
 `--fs-body-default` in the 720px block is the worked example.
+
+**The focus ring is one ring, and every focusable element gets it.**
+`--focus-ring-color` is `--accent-2`, deliberately not `--accent`: the ring is never the link colour, and never the fill of the control it surrounds - the appearance panel's pressed mode card is painted in `--accent` and its ring used to be the same colour as itself.
+`--focus-ring-offset` is 2px and `--focus-ring-offset-box` is the 3px a scroll container takes, one pixel further out so the ring clears the box's own edge.
+Neither may be 0: a ring on the border box of a scroll container is clipped by that container and disappears.
+Write the rule against `:focus-visible`, never `:focus`, so a mouse click paints nothing.
+You should not need to write one at all - `hub.css` already covers `a`, `button`, `input`, `select`, `summary`, `textarea` and anything carrying a `tabindex` - and if you find an element that needs its own, it is a sign the element is doing something the closed vocabulary does not know about.
+`scripts/focus_walk.py` presses Tab through three pages, the appearance panel and a narrow viewport and fails if any stop is missing the ring, wearing the browser's own, or sitting flat on the border box.
+
+**Contrast is measured, not asserted.**
+`scripts/contrast.py` checks the colours the palette layer states outright - every registered ground is inside its lightness band, every ink clears 7:1 and sits on the right side of the L\* 48.9 crossover, every other palette colour clears the floor its role carries - and it runs inside `validate_site.py`, so it gates every pull request.
+`scripts/contrast_matrix.py` measures what needs a browser: the nine `color-mix()` tints and the per-course accent, over six palettes, two modes and every registered course hue.
+Both print every number, pass or fail: `python3 scripts/contrast.py --report` is the command to run while choosing a colour, and both carry a `--self-test` or a recorded-breach list so a gate that stops biting says so.
+The floors are WCAG 2.2: 7:1 body text, 4.5:1 every other text, 3:1 borders, focus rings and chart marks.
 
 ## The derived axes
 
