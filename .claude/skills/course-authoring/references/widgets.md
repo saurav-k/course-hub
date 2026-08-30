@@ -119,7 +119,7 @@ It names the division of the course this page belongs to, which is the one piece
 One span or two.
 The first is the part itself and is the only one that matters.
 A second span is the part's own subtitle, and it prints faint at the far end of the row; it needs no class, because a widget that can be told apart by counting its children should be.
-Write both in sentence case and let the stylesheet decide about capitals, exactly as `.fig-cap` does: the row takes the course's own eyebrow face, tracking and case from the design in force.
+Write both in sentence case and let the stylesheet decide about capitals, exactly as `.eyebrow` is written: the row takes the course's own eyebrow face, tracking and case from the design in force.
 
 It is a row rather than a label, and the hairline under it is what makes it read as a divider of the course rather than as a second caption.
 The rule's style is `--part-rule-style`, so the House design draws it solid and Press draws it dashed.
@@ -183,7 +183,6 @@ It is decoration beside a heading, and the heading's own name is what a reader n
 **One rule above the heading, never two.**
 An `h2` already carries a hairline above it.
 Do not add a second rule under the heading to go with the badge; the sheet ships one and one is what the page should have.
-
 
 ## The one-minute version
 
