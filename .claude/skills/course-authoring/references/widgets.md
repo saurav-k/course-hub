@@ -1035,9 +1035,10 @@ One click repaints the whole page, which is a demonstration rather than a label;
 It names the mode it will switch to rather than the mode that is on, in its glyph and in its `aria-label`, and it follows the operating system's preference while the reader has stated none.
 The reference site's own button shows the current theme and reads as an instruction, so `Light` there means "you are in Light" and every reader who takes it for a label presses it expecting the opposite.
 
-**The panel now has two openers and no owner.**
-Both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was used.
+**The panel now has two openers and no owner, and the shell is where that lives.**
+`attachOpener` registers a button rather than replacing the last one, so both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was actually used.
 A reader who opened the panel from the corner and was thrown to the topbar has lost their place, which is the thing the panel's focus contract exists to prevent.
+A third way in, or a second panel with two of its own, is one call and no new code.
 
 **Scroll-to-top is absent until there is somewhere to go back to**, which is one viewport of scrolling rather than a literal distance.
 It is the first control in the row, because the cluster hugs the right edge and a control that comes and goes on the left never moves the other two under the reader's thumb.
@@ -1046,7 +1047,7 @@ Activating it scrolls with no `behavior` named, so the browser reads `scroll-beh
 
 **Three positioning decisions, and each is read rather than assumed.**
 The bottom edge is `--dock-offset` plus whatever the pre-production strip occupies, through the fallback in `var(--preprod-h, 0px)`, so the live site and the review site are one declaration.
-`z-index: 64` puts the cluster under the rail's drawer scrim below 1040px and under the appearance panel, so a click on it while the drawer is open dismisses the drawer, which is what the reader meant.
+`z-index: 64` puts the cluster under the rail's drawer scrim below 1040px and under every panel shell, so a click on it while the drawer is open dismisses the drawer, which is what the reader meant.
 It is a `role="group"` and not a `role="toolbar"`, because a toolbar owes the reader arrow-key roving focus and three plain buttons owe nothing beyond Tab.
 
 **It is chrome, so it is out of the density control's reach and it is not on the paper.**

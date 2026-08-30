@@ -199,10 +199,12 @@ the second.** Three controls, also built by `hub.js` with no page markup: light 
 launcher, and scroll-to-top. It exists because a control nobody finds is a control nobody has, and
 the mode toggle is the part that teaches - one click repaints the page, so the launcher beside it
 reads as an offer. Both openers wear `aria-expanded` and closing returns focus to whichever one was
-used. Its bottom edge reads `var(--preprod-h, 0px)` rather than assuming the foot of the viewport is
-free, and it sits under the rail's drawer scrim and under the panel, so the corner needs none of the
-`!important` arms race the reference site's own cluster carries. Its three tokens are
-`--dock-target`, `--dock-offset` and `--sp-inset-dock`, all on the design axis.
+used, and the shell owns that: `attachOpener` registers a button rather than replacing the last one,
+so a third way in costs one call. Its bottom edge reads `var(--preprod-h, 0px)` rather than assuming
+the foot of the viewport is free, and it sits under the rail's drawer scrim and under every panel
+shell, so the corner needs none of the `!important` arms race the reference site's own cluster
+carries. Its three tokens are `--dock-target`, `--dock-offset` and `--sp-inset-dock`, all on the
+design axis.
 
 The author-facing statement, including the focus contract in full, is
 `.claude/skills/course-authoring/references/widgets.md`, "The reader control panel" and "The
