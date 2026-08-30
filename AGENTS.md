@@ -112,6 +112,15 @@ Do not infer the house style from this file. Infer it from the lessons.
 - One tight idea per lesson, mental model first, then the mechanism, then the trade-offs.
 - Full normal prose. Complete sentences. No terse fragments in published content, whatever style the chat conversation is using.
 - Include active-recall widgets. Copy the exact markup documented in the `assets/hub.js` header; do not invent your own widget shape.
+- A figure carries two lines above the drawing: `.fig-cap` names the subject in two to five
+  words and `.fig-claim` says in one sentence what the drawing proves, so the picture answers a
+  question the reader has already asked. Both are direct children of `figure.diagram`, because
+  `hub.css` selects them that way: one wrapped in a `div` for spacing takes no styling and renders
+  as body text at figure width, which validates and reaches no console. `validate_site.py` check
+  19 fails that shape, a claim with no label, a reversed pair, and either line below the drawing.
+  Presence is never checked by machine and must not be: a label cannot be generated. The
+  author-facing statement is `.claude/skills/course-authoring/references/widgets.md`, "What a
+  figure is".
 - A Mermaid diagram is a `<div class="mermaid">`, never a `<pre class="mermaid">`. `assets/hub.js` appends a copy button to every `<pre>`, and Mermaid renders from the element's `textContent`, so a `pre` silently picks up the word `copy` as a final line of graph source and the diagram renders as a syntax error. Nothing reaches the console, so always look at the figures rather than counting them.
 - Make quiz options match in word and character count. A visibly longer correct answer leaks the answer.
 - File it as `lessons/NNNN-kebab-case.html`, continuing the existing sequence.
@@ -163,7 +172,17 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 - Do not change `.github/workflows/` or `scripts/` unless the task is explicitly about the pipeline.
 - If the task needs a decision you cannot make from the repository - a course's direction, a licence question, a deployment change - stop and ask. Do not guess.
 
-## The reader control panel
+## The panel shell, and the reader control panel
+
+**A panel is built by one shell, `makePanel` in `hub.js`, and never by hand.** The shell owns the
+whole contract: drag by pointer and keyboard, the viewport clamp, a position remembered under that
+panel's own key, open and close, the focus contract and the settling glide. A panel supplies its
+name, its store key, its title and what goes in its body, and it wears `.panel-shell` plus one class
+of its own for the two lengths it states. Never copy the contract into a second panel; ask for a
+shell. It is **non-modal, has no backdrop and does not close on an outside click**, and none of that
+is configurable - a reader parks a panel in order to keep reading beside it. The author-facing
+statement is `.claude/skills/course-authoring/references/widgets.md`, "The panel shell". Do not
+restate it here.
 
 `hub.js` builds one panel and it reaches every page, with no page markup anywhere. Six controls,
 plus motion in the accessibility defaults and one reset: ground (mode and palette), body size,
@@ -178,22 +197,27 @@ apparent size, and `--measure`, `--fs-body`, `--fs-mono` and the per-face consta
 nothing may write. See the derived axes under "Editing the shared assets" for why the four are
 coupled.
 
-**The panel moves, by pointer and by keyboard**, and its position is stored as an intention that is
-clamped into whatever viewport is in front of the reader. The band is measured off the sticky
-topbar and the pre-production strip rather than assumed. It is a **non-modal** dialog - no
-`aria-modal`, no focus trap, and an outside click does not close it - because a reader parks it in
-order to keep reading with it open. Escape and the close control both return focus to the opening
-button, but only when focus was inside the panel.
-
 **Density is the one control with a hard limit.** It scales the twenty prose-rhythm roles and
 reaches nothing else, because there is no headroom in the chrome: one control already fails SC
 2.5.8, seven more pass on the spacing exception, and the smallest compliant control has 2px of
 margin. The limit is structural rather than promised - `hub.js` can only write `--*-user` names
 that `hub.css` resolves, and those are the twenty-four reader-reachable tokens.
 
+**The panel has two openers, and a floating cluster in the bottom-right corner of every page is
+the second.** Three controls, also built by `hub.js` with no page markup: light and dark, the panel
+launcher, and scroll-to-top. It exists because a control nobody finds is a control nobody has, and
+the mode toggle is the part that teaches - one click repaints the page, so the launcher beside it
+reads as an offer. Both openers wear `aria-expanded` and closing returns focus to whichever one was
+used, and the shell owns that: `attachOpener` registers a button rather than replacing the last one,
+so a third way in costs one call. Its bottom edge reads `var(--preprod-h, 0px)` rather than assuming
+the foot of the viewport is free, and it sits under the rail's drawer scrim and under every panel
+shell, so the corner needs none of the `!important` arms race the reference site's own cluster
+carries. Its three tokens are `--dock-target`, `--dock-offset` and `--sp-inset-dock`, all on the
+design axis.
+
 The author-facing statement, including the focus contract in full, is
-`.claude/skills/course-authoring/references/widgets.md`, "The reader control panel". Do not restate
-it here.
+`.claude/skills/course-authoring/references/widgets.md`, "The reader control panel" and "The
+floating control cluster". Do not restate it here.
 
 ## The course contract
 
@@ -279,7 +303,7 @@ rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub
 attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries 317 of them: `--font-display`,
+near the head of `hub.css`, marked "the design axis", carries 339 of them: `--font-display`,
 `--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
 eight-step space ramp with a role layer over it, the reading frame, shape, motion and the eyebrow
 treatment. Six of

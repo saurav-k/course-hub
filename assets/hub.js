@@ -994,9 +994,12 @@
   }
 
   /* ============================================================
-     2. MOUNT PHASE - the rail, the topbar controls, the settings panel
+     2. MOUNT PHASE - the rail, the topbar controls, the appearance panel
      ============================================================ */
-  var settingsEl = null;
+  /* The one panel this file builds today, held so the sync pass and the reset
+     button can reach it. It is a shell handle rather than an element: what the
+     panel is made of belongs to the shell and nothing outside it may reach in. */
+  var appearance = null;
 
   function el(tag, cls, text) {
     var node = document.createElement(tag);
@@ -1254,66 +1257,133 @@
 
     var button = el('button', 'tb-btn');
     button.type = 'button';
-    button.setAttribute('aria-expanded', 'false');
-    button.setAttribute('aria-haspopup', 'dialog');
     button.appendChild(el('span', 'tb-icon', '◑'));
     button.appendChild(el('span', 'hide-sm', 'Appearance'));
     inner.appendChild(button);
 
-    settingsEl = buildSettings();
-    document.body.appendChild(settingsEl);
+    /* The topbar owns the button and nothing else about the panel. Opening,
+       closing, moving, remembering a position and the focus contract all belong
+       to the shell, so a second panel gets every one of them by asking for one.
+       See "THE PANEL SHELL" below. */
+    appearance = buildAppearancePanel();
+    document.body.appendChild(appearance.el);
+    appearance.attachOpener(button);
+  }
 
-    /* ---------- opening, closing, and where focus goes ----------
-       The specification's focus contract was written against a popover anchored
-       to this button, and a panel the reader can pick up and park beside the
-       paragraph they are judging is a different thing. So the contract is
-       restated here, and every difference from the anchored one follows from
-       the panel being movable.
+  /* ---------- the floating control cluster ----------
+     Three controls, fixed to the bottom-right corner of every page, built here
+     and present in no page's markup. The stylesheet section of the same name
+     carries why it exists and where it sits; this is what it does.
 
-       It is a NON-MODAL dialog: `role="dialog"` and `aria-labelledby`, and no
-       `aria-modal`. A reader moves this panel in order to keep reading with it
-       open, so the page behind it is not inert and saying that it is would be a
-       lie a screen reader then acts on. For the same reason focus is not
-       trapped: Tab walks out of the panel into the page and back round, which
-       is what a reader who has parked it wants and what a trap would forbid.
+     It is inserted straight after the topbar rather than appended to the body,
+     so a reader on a keyboard reaches it in the same breath as the rest of the
+     chrome instead of after every paragraph, figure and footer link on the
+     page. That leaves a fixed overlay whose focus position is not its visual
+     position, which is true of any fixed overlay and is the lesser of the two:
+     a control cluster that costs eighty tab presses to reach is a control
+     cluster keyboard readers do not have.
 
-       Focus moves into the panel when it opens, because the reader asked for
-       it. On close it returns to the opening button only if it was inside the
-       panel at the time - a reader who has tabbed back into the page and
-       pressed Escape keeps their place instead of being thrown to the topbar.
+     It is a `role="group"` rather than a `role="toolbar"`, and that is a
+     promise not made on purpose. A toolbar owes the reader arrow-key roving
+     focus between its controls; three plain buttons in a labelled group owe
+     nothing beyond Tab, which is what they implement. */
+  var dockMode = null;
+  var dockTop = null;
 
-       An outside click no longer closes the panel, and that is the one
-       behaviour a reader may notice going. A parked panel that vanishes the
-       moment the reader clicks the text beside it is a panel that cannot be
-       parked. The ways out are the button, the close control in the title bar,
-       and Escape - three, all of them visible or conventional. */
-    function close(restoreFocus) {
-      if (settingsEl.hidden) return;
-      var inside = document.activeElement && settingsEl.contains(document.activeElement);
-      settingsEl.hidden = true;
-      button.setAttribute('aria-expanded', 'false');
-      if (restoreFocus && inside) button.focus();
+  /* The mode control names what it will do rather than what is on. The
+     reference site's own button shows the current theme and reads as an
+     instruction, so `Light` there means "you are in Light" and every reader
+     who takes it for a button label presses it expecting the opposite. */
+  function syncCluster() {
+    if (!dockMode) return;
+    var next = isDark() ? 'light' : 'dark';
+    var say = 'Switch to ' + next + ' mode';
+    dockMode.firstChild.textContent = next === 'dark' ? '\u263E' : '\u2600';
+    dockMode.setAttribute('aria-label', say);
+    dockMode.title = say;
+  }
+
+  function dockButton(glyph, label) {
+    var control = el('button', 'dock-btn');
+    control.type = 'button';
+    control.title = label;
+    control.setAttribute('aria-label', label);
+    /* The glyph is its own element so the mode control can be relabelled
+       without touching the button's attributes. It borrows no class from the
+       topbar: `.dock-btn` sets the icon size itself, and one owner for a
+       component's size is the rule the shared sheet is held to. */
+    control.appendChild(el('span', null, glyph));
+    return control;
+  }
+
+  function mountCluster() {
+    var dock = el('div', 'dock');
+    dock.setAttribute('role', 'group');
+    dock.setAttribute('aria-label', 'Reader controls');
+
+    /* Scroll to top, and it is the first child because the cluster hugs the
+       right edge: a control that appears and disappears on the left grows the
+       cluster away from the other two rather than pushing them under the
+       reader's thumb. */
+    dockTop = dockButton('\u2191', 'Back to the top of the page');
+    dockTop.hidden = true;
+    dockTop.addEventListener('click', function () {
+      /* No `behavior` is named, so the browser reads `scroll-behavior` off the
+         stylesheet: smooth by default and `auto` under either arm of the motion
+         axis. Naming `smooth` here would animate a scroll for a reader who
+         asked the whole system for no animation. */
+      window.scrollTo({ top: 0 });
+      /* Scrolling moves the page and leaves the keyboard where it was, so the
+         next Tab would carry on from the foot of a document the reader has just
+         left. Focus follows the scroll to the first thing at the top. It is
+         `preventScroll` because the smooth scroll is already under way, and it
+         is the wordmark because that is the page's first stop. A pointer
+         activation sets the browser's modality to pointer, so this paints no
+         ring for a reader using a mouse and paints one for a reader using
+         Tab, which is what `:focus-visible` is for. */
+      var first = document.querySelector('.spine .home');
+      if (first) first.focus({ preventScroll: true });
+    });
+    dock.appendChild(dockTop);
+
+    /* Nothing to launch on a page with no topbar, and no dead control either.
+       The shell owns opening, closing and where focus goes; this is a second
+       button asking it for the same contract the topbar's already has. */
+    if (appearance) {
+      var launch = dockButton('\u25D1', 'Appearance and reading settings');
+      appearance.attachOpener(launch);
+      dock.appendChild(launch);
     }
 
-    function open() {
-      settingsEl.hidden = false;
-      button.setAttribute('aria-expanded', 'true');
-      syncSettings();
-      // The panel has no size while it is hidden, so the constraint that keeps
-      // it on screen can only be applied now. This is also what re-seats a
-      // stored position that no longer fits the viewport in front of the reader.
-      placeFromStore();
-      var first = settingsEl.querySelector('button, input');
-      if (first) first.focus();
-    }
+    dockMode = dockButton('\u263E', 'Switch to dark mode');
+    dockMode.addEventListener('click', function () { applyMode(isDark() ? 'light' : 'dark'); });
+    dock.appendChild(dockMode);
 
-    button.addEventListener('click', function () {
-      if (settingsEl.hidden) open(); else close(true);
-    });
-    closePanel = close;
-    document.addEventListener('keydown', function (event) {
-      if (event.key === 'Escape') close(true);
-    });
+    var spine = document.querySelector('.spine');
+    if (spine && spine.parentNode) spine.parentNode.insertBefore(dock, spine.nextSibling);
+    else document.body.appendChild(dock);
+
+    /* A page the reader has not left yet has nowhere to go back to, so the
+       control is not there. The threshold is one viewport rather than a
+       literal, because "far enough to have lost the top" is a property of the
+       screen in front of the reader and not of a number.
+
+       It is never taken away while it holds focus. Hiding the element a
+       keyboard reader is standing on drops focus to the body and loses their
+       place in the tab order, and a reader can reach the top with the wheel
+       while the control is focused. */
+    var judge = function () {
+      var far = (window.scrollY || document.documentElement.scrollTop || 0) > window.innerHeight;
+      if (!far && dockTop.contains(document.activeElement)) return;
+      // Only on a change. This runs on every frame of a scroll, and writing the
+      // same state back each time is work the browser has to look at.
+      var away = !far;
+      if (dockTop.hidden !== away) dockTop.hidden = away;
+    };
+    window.addEventListener('scroll', judge, { passive: true });
+    window.addEventListener('resize', judge);
+    judge();
+    syncCluster();
   }
 
   /* ---------- the appearance panel ---------- */
@@ -1415,45 +1485,21 @@
     return field;
   }
 
-  function buildSettings() {
-    var panel = el('div', 'settings');
-    panel.hidden = true;
-    panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-labelledby', 'set-title');
-
-    /* ---------- the title bar, which is the handle ----------
-       The captain asked for a movable bar and meant it: the panel is picked up
-       and put where the reader wants it, rather than hanging off the button
-       that opened it. The whole strip is the pointer surface and the grip
-       inside it is the keyboard one, because a panel only a mouse can move is a
-       panel some readers cannot move at all. */
-    var bar = el('div', 'set-bar');
-    var grip = el('button', 'set-grip');
-    grip.type = 'button';
-    grip.setAttribute('aria-label', 'Move panel');
-    grip.setAttribute('aria-describedby', 'set-move-hint');
-    grip.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown ArrowLeft ArrowRight Home');
-    grip.appendChild(el('span', 'tb-icon', '✥'));
-    var title = el('h2', 'set-title', 'Appearance');
-    title.id = 'set-title';
-    var shut = el('button', 'set-close');
-    shut.type = 'button';
-    shut.setAttribute('aria-label', 'Close appearance panel');
-    shut.appendChild(el('span', 'tb-icon', '✕'));
-    shut.addEventListener('click', function () { if (closePanel) closePanel(true); });
-    bar.appendChild(grip);
-    bar.appendChild(title);
-    bar.appendChild(shut);
-    panel.appendChild(bar);
-
-    var hint = el('p', 'sr-only',
-      'Drag this panel to move it, or press the arrow keys while this control has focus. '
-      + 'Hold Shift for a smaller step. Press Enter or Home to return the panel to its usual place.');
-    hint.id = 'set-move-hint';
-    panel.appendChild(hint);
-
-    var body = el('div', 'set-body');
-    panel.appendChild(body);
+  /* The panel is a shell plus a body. Everything the reader can do to the panel
+     itself - open it, close it, pick it up, step it with the arrow keys, put it
+     back, have it remembered - is the shell's, asked for by name and store key.
+     What is left here is the six controls, which is all this function should
+     ever have been about. */
+  function buildAppearancePanel() {
+    var shell = makePanel({
+      name: 'appearance',
+      className: 'settings',
+      title: 'Appearance',
+      closeLabel: 'Close appearance panel',
+      storeKey: STORE.panel,
+      onOpen: syncSettings
+    });
+    var body = shell.body;
 
     /* ---------- 1. ground ----------
        Mode and palette are the accessibility control the rest of the panel is
@@ -1560,8 +1606,7 @@
     accessGroup.appendChild(reset);
     body.appendChild(accessGroup);
 
-    wireDrag(panel, bar, grip, shut);
-    return panel;
+    return shell;
   }
 
   /* ---------- back to the defaults ----------
@@ -1579,16 +1624,53 @@
     applyPalette(PALETTES[0].key);
     applyDesign(DESIGNS[0].key);
     applyMode('');
-    goHome();
+    if (appearance) appearance.goHome();
     syncSettings();
   }
 
   /* ============================================================
-     MOVING THE PANEL
+     THE PANEL SHELL
 
-     The reader can pick the panel up with a pointer or with the keyboard, and
-     the position is a preference like any other: it lives in the same store and
-     it is restored before the panel is shown.
+     One contract, and every panel wears it. A panel is a strip the reader can
+     take hold of, a body, and a place the reader put it; `makePanel` owns all
+     three and a caller supplies a name, a store key and what goes in the body.
+     The reason the contract lives here rather than in the panel that first
+     needed it is that a second panel written beside it would drift: one would
+     trap focus, one would forget its position, one would close on an outside
+     click, and the three would have to be corrected three times.
+
+     ---------- opening, closing, and where focus goes ----------
+     The specification's focus contract was written against a popover anchored
+     to the button that opens it, and a panel the reader can pick up and park
+     beside the paragraph they are judging is a different thing. So the contract
+     is restated here, and every difference from the anchored one follows from
+     the panel being movable.
+
+     It is a NON-MODAL dialog: `role="dialog"` and `aria-labelledby`, and no
+     `aria-modal`. A reader moves a panel in order to keep reading with it open,
+     so the page behind it is not inert and saying that it is would be a lie a
+     screen reader then acts on. For the same reason focus is not trapped: Tab
+     walks out of the panel into the page and back round, which is what a reader
+     who has parked it wants and what a trap would forbid.
+
+     Focus moves into the panel when it opens, because the reader asked for it.
+     On close it returns to the opening button only if it was inside the panel
+     at the time - a reader who has tabbed back into the page and pressed Escape
+     keeps their place instead of being thrown to the topbar.
+
+     An outside click does not close a panel, and none of this is configurable.
+     A parked panel that vanishes the moment the reader clicks the text beside
+     it is a panel that cannot be parked, and a panel that dims the page behind
+     it is a panel that hides the thing the reader opened it to work on. The
+     ways out are the opening button, the close control in the title bar, and
+     Escape - three, all of them visible or conventional.
+
+     ---------- where a panel sits ----------
+     The reader can pick a panel up with a pointer or with the keyboard, and the
+     position is a preference like any other: it lives in the same store, under
+     a key of that panel's own, and it is restored before the panel is shown.
+     Two panels therefore remember two places and neither can overwrite the
+     other's.
 
      What is stored is an INTENTION and what is rendered is that intention
      clamped into whatever viewport is in front of the reader now. A pair of
@@ -1603,114 +1685,166 @@
      the elements themselves. A panel parked under either of them is a panel the
      reader cannot reach.
      ============================================================ */
-  var closePanel = null;
-  var dragging = null;
-
-  var PANEL_EDGE = 8;      // the gap the panel keeps from every edge
+  var PANEL_EDGE = 8;      // the gap a panel keeps from every edge
   var PANEL_STEP = 20;     // one arrow key
   var PANEL_FINE = 4;      // one arrow key with Shift held
 
-  /* Where the panel was last put, which is not always where it is. A framework
-     move glides, and `getBoundingClientRect` during a glide reports the frame
-     the panel is passing through rather than the place it is going to. Reading
-     that back is what made two arrow presses in quick succession add up to one:
-     the second read a position still in flight and stepped from there. So the
-     intended position is held here and the rendered one is never asked. */
-  var placed = null;
+  function makePanel(spec) {
+    /* Every piece of state below belongs to this panel alone. A second panel
+       gets its own, which is the whole reason the shell is a factory rather
+       than a set of functions over one module-level element. */
 
-  function panelBounds(panel) {
-    var spine = document.querySelector('.spine');
-    var flag = document.querySelector('.preprod-flag');
-    var box = panel.getBoundingClientRect();
-    var ceiling = (spine ? spine.getBoundingClientRect().bottom : 0) + PANEL_EDGE;
-    var floor = window.innerHeight - (flag ? flag.getBoundingClientRect().height : 0) - PANEL_EDGE;
-    return {
-      minX: PANEL_EDGE,
-      maxX: Math.max(PANEL_EDGE, window.innerWidth - box.width - PANEL_EDGE),
-      minY: ceiling,
-      // A panel taller than the band it has to fit in is pinned to the top of
-      // that band rather than pushed above it, and scrolls inside itself.
-      maxY: Math.max(ceiling, floor - box.height)
-    };
-  }
-
-  function place(panel, x, y) {
-    var limit = panelBounds(panel);
-    placed = {
-      x: Math.min(Math.max(x, limit.minX), limit.maxX),
-      y: Math.min(Math.max(y, limit.minY), limit.maxY)
-    };
-    panel.style.left = placed.x + 'px';
-    panel.style.top = placed.y + 'px';
-    panel.setAttribute('data-moved', '');
-  }
-
-  function at(panel) {
-    if (placed) return placed;
-    var box = panel.getBoundingClientRect();
-    return { x: box.left, y: box.top };
-  }
-
-  function storedPosition() {
-    var raw = get(STORE.panel);
-    if (!raw) return null;
-    try {
-      var at = JSON.parse(raw);
-      if (at && isFinite(at.x) && isFinite(at.y)) return { x: Number(at.x), y: Number(at.y) };
-    } catch (e) { /* a key from another era, or a hand edit */ }
-    return null;
-  }
-
-  function placeFromStore() {
-    if (!settingsEl || settingsEl.hidden) return;
-    var stored = storedPosition();
-    if (stored) place(settingsEl, stored.x, stored.y);
-    else goHome();
-  }
-
-  /* The viewport changed under a panel the reader placed. It glides back into
-     reach rather than jumping, because a panel that teleports on a rotation
-     reads as a bug and a panel that slides reads as the framework putting it
-     somewhere it fits. `data-settling` is what carries the glide, and every
-     direct move takes it off again: a step the reader is aiming must land where
-     they aimed it, at once. */
-  function reseat() {
-    if (!settingsEl || settingsEl.hidden) return;
-    settingsEl.setAttribute('data-settling', '');
-    placeFromStore();
-  }
-
-  /* The way back. Removing the two lengths hands the panel to the stylesheet's
-     own resting place, which is under the button that opened it, so "home" is
-     one answer written in one file rather than a pair of numbers repeated
-     here. */
-  function goHome() {
-    if (!settingsEl) return;
-    placed = null;
-    settingsEl.style.left = '';
-    settingsEl.style.top = '';
-    settingsEl.removeAttribute('data-moved');
-    drop(STORE.panel);
-  }
-
-  function rememberPosition() {
-    if (placed) set(STORE.panel, JSON.stringify({ x: Math.round(placed.x), y: Math.round(placed.y) }));
-  }
-
-  function wireDrag(panel, bar, grip, shut) {
-    /* The pointer. One code path for mouse, touch and pen, and the capture is
-       what keeps the panel following a finger that has left the strip. The
-       grab offset is taken once, so the panel does not jump to centre itself
-       under the pointer on the first move. */
+    /* Where the panel was last put, which is not always where it is. A
+       framework move glides, and `getBoundingClientRect` during a glide reports
+       the frame the panel is passing through rather than the place it is going
+       to. Reading that back is what made two arrow presses in quick succession
+       add up to one: the second read a position still in flight and stepped
+       from there. So the intended position is held here and the rendered one is
+       never asked. */
+    var placed = null;
+    var dragging = null;
     var suppressClick = false;
+    /* A panel can have more than one way in - the topbar button and the
+       cluster's launcher both open the appearance panel - so the shell holds
+       every attached opener and remembers which one was actually used. All of
+       them wear the state; only the one that opened it gets focus back. A
+       reader who opened the panel from the corner of the screen and was thrown
+       to the topbar on Escape has lost their place, which is the thing the
+       focus contract exists to prevent. */
+    var openers = [];
+    var opener = null;
 
+    var panel = el('div', spec.className ? 'panel-shell ' + spec.className : 'panel-shell');
+    panel.hidden = true;
+    panel.setAttribute('role', 'dialog');
+    var titleId = 'panel-' + spec.name + '-title';
+    var hintId = 'panel-' + spec.name + '-hint';
+    panel.setAttribute('aria-labelledby', titleId);
+
+    /* ---------- the title bar, which is the handle ----------
+       The captain asked for a movable bar and meant it: the panel is picked up
+       and put where the reader wants it, rather than hanging off the button
+       that opened it. The whole strip is the pointer surface and the grip
+       inside it is the keyboard one, because a panel only a mouse can move is a
+       panel some readers cannot move at all. */
+    var bar = el('div', 'panel-bar');
+    var grip = el('button', 'panel-grip');
+    grip.type = 'button';
+    grip.setAttribute('aria-label', 'Move panel');
+    grip.setAttribute('aria-describedby', hintId);
+    grip.setAttribute('aria-keyshortcuts', 'ArrowUp ArrowDown ArrowLeft ArrowRight Home');
+    grip.appendChild(el('span', 'tb-icon', '✥'));
+    var title = el('h2', 'panel-title', spec.title);
+    title.id = titleId;
+    var shut = el('button', 'panel-close');
+    shut.type = 'button';
+    shut.setAttribute('aria-label', spec.closeLabel);
+    shut.appendChild(el('span', 'tb-icon', '✕'));
+    shut.addEventListener('click', function () { close(true); });
+    bar.appendChild(grip);
+    bar.appendChild(title);
+    bar.appendChild(shut);
+    panel.appendChild(bar);
+
+    var hint = el('p', 'sr-only',
+      'Drag this panel to move it, or press the arrow keys while this control has focus. '
+      + 'Hold Shift for a smaller step. Press Enter or Home to return the panel to its usual place.');
+    hint.id = hintId;
+    panel.appendChild(hint);
+
+    var body = el('div', 'panel-body');
+    panel.appendChild(body);
+
+    function bounds() {
+      var spine = document.querySelector('.spine');
+      var flag = document.querySelector('.preprod-flag');
+      var box = panel.getBoundingClientRect();
+      var ceiling = (spine ? spine.getBoundingClientRect().bottom : 0) + PANEL_EDGE;
+      var floor = window.innerHeight - (flag ? flag.getBoundingClientRect().height : 0) - PANEL_EDGE;
+      return {
+        minX: PANEL_EDGE,
+        maxX: Math.max(PANEL_EDGE, window.innerWidth - box.width - PANEL_EDGE),
+        minY: ceiling,
+        // A panel taller than the band it has to fit in is pinned to the top of
+        // that band rather than pushed above it, and scrolls inside itself.
+        maxY: Math.max(ceiling, floor - box.height)
+      };
+    }
+
+    function place(x, y) {
+      var limit = bounds();
+      placed = {
+        x: Math.min(Math.max(x, limit.minX), limit.maxX),
+        y: Math.min(Math.max(y, limit.minY), limit.maxY)
+      };
+      panel.style.left = placed.x + 'px';
+      panel.style.top = placed.y + 'px';
+      panel.setAttribute('data-moved', '');
+    }
+
+    function at() {
+      if (placed) return placed;
+      var box = panel.getBoundingClientRect();
+      return { x: box.left, y: box.top };
+    }
+
+    function storedPosition() {
+      var raw = get(spec.storeKey);
+      if (!raw) return null;
+      try {
+        var seen = JSON.parse(raw);
+        if (seen && isFinite(seen.x) && isFinite(seen.y)) return { x: Number(seen.x), y: Number(seen.y) };
+      } catch (e) { /* a key from another era, or a hand edit */ }
+      return null;
+    }
+
+    function placeFromStore() {
+      if (panel.hidden) return;
+      var was = storedPosition();
+      if (was) place(was.x, was.y);
+      else goHome();
+    }
+
+    /* The viewport changed under a panel the reader placed. It glides back into
+       reach rather than jumping, because a panel that teleports on a rotation
+       reads as a bug and a panel that slides reads as the framework putting it
+       somewhere it fits. `data-settling` is what carries the glide, and every
+       direct move takes it off again: a step the reader is aiming must land
+       where they aimed it, at once. Under either arm of the motion axis the
+       glide is zeroed with everything else the framework animates, so reduced
+       motion is answered by the stylesheet and not by a branch here. */
+    function reseat() {
+      if (panel.hidden) return;
+      panel.setAttribute('data-settling', '');
+      placeFromStore();
+    }
+
+    /* The way back. Removing the two lengths hands the panel to the
+       stylesheet's own resting place, so "home" is one answer written in one
+       file rather than a pair of numbers repeated here. */
+    function goHome() {
+      placed = null;
+      panel.style.left = '';
+      panel.style.top = '';
+      panel.removeAttribute('data-moved');
+      drop(spec.storeKey);
+    }
+
+    function rememberPosition() {
+      if (placed) set(spec.storeKey, JSON.stringify({ x: Math.round(placed.x), y: Math.round(placed.y) }));
+    }
+
+    /* The pointer. One code path for mouse, touch and pen, and the capture is
+       what keeps the panel following a finger that has left the strip. The grab
+       offset is taken once, so the panel does not jump to centre itself under
+       the pointer on the first move. */
     bar.addEventListener('pointerdown', function (event) {
       if (event.button !== 0 && event.pointerType === 'mouse') return;
       // The close control lives in the strip and is not part of the handle.
       if (shut.contains(event.target)) return;
       suppressClick = false;
       panel.removeAttribute('data-settling');
-      var from = at(panel);
+      var from = at();
       dragging = {
         id: event.pointerId,
         grabX: event.clientX - from.x,
@@ -1729,7 +1863,7 @@
     bar.addEventListener('pointermove', function (event) {
       if (!dragging || event.pointerId !== dragging.id) return;
       dragging.dragged = true;
-      place(panel, event.clientX - dragging.grabX, event.clientY - dragging.grabY);
+      place(event.clientX - dragging.grabX, event.clientY - dragging.grabY);
     });
 
     var release = function (event) {
@@ -1764,8 +1898,8 @@
       else if (event.key === 'Home') { goHome(); event.preventDefault(); return; }
       else return;
       panel.removeAttribute('data-settling');
-      var from = at(panel);
-      place(panel, from.x + dx, from.y + dy);
+      var from = at();
+      place(from.x + dx, from.y + dy);
       rememberPosition();
       // Arrow keys scroll the page by default, and a panel that moves while the
       // page slides under it is a control nobody can aim.
@@ -1788,7 +1922,7 @@
       if (bar.hasPointerCapture && bar.hasPointerCapture(dragging.id)) bar.releasePointerCapture(dragging.id);
       dragging = null;
       suppressClick = true;
-      if (wasMoved) place(panel, was.x, was.y); else goHome();
+      if (wasMoved) place(was.x, was.y); else goHome();
       event.stopPropagation();
       event.preventDefault();
     }, true);
@@ -1797,6 +1931,70 @@
        on every resize is what stops a reader who rotated a tablet, or came back
        on a smaller screen, finding the panel parked off the edge. */
     window.addEventListener('resize', reseat);
+
+    function announce(shown) {
+      openers.forEach(function (button) {
+        button.setAttribute('aria-expanded', shown ? 'true' : 'false');
+      });
+    }
+
+    function close(restoreFocus) {
+      if (panel.hidden) return;
+      var inside = document.activeElement && panel.contains(document.activeElement);
+      panel.hidden = true;
+      announce(false);
+      if (restoreFocus && inside && opener) opener.focus();
+    }
+
+    function open(from) {
+      if (!panel.hidden) return;
+      // Opened by script rather than by a control, the last button used is
+      // still where focus should go back to.
+      if (from) opener = from;
+      panel.hidden = false;
+      announce(true);
+      if (spec.onOpen) spec.onOpen();
+      // The panel has no size while it is hidden, so the constraint that keeps
+      // it on screen can only be applied now. This is also what re-seats a
+      // stored position that no longer fits the viewport in front of the reader.
+      placeFromStore();
+      var first = panel.querySelector('button, input, select, textarea, a[href]');
+      if (first) first.focus();
+    }
+
+    /* Escape belongs to the panel the reader is in. With focus inside another
+       panel this one stays open; with focus anywhere else every open panel
+       closes, which is exactly what a lone panel has always done. */
+    document.addEventListener('keydown', function (event) {
+      if (event.key !== 'Escape' || panel.hidden) return;
+      var active = document.activeElement;
+      if (active && active.closest && active.closest('.panel-shell') && !panel.contains(active)) return;
+      close(true);
+    });
+
+    /* The button that opens the panel belongs to whatever built it - the topbar,
+       a control cluster, a page. What the shell insists on is that the button
+       and the panel never disagree about whether it is open, which is the defect
+       the reference site ships: `aria-expanded` written once into the markup and
+       never updated again. */
+    function attachOpener(button) {
+      openers.push(button);
+      if (!opener) opener = button;
+      button.setAttribute('aria-haspopup', 'dialog');
+      button.setAttribute('aria-expanded', String(!panel.hidden));
+      button.addEventListener('click', function () {
+        if (panel.hidden) open(button); else close(true);
+      });
+    }
+
+    return {
+      el: panel,
+      body: body,
+      open: open,
+      close: close,
+      goHome: goHome,
+      attachOpener: attachOpener
+    };
   }
 
   /* ---------- the panel reads the page back, never its own memory ----------
@@ -1805,8 +2003,8 @@
      what is on. A control that remembered what it drew would be right until the
      first time something else moved. */
   function syncGroup(attribute, current) {
-    if (!settingsEl) return;
-    var cards = settingsEl.querySelectorAll('[data-' + attribute + ']');
+    if (!appearance) return;
+    var cards = appearance.el.querySelectorAll('[data-' + attribute + ']');
     Array.prototype.forEach.call(cards, function (card) {
       if (card.tagName !== 'BUTTON') return;
       card.setAttribute('aria-pressed', String(card.dataset[attribute] === current));
@@ -1814,7 +2012,11 @@
   }
 
   function syncSettings() {
-    if (!settingsEl) return;
+    /* Before the early return, because the cluster is built whether or not the
+       panel was and its mode control has to keep up with every path that moves
+       the mode: the panel, the reset, and the cluster's own button. */
+    syncCluster();
+    if (!appearance) return;
     /* Four of these read an attribute straight off <html> and two read the
        chosen key, because a step whose value is "write nothing" leaves no trace
        on the element to read back. Two groups share the `.pal-card` shape, so
@@ -1839,7 +2041,7 @@
        an untouched measure slider reads 80. It is the nearest position the
        control can express and it becomes exact the moment the reader moves it;
        an off-grid thumb that jumped on first touch would be worse. */
-    Array.prototype.forEach.call(settingsEl.querySelectorAll('.set-field'), function (field) {
+    Array.prototype.forEach.call(appearance.el.querySelectorAll('.set-field'), function (field) {
       var axis = field.rangeAxis;
       if (!axis) return;
       var computed = axis.read(parseFloat(getComputedStyle(root).getPropertyValue(axis.token)));
@@ -2248,6 +2450,7 @@
       document.body.dataset.rail = isWide() ? (get(STORE.rail) || 'on') : 'off';
     }
     mountTopbar(hasRail);
+    mountCluster();
     mountStageFlag();
     wireQuizzes();
     wireCopyButtons();
@@ -2267,7 +2470,12 @@
 
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
-        if (!root.getAttribute('data-mode')) renderMermaid();
+        if (root.getAttribute('data-mode')) return;
+        // The cluster names the mode it will switch to, so a reader following
+        // the system whose machine has just gone dark needs the label back the
+        // other way round.
+        syncCluster();
+        renderMermaid();
       });
     }
 

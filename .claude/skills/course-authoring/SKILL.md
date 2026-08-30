@@ -41,7 +41,7 @@ When a lesson genuinely needs a shape the catalogue does not have, add the shape
 Adding to the vocabulary is welcome; using a word that is not in it is not.
 Before you touch any selector, grep **every** `*.css` in the repository for it: three courses still carry an `assets/course-extras.css` layered after the hub sheet, and they restyle shared elements.
 
-## The five ways a page breaks silently
+## The seven ways a page breaks silently
 
 Every one of these ships green, renders wrong, and reaches no console.
 `AGENTS.md` carries the full mechanism; this is what an author has to hold.
@@ -51,6 +51,8 @@ Every one of these ships green, renders wrong, and reaches no console.
 3. **A semicolon in Mermaid text is a statement separator.** Measured against the Mermaid 11 the hub loads: in a `sequenceDiagram` the free text after a colon, in a message or a `Note over`, is parsed as a statement, and a semicolon there is a red error box. A flowchart label survives one, quoted or not. The house form is a dash everywhere, because the safe positions are not worth remembering.
 4. **Check a page in both render states.** Defects of kind 1 are wrong on first paint; defects of kind 2 are wrong only after a repaint. Toggling mode or palette is what moves a page from one state to the other, and one state alone catches neither reliably.
 5. **Counting SVGs proves nothing.** A Mermaid error box is itself an `<svg>`. Look at the figures, and match `.error-icon` when you check by machine.
+6. **A figure's label and claim are direct children of `figure.diagram`, before the drawing.** The stylesheet selects `figure.diagram > .fig-cap`, so one nested inside a wrapper `div` takes no styling and renders as unstyled body text at figure width. It validates against every other check, it reaches no console, and it reads as a paragraph that lost its formatting.
+7. **A colour inside a hand-authored figure is a class, never a hex.** `check_pages.py` fails the build on a literal `fill="#..."` in a `<figure>`, and the reason is worth knowing rather than working around. The reference site this figure anatomy comes from hard-codes 5,634 colours across 234 drawings, patches 65% of them back for dark mode with attribute selectors in two sheets that disagree, and leaves eight labels on its first chapter below 3:1, one of them at 1.16:1. That is the failure the closed class set exists to prevent.
 
 ## The teaching bar
 
@@ -60,7 +62,8 @@ Read it on every branch.
 
 Two of those bars decide the shape of a page rather than its polish.
 
-- **The big picture comes first.** Every content page opens with an orientation figure, before the first body section, showing where this idea sits in the whole. A reader who sees the opening sentence and that figure alone can say what the page is about and why it exists.
+- **The big picture comes first.** Every content page opens with an orientation figure, before the first body section, showing where this idea sits in the whole. A reader who sees the opening sentence and that figure alone can say what the page is about and why it exists. **Its `.fig-cap` is the only one on the page that may be generic - `Where this sits` is the house label for it - and every other figure needs its own subject.**
+- **A figure says what it is and what it proves, above the drawing.** Two lines: `.fig-cap` names the subject in two to five words, `.fig-claim` states what the drawing proves in one sentence under fifteen. The reader meets the question before the answer. A caption that only names the figure is half a caption, and `.fig-claim` with no `.fig-cap` fails the validator. Write the label in sentence case: the stylesheet upper-cases it, so capitals of your own are invisible until a course turns the treatment off, and it is held to the eyebrow's five-word limit.
 - **Fewer words.** 1,800 prose words per page, 400 prose words per figure. When a paragraph and a figure say the same thing, the paragraph goes.
 
 ## Facts

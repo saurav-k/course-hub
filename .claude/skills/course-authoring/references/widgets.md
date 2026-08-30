@@ -107,6 +107,29 @@ Both are mandatory on every lesson page. See the ladder in [`pedagogy.md`](pedag
 
 A one-sentence framing line may use `<p class="lead">` instead, above `.paper-meta`, where the page has no attribution to carry.
 
+### The part eyebrow, `.part-eyebrow`
+
+Optional, and it sits directly above `.eyebrow`.
+Where a page also carries a breadcrumb it goes below that, because navigation comes before the page's own labels.
+It names the division of the course this page belongs to, which is the one piece of bearing the rest of the head block does not carry: `.eyebrow` says which module and which lesson, and this says which part of the whole.
+
+```html
+<div class="part-eyebrow"><span>Part II / Methods and semantics</span><span>Where the argument turns</span></div>
+```
+
+One span or two.
+The first is the part itself and is the only one that matters.
+A second span is the part's own subtitle, and it prints faint at the far end of the row.
+It needs no class of its own: the row can tell one span from two without being told.
+Each span is a cell of the row, so keep a cell's own markup inside its span; bare text beside a span reads as a second cell and is pushed to the far end.
+Write both in sentence case and let the stylesheet decide about capitals, exactly as `.eyebrow` is written: the row takes the course's own eyebrow face, tracking and case from the design in force.
+
+It is a row rather than a label, and the hairline under it is what makes it read as a divider of the course rather than as a second caption.
+The rule's style is `--part-rule-style`, so the House design draws it solid and Press draws it dashed.
+
+Do not put one on every page of a course that has no parts.
+The widget answers "where am I in the whole", and a course whose whole is one sequence has already answered it in the eyebrow.
+
 ### The breadcrumb, `.crumbs`
 
 Optional, and above the eyebrow when it is there.
@@ -131,6 +154,40 @@ An ordinary course whose spine already names the hub and the course map does not
 Fix a broken heading order by retagging the heading and adding the matching class, never by leaving the tag wrong because the right one looks wrong.
 
 That is why the house forms below read `<h2 class="h-label">` rather than `<h4>`: they sit directly under the page `<h1>` and a bare `<h4>` there skips two levels.
+
+### The numbered section badge, `.numbered`
+
+Optional, and one class on the container does the whole job.
+
+```html
+<main class="wrap numbered">
+  <h2>What routing is</h2>
+  <h2>The keeper and the viewer</h2>
+</main>
+```
+
+Every `h2` that is a direct child of the container gets a filled square in front of it carrying its number: `01`, `02`, `03`.
+Nothing is written on the headings, and nothing may be.
+The numbers come from a CSS counter, so they cannot drift from the headings the way a typed number does, and adding a section in the middle renumbers the rest with no edit anywhere.
+
+Four things to know before you use it.
+
+**It is opt-in, and that is the point.**
+A course map and a reference sheet are lists rather than arguments, and neither is a numbered sequence.
+Put `.numbered` on the pages that really do proceed in sections.
+
+**`.h-label` and `.h-sub` are stepped over.**
+Both are `h2` tags wearing a smaller face - "The one-minute version" is the common one - and neither is a section of the argument, so neither takes a number and neither advances the count.
+
+**The number is not part of the heading's accessible name.**
+The badge is drawn with empty alternative text, so a screen reader announces "The keeper and the viewer" rather than "02 The keeper and the viewer".
+It is decoration beside a heading, and the heading's own name is what a reader navigates by.
+
+**One rule above the heading, never two.**
+An `h2` already carries a hairline above it.
+Do not add a second rule under the heading to go with the badge; the sheet ships one and one is what the page should have.
+
+Inline markup inside a numbered heading behaves exactly as it does in any other heading: the badge hangs in a gutter beside the block rather than turning the heading into a row of boxes, so `Practice <span class="note-sm">about 15 minutes</span>` still reads as one line and still wraps.
 
 ## The one-minute version
 
@@ -164,6 +221,64 @@ Three, and the difference is not decoration.
 Reserve it. A page with three warnings has no warning.
 
 ## Diagrams
+
+### What a figure is
+
+Four parts, in this order, and the order is the point.
+
+```html
+<figure class="diagram">
+  <div class="fig-cap">How the two summaries move</div>
+  <div class="fig-claim">The mean is dragged past nine of the ten days. The median is not.</div>
+  <div class="mermaid">
+flowchart LR
+  A["Observed data"] --> B["Estimate"]
+  </div>
+  <figcaption>Plain English reading of the figure, with <b>the one takeaway in bold</b>.</figcaption>
+</figure>
+```
+
+| Part | What it is | Length |
+|---|---|---|
+| `.fig-cap` | the **subject**. What the drawing is of. | 2 to 5 words, and 5 is a gate |
+| `.fig-claim` | the **claim**. What the drawing proves. | one sentence, under 15 words |
+| the drawing | `div.mermaid` or `svg.chart` | - |
+| `<figcaption>` | the reading, with the bolded takeaway | as short as it can be and still teach |
+
+The reader meets the label, then the claim, then the picture.
+The picture answers a question that has already been asked, which is why the two lines go above and the reading stays below.
+
+**`.fig-cap` names and never argues. `.fig-claim` argues and never describes the picture.**
+Neither is ever a question.
+Measured across the 94 figures the anatomy comes from: zero question marks in either line, median 3 words in the label and 11 in the claim.
+An author who is choosing what kind of sentence to write has already put the wrong thing in one of them.
+
+Write `.fig-cap` in sentence case.
+The stylesheet upper-cases it, and it takes the eyebrow family, tracking and case from the design in force, so it is mono under Press and Inter under House with the page naming no face.
+Both lines cost no colour: the label is `--accent-2` and the claim `--ink`, which the contrast matrix already holds over the diagram card in every palette, both modes and every course hue.
+
+**Five words is the ceiling, and it is the eyebrow's rather than a second number.**
+`.fig-cap` wears the eyebrow treatment, so `validate_site.py` holds it to exactly the limit a page's own `.eyebrow` already answers to: no more than five words in a segment while the case is uppercase, because capitals read 9.53% to 19.01% slower than lowercase.
+The house target is two to four.
+A label that needs more than five words has stopped naming a subject and started making the claim, which is the line below it.
+
+A figure may carry neither line.
+It may not carry only the claim.
+**A `.fig-claim` with no `.fig-cap` above it is a proposition with no subject, and it reads as a stray sentence that lost its paragraph.**
+Check 19 in `scripts/validate_site.py` fails that, and three other shapes with it.
+
+The pair is not required on an existing figure and never will be by machine.
+A label cannot be generated: the measured pass over the hub's own 2,934 captions produces 434 figures all labelled WHERE THIS SITS and 173 labelled FIGURE 1, FIGURE 2, FIGURE 3, which is worse than no label.
+The bar for a page you are writing now is in [`pedagogy.md`](pedagogy.md).
+
+### Two ways the caption pair breaks silently
+
+- **`.fig-cap` and `.fig-claim` are direct children of `figure.diagram`, in that order, before the drawing.** The stylesheet selects them as `figure.diagram > .fig-cap`, so one wrapped in a `<div>` for spacing takes no styling at all and renders as unstyled body text at figure width. Nothing reaches the console and the page still validates against every other check.
+- **Write the label in sentence case, never in capitals of your own.** The stylesheet upper-cases it, so `WHERE THIS SITS` and `Where this sits` are the same pixels under the default treatment and the mistake is invisible on the page you wrote it on. A course that sets `--eyebrow-case: none`, which the course contract allows, then renders your capitals as capitals, on a page nobody is going to look at again. The treatment is the stylesheet's decision, and a page that takes it back has taken a reading-speed penalty nobody asked for.
+
+The rule mark is not one of them, and it used to be.
+It rides the first line by a half-line offset rather than by centring on the box, so a label that wraps keeps its anchor and its second line stays indented under its first.
+That was worth fixing rather than documenting: measured at 320px, a five-word label wraps under Press and a six-word one under House, both inside the bar above, so the wrap is reachable by an author who did nothing wrong.
 
 ### The orientation figure, which opens every content page
 
@@ -250,7 +365,9 @@ Three rules.
 
 ### Inline SVG, for anything quantitative
 
-Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot.
+Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot, and it cannot put one saturated mark in a neutral field so that the colour is the argument.
+That last one is a real reason to draw by hand: a figure whose whole point is *this one thing, among these others* is clearer when nine tenths of it is unpainted.
+It is not a reason to redraw a flowchart that is doing its job.
 Write the SVG by hand, in the page. No chart library, no build step, no extra CDN.
 
 ```html
@@ -269,6 +386,8 @@ Write the SVG by hand, in the page. No chart library, no build step, no extra CD
 - Always a `viewBox`, never a `width`/`height` pair. Around `640 x 300` keeps 13px text readable.
 - Always `role="img"` and an `aria-label` saying what the chart shows.
 - **Colour comes only from the semantic classes.** A literal hex looks right in one theme and vanishes in the other, and it cannot follow the print stylesheet either.
+- **Paint about a tenth of the canvas and no more.** Colour marks the subject; the field around it stays `panel`, `grid`, `axis` and `ink`. Measured on the figures the caption anatomy comes from, the saturated area is a median of 10.7% of the canvas and under 10% on 109 of 234. A chart where every mark is coloured has no subject, and the reader has to be told which one matters instead of seeing it.
+- **A wide short band sits in the column like a rule between paragraphs.** Those same figures run a median aspect ratio of 3.43:1. A tall figure is an interruption, and a `640 x 300` viewBox is already close to the shape.
 
 The colour names are a **closed set, shared by the whole hub** and declared in `assets/hub.css`: `stat`, `prob`, `signal`, `noise`, `alarm`, `gold`, `plum`, `sky`, and `ink` for marks and strokes.
 They are not a per-course palette any more; a course's identity comes from its accent hue, not from its charts.
@@ -675,13 +794,13 @@ The groups, and what each is for.
 | Group | Count | What a rule reads |
 |---|---|---|
 | Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. `--font-body` is set by the face registry rather than in this block; see the derived axes below. |
-| Type scale | 62 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
+| Type scale | 64 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
 | Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. `--lh-body` carries the measure nudge; see the derived axes below. |
 | Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
 | Tracking | 14 | Negative on display type, positive on anything set in capitals. |
-| Space | 176 | Two layers; see below. |
+| Space | 184 | Two layers, five of them the printed page's; see below. |
 | Reading frame | 3 | `--measure-chars-default`, the column width in real characters, and `--wide-left` / `--wide-right`, unitless shares summing to 1 that say how the breakout band sits around it. `.5` and `.5` centres the prose; `0` and `1` grows figures from its left edge. The rule does the arithmetic, because `--measure-wide` differs by element. |
-| Shape | 17 | The seven radii, the four border widths, and the six that are the shadow *shape* - its colour stays on the mode layer. |
+| Shape | 22 | The seven radii, the four border widths, the two that are the figure label's rule mark, and the six that are the shadow *shape* - its colour stays on the mode layer. Three more are one widget's shape each: `--part-rule-style`, `--sec-badge-size` and `--sec-badge-radius`. |
 | Focus ring | 5 | `--focus-ring-color`, `--focus-ring-width`, `--focus-ring-style` and the two offsets; see below. |
 | Motion | 11 | Six durations, two easings, two lift distances and one slide distance. `--motion-slide` is `0px` in House; a design whose signature gesture is horizontal sets it and every lesson card follows. |
 | Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
@@ -874,10 +993,65 @@ No deploy, no page edit, and the fallback was measured to restore the original e
 Mermaid cuts every label box to a measurement it takes at render time, and it takes that measurement in the face `hub.js` hands it - `--font-ui`, the chrome role, which is also what `hub.css` paints diagrams with.
 Test a design change by *switching*, never by loading: a diagram with stale metrics renders correctly on the next reload, which is how the defect survives review.
 
+## The panel shell
+
+`hub.js` builds every panel from one shell, `makePanel(spec)`, and a panel supplies nothing but its own name, its store key, its title and what goes in its body.
+The contract below belongs to the shell, so a second panel gets all of it by asking for one, and a correction to any of it is made once.
+Nothing here is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
+
+**Six classes, and the shape is fixed.**
+
+| Class | What it is |
+|---|---|
+| `.panel-shell` | The dialog. Every panel wears it, plus one class of its own - the appearance panel's is `.settings` - which is where that panel states its width and the height above which its body scrolls. |
+| `.panel-bar` | The title bar, which is also the whole pointer surface for a drag. |
+| `.panel-grip` | The keyboard handle inside the bar. Arrow keys move the panel, Shift is the finer step, Home or Enter puts it back. |
+| `.panel-title` | An `h2`, because a dialog's name is a heading. The tag decides the outline a screen reader navigates by and the class decides how it looks. |
+| `.panel-close` | The close control. It lives in the bar and is deliberately not part of the handle. |
+| `.panel-body` | The part that scrolls. The bar stays in view at every scroll position, because a handle that scrolls out of reach is a panel the reader cannot put back. |
+
+The root is `.panel-shell` rather than `.panel` because `panel` is already taken by chart furniture, and a bare `.panel` rule would have matched every `<rect class="panel">` in the hub's inline drawings.
+
+**A panel is non-modal, it has no backdrop, and an outside click does not close it. This is not configurable.**
+It carries `role="dialog"` and `aria-labelledby` and it does not carry `aria-modal`, because a reader parks a panel in order to keep reading with it open and telling a screen reader the page behind it is inert would be a lie.
+For the same reason focus is not trapped: Tab walks out of the panel into the page and back round.
+A parked panel that vanishes the moment the reader clicks the text beside it is a panel that cannot be parked, and a panel that dims or blurs the page behind it hides the thing the reader opened it to work on.
+The ways out are the opening button, the close control and Escape - three, all of them visible or conventional.
+
+**Focus moves into a panel when it opens, and returns to the opening button only if it was inside.**
+A reader who has tabbed back into the page and pressed Escape keeps their place instead of being thrown to the topbar.
+Escape belongs to the panel the reader is in: with focus inside another panel this one stays open, and with focus anywhere else every open panel closes.
+
+**The panel and the button that opens it can never disagree about whether it is open.**
+`attachOpener` is what ties them together, and it is the shell that writes `aria-expanded` on every open and every close.
+A button whose markup states `aria-expanded="false"` once and is never updated tells a screen reader the panel is closed while it is open; that is the defect the reference site ships and the reason this is the shell's job rather than a caller's.
+
+**A panel moves, by pointer and by keyboard, and its position is an intention.**
+What is rendered is that intention clamped into whatever viewport is in front of the reader now, so a coordinate chosen on a wide display comes back when the wide display does and on a phone the panel is re-seated rather than stranded.
+The clamp runs on every open and every resize and it never writes back.
+The band the panel is held inside is measured off the sticky topbar and the pre-production strip rather than assumed, so a panel can never be parked under either.
+Only the re-seat glides - it carries `[data-settling]` - and every move the reader aims takes that attribute off first, because a step that animates is a step nobody can aim.
+`[data-motion="reduced"]` zeroes the glide with every other transition, so reduced motion is answered by the stylesheet and never by a branch in the script.
+
+**Each panel remembers its own position under its own key**, so two panels remember two places and neither can overwrite the other's.
+The appearance panel's key is `coursehub.panel`.
+
+**A panel is `hidden` while it is closed, and that is a requirement rather than a detail.**
+The element is in the DOM of all 797 pages; without `hidden`, `scripts/focus_walk.py` would tab through every control in it on every page and so would every reader.
+
+**Three tokens belong to the shell and are read by every panel**: `--panel-target`, the square the grip and the close control take, at the WCAG 2.2 SC 2.5.8 floor; `--sp-inset-panel-bar`; and `--sp-inset-panel-body`.
+`--set-w` and `--set-h` are the appearance panel's own width and height and are not the shell's.
+
+**Adding a panel is a call and a class, and nothing else.**
+Ask `makePanel` for a shell, fill `shell.body`, hand it the button that opens it, and give it a class of its own for the two lengths it states.
+It may not reintroduce a backdrop, make the close-on-outside-click behaviour configurable, trap focus, share another panel's store key, or write its own drag.
+Every colour it uses is a token, and every control in it must show the hub's focus ring, because `focus_walk.py` presses real Tab keys through the open panel.
+
 ## The reader control panel
 
-`hub.js` builds one panel and it reaches every page, because every page already links the shared assets.
-Nothing about it is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
+`hub.js` builds one panel from the shell above and it reaches every page, because every page already links the shared assets.
+It is the shell plus six controls: everything a reader can do to the panel itself - open it, close it, pick it up, step it with the arrow keys, put it back, have it remembered - is stated in "The panel shell" and is not restated here.
+What follows is what this panel *contains*, and why.
 
 **Six controls, and three axes that are deliberately not among them.**
 The six are the ground (mode and palette), the body size, the reading face, the measure, the line spacing and the density.
@@ -899,28 +1073,50 @@ Check 11 in `scripts/validate_site.py` gates both halves - hub.js may write no o
 It writes the twenty prose-rhythm roles as `calc(var(--x-default) * 0.75)`, so a design that restates a role is scaled rather than overruled, and the only names it *can* write are ones hub.css resolves.
 There is no headroom in the chrome for a compact mode: one control already fails WCAG 2.2 SC 2.5.8, seven more pass on the spacing exception alone, and the smallest compliant control has two pixels of margin.
 
-**The panel moves, by pointer and by keyboard.**
-The title bar is the drag surface and the grip inside it takes the arrow keys, with Shift for a finer step and Home or Enter to put the panel back where it started.
-A panel only a mouse can move is a panel some readers cannot move at all.
-
-**Its position is an intention, and what is rendered is that intention clamped into the viewport in front of the reader.**
-The band it is held inside is measured off the sticky topbar and the pre-production strip rather than assumed, so it can never be parked under either.
-The clamp does not write back, so a coordinate chosen on a wide display comes back when the wide display does, and on a phone the panel is re-seated rather than stranded.
-Only the re-seat glides; a move the reader is aiming lands at once, and `[data-motion="reduced"]` zeroes the glide with every other transition.
-
-**The panel is a non-modal dialog, and that follows from it being movable.**
-It carries `role="dialog"` and `aria-labelledby` and it does not carry `aria-modal`, because a reader parks it in order to keep reading with it open and telling a screen reader the page behind it is inert would be a lie.
-For the same reason focus is not trapped and a click on the page does not close it.
-Focus moves into the panel when it opens; Escape and the close control both shut it, and both return focus to the opening button only when focus was inside the panel, so a reader who has tabbed back into the page keeps their place.
-
 **The panel passes the floors it enforces.**
 Its labels are `--ink` or `--ink-soft` and never faint ink on a recessed surface at a small size - the comment on the copy button in `hub.css` records that this codebase has already failed that once.
 Every control clears 24 by 24 CSS pixels, which is why the range thumb is drawn rather than inherited: the browser's own is about 16px square.
 `scripts/focus_walk.py` opens the panel and presses Tab through all of it in both modes.
+The panel's own chrome - the grip, the title and the close control - is the shell's and clears the same floor through `--panel-target`.
 
 **"Back to this course's defaults" is exact.**
 It removes every `--*-user` property, every reader axis attribute and the panel's own position, which leaves the stylesheet's own values with nothing to unwind.
 That is a property of the three-layer rule rather than a feature of the button: a reader value that competed with a token instead of feeding one would have to be unwound rather than removed.
+
+## The floating control cluster
+
+`hub.js` builds a three-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
+It is chrome you never author, exactly as the topbar and the rail are: it arrives on a page because that page links the shared assets.
+
+**It exists because the panel above was invisible.**
+Every reader control sat behind one unlabelled glyph at the right of the topbar, and the person who commissioned the framework could not find it.
+A reader who never opens that glyph never learns that the palettes, the designs, the text size or the reading face exist, so the framework was shipped and not delivered.
+
+**The light and dark control is what teaches, and that is why it is in the cluster rather than only in the panel.**
+One click repaints the whole page, which is a demonstration rather than a label; a reader who has watched it happen reads the launcher beside it as an offer.
+It names the mode it will switch to rather than the mode that is on, in its glyph and in its `aria-label`, and it follows the operating system's preference while the reader has stated none.
+The reference site's own button shows the current theme and reads as an instruction, so `Light` there means "you are in Light" and every reader who takes it for a label presses it expecting the opposite.
+
+**The panel now has two openers and no owner, and the shell is where that lives.**
+`attachOpener` registers a button rather than replacing the last one, so both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was actually used.
+A reader who opened the panel from the corner and was thrown to the topbar has lost their place, which is the thing the panel's focus contract exists to prevent.
+A third way in, or a second panel with two of its own, is one call and no new code.
+
+**Scroll-to-top is absent until there is somewhere to go back to**, which is one viewport of scrolling rather than a literal distance.
+It is the first control in the row, because the cluster hugs the right edge and a control that comes and goes on the left never moves the other two under the reader's thumb.
+It is never taken away while it holds focus, because hiding the element a keyboard reader is standing on drops focus to the body.
+Activating it scrolls with no `behavior` named, so the browser reads `scroll-behavior` off the stylesheet and the motion axis governs it, and then moves focus to the wordmark: a page that scrolls to the top and leaves the keyboard at the foot of it has moved only half the reader.
+
+**Three positioning decisions, and each is read rather than assumed.**
+The bottom edge is `--dock-offset` plus whatever the pre-production strip occupies, through the fallback in `var(--preprod-h, 0px)`, so the live site and the review site are one declaration.
+`z-index: 64` puts the cluster under the rail's drawer scrim below 1040px and under every panel shell, so a click on it while the drawer is open dismisses the drawer, which is what the reader meant.
+It is a `role="group"` and not a `role="toolbar"`, because a toolbar owes the reader arrow-key roving focus and three plain buttons owe nothing beyond Tab.
+
+**It is chrome, so it is out of the density control's reach and it is not on the paper.**
+The print block hides it with the topbar, the rail, the panel and the pager.
+
+Three tokens are its own: `--dock-target`, the square each control takes, at 36px because it is aimed at with a thumb while the reader is reading rather than with a pointer while they are looking at it; `--dock-offset`, the distance from the two viewport edges it hugs; and `--sp-inset-dock`, the padding around the row.
+All three are design-axis tokens, so a design may raise the target and may never lower it below the 24px WCAG 2.2 SC 2.5.8 asks for.
 
 ## The course contract
 
