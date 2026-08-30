@@ -874,10 +874,65 @@ No deploy, no page edit, and the fallback was measured to restore the original e
 Mermaid cuts every label box to a measurement it takes at render time, and it takes that measurement in the face `hub.js` hands it - `--font-ui`, the chrome role, which is also what `hub.css` paints diagrams with.
 Test a design change by *switching*, never by loading: a diagram with stale metrics renders correctly on the next reload, which is how the defect survives review.
 
+## The panel shell
+
+`hub.js` builds every panel from one shell, `makePanel(spec)`, and a panel supplies nothing but its own name, its store key, its title and what goes in its body.
+The contract below belongs to the shell, so a second panel gets all of it by asking for one, and a correction to any of it is made once.
+Nothing here is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
+
+**Six classes, and the shape is fixed.**
+
+| Class | What it is |
+|---|---|
+| `.panel-shell` | The dialog. Every panel wears it, plus one class of its own - the appearance panel's is `.settings` - which is where that panel states its width and the height above which its body scrolls. |
+| `.panel-bar` | The title bar, which is also the whole pointer surface for a drag. |
+| `.panel-grip` | The keyboard handle inside the bar. Arrow keys move the panel, Shift is the finer step, Home or Enter puts it back. |
+| `.panel-title` | An `h2`, because a dialog's name is a heading. The tag decides the outline a screen reader navigates by and the class decides how it looks. |
+| `.panel-close` | The close control. It lives in the bar and is deliberately not part of the handle. |
+| `.panel-body` | The part that scrolls. The bar stays in view at every scroll position, because a handle that scrolls out of reach is a panel the reader cannot put back. |
+
+The root is `.panel-shell` rather than `.panel` because `panel` is already taken by chart furniture, and a bare `.panel` rule would have matched every `<rect class="panel">` in the hub's inline drawings.
+
+**A panel is non-modal, it has no backdrop, and an outside click does not close it. This is not configurable.**
+It carries `role="dialog"` and `aria-labelledby` and it does not carry `aria-modal`, because a reader parks a panel in order to keep reading with it open and telling a screen reader the page behind it is inert would be a lie.
+For the same reason focus is not trapped: Tab walks out of the panel into the page and back round.
+A parked panel that vanishes the moment the reader clicks the text beside it is a panel that cannot be parked, and a panel that dims or blurs the page behind it hides the thing the reader opened it to work on.
+The ways out are the opening button, the close control and Escape - three, all of them visible or conventional.
+
+**Focus moves into a panel when it opens, and returns to the opening button only if it was inside.**
+A reader who has tabbed back into the page and pressed Escape keeps their place instead of being thrown to the topbar.
+Escape belongs to the panel the reader is in: with focus inside another panel this one stays open, and with focus anywhere else every open panel closes.
+
+**The panel and the button that opens it can never disagree about whether it is open.**
+`attachOpener` is what ties them together, and it is the shell that writes `aria-expanded` on every open and every close.
+A button whose markup states `aria-expanded="false"` once and is never updated tells a screen reader the panel is closed while it is open; that is the defect the reference site ships and the reason this is the shell's job rather than a caller's.
+
+**A panel moves, by pointer and by keyboard, and its position is an intention.**
+What is rendered is that intention clamped into whatever viewport is in front of the reader now, so a coordinate chosen on a wide display comes back when the wide display does and on a phone the panel is re-seated rather than stranded.
+The clamp runs on every open and every resize and it never writes back.
+The band the panel is held inside is measured off the sticky topbar and the pre-production strip rather than assumed, so a panel can never be parked under either.
+Only the re-seat glides - it carries `[data-settling]` - and every move the reader aims takes that attribute off first, because a step that animates is a step nobody can aim.
+`[data-motion="reduced"]` zeroes the glide with every other transition, so reduced motion is answered by the stylesheet and never by a branch in the script.
+
+**Each panel remembers its own position under its own key**, so two panels remember two places and neither can overwrite the other's.
+The appearance panel's key is `coursehub.panel`.
+
+**A panel is `hidden` while it is closed, and that is a requirement rather than a detail.**
+The element is in the DOM of all 797 pages; without `hidden`, `scripts/focus_walk.py` would tab through every control in it on every page and so would every reader.
+
+**Three tokens belong to the shell and are read by every panel**: `--panel-target`, the square the grip and the close control take, at the WCAG 2.2 SC 2.5.8 floor; `--sp-inset-panel-bar`; and `--sp-inset-panel-body`.
+`--set-w` and `--set-h` are the appearance panel's own width and height and are not the shell's.
+
+**Adding a panel is a call and a class, and nothing else.**
+Ask `makePanel` for a shell, fill `shell.body`, hand it the button that opens it, and give it a class of its own for the two lengths it states.
+It may not reintroduce a backdrop, make the close-on-outside-click behaviour configurable, trap focus, share another panel's store key, or write its own drag.
+Every colour it uses is a token, and every control in it must show the hub's focus ring, because `focus_walk.py` presses real Tab keys through the open panel.
+
 ## The reader control panel
 
-`hub.js` builds one panel and it reaches every page, because every page already links the shared assets.
-Nothing about it is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
+`hub.js` builds one panel from the shell above and it reaches every page, because every page already links the shared assets.
+It is the shell plus six controls: everything a reader can do to the panel itself - open it, close it, pick it up, step it with the arrow keys, put it back, have it remembered - is stated in "The panel shell" and is not restated here.
+What follows is what this panel *contains*, and why.
 
 **Six controls, and three axes that are deliberately not among them.**
 The six are the ground (mode and palette), the body size, the reading face, the measure, the line spacing and the density.
@@ -899,24 +954,11 @@ Check 11 in `scripts/validate_site.py` gates both halves - hub.js may write no o
 It writes the twenty prose-rhythm roles as `calc(var(--x-default) * 0.75)`, so a design that restates a role is scaled rather than overruled, and the only names it *can* write are ones hub.css resolves.
 There is no headroom in the chrome for a compact mode: one control already fails WCAG 2.2 SC 2.5.8, seven more pass on the spacing exception alone, and the smallest compliant control has two pixels of margin.
 
-**The panel moves, by pointer and by keyboard.**
-The title bar is the drag surface and the grip inside it takes the arrow keys, with Shift for a finer step and Home or Enter to put the panel back where it started.
-A panel only a mouse can move is a panel some readers cannot move at all.
-
-**Its position is an intention, and what is rendered is that intention clamped into the viewport in front of the reader.**
-The band it is held inside is measured off the sticky topbar and the pre-production strip rather than assumed, so it can never be parked under either.
-The clamp does not write back, so a coordinate chosen on a wide display comes back when the wide display does, and on a phone the panel is re-seated rather than stranded.
-Only the re-seat glides; a move the reader is aiming lands at once, and `[data-motion="reduced"]` zeroes the glide with every other transition.
-
-**The panel is a non-modal dialog, and that follows from it being movable.**
-It carries `role="dialog"` and `aria-labelledby` and it does not carry `aria-modal`, because a reader parks it in order to keep reading with it open and telling a screen reader the page behind it is inert would be a lie.
-For the same reason focus is not trapped and a click on the page does not close it.
-Focus moves into the panel when it opens; Escape and the close control both shut it, and both return focus to the opening button only when focus was inside the panel, so a reader who has tabbed back into the page keeps their place.
-
 **The panel passes the floors it enforces.**
 Its labels are `--ink` or `--ink-soft` and never faint ink on a recessed surface at a small size - the comment on the copy button in `hub.css` records that this codebase has already failed that once.
 Every control clears 24 by 24 CSS pixels, which is why the range thumb is drawn rather than inherited: the browser's own is about 16px square.
 `scripts/focus_walk.py` opens the panel and presses Tab through all of it in both modes.
+The panel's own chrome - the grip, the title and the close control - is the shell's and clears the same floor through `--panel-target`.
 
 **"Back to this course's defaults" is exact.**
 It removes every `--*-user` property, every reader axis attribute and the panel's own position, which leaves the stylesheet's own values with nothing to unwind.
