@@ -999,7 +999,7 @@ Test a design change by *switching*, never by loading: a diagram with stale metr
 The contract below belongs to the shell, so a second panel gets all of it by asking for one, and a correction to any of it is made once.
 Nothing here is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
 
-**Six classes, and the shape is fixed.**
+**Ten classes, and the shape is fixed.** The last four arrive only when a panel asks for a foot.
 
 | Class | What it is |
 |---|---|
@@ -1009,6 +1009,15 @@ Nothing here is in any page's markup, and a page served with the script blocked 
 | `.panel-title` | An `h2`, because a dialog's name is a heading. The tag decides the outline a screen reader navigates by and the class decides how it looks. |
 | `.panel-close` | The close control. It lives in the bar and is deliberately not part of the handle. |
 | `.panel-body` | The part that scrolls. The bar stays in view at every scroll position, because a handle that scrolls out of reach is a panel the reader cannot put back. |
+| `.panel-foot` | Optional, asked for with `foot: true`. Pinned below the body and outside it, which is the title bar's shape at the other end. |
+| `.panel-state` | The save state, in `--ok` on a good write and `--warn` on a failed one, written by the shell's `saveState` helper and never by a caller's own copy of it. |
+| `.panel-export` | The escape hatch, filled in `--warn` the moment a write fails. |
+| `.panel-do` | The one action a panel body leads with, when it has one. |
+
+**A panel that holds something the reader made takes a foot, and the foot is the shell's.**
+The two that do are the study notes panel and the highlights panel, and both of them make the same promise - that the save state is a fact rather than an intention - so both paint it with the same three classes and the same two helpers, `saveState` and `saveFailure`.
+The state is a `role="status"` line whose text is written only when it changed, because the role speaks every write and nobody needs `Saved` announced at every pause.
+A second copy of that would drift, which is the reason the shell exists at all.
 
 The root is `.panel-shell` rather than `.panel` because `panel` is already taken by chart furniture, and a bare `.panel` rule would have matched every `<rect class="panel">` in the hub's inline drawings.
 
@@ -1040,10 +1049,10 @@ The appearance panel's key is `coursehub.panel`.
 The element is in the DOM of all 797 pages; without `hidden`, `scripts/focus_walk.py` would tab through every control in it on every page and so would every reader.
 
 **Three tokens belong to the shell and are read by every panel**: `--panel-target`, the square the grip and the close control take, at the WCAG 2.2 SC 2.5.8 floor; `--sp-inset-panel-bar`; and `--sp-inset-panel-body`.
-`--set-w` and `--set-h` are the appearance panel's own width and height and are not the shell's.
+`--set-w` and `--set-h` are the appearance panel's own width and height and are not the shell's, and neither are `--notes-*` or `--marks-*`.
 
 **Adding a panel is a call and a class, and nothing else.**
-Ask `makePanel` for a shell, fill `shell.body`, hand it the button that opens it, and give it a class of its own for the two lengths it states.
+Ask `makePanel` for a shell, fill `shell.body`, optionally ask for a foot and fill `shell.foot`, hand it the button that opens it, and give it a class of its own for the two lengths it states.
 It may not reintroduce a backdrop, make the close-on-outside-click behaviour configurable, trap focus, share another panel's store key, or write its own drag.
 Every colour it uses is a token, and every control in it must show the hub's focus ring, because `focus_walk.py` presses real Tab keys through the open panel.
 
@@ -1085,7 +1094,8 @@ That is a property of the three-layer rule rather than a feature of the button: 
 
 ## The floating control cluster
 
-`hub.js` builds a four-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
+`hub.js` builds a five-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
+The fifth, the highlights launcher, is the only one that is conditional: it is absent on a browser with no CSS Custom Highlight API, because the panel it would open was never built there.
 It is chrome you never author, exactly as the topbar and the rail are: it arrives on a page because that page links the shared assets.
 
 **It exists because the panel above was invisible.**
@@ -1099,7 +1109,7 @@ The reference site's own button shows the current theme and reads as an instruct
 
 **Each panel has two openers and no owner, and the shell is where that lives.**
 `attachOpener` registers a button rather than replacing the last one, so both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was actually used.
-The study notes panel takes its second way in the same way, which is one call in `mountCluster`.
+The study notes panel and the highlights panel each take their second way in the same way, which is one call apiece in `mountCluster`.
 A reader who opened the panel from the corner and was thrown to the topbar has lost their place, which is the thing the panel's focus contract exists to prevent.
 A third way in, or a second panel with two of its own, is one call and no new code.
 
@@ -1244,14 +1254,105 @@ The front-matter guard is a real one: a block is a fence, a body and a closing f
 
 **The foot is pinned to the panel and the body scrolls above it.**
 It is the one place this panel departs from the appearance panel's shape, and the save state is what earns it: a state that can be below the fold is a state a reader can miss.
+The foot itself, the state line and the export button are the shell's `.panel-foot`, `.panel-state` and `.panel-export`: this panel asked for them first and the highlights panel needs the identical three, so they belong to the shell rather than to either.
 
 **What this panel deliberately does not have.**
 No images and no attachment store - theirs is what fills the quota that then causes the silent data loss.
 No `Clear` - theirs wipes every chapter's highlights from the landing page while deleting only one document, and a reader who wants an empty note selects all and deletes, which saves as an empty note and drops the key.
-No page-text highlighter; that is its own feature and its own investigation.
+No page-text highlighter: that is its own feature, its own panel and its own anchoring contract, stated below.
 
 **Seven tokens belong to this panel and are read by nothing else**: `--notes-w`, `--notes-h` and `--notes-edit-h` for the two lengths it states and the editor's floor, and `--sp-notes-rows`, `--sp-notes-block`, `--sp-notes-indent` and `--sp-inset-notes-edit` for its rhythm.
+The highlights panel states its own four and reads none of these.
 The preview's block rhythm is a chrome distance rather than one of the twenty reading roles on purpose: a `.callout` inside a panel that took a reading role would put the density control into the chrome, which is the split the space ramp exists to prevent.
+
+## The text highlighter
+
+A reader selects a sentence, marks it, and finds it marked when they come back.
+`hub.js` builds all of it and no page's markup mentions it: it is chrome you never author, exactly as the topbar, the rail, the cluster and the two panels are, and it reaches all 797 pages because those pages link the shared assets.
+A page served with the script blocked has no control, no panel and no trace.
+
+**It is painted with the browser's own highlight mechanism and never with a `<mark>` element.**
+`CSS.highlights` takes a set of `Range` objects and `::highlight()` styles them, so nothing in the page is wrapped, split or rewritten and the DOM a screen reader walks is byte for byte the one the author wrote.
+The alternative is to split the text nodes a selection crosses and wrap each piece, which is how this feature is usually built and is why it usually breaks: a sentence a screen reader read as one string becomes three, and it is read out in fragments with a pause at each seam.
+It is also a live edit of a document the section rail, Mermaid and the print pass all hold references into, and it cannot be undone cleanly - removing a mark means merging text nodes back.
+A range highlight has none of those properties, and the worst failure available to it is a mark that does not appear.
+
+**What that costs is semantics, and the panel is the answer to it.**
+There is no element, so there is nothing in the accessibility tree to announce and a screen reader is not told the words are marked.
+That trade is made on purpose: the panel lists every mark on the page as text, in reading order, which is what a screen reader reads instead of a shredded sentence.
+
+**Where the API is missing there is no button, no panel and no cue.**
+The feature is simply not on that browser, and it does not fall back to splitting the DOM, because the fallback is the defect.
+
+### The anchoring contract
+
+A highlight is a reference into text that can change under it, so where it lands on return is the whole design.
+
+**The domain** is the page's own prose flattened to one string: every text node under `main.wrap` or `main.wide`, in document order, with each run of whitespace collapsed to a single space.
+Five things are left out and each has a reason - `script` and `style` are not prose, `svg` and `.mermaid` are drawings whose text is replaced when they render, form controls and buttons are chrome inside the column, `.sr-only` is text no sighted reader can select, and anything `hidden` or `aria-hidden` is not on the page.
+Collapsing whitespace is what makes the domain the text the reader sees rather than the file's indentation, so re-wrapping a lesson's source moves nothing.
+
+**What is stored** is four fields and no ids into the DOM: the exact quote, the offset it was taken from, and up to 48 characters of the text either side.
+That is a position selector plus a quote selector with context, which is the shape the W3C Web Annotation model settled on for the same reason.
+
+**How it is placed on return**, in order, and every step is an exact match:
+
+| Step | What is asked | What answers it |
+|---|---|---|
+| 1 | Is the quote at the offset it was saved at? | The whole of the cost on a page nobody has edited. |
+| 2 | Does `before + quote + after` occur **exactly once**? | A new paragraph above moves every offset below it and moves no words. |
+| 3 | Does the quote occur **exactly once**? | An edit to the sentences either side of the marked one. |
+| 4 | Nothing else. | The highlight is not painted, and the panel says so. |
+
+**Two or more occurrences at any step is a failure rather than a guess.**
+There is no fuzzy match, no nearest match and no edit distance anywhere in the file.
+A highlight that no longer fits **fails visibly** rather than landing on the wrong words, because a silently misplaced highlight - marking the wrong sentence with complete confidence - is worse than one that openly did not come back.
+The panel names the ones that did not place, quotes the words they were made of so the reader can find them by eye, and offers to remove them; nothing is thrown away, so restoring the paragraph restores the mark.
+
+**Placing never writes.**
+Re-anchoring through step 2 or step 3 does not rewrite the stored offset: a load that quietly rewrote storage could report a write failure the reader did not cause.
+
+**A selection that crosses element boundaries is one highlight.**
+The domain is one string over the whole content region, so a selection spanning a paragraph break, a list, a code block or a figure caption has one anchor and the browser paints it across every element it crosses.
+Nothing in the DOM is touched, so there is no partial mark and no broken markup available here at all.
+A selection is clipped to the content region - the part inside is marked and the part outside is dropped - and a selection with no prose in it, one made entirely inside a diagram or in the chrome, is refused and said to be refused.
+
+**A stroke over words already marked merges with them**, so the reader ends with one highlight over the union rather than two stacked ones, which is what a marker pen does and what makes Remove mean one thing.
+
+### Where a page's highlights live
+
+Beside the notes, and on the same identifier: `coursehub.mark:` plus the tier and the course-key-and-file-name `pageKey` derives, so a note and a highlight on one page can never disagree about what a page is.
+One key per page holding one array, because a page's marks are one document.
+The storage discipline is the notes panel's and is not negotiable: writes go through `setChecked` and `dropChecked`, the state is painted from what they returned, and a mark whose write failed is still on screen with the export button filled and the sentence saying it will not survive the reload.
+The panel tells the two failures apart by what the write itself raised rather than by a second probe - a store full to the last byte refuses a probe as well, and the reader would then be told the browser is storing nothing when it is storing five megabytes of theirs.
+
+### The two ways in
+
+**A pointer reader gets the cue**, a floating `Highlight` offer over the selection, which borrows the cluster's `--dock-target` and `--sp-inset-dock` because it is the same kind of control - a floating one aimed at with a thumb while the reader is reading.
+It prevents the default on `mousedown` so pressing it does not collapse the selection it is about to mark, and it is positioned into the band between the sticky topbar and everything fixed across the foot, so it never opens where it cannot be pressed.
+
+**A keyboard reader gets the panel.**
+The last selection made inside the content region is held as an anchor, so opening the panel and pressing its first button marks it whatever the selection did when focus moved, and the panel names the words it is about to mark underneath.
+There is no global shortcut key: a single-character one is an SC 2.1.4 problem and every free modifier combination is taken by a browser on some platform.
+The held selection is re-placed through the same contract a stored one is, so a reader who selected a sentence and then answered a quiz below it still marks the right words.
+
+### On paper
+
+**The control comes off and the mark stays, as an underline.**
+The cue is hidden with the rest of the interactive chrome, `--mark-soft` is white in the print block, and `::highlight()` carries a grey rule instead - so a marked page prints the reader's own annotation without printing a grey block behind every marked paragraph.
+Verified in Chrome at A4: the fill is gone and the underline is there.
+
+### What it costs the design system
+
+**One colour, and it comes from the palette.**
+`--mark-soft` is `color-mix(in srgb, var(--gold) 26%, var(--surface))`, so it is the palette's own gold in every one of the seven and never a hard-coded yellow.
+26% is the strongest tint that still clears the 7:1 body floor on every palette in both modes, which is arithmetic rather than taste: `scripts/contrast_matrix.py` measures `--ink` and `--ink-soft` on it over all 266 combinations, and the worst is 8.08:1 against a 7:1 floor.
+The highlight the panel is pointing at, after `Show`, adds an `--accent-2` underline, which is the only shape `::highlight()` can carry - it takes colour, background, text-decoration, text-shadow and the stroke, and nothing else - and that pair is measured too, at 4.14:1 against a 3:1 floor.
+
+**Four tokens belong to this feature and are read by nothing else**: `--marks-w` and `--marks-h`, the two lengths its panel states, and `--sp-marks-rows` and `--sp-inset-mark` for its rhythm.
+
+**What CI proves.**
+`scripts/focus_walk.py` makes three highlights through the cue, on three pages, in both modes, before it walks the panel - so every run proves the highlighter works end to end in a browser and not only that its panel opens.
 
 ## The in-page section rail
 
