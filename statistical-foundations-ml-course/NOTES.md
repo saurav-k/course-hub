@@ -67,8 +67,14 @@ Lecture 4 carries two more of the same kind, both named on its hub page before t
 4. **The lecture writes the reverse decomposition for `P(D | -)` and never evaluates it.** Page 0049 shows the identity as the notes leave it, then works the number out in a separate callout marked as this course's own derivation. See `learning-records/0002-finishing-an-arithmetic-the-lecture-leaves-open.md`.
 5. **Conditional independence gets a definition and no example.** Page 0052 supplies one - two API replicas behind a shared database - and labels it as this course's construction rather than the lecture's.
 
+Lecture 5 carries three more, all named on its hub page 0058:
+
+6. **Almost nothing in Lecture 5 is evaluated to a decimal.** Both sources stop at an expression. Every decimal on pages 0059 to 0068 is this course's arithmetic on the lecture's own expressions, carried in a `.callout.key` marked as such, and none of it is marked `.keynum`.
+7. **Two marks on the handwritten notes cannot be read.** A stray binomial coefficient beside the quality-check line, named on page 0061 with both readings and built on with neither, and the first letter of the sixth four-image configuration, which page 0065 derives from the count instead of guessing.
+8. **Two threads were parked for the next session.** A pictorial view of the complement, carried as open on page 0061, and the direct route to "both classes represented", which page 0060 shows stalling and page 0068 closes under this course's own name once the binomial has arrived.
+
 ## Open threads
 
-- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4. One idea per page is the constraint; the total falls out of it.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5. One idea per page is the constraint; the total falls out of it.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lectures 1, 2, 3 and 4. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.
+- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4 and 5. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.

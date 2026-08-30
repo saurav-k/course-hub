@@ -12,7 +12,7 @@ Prefer a textbook or a primary paper over a blog summarising one.
 
 - **A First Course in Probability** - Sheldon Ross.
   The standard first course, and the one the lecture course names first. Combinatorics, axioms, random variables, expectation, limit theorems, all with a large exercise set.
-  Use for: the binomial calculation on page 0003, expectation on page 0003, and the exponential distribution on page 0004.
+  Use for: the binomial calculation on page 0003, expectation on page 0003, and the exponential distribution on page 0004. Chapter 1 covers the counting rules and the four sampling cases that Lecture 4 builds and Lecture 5 applies; chapter 4 develops the binomial and the hypergeometric as named distributions, which is where pages 0062 to 0068 point a reader who wants the next step.
 
 - **Probability, Random Variables and Stochastic Processes** - Athanasios Papoulis and S. Unnikrishna Pillai.
   The engineer's reference. Denser than Ross, and the book to reach for when a result is needed rather than a course.
@@ -80,4 +80,5 @@ Prefer a textbook or a primary paper over a blog summarising one.
 ## Gaps
 
 - The lecture's three case studies (the new-to-credit limit, the button A/B test, the leading-indicator search) are teaching constructions. The data is invented to make a point. Nothing in them should be cited as evidence about real fintech behaviour, and the pages say so.
+- Lecture 5's two source documents are the lecturer's own: a typeset examples handout and five pages of handwritten class notes, both watermarked for personal use. Neither is reproduced anywhere on the site and neither is linkable, so pages 0058 to 0068 cite them by description rather than by link. Two marks on the handwritten notes could not be read, and both are named on the pages that would otherwise have used them.
 - The correlation slide's normalising constants do not reproduce from the table printed on the slide immediately before it. Page 0007 quotes the deck and then shows the arithmetic the table itself gives. There is no source that resolves the difference, so the page names it rather than picking a side.
