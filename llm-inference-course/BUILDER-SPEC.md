@@ -8,7 +8,7 @@ This course links TWO stylesheets, in this order: the shared design system `../.
 
 ## Hard rules
 1. No em dashes anywhere. Use `-`.
-2. Diagrams everywhere - min 4 Mermaid diagrams per lesson (flowchart, sequenceDiagram, stateDiagram, architecture). Each in `<figure class="diagram"><div class="mermaid">...</div><figcaption>...</figcaption></figure>`; figcaption explains it in plain English and bolds the takeaway.
+2. Diagrams everywhere - min 4 Mermaid diagrams per lesson (flowchart, sequenceDiagram, stateDiagram, architecture). Each in `<figure class="diagram"><div class="fig-cap">...</div><div class="fig-claim">...</div><div class="mermaid">...</div><figcaption>...</figcaption></figure>`; the caption pair goes above the drawing, `.fig-cap` naming the subject in 2 to 5 words and `.fig-claim` stating in one sentence what the drawing proves, and the figcaption below explains it in plain English and bolds the takeaway.
 3. This is a LAB course: every lesson must include at least one `.lab` box with a concrete goal, the real commands (`.term` blocks) and/or runnable code (`<pre><code>` with `.code-cap`) to run it, and a measurable outcome. Prefer real tool invocations (docker run, vllm serve, pip install, kubectl, etc.) that actually work.
 4. Everything grammatically explainable. Plain English before commands/code. Any formula in `.math` + `.gloss`.
 5. Accuracy: web-verify current tool usage/flags (vLLM, SGLang, TensorRT-LLM, LiteLLM, etc.) so commands are real, not invented. Note version-sensitivity where relevant.
