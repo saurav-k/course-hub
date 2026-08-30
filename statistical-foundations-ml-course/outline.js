@@ -361,6 +361,72 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0076-the-false-positive-paradox.html"
         }
       ]
+    },
+    {
+      "n": "L6",
+      "title": "Lecture 6: the random variable",
+      "lessons": [
+        {
+          "title": "Lecture 6: start here",
+          "href": "lessons/0077-lecture-6-start-here.html"
+        },
+        {
+          "title": "Why a number instead of an outcome",
+          "href": "lessons/0078-why-a-number-instead-of-an-outcome.html"
+        },
+        {
+          "title": "The function with the wrong name",
+          "href": "lessons/0079-the-function-with-the-wrong-name.html"
+        },
+        {
+          "title": "The support, and the PMF",
+          "href": "lessons/0080-the-support-and-the-pmf.html"
+        },
+        {
+          "title": "The CDF is a running sum",
+          "href": "lessons/0081-the-cdf-is-a-running-sum.html"
+        },
+        {
+          "title": "Four things every CDF does",
+          "href": "lessons/0082-four-things-every-cdf-does.html"
+        },
+        {
+          "title": "Reading probability off the staircase",
+          "href": "lessons/0083-reading-probability-off-the-staircase.html"
+        },
+        {
+          "title": "Bernoulli and the discrete uniform",
+          "href": "lessons/0084-bernoulli-and-the-discrete-uniform.html"
+        },
+        {
+          "title": "The binomial, now a distribution",
+          "href": "lessons/0085-the-binomial-as-a-distribution.html"
+        },
+        {
+          "title": "The geometric, and memorylessness",
+          "href": "lessons/0086-the-geometric-and-memorylessness.html"
+        },
+        {
+          "title": "The Poisson, and the shape of N",
+          "href": "lessons/0087-the-poisson-and-the-shape-of-n.html"
+        },
+        {
+          "title": "When mass becomes density",
+          "href": "lessons/0088-when-mass-becomes-density.html"
+        },
+        {
+          "title": "The uniform and the exponential",
+          "href": "lessons/0089-the-uniform-and-the-exponential.html"
+        },
+        {
+          "title": "The Gaussian, and its missing formula",
+          "href": "lessons/0090-the-gaussian-and-its-missing-formula.html"
+        },
+        {
+          "title": "Light tails against heavy tails",
+          "href": "lessons/0091-light-tails-against-heavy-tails.html"
+        }
+      ]
     }
   ],
   "extras": [
@@ -383,6 +449,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Lecture 5 Formula Sheet",
       "href": "reference/lecture-5-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 6 Formula Sheet",
+      "href": "reference/lecture-6-formula-sheet.html"
     }
   ]
 };
