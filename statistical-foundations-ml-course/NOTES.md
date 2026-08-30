@@ -77,8 +77,16 @@ Lecture 5 carries three more, all named on its hub page 0058:
 7. **Two marks on the handwritten notes cannot be read.** A stray binomial coefficient beside the quality-check line, named on page 0061 with both readings and built on with neither, and the first letter of the sixth four-image configuration, which page 0065 derives from the count instead of guessing.
 8. **Two threads were parked for the next session.** A pictorial view of the complement, carried as open on page 0061, and the direct route to "both classes represented", which page 0060 shows stalling and page 0068 closes under this course's own name once the binomial has arrived.
 
+Lecture 6 carries five more, all named on its hub page 0077:
+
+9. **The source's own lecture number is not this course's.** The notes are titled as the lecturer's Lecture 4 and are this course's Lecture 6, because the two numbering schemes have drifted by one topic. Nothing is renumbered; `PLOT.md` row 9 is the record.
+10. **The notes state one worked set of figures in eight pages.** Only the two-coin example carries numbers. Every decimal and every curve on pages 0078 to 0091 is this course's own arithmetic on the notes' own formulas, carried in a `.callout.key` and never marked `.keynum`.
+11. **Four results are asserted with no proof**: that the geometric is the only memoryless discrete shape, that the exponential is the only memoryless continuous one (the notes write "prove it" and move on), that a continuous variable gives any countable set probability zero, and that the Gaussian CDF has no closed form. All four are taught as stated and the absence is named on the page.
+12. **The geometric's words and its formula disagree.** "Number of coin tosses before first heads" against `p(1-p)^(k-1)`, which counts the toss the first head lands on. Page 0086 follows the formula and leaves the sentence as written.
+13. **The letter N means two different sets one paragraph apart.** The geometric needs it to start at 1 and the Poisson at 0. Page 0087 runs both sums and lets the arithmetic settle each reading.
+
 ## Open threads
 
-- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4 and 5. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.
+- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4, 5 and 6. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.
