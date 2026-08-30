@@ -112,6 +112,15 @@ Do not infer the house style from this file. Infer it from the lessons.
 - One tight idea per lesson, mental model first, then the mechanism, then the trade-offs.
 - Full normal prose. Complete sentences. No terse fragments in published content, whatever style the chat conversation is using.
 - Include active-recall widgets. Copy the exact markup documented in the `assets/hub.js` header; do not invent your own widget shape.
+- A figure carries two lines above the drawing: `.fig-cap` names the subject in two to five
+  words and `.fig-claim` says in one sentence what the drawing proves, so the picture answers a
+  question the reader has already asked. Both are direct children of `figure.diagram`, because
+  `hub.css` selects them that way: one wrapped in a `div` for spacing takes no styling and renders
+  as body text at figure width, which validates and reaches no console. `validate_site.py` check
+  19 fails that shape, a claim with no label, a reversed pair, and either line below the drawing.
+  Presence is never checked by machine and must not be: a label cannot be generated. The
+  author-facing statement is `.claude/skills/course-authoring/references/widgets.md`, "What a
+  figure is".
 - A Mermaid diagram is a `<div class="mermaid">`, never a `<pre class="mermaid">`. `assets/hub.js` appends a copy button to every `<pre>`, and Mermaid renders from the element's `textContent`, so a `pre` silently picks up the word `copy` as a final line of graph source and the diagram renders as a syntax error. Nothing reaches the console, so always look at the figures rather than counting them.
 - Make quiz options match in word and character count. A visibly longer correct answer leaks the answer.
 - File it as `lessons/NNNN-kebab-case.html`, continuing the existing sequence.
@@ -294,7 +303,7 @@ rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub
 attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries 335 of them: `--font-display`,
+near the head of `hub.css`, marked "the design axis", carries COUNT_TOTAL of them: `--font-display`,
 `--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
 eight-step space ramp with a role layer over it, the reading frame, shape, motion and the eyebrow
 treatment. Six of

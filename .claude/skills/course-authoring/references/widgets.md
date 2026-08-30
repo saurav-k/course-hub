@@ -222,6 +222,55 @@ Reserve it. A page with three warnings has no warning.
 
 ## Diagrams
 
+### What a figure is
+
+Four parts, in this order, and the order is the point.
+
+```html
+<figure class="diagram">
+  <div class="fig-cap">How the two summaries move</div>
+  <div class="fig-claim">The mean is dragged past nine of the ten days. The median is not.</div>
+  <div class="mermaid">
+flowchart LR
+  A["Observed data"] --> B["Estimate"]
+  </div>
+  <figcaption>Plain English reading of the figure, with <b>the one takeaway in bold</b>.</figcaption>
+</figure>
+```
+
+| Part | What it is | Length |
+|---|---|---|
+| `.fig-cap` | the **subject**. What the drawing is of. | 2 to 5 words |
+| `.fig-claim` | the **claim**. What the drawing proves. | one sentence, under 15 words |
+| the drawing | `div.mermaid` or `svg.chart` | - |
+| `<figcaption>` | the reading, with the bolded takeaway | as short as it can be and still teach |
+
+The reader meets the label, then the claim, then the picture.
+The picture answers a question that has already been asked, which is why the two lines go above and the reading stays below.
+
+**`.fig-cap` names and never argues. `.fig-claim` argues and never describes the picture.**
+Neither is ever a question.
+Measured across the 94 figures the anatomy comes from: zero question marks in either line, median 3 words in the label and 11 in the claim.
+An author who is choosing what kind of sentence to write has already put the wrong thing in one of them.
+
+Write `.fig-cap` in sentence case.
+The stylesheet upper-cases it, and it takes the eyebrow family, tracking and case from the design in force, so it is mono under Press and Inter under House with the page naming no face.
+Both lines cost no colour: the label is `--accent-2` and the claim `--ink`, which the contrast matrix already holds over the diagram card in every palette, both modes and every course hue.
+
+A figure may carry neither line.
+It may not carry only the claim.
+**A `.fig-claim` with no `.fig-cap` above it is a proposition with no subject, and it reads as a stray sentence that lost its paragraph.**
+Check 19 in `scripts/validate_site.py` fails that, and three other shapes with it.
+
+The pair is not required on an existing figure and never will be by machine.
+A label cannot be generated: the measured pass over the hub's own 2,934 captions produces 434 figures all labelled WHERE THIS SITS and 173 labelled FIGURE 1, FIGURE 2, FIGURE 3, which is worse than no label.
+The bar for a page you are writing now is in [`pedagogy.md`](pedagogy.md).
+
+### Two ways the caption pair breaks silently
+
+- **`.fig-cap` and `.fig-claim` are direct children of `figure.diagram`, in that order, before the drawing.** The stylesheet selects them as `figure.diagram > .fig-cap`, so one wrapped in a `<div>` for spacing takes no styling at all and renders as unstyled body text at figure width. Nothing reaches the console and the page still validates against every other check.
+- **A `.fig-cap` longer than about six words wraps, and the rule mark is on the first line only.** The mark is a `::before` on a flex row, so a wrapped label leaves its second line with no anchor and the figure loses its left edge. There is no ellipsis and no warning; it looks correct on a laptop and broken at narrow widths, which is the order nobody checks in.
+
 ### The orientation figure, which opens every content page
 
 Ordinary `figure.diagram` markup in a load-bearing position: the page's first figure, directly after the one-minute version and before the first body section.
@@ -307,7 +356,9 @@ Three rules.
 
 ### Inline SVG, for anything quantitative
 
-Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot.
+Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot, and it cannot put one saturated mark in a neutral field so that the colour is the argument.
+That last one is a real reason to draw by hand: a figure whose whole point is *this one thing, among these others* is clearer when nine tenths of it is unpainted.
+It is not a reason to redraw a flowchart that is doing its job.
 Write the SVG by hand, in the page. No chart library, no build step, no extra CDN.
 
 ```html
@@ -326,6 +377,8 @@ Write the SVG by hand, in the page. No chart library, no build step, no extra CD
 - Always a `viewBox`, never a `width`/`height` pair. Around `640 x 300` keeps 13px text readable.
 - Always `role="img"` and an `aria-label` saying what the chart shows.
 - **Colour comes only from the semantic classes.** A literal hex looks right in one theme and vanishes in the other, and it cannot follow the print stylesheet either.
+- **Paint about a tenth of the canvas and no more.** Colour marks the subject; the field around it stays `panel`, `grid`, `axis` and `ink`. Measured on the figures the caption anatomy comes from, the saturated area is a median of 10.7% of the canvas and under 10% on 109 of 234. A chart where every mark is coloured has no subject, and the reader has to be told which one matters instead of seeing it.
+- **A wide short band sits in the column like a rule between paragraphs.** Those same figures run a median aspect ratio of 3.43:1. A tall figure is an interruption, and a `640 x 300` viewBox is already close to the shape.
 
 The colour names are a **closed set, shared by the whole hub** and declared in `assets/hub.css`: `stat`, `prob`, `signal`, `noise`, `alarm`, `gold`, `plum`, `sky`, and `ink` for marks and strokes.
 They are not a per-course palette any more; a course's identity comes from its accent hue, not from its charts.
@@ -732,13 +785,13 @@ The groups, and what each is for.
 | Group | Count | What a rule reads |
 |---|---|---|
 | Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. `--font-body` is set by the face registry rather than in this block; see the derived axes below. |
-| Type scale | 63 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
+| Type scale | 64 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
 | Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. `--lh-body` carries the measure nudge; see the derived axes below. |
 | Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
 | Tracking | 14 | Negative on display type, positive on anything set in capitals. |
-| Space | 182 | Two layers; see below. |
+| Space | 183 | Two layers, five of them the printed page's; see below. |
 | Reading frame | 3 | `--measure-chars-default`, the column width in real characters, and `--wide-left` / `--wide-right`, unitless shares summing to 1 that say how the breakout band sits around it. `.5` and `.5` centres the prose; `0` and `1` grows figures from its left edge. The rule does the arithmetic, because `--measure-wide` differs by element. |
-| Shape | 20 | The seven radii, the four border widths, and the six that are the shadow *shape* - its colour stays on the mode layer. Three more are one widget's shape each: `--part-rule-style`, `--sec-badge-size` and `--sec-badge-radius`. |
+| Shape | 22 | The seven radii, the four border widths, the two that are the figure label's rule mark, and the six that are the shadow *shape* - its colour stays on the mode layer. Three more are one widget's shape each: `--part-rule-style`, `--sec-badge-size` and `--sec-badge-radius`. |
 | Focus ring | 5 | `--focus-ring-color`, `--focus-ring-width`, `--focus-ring-style` and the two offsets; see below. |
 | Motion | 11 | Six durations, two easings, two lift distances and one slide distance. `--motion-slide` is `0px` in House; a design whose signature gesture is horizontal sets it and every lesson card follows. |
 | Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
