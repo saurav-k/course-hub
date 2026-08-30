@@ -1308,7 +1308,11 @@
     control.type = 'button';
     control.title = label;
     control.setAttribute('aria-label', label);
-    control.appendChild(el('span', 'tb-icon', glyph));
+    /* The glyph is its own element so the mode control can be relabelled
+       without touching the button's attributes. It borrows no class from the
+       topbar: `.dock-btn` sets the icon size itself, and one owner for a
+       component's size is the rule the shared sheet is held to. */
+    control.appendChild(el('span', null, glyph));
     return control;
   }
 
