@@ -1253,6 +1253,74 @@ No page-text highlighter; that is its own feature and its own investigation.
 **Seven tokens belong to this panel and are read by nothing else**: `--notes-w`, `--notes-h` and `--notes-edit-h` for the two lengths it states and the editor's floor, and `--sp-notes-rows`, `--sp-notes-block`, `--sp-notes-indent` and `--sp-inset-notes-edit` for its rhythm.
 The preview's block rhythm is a chrome distance rather than one of the twenty reading roles on purpose: a `.callout` inside a panel that took a reading role would put the density control into the chrome, which is the split the space ramp exists to prevent.
 
+## The in-page section rail
+
+`hub.js` builds a strip of ticks down the right-hand margin of every page, one per section of that page, and no page's markup mentions it.
+It is chrome you never author, exactly as the topbar, the course rail and the floating cluster are: it arrives on a page because that page links the shared assets.
+
+**It is derived from the page's own headings, at runtime, and from nothing else.**
+That is the whole design and it is the reason there is no authoring step here at all.
+A model of a page's sections held anywhere but in the page is a second source that can disagree with it, and a lesson rewritten in the afternoon would leave that model wrong by the evening.
+The headings cannot drift from the page, because they are the page.
+
+**Which headings is one rule, and it was read off the corpus rather than guessed.**
+An `h2` that is a direct child of the content region and is not wearing a smaller face.
+Inside `main`, the hub's 744 lesson pages carry 6,260 `h2`, 1,236 `h3` and 10 `h4`, and 5,559 of those `h2` are direct children, so `h2` is this hub's section level, `h3` is an occasional subdivision inside a section rather than a section of its own, and `h4` barely exists.
+It is the same rule [`.numbered`](#the-numbered-section-badge-numbered) already applies when it draws the section badges, so the squares down the page and the ticks down the margin can never name different sections.
+Direct children is also what keeps everything else out without naming any of it: the topbar, the course rail, both panels and the cluster are children of `body`, and a figure's caption, a callout's heading and a card's title are deeper than one level, so none of them can appear in the list and a widget added next year cannot leak into it either.
+
+**Four sections, or no rail.**
+A rail answers two questions - where am I, and how much is left - and on a page of three sections the scrollbar has already answered both, so a list of three is chrome that outweighs what it indexes.
+Fifty-seven of the hub's 789 content pages carry three sections or fewer and get nothing at all, which is the intended outcome and not a gap.
+A course map gets none either, and for the same reason rather than by an exception: its headings sit inside `.module` blocks and are not direct children of anything.
+
+**A heading keeps its own id and is given one only if it has none.**
+The generated id is `sec-` plus the heading's text, lowercased, with accents folded onto their letters, apostrophes dropped so a possessive stays one word, and every other run of non-alphanumeric characters folded to a single dash.
+It is deterministic, so a link a reader shared last month still lands in the right place today.
+The collision rule: a candidate is taken only if nothing in the document already answers to it, which covers an id an author wrote elsewhere on the page and a second heading whose words match an earlier one's in the same test.
+Otherwise the next free `-2`, `-3` and so on is taken, counting in document order, so the first heading with those words keeps the plain id and a later one can never take it away.
+A heading whose text yields no slug at all takes its own position in the sequence instead.
+
+**The reader is in the last section whose heading has reached the reading line, and in exactly one.**
+The reading line is `--secrail-line`, which is also every direct-child `h2`'s `scroll-margin-top`, so a jump lands a heading on the line and the section jumped to is current the moment the reader arrives.
+`hub.js` reads that value back in pixels off the heading itself rather than restating it, so the distance that positions a jump and the distance that decides which section is current are one number with one home.
+When two sections are on screen at once - the tail of one and the heading of the next - the reader is in the earlier of the two, because they have not reached the later heading yet.
+Above the first heading no section is current, and nothing is highlighted: a page's opening is not a section, and saying it is would be a small lie told on every page load.
+
+**It is tracked with an `IntersectionObserver`, and the observer's shape is what makes that honest.**
+The root is the viewport from one pixel above the reading line down; the thresholds are 0 and 1.
+A heading's top crossing that edge is a crossing of threshold 1 - it stops being wholly inside the root - and its bottom crossing is a crossing of threshold 0, so every transition of "has this heading reached the line" raises a callback.
+Neither threshold alone would do: with 0 the highlight lagged by the height of the heading, and a one-pixel band was stepped over between two frames by any fast scroll and never fired at all.
+The callback reads the headings' own rectangles rather than the entries it was handed, so what is painted is the geometry at the moment of painting and never a fact remembered from an earlier frame.
+
+**Ticks always, labels on hover and on focus.**
+Collapsed, the strip is about 35px wide and stands in the content gutter beside the breakout band rather than over it; the reader's own section is drawn on a longer tick in the course accent, so "where am I" is answered with no label showing and without asking anyone to tell two colours apart.
+Hovering the strip, or tabbing into it, opens the labels leftwards over the page for as long as the reader is there.
+That is the trade the widget exists to make: a permanently labelled list would sit on every figure and every table on the page, and a list of ticks nobody can read is not a list.
+Opening changes colours and the labels' own width, never anything under the pointer - the ticks are the elements nearest the edge and they do not move.
+
+**Every row is a plain anchor and deliberately nothing else.**
+The browser scrolls it, reads `scroll-behavior` off the stylesheet so the motion axis governs whether the jump animates, puts the address bar on the section the reader is now reading, and moves the sequential focus starting point to the heading so the next Tab carries on from the page rather than from the rail.
+Four user stories, and not one line of script.
+The strip is a `nav` with an accessible name, the rows are an ordered list, and the current row carries `aria-current="location"` - `location` rather than `page`, because the course rail's `page` says which page of the course this is and this says which place within the page the reader is at.
+A label is clipped rather than hidden, so it stays in the link's accessible name whether the labels are open or shut.
+
+**Its band stops where the foot begins.**
+The strip spans the viewport from the foot of the topbar to the top of the floating cluster, and what is fixed across the foot below the cluster is [`--foot-h`](#the-fixed-chapter-bar), which this reads as one token exactly as the cluster does.
+So the pre-production strip, the chapter bar and the device inset are already summed and a fourth occupant reaches this rail with no edit to it.
+It carries `z-index: 63`, the chapter bar's layer, and the two never contend for a pixel because the strip ends above where the bar begins.
+
+**It runs at 1281px and up, and it is absent below that.**
+The strip stands in the content gutter, which is `--pad`: 3rem above 1280px, where there is room for it beside the widest figure on the page, and 2rem or less below, where the same strip would stand on the edge of every breakout element instead.
+That threshold is above the course rail's own by construction, so the two never compete.
+Below 1041px the course rail leaves the grid and becomes a drawer over the content, the reading column takes the whole viewport, and there is no gutter at all; a second navigation floating over the same prose would be a second thing between the reader and the page, and a phone reader's whole width is the reading width.
+So the section rail is simply not there, and the page keeps the navigation it has always had.
+It is not printed either, with the rest of the chrome.
+
+**Seven tokens belong to it and are read by nothing else**: `--secrail-w`, the width the labels open to; `--secrail-tick` and `--secrail-tick-on`, one section's tick and the reader's own; `--secrail-target`, the height of a row; `--secrail-offset`, from the right edge of the viewport; `--secrail-line`, the reading line; and `--sp-inset-secrail`, around the ticks.
+A row is `--secrail-target` tall and no wider than its own tick, so it meets WCAG 2.2 SC 2.5.8 on the spacing exception rather than outright: the nearest other target is the row above or below and nothing else on the page comes within the strip's own width.
+Widening a row to clear the criterion outright would put the strip on the breakout band at the width the rail starts at, which is the one thing it may not do, and closing the gap between rows would take the exception away, so nothing here may be tightened.
+
 ## The course contract
 
 A course declares its identity through **seven tokens, in one block, and through nothing else**.
