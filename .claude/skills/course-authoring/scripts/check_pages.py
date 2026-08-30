@@ -7,6 +7,11 @@ page is one of these courses: the design-system links it must carry, the four
 ways a Mermaid diagram breaks silently, the widget shapes in
 ``references/widgets.md`` and the counts in ``references/pedagogy.md``.
 
+The caption pair splits across the two: whether a ``.fig-cap`` and a
+``.fig-claim`` are in the right place is structural and belongs to
+``validate_site.py``; how long they are and whether either is a question is
+editorial and belongs here.
+
 Deterministic and offline, no dependencies. Two severities:
 
 * FAIL - a defect with no defensible reason to exist. Fix it.
@@ -54,6 +59,18 @@ MIN_ORIENTATION_LINES: int = 3
 MAX_PROSE_WORDS_PER_PAGE: int = 1800
 MAX_PROSE_WORDS_PER_FIGURE: int = 400
 
+# The figure's text budget above the drawing: a label that names the subject and
+# a claim that says what the drawing proves. Both ceilings are measured on the
+# 94 figures the anatomy comes from rather than chosen: a median of 3 words in
+# the label and 11 in the claim, and no question mark in either.
+#
+# Six words is where the label stops being one line. The rule mark before it is
+# a ::before on a flex row, so a wrapped label leaves its second line with no
+# anchor and the figure loses its left edge - correct on a laptop, broken at
+# narrow widths, and silent in both.
+MAX_FIG_CAP_WORDS: int = 6
+MAX_FIG_CLAIM_WORDS: int = 15
+
 # Two floors are newer than the seven courses that predate this checker, so a
 # course opts into them by name rather than inheriting them silently and turning
 # every legacy page red. Joining this set is the last step of a retrofit under
@@ -86,6 +103,12 @@ MERMAID_LABEL = re.compile(r"[\[\(\{]+([^\[\]\(\)\{\}]+)[\]\)\}]+")
 ENTITY = re.compile(r"[&#](?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);|#\d+;")
 
 CHART_SEMANTIC = re.compile(r"^(?:m|s|f|t|sw)-[a-z0-9-]+$")
+
+# The two lines of the caption pair. Whether they are in the right place is
+# scripts/validate_site.py check 19, which parses the element stack; what is
+# checked here is what an author wrote in them.
+FIG_CAP = re.compile(r'<div class="fig-cap"[^>]*>(.*?)</div>', re.S)
+FIG_CLAIM = re.compile(r'<div class="fig-claim"[^>]*>(.*?)</div>', re.S)
 
 # Prose is what is left of the reading column once everything that is not prose
 # is taken out of it: the figures, the code, the quizzes and the page chrome.
@@ -165,6 +188,24 @@ def is_hub_landing(page: Path) -> bool:
     return page.parent == REPO_ROOT and page.name == "index.html"
 
 
+def is_course(folder: Path) -> bool:
+    """A top-level folder that teaches, as opposed to one that does not.
+
+    Not every folder in the hub is a course. ``design-system/`` is a single
+    reference page about the design system itself: it has no lessons, so it has
+    no rail to build, no mission to declare and no diagram-kind spread to keep.
+    Holding it to the course bar would report five failures that name nothing a
+    reader or an author could act on.
+
+    The test is the ``lessons/`` directory, because that is what a course *is*
+    here and every one of them has one. It is deliberately structural rather
+    than a list of folder names: a list would have to be edited by whoever adds
+    the next course, and the failure mode of forgetting is a course that quietly
+    stops being checked.
+    """
+    return folder.is_dir() and (folder / "lessons").is_dir()
+
+
 def is_course_map(page: Path) -> bool:
     return page.name == "index.html" and page.parent.parent == REPO_ROOT
 
@@ -207,7 +248,11 @@ def check_design_system(page: Path, src: str) -> list[Finding]:
         found.append(Finding(rel(page), "FAIL", "does not load assets/hub.js"))
     elif "</head>" in src and re.search(r'src="[^"]*assets/hub\.js"', src.split("</head>", 1)[1] or ""):
         found.append(Finding(rel(page), "FAIL", "loads hub.js after </head>; it must run before the first paint"))
-    if not is_hub_landing(page) and not re.search(r'src="[^"]*outline\.js"', src):
+    # The rail is a course's table of contents, so only a course's pages owe one.
+    # The hub landing page and the design-system reference have no lessons to
+    # list and `hub.js` builds no rail for them.
+    course = course_of(page)
+    if course is not None and not re.search(r'src="[^"]*outline\.js"', src):
         found.append(Finding(rel(page), "FAIL", "does not load its course outline.js, so it has no sidebar rail"))
     if "theme-btn" in src:
         found.append(Finding(rel(page), "WARN", "carries a legacy .theme-btn; hub.js deletes it at mount"))
@@ -300,6 +345,44 @@ def mermaid_kinds(src: str) -> set[str]:
     return kinds
 
 
+def caption_pair_findings(page: Path, index: int, body: str) -> list[Finding]:
+    """What the author wrote in the two lines above the drawing.
+
+    The label names the subject and never argues. The claim argues and never
+    describes the picture. Neither is ever a question, and an author who is
+    choosing what kind of sentence to write has already put the wrong thing in
+    one of them - which is why the question mark is a FAIL in the label rather
+    than a matter of taste.
+
+    The claim's ceiling is a WARN: fifteen words is the measured median plus
+    room, and a claim at seventeen is a sentence to tighten rather than a defect
+    to reject.
+    """
+    found: list[Finding] = []
+    for label in FIG_CAP.findall(body):
+        words = plain(label).split()
+        if len(words) > MAX_FIG_CAP_WORDS:
+            found.append(Finding(rel(page), "FAIL",
+                                 f"figure {index} .fig-cap is {len(words)} words, over {MAX_FIG_CAP_WORDS}; "
+                                 "it wraps and the rule mark stays on the first line"))
+        if "?" in plain(label):
+            found.append(Finding(rel(page), "FAIL",
+                                 f"figure {index} .fig-cap is a question; the label names the "
+                                 "subject and the claim is what argues"))
+    for claim in FIG_CLAIM.findall(body):
+        words = plain(claim).split()
+        if len(words) > MAX_FIG_CLAIM_WORDS:
+            found.append(Finding(rel(page), "WARN",
+                                 f"figure {index} .fig-claim is {len(words)} words, over "
+                                 f"{MAX_FIG_CLAIM_WORDS}; the claim is one sentence, and the "
+                                 "reading belongs in the figcaption"))
+        if "?" in plain(claim):
+            found.append(Finding(rel(page), "FAIL",
+                                 f"figure {index} .fig-claim is a question; it states what the "
+                                 "drawing proves"))
+    return found
+
+
 def check_figures(page: Path, src: str, css_classes: frozenset[str]) -> list[Finding]:
     found: list[Finding] = []
     figures = FIGURE.findall(src)
@@ -308,6 +391,7 @@ def check_figures(page: Path, src: str, css_classes: frozenset[str]) -> list[Fin
             found.append(Finding(rel(page), "FAIL", f"figure {index} has no figcaption"))
         elif not re.search(r"<figcaption[^>]*>.*?<b>", body, re.S):
             found.append(Finding(rel(page), "FAIL", f"figure {index} has no bolded takeaway in its caption"))
+        found.extend(caption_pair_findings(page, index, body))
         if "<svg" not in body:
             continue
         if re.search(r'(?:fill|stroke)\s*=\s*"#[0-9a-fA-F]{3,8}"', body):
@@ -626,8 +710,15 @@ def pages_under(target: Path) -> list[Path]:
 
 
 def course_of(page: Path) -> Path | None:
+    """The course a page belongs to, or ``None`` if it belongs to no course.
+
+    A page directly under the repository root is the hub landing page, and a
+    page under a top-level folder that ships no ``lessons/`` is part of a hub
+    section rather than of a course. Both answer ``None``, which is what keeps
+    the course-wide bars off a page that is not teaching anything.
+    """
     for parent in page.parents:
-        if parent.parent == REPO_ROOT and parent.is_dir():
+        if parent.parent == REPO_ROOT and is_course(parent):
             return parent
     return None
 

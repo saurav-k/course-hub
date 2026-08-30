@@ -94,25 +94,47 @@ Five of these are instruction files and a new course is never born without them:
 Fill each one from this interview and from what the course actually is; a template with only the name swapped produces files nobody reads.
 If your tooling flattened the `CLAUDE.md` symlink into a text file while copying, recreate it with `ln -s AGENTS.md CLAUDE.md`.
 
-A course needs **no `assets/` folder at all**.
+A course needs **no `assets/` folder at all**, and a new course may not have one.
 It links `assets/hub.css` and `assets/hub.js` like every other page in the hub, and there is nothing else to link.
-Add `<course>/assets/course-extras.css` from `course-extras.css.tmpl` only when you have a rule that is genuinely unique to this course, and layer it after the hub sheet.
-A rule two courses would both want belongs in `assets/hub.css` instead.
+Three courses carry a grandfathered `assets/course-extras.css` from before the course contract; they stay because their pages link them, and no course gets a fourth.
+A rule two courses would both want belongs in `assets/hub.css`, and so does a rule only one course wants: one owner is the whole point.
+A course's identity is the seven tokens below, not a stylesheet.
 
 Then three registrations, none of which the course can do for itself:
 
-1. **Give the course a hue.** Add one line to the course-accent block in `assets/hub.css`:
+1. **Register the course.** Add one block to the course-contract section of `assets/hub.css`.
+   Seven tokens are available, one of them required, and that is the entire author surface:
 
    ```css
    :root[data-course="<course>-course"] { --course-hue: 0; }
    ```
 
-   `hub.js` reads the course folder out of the URL and writes it onto `<html>`, and `hub.css` rotates whichever palette the reader chose by that offset in OKLCH.
-   The grid is 25 degrees. The first seven courses filled -75 to +75, so the eighth extended the same grid outwards rather than re-spreading it, and `math-for-ml-course` holds +125.
-   A new course takes a free step on that grid, extends it again, or re-spreads the block; extending is cheapest, because re-spreading changes the accent of every course already published.
-   A course with no line here silently wears the plain palette accent, which is dull rather than broken.
+   Most courses stop there.
+   A course that also wants its own heading voice, its own code face or its own eyebrow writes them into the same block:
 
-   Check the new hue against every palette in both modes before you ship it: six palettes times two modes is what "verified" means here.
+   ```css
+   :root[data-course="<course>-course"] {
+     --course-hue: 0;
+     --font-display: var(--serif);       /* a face in the registry, never a stack of your own */
+     --font-mono: var(--mono);
+     --eyebrow-family: var(--font-mono);
+     --eyebrow-tracking: .18em;          /* 0em to .34em */
+     --eyebrow-case: uppercase;          /* or none; uppercase only on about five words or fewer */
+     --eyebrow-size: var(--fs-xs);       /* inside the --fs-xs band */
+   }
+   ```
+
+   [`references/widgets.md`](references/widgets.md), "The course contract", is the reference: what each token constrains, what you may rely on, and what is forbidden.
+   `python3 scripts/validate_site.py` fails the pull request on a hue with a unit, a token that is not one of the seven, a value out of range, a face that is not in the registry, and a hue another course already holds.
+
+   **Choosing the hue is the one part no script can do for you.**
+   `hub.js` reads the course folder out of the URL and writes it onto `<html>`, and `hub.css` rotates whichever palette the reader chose by that offset in OKLCH.
+   Read the list as absolute hue and the 25-degree grid is already full: 0 to +200 in steps of 25, then +225 through +335 written as negatives.
+   So a new course splits a gap rather than extending outwards, and which gap is decided by whose pages your reader actually holds open beside yours.
+   `staff-ai-course/learning-records/0001-choosing-the-hue.md` carries the method and a measured comparison table for four shipped hues; compare a candidate against that table.
+   A course with no line at all silently wears the plain palette accent, which is dull rather than broken.
+
+   Check the candidate against every palette in both modes before you ship it: seven palettes times two modes is what "verified" means here.
    Looking is the check, and there is a cheaper one worth doing first, because hue rotation preserves lightness and chroma while the OKLCH gamut is not a cylinder: at some hues the rotated colour falls outside sRGB and the browser clips it, which quietly changes what the reader sees.
    Render the candidate against all twelve combinations, read the painted pixel back through a canvas, and compare its chroma with the unrotated accent's.
    The seven original hues lose between 0 and 8 percent of their chroma on average, and up to 55 percent in their worst cell, so a candidate inside that range is no worse than what is already published.

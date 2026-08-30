@@ -6,7 +6,8 @@ Nothing here is a suggestion about shape: `assets/hub.css` styles these class na
 
 There is **one** design system and one copy of it.
 The old `assets/course.css` / `course.js` pair and its per-course forks are gone.
-Three courses still layer an `assets/course-extras.css` after the hub sheet for rules genuinely unique to them, and those files restyle shared elements, so grep every `*.css` in the repository before you change any selector.
+Three courses still layer an `assets/course-extras.css` after the hub sheet, and those files restyle shared elements, so grep every `*.css` in the repository before you change any selector.
+Those three are grandfathered and no course gets a fourth: see "The course contract" at the foot of this file.
 
 Adding a widget is a three-part pull request: the CSS in `assets/hub.css`, the entry here, and the first use.
 
@@ -45,14 +46,33 @@ Adding a widget is a three-part pull request: the CSS in `assets/hub.css`, the e
 
 Five rules, all of them load-bearing.
 
-- **One stylesheet, `assets/hub.css`.** Add `<link rel="stylesheet" href="../assets/course-extras.css">` immediately after it, and only if that course already has one or the rule you need is genuinely unique to that course. A course owns its palette hue and its extras, never the design system.
+- **One stylesheet, `assets/hub.css`.** Add `<link rel="stylesheet" href="../assets/course-extras.css">` immediately after it only when that course already has one; three do, they are grandfathered, and no course gets a fourth. A course owns the seven tokens of the course contract, never the design system.
 - **`hub.js` loads in the head, without `defer`.** It writes `data-mode`, `data-palette` and `data-course` onto `<html>` before the first paint, so a deferred copy means every page flashes the wrong colours.
 - **`../outline.js` after it.** That is what the sidebar rail reads, and it is generated: `python3 scripts/gen_outline.py <course>`. A routed course loads `../routes.js` first and then its hand-written `../outline.js`; `gen_outline.py` refuses to run against one.
 - **The Mermaid script tag goes on a page if and only if that page contains a `.mermaid` block.** It must come before `hub.js`, which claims the render from it in its head phase.
-- **No `<button class="theme-btn">`.** `hub.js` deletes a legacy one and mounts the real appearance control, which offers three modes and six palettes. Writing one is dead markup.
+- **No `<button class="theme-btn">`.** `hub.js` deletes a legacy one and mounts the real appearance control, which offers three modes, seven palettes and two designs. Writing one is dead markup.
+
+**The spine is one row that never wraps, and it changes shape twice on the way down.**
+Below 1040px nothing in it may be squeezed except the wordmark, which clips to an ellipsis rather than running out over the next link.
+Below 720px the row keeps the wordmark, the **last** of the page's own links, and the two controls, and hides the rest.
+So write the link a reader on a phone must keep last, which on this hub is `Course Hub`: it is the one destination the wordmark does not already reach.
+`hide-sm` still marks a link as droppable at 720px and is still worth writing, but it is no longer what holds the row together - 493 of the 796 pages carry no such class, so the rules that keep the row legible read the structure every spine shares instead.
 
 `main.wrap` is the reading column and it is the default for a lesson and for a reference sheet.
 `main.wide wrap` is the full width and it is for a course map and the hub landing page only.
+
+Inside `main.wrap` a page has three widths, and they are the only three:
+
+| Width | How to reach it | For |
+|---|---|---|
+| the prose column | the default for every child | prose, and anything read as prose |
+| the breakout | a figure, table, `pre`, `.diagram`, `.module`, `.lgrid`, `.hero` or `.roadmap`, which the sheet widens on its own; `class="wide"` on anything else | a figure or a table that does not fit the prose column |
+| edge to edge | `class="bleed"` | reserved, see below |
+
+**`.bleed` is a reserved escape hatch and it has no uses today.**
+It is kept on purpose rather than retired: it is the only route from `main.wrap` to the full grid column, the gutters included, and without it the first page that wants a full-bleed figure would reach for an inline style or invent a class, and the vocabulary is closed.
+It stays one declaration, it stays documented, and reaching for it means the figure genuinely wants the whole page.
+Widening the whole page instead is `main.wide`, which is a decision about the page and not about one element.
 
 ### A course map
 
@@ -87,6 +107,46 @@ Both are mandatory on every lesson page. See the ladder in [`pedagogy.md`](pedag
 
 A one-sentence framing line may use `<p class="lead">` instead, above `.paper-meta`, where the page has no attribution to carry.
 
+### The part eyebrow, `.part-eyebrow`
+
+Optional, and it sits directly above `.eyebrow`.
+Where a page also carries a breadcrumb it goes below that, because navigation comes before the page's own labels.
+It names the division of the course this page belongs to, which is the one piece of bearing the rest of the head block does not carry: `.eyebrow` says which module and which lesson, and this says which part of the whole.
+
+```html
+<div class="part-eyebrow"><span>Part II / Methods and semantics</span><span>Where the argument turns</span></div>
+```
+
+One span or two.
+The first is the part itself and is the only one that matters.
+A second span is the part's own subtitle, and it prints faint at the far end of the row.
+It needs no class of its own: the row can tell one span from two without being told.
+Each span is a cell of the row, so keep a cell's own markup inside its span; bare text beside a span reads as a second cell and is pushed to the far end.
+Write both in sentence case and let the stylesheet decide about capitals, exactly as `.eyebrow` is written: the row takes the course's own eyebrow face, tracking and case from the design in force.
+
+It is a row rather than a label, and the hairline under it is what makes it read as a divider of the course rather than as a second caption.
+The rule's style is `--part-rule-style`, so the House design draws it solid and Press draws it dashed.
+
+Do not put one on every page of a course that has no parts.
+The widget answers "where am I in the whole", and a course whose whole is one sequence has already answered it in the eyebrow.
+
+### The breadcrumb, `.crumbs`
+
+Optional, and above the eyebrow when it is there.
+The hub sheet styles it; no script is needed to make it work.
+
+```html
+<nav class="crumbs" aria-label="Breadcrumb"><a href="../../index.html">Course Hub</a><span class="sep">/</span><a href="../index.html">Course Name</a><span class="sep">/</span><span>Module name</span></nav>
+```
+
+`.sep` is the divider between the rungs and is a `<span>` holding a single `/`.
+The last rung is the page's own place and is plain text, never a link.
+`aria-label="Breadcrumb"` is what tells a screen reader which navigation this is; the class alone says nothing.
+
+Only `llm-evolution-course` writes one today, on all 60 of its pages, because a routed course is the case where a reader can arrive from four different orders and needs telling which one they are in.
+That course adds `data-crumb-section` to the last rung and its own `outline.js` rewrites the text to the active route's section name; the attribute means nothing outside it, so do not copy it into another course.
+An ordinary course whose spine already names the hub and the course map does not need a breadcrumb as well.
+
 ## Headings: the tag and the size are separate decisions
 
 `h1` to `h4` set the outline a screen reader navigates by.
@@ -94,6 +154,40 @@ A one-sentence framing line may use `<p class="lead">` instead, above `.paper-me
 Fix a broken heading order by retagging the heading and adding the matching class, never by leaving the tag wrong because the right one looks wrong.
 
 That is why the house forms below read `<h2 class="h-label">` rather than `<h4>`: they sit directly under the page `<h1>` and a bare `<h4>` there skips two levels.
+
+### The numbered section badge, `.numbered`
+
+Optional, and one class on the container does the whole job.
+
+```html
+<main class="wrap numbered">
+  <h2>What routing is</h2>
+  <h2>The keeper and the viewer</h2>
+</main>
+```
+
+Every `h2` that is a direct child of the container gets a filled square in front of it carrying its number: `01`, `02`, `03`.
+Nothing is written on the headings, and nothing may be.
+The numbers come from a CSS counter, so they cannot drift from the headings the way a typed number does, and adding a section in the middle renumbers the rest with no edit anywhere.
+
+Four things to know before you use it.
+
+**It is opt-in, and that is the point.**
+A course map and a reference sheet are lists rather than arguments, and neither is a numbered sequence.
+Put `.numbered` on the pages that really do proceed in sections.
+
+**`.h-label` and `.h-sub` are stepped over.**
+Both are `h2` tags wearing a smaller face - "The one-minute version" is the common one - and neither is a section of the argument, so neither takes a number and neither advances the count.
+
+**The number is not part of the heading's accessible name.**
+The badge is drawn with empty alternative text, so a screen reader announces "The keeper and the viewer" rather than "02 The keeper and the viewer".
+It is decoration beside a heading, and the heading's own name is what a reader navigates by.
+
+**One rule above the heading, never two.**
+An `h2` already carries a hairline above it.
+Do not add a second rule under the heading to go with the badge; the sheet ships one and one is what the page should have.
+
+Inline markup inside a numbered heading behaves exactly as it does in any other heading: the badge hangs in a gutter beside the block rather than turning the heading into a row of boxes, so `Practice <span class="note-sm">about 15 minutes</span>` still reads as one line and still wraps.
 
 ## The one-minute version
 
@@ -127,6 +221,64 @@ Three, and the difference is not decoration.
 Reserve it. A page with three warnings has no warning.
 
 ## Diagrams
+
+### What a figure is
+
+Four parts, in this order, and the order is the point.
+
+```html
+<figure class="diagram">
+  <div class="fig-cap">How the two summaries move</div>
+  <div class="fig-claim">The mean is dragged past nine of the ten days. The median is not.</div>
+  <div class="mermaid">
+flowchart LR
+  A["Observed data"] --> B["Estimate"]
+  </div>
+  <figcaption>Plain English reading of the figure, with <b>the one takeaway in bold</b>.</figcaption>
+</figure>
+```
+
+| Part | What it is | Length |
+|---|---|---|
+| `.fig-cap` | the **subject**. What the drawing is of. | 2 to 5 words, and 5 is a gate |
+| `.fig-claim` | the **claim**. What the drawing proves. | one sentence, under 15 words |
+| the drawing | `div.mermaid` or `svg.chart` | - |
+| `<figcaption>` | the reading, with the bolded takeaway | as short as it can be and still teach |
+
+The reader meets the label, then the claim, then the picture.
+The picture answers a question that has already been asked, which is why the two lines go above and the reading stays below.
+
+**`.fig-cap` names and never argues. `.fig-claim` argues and never describes the picture.**
+Neither is ever a question.
+Measured across the 94 figures the anatomy comes from: zero question marks in either line, median 3 words in the label and 11 in the claim.
+An author who is choosing what kind of sentence to write has already put the wrong thing in one of them.
+
+Write `.fig-cap` in sentence case.
+The stylesheet upper-cases it, and it takes the eyebrow family, tracking and case from the design in force, so it is mono under Press and Inter under House with the page naming no face.
+Both lines cost no colour: the label is `--accent-2` and the claim `--ink`, which the contrast matrix already holds over the diagram card in every palette, both modes and every course hue.
+
+**Five words is the ceiling, and it is the eyebrow's rather than a second number.**
+`.fig-cap` wears the eyebrow treatment, so `validate_site.py` holds it to exactly the limit a page's own `.eyebrow` already answers to: no more than five words in a segment while the case is uppercase, because capitals read 9.53% to 19.01% slower than lowercase.
+The house target is two to four.
+A label that needs more than five words has stopped naming a subject and started making the claim, which is the line below it.
+
+A figure may carry neither line.
+It may not carry only the claim.
+**A `.fig-claim` with no `.fig-cap` above it is a proposition with no subject, and it reads as a stray sentence that lost its paragraph.**
+Check 19 in `scripts/validate_site.py` fails that, and three other shapes with it.
+
+The pair is not required on an existing figure and never will be by machine.
+A label cannot be generated: the measured pass over the hub's own 2,934 captions produces 434 figures all labelled WHERE THIS SITS and 173 labelled FIGURE 1, FIGURE 2, FIGURE 3, which is worse than no label.
+The bar for a page you are writing now is in [`pedagogy.md`](pedagogy.md).
+
+### Two ways the caption pair breaks silently
+
+- **`.fig-cap` and `.fig-claim` are direct children of `figure.diagram`, in that order, before the drawing.** The stylesheet selects them as `figure.diagram > .fig-cap`, so one wrapped in a `<div>` for spacing takes no styling at all and renders as unstyled body text at figure width. Nothing reaches the console and the page still validates against every other check.
+- **Write the label in sentence case, never in capitals of your own.** The stylesheet upper-cases it, so `WHERE THIS SITS` and `Where this sits` are the same pixels under the default treatment and the mistake is invisible on the page you wrote it on. A course that sets `--eyebrow-case: none`, which the course contract allows, then renders your capitals as capitals, on a page nobody is going to look at again. The treatment is the stylesheet's decision, and a page that takes it back has taken a reading-speed penalty nobody asked for.
+
+The rule mark is not one of them, and it used to be.
+It rides the first line by a half-line offset rather than by centring on the box, so a label that wraps keeps its anchor and its second line stays indented under its first.
+That was worth fixing rather than documenting: measured at 320px, a five-word label wraps under Press and a six-word one under House, both inside the bar above, so the wrap is reachable by an author who did nothing wrong.
 
 ### The orientation figure, which opens every content page
 
@@ -191,9 +343,31 @@ A `mindmap` and a `timeline` take their branch colours from Mermaid's own twelve
 `hub.js` supplies that scale from the `--branch-0..7` tokens and `hub.css` pins the mindmap root disc, so both follow the palette.
 A diagram type that appears in a colour following neither the palette nor those tokens is that bug resurfacing.
 
+#### A colour of its own, in a `classDef`
+
+Most diagrams need none: every node already carries the palette.
+Where one node genuinely means something different from another - kept against dropped, a constant against a term you can shrink - write a `classDef` and give it a **token**, never a hex literal.
+
+```
+  classDef keep fill:var(--ok-soft),stroke:var(--ok)
+  classDef drop fill:var(--warn-soft),stroke:var(--warn)
+```
+
+Mermaid's own grammar rejects a parenthesis in a `classDef` value, so `hub.js` resolves the token on the way in, from the same probe that themes the rest of the diagram.
+The result follows the palette, both modes and every repaint, and the printed copy comes out black on white with the rest of the page.
+**A hex literal cannot do any of that**: it is one mode's answer written down, and the mode it is wrong in is the one nobody checked. Two published diagrams carried a near-white fill under near-white labels in dark mode, at 1.1:1, until this existed.
+
+Three rules.
+
+- **Name a semantic token, not a raw one.** `--ok`, `--warn`, `--gold`, `--accent-2`, `--surface-2`, `--line-strong` and their `-soft` partners. The raw `--l-*` and `--d-*` layer belongs to the terminal transcript and to nothing else.
+- **Do not set `color`.** The label already takes `--ink` from the theme, in both modes. Setting it is how a fill and its label drift apart later.
+- **Spell the token correctly.** A name the stylesheet does not declare is left exactly as written, so Mermaid fails to parse it and draws a red error box. That is deliberate: a visible failure beats a colour quietly taken from somewhere else.
+
 ### Inline SVG, for anything quantitative
 
-Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot.
+Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot, and it cannot put one saturated mark in a neutral field so that the colour is the argument.
+That last one is a real reason to draw by hand: a figure whose whole point is *this one thing, among these others* is clearer when nine tenths of it is unpainted.
+It is not a reason to redraw a flowchart that is doing its job.
 Write the SVG by hand, in the page. No chart library, no build step, no extra CDN.
 
 ```html
@@ -212,6 +386,8 @@ Write the SVG by hand, in the page. No chart library, no build step, no extra CD
 - Always a `viewBox`, never a `width`/`height` pair. Around `640 x 300` keeps 13px text readable.
 - Always `role="img"` and an `aria-label` saying what the chart shows.
 - **Colour comes only from the semantic classes.** A literal hex looks right in one theme and vanishes in the other, and it cannot follow the print stylesheet either.
+- **Paint about a tenth of the canvas and no more.** Colour marks the subject; the field around it stays `panel`, `grid`, `axis` and `ink`. Measured on the figures the caption anatomy comes from, the saturated area is a median of 10.7% of the canvas and under 10% on 109 of 234. A chart where every mark is coloured has no subject, and the reader has to be told which one matters instead of seeing it.
+- **A wide short band sits in the column like a rule between paragraphs.** Those same figures run a median aspect ratio of 3.43:1. A tall figure is an interruption, and a `640 x 300` viewBox is already close to the shape.
 
 The colour names are a **closed set, shared by the whole hub** and declared in `assets/hub.css`: `stat`, `prob`, `signal`, `noise`, `alarm`, `gold`, `plum`, `sky`, and `ink` for marks and strokes.
 They are not a per-course palette any more; a course's identity comes from its accent hue, not from its charts.
@@ -409,6 +585,16 @@ A `<br/>` inside `.math` is an ordinary line break and is correct there; the ent
 The copy button is injected by `hub.js` into every `<pre>`. Do not add one.
 The caption names the file and says what it is, so a reader knows whether to run it or read it.
 
+**The plate and the chip are two token pairs.**
+A `<pre>` reads `--code-bg` and `--code-ink`; an inline `<code>` reads `--code-inline-bg` and `--code-inline-ink`.
+Six palettes state the same values twice, so the two look identical on them.
+Press states them apart: a dark plate for a block of code, deep rust on warm paper for a word of it inside a sentence, which is what the reference site does and what one shared pair could not express.
+Both pairs carry body text, so `scripts/contrast.py` holds both to 7:1.
+Neither is yours to write in a page - `hub.css` owns both rules - and neither is a design-axis token, because both are colour.
+
+**Both sizes are one token, `--fs-mono`, and it is written in `em`.**
+So block and inline code track the prose around them, and a change to the reader's body size or reading face moves both together.
+
 ## Retrieval practice
 
 ```html
@@ -510,9 +696,20 @@ A roadmap entry that has since been written is marked `class="written"`.
 
 Where a course nests a level deeper, a lecture hub card is followed by `<ul class="parts">` listing its parts, each numbered with `<span class="pn">`.
 
-`.roadmap` is now in `assets/hub.css`, because a second course needed it and an unstyled roadmap is invisible markup.
-**It is currently declared twice**: the copy in `statistical-foundations-ml-course/assets/course-extras.css` is still there, and on that course's own pages it wins on cascade order. The two declarations are equivalent, so nothing renders differently, but the duplication is real and the extras copy should be deleted the next time that course is touched for another reason.
+`.roadmap` is in `assets/hub.css`, because a second course needed it and an unstyled roadmap is invisible markup.
+The hub sheet is its only home; the duplicate that used to sit in `statistical-foundations-ml-course/assets/course-extras.css` is gone.
 `.parts` and `.pn` are still only in that extras sheet, so a new course that uses them gets unstyled markup and must promote them the same way rather than copying the file.
+
+On the hub landing page a category may carry an emblem, `<img class="cat-art">`, between the `.module-h` heading and its `.mcount`:
+
+```html
+<div class="module-h"><span class="mnum">CLOUD</span><h2 class="h-sub">Cloud Architecture</h2><img class="cat-art" src="assets/category-cloud.svg" alt="" width="34" height="34"><span class="mcount">5 courses</span></div>
+```
+
+The image is decorative, so `alt` is empty: the heading beside it already names the category, and a second reading of the same words is noise on a screen reader.
+`width` and `height` are the intrinsic size of the file and hold the space before it loads; the sheet sets the drawn height to `1.7rem` and lets the width follow, so the emblem tracks the heading rather than a pixel figure.
+Only Cloud Architecture has one today.
+An emblem is a hub-landing-page shape, not a course-map one.
 
 Two more small shapes live in the hub sheet and are worth knowing, because both were being written as inline styles before they existed:
 
@@ -573,5 +770,822 @@ For courses whose pages are exercises rather than readings.
 `.metric` is key, value, unit.
 The `ul.checklist` closes a lab page: each item is something the learner can now do, phrased in the first person.
 
-These classes live in `llm-inference-course/assets/course-extras.css`, not in the hub sheet, so today they only work in that course.
-A second course that wants the lab kit promotes the rules into `assets/hub.css` and deletes them from the extras file, in one pull request. It does not fork them.
+**The whole kit lives in `assets/hub.css`, under "the lab kit", and every course may use it.**
+`llm-inference-course` invented it and `llm-efficiency-course` was the second course to need it, which is what promoted it; the originating extras file keeps no copy, and the responsive and print rules for `.lab` and `.metric-grid` and the tabular-numerals entry for `.metric` sit in the hub sheet beside the base rules rather than in two files.
+One owner, one place to change it.
+
+One rule in that block reads the raw palette layer on purpose.
+`.term` is drawn from the `--d-*` values in **both** modes, because a terminal reads as a terminal only while it is dark, and the `--d-*` set is declared whichever mode the reader is in.
+That is the one sanctioned use of the raw layer: everything else in the kit reads the semantic tokens.
+The print block restates the six `--term-*` tokens with `!important`, because the hub's own print block flattens the semantic tokens and cannot reach these.
+
+## The design tokens
+
+Type, rhythm and shape are tokens, in one block near the head of `assets/hub.css` marked "the design axis".
+A page never names one: the sheet does, and a page gets the whole system by linking the sheet.
+The block matters to you in three cases - you are adding a widget, you are changing an existing rule, or you are writing a course sheet.
+
+**Adding a widget or changing a rule: read a token, never a literal.**
+The whole point of the block is that a second design is a list of values rather than a second copy of the sheet, and one hard-coded `1.05rem` is a rule that a design cannot reach.
+If nothing in the block fits, add a token beside the ones it belongs with, give it a call-site comment, and say so in the pull request.
+
+The groups, and what each is for.
+
+| Group | Count | What a rule reads |
+|---|---|---|
+| Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. `--font-body` is set by the face registry rather than in this block; see the derived axes below. |
+| Type scale | 64 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
+| Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. `--lh-body` carries the measure nudge; see the derived axes below. |
+| Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
+| Tracking | 14 | Negative on display type, positive on anything set in capitals. |
+| Space | 184 | Two layers, five of them the printed page's; see below. |
+| Reading frame | 3 | `--measure-chars-default`, the column width in real characters, and `--wide-left` / `--wide-right`, unitless shares summing to 1 that say how the breakout band sits around it. `.5` and `.5` centres the prose; `0` and `1` grows figures from its left edge. The rule does the arithmetic, because `--measure-wide` differs by element. |
+| Shape | 22 | The seven radii, the four border widths, the two that are the figure label's rule mark, and the six that are the shadow *shape* - its colour stays on the mode layer. Three more are one widget's shape each: `--part-rule-style`, `--sec-badge-size` and `--sec-badge-radius`. |
+| Focus ring | 5 | `--focus-ring-color`, `--focus-ring-width`, `--focus-ring-style` and the two offsets; see below. |
+| Motion | 11 | Six durations, two easings, two lift distances and one slide distance. `--motion-slide` is `0px` in House; a design whose signature gesture is horizontal sets it and every lesson card follows. |
+| Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
+
+**Six of those tokens carry two names.**
+`--font-display`, `--font-mono` and the four eyebrow tokens a course may set are written by a design as `--x-default` and by a course as `--x`, so the two writers never contend; every rule still reads `--x`.
+See "The course contract" at the foot of this file.
+
+**Space has two layers and a rule only ever reads the second.**
+Layer one is `--sp-1` to `--sp-8`, a ramp of ratio about 1.41 anchored on `.5rem`, which is the modal spacing value in the sheet; every step is a local maximum of the measured distribution.
+Layer two is the roles: the reading column's rhythm, the component insets, the gap ladder and the offset ladder.
+**Never write `padding: var(--sp-3)`.** A ramp step in a rule is a value with no name, and it puts a reading-rhythm distance and a chrome distance on the same token, which is exactly what the split exists to prevent.
+
+Six of the role tokens are the reading column's vertical rhythm - `--sp-para`, `--sp-list`, `--sp-heading-before-*`, `--sp-heading-after-*`, `--sp-block*` and `--sp-figure*` - and a later reader density control may scale those and nothing else.
+Everything else, component insets and page chrome included, is permanently out of its reach.
+That is a hard limit rather than a note: seven pointer targets in the chrome pass WCAG 2.2 SC 2.5.8 only on the spacing exception and the smallest compliant control has two pixels of margin, so a compact chrome would turn near-misses into failures.
+
+**A reader-settable value has three layers; nothing else does.**
+`hub.css` declares a `-default`, `hub.js` writes only a `--*-user` property inline on `<html>`, and one resolved token `--x: var(--x-user, var(--x-default))` is what every rule reads.
+Only that resolution line may read a `--*-user` property, and only as the head of its own fallback: what follows the comma is a `-default` for a token a control sets directly and the derivation itself for a derived axis.
+Twenty-four tokens carry the form today, and they are the ones a reader control can reach: `--measure-chars`, `--measure`, `--fs-body`, `--lh-body` and the twenty prose-rhythm roles.
+**A resolution line never sits inside a design block.** A design block is `(0,2,0)`, so a resolution line written in one would be a second resolution line for the same reader value and source order between two designs would decide which answered.
+The twenty rhythm roles resolve at a bare `:root` just after the design blocks, in the shape of the course layer, and the design writes only the `-default`.
+The `var()` still picks up the design's value, because substitution reads the computed value of the `-default` on the element rather than the declaration beside it.
+The rest are one-layer design tokens.
+The reading face is the one reader choice that is not a `--*-user` property, because three measured constants have to travel with the family; it is the registered axis attribute `data-body-face` instead.
+The consequence for a media query: a token with a `-user` layer must be restated as its `-default` inside the query, never as the token, or the query out-argues the reader.
+`--fs-body-default` in the 720px block is the worked example.
+
+**The focus ring is one ring, and every focusable element gets it.**
+`--focus-ring-color` is `--accent-2`, deliberately not `--accent`: the ring is never the link colour, and never the fill of the control it surrounds - the appearance panel's pressed mode card is painted in `--accent` and its ring used to be the same colour as itself.
+`--focus-ring-offset` is 2px and `--focus-ring-offset-box` is the 3px a scroll container takes, one pixel further out so the ring clears the box's own edge.
+Neither may be 0: a ring on the border box of a scroll container is clipped by that container and disappears.
+Write the rule against `:focus-visible`, never `:focus`, so a mouse click paints nothing.
+You should not need to write one at all - `hub.css` already covers `a`, `button`, `input`, `select`, `summary`, `textarea` and anything carrying a `tabindex` - and if you find an element that needs its own, it is a sign the element is doing something the closed vocabulary does not know about.
+`scripts/focus_walk.py` presses Tab through three pages, the appearance panel and a narrow viewport and fails if any stop is missing the ring, wearing the browser's own, or sitting flat on the border box.
+
+**Contrast is measured, not asserted.**
+`scripts/contrast.py` checks the colours the palette layer states outright - every registered ground is inside its lightness band, every ink clears 7:1 and sits on the right side of the L\* 48.9 crossover, every other palette colour clears the floor its role carries - and it runs inside `validate_site.py`, so it gates every pull request.
+`scripts/contrast_matrix.py` measures what needs a browser: the nine `color-mix()` tints and the per-course accent, over every registered palette, two modes and every registered course hue.
+Both print every number, pass or fail: `python3 scripts/contrast.py --report` is the command to run while choosing a colour, and both carry a `--self-test` or a recorded-breach list so a gate that stops biting says so.
+The floors are WCAG 2.2: 7:1 body text, 4.5:1 every other text, 3:1 borders, focus rings and chart marks.
+
+## The derived axes
+
+Four of the reading axes are not independent, and each coupling is measured.
+A framework that offered the four as free settings would let a reader move one control and silently move a second, and then build a page that no single setting explains.
+So the block after the design axis derives all four, in CSS, with nothing left to the script.
+
+**The measure names real characters, and the width is computed.**
+`ch` is the advance of the digit zero rather than of a character, and the two part company by face: one `ch` of Source Serif 4 is `.5049em` against an average prose character of `.4479em`, so the `72ch` this sheet used to carry was 81 characters and not 72.
+A reader who set "72" and then changed the reading face would have moved their line length without touching the measure control.
+`--measure-chars` is the number a control sets and `--measure` is the width that follows from it.
+
+**The body size names apparent size, not nominal size.**
+Holding `font-size` at 19px and swapping Source Serif 4 for Inter makes the page about 21% larger to the eye, because the x-heights are `.4520` and `.5459` em.
+So `--fs-body-ref` is the reader's number on the Source Serif 4 reference scale and `--fs-body` is what the page renders.
+
+**The code size follows the reading face.**
+JetBrains Mono at x-height parity is `.822em` against a Source Serif 4 body and `.993em` against an Inter body, so one hard-coded mono size is wrong for one of the two faces.
+`--fs-mono` is derived from `--xh-body`, and it stays a ratio of `1em` so block and inline code keep tracking the prose that surrounds them.
+
+**The leading rises with the measure, as a nudge and never as a lock.**
+Above 80 characters, or above the design's own default measure if that is wider, `--lh-body` gains `.05` per 10 characters.
+A reader who has chosen a line spacing suppresses the nudge entirely, and nothing may move a control's visible position because another control moved.
+
+**A face is a name plus three measured constants.**
+The family, the average prose advance, the x-height per em and the apparent-size factor are declared together in one `:root[data-body-face="..."]` entry, because the three derivations cannot compute without all three numbers.
+Never set `--font-body` on its own, and never copy a constant out of a report: `scripts/type_invariants.py` refuses an entry that names a family without the other three, measures the advance from a committed corpus of real hub prose, and holds two invariants for every registered face.
+M1 requires a `--measure-chars` of N to realise N plus or minus one characters, at 55, 68, 80 and 85.
+M2 requires the code size to stay inside `.85` to `.90` of the prose under a serif reading face, at every body size the panel will offer.
+The registry must stay after any design block, for the same reason the mode layer sits after the palettes: an explicit reader choice and a design block have the same specificity, so source order decides.
+
+**Four tokens are outputs and nothing may write them.**
+`--measure`, `--fs-body`, `--fs-mono` and the per-face constants are computed from the controls above them.
+A control that wrote one would put back exactly the coupling this block removes.
+
+**A course sheet restates tokens; it never restates rules.**
+The three `course-extras.css` files are layered after the hub sheet, so a copy of a hub rule in one of them wins on source order and every later change to the hub sheet stops at that course's pages.
+Setting `--radius` or `--fs-note` under a course's own selector reaches the same pixels and keeps one owner.
+Write that selector as `:root[data-course="your-course"]`, which is the spelling `hub.css` already uses for `--course-hue`.
+A bare `[data-course="..."]` is `(0,1,0)` and loses to a design block, so the course's own value would go silently dead.
+The spelling is necessary and not sufficient: a course block and a design block are both `(0,2,0)`, so for the six tokens both of them want, the design writes a `-default` and the course writes the token.
+See "The course contract" below.
+A new course has no sheet to do either in: it declares the seven tokens of the course contract and nothing else.
+
+## The faces, and what a page pays for them
+
+Three families are self-hosted as woff2 beside the stylesheet, declared at the head of `assets/hub.css` and served from nowhere else.
+That is what lets a page opened straight off disk look like the published one, and it is why no reader is ever visible to a font service.
+`assets/fonts/README.md` carries the per-file table, the sizes and the refresh procedure.
+
+**Eight files, 459.3K on disk, and no page fetches more than four of them.**
+The `-ext` cuts are gated by `unicode-range` and only 34 of the 796 pages carry a character that needs one.
+A page with no italic in its prose fetches 152.8K; a page with `<em>` in its prose fetches 241.0K, and that is 559 of the 796 pages, so it is the number to plan against.
+`scripts/validate_site.py` holds both a total ceiling and a latin-cut ceiling, so a fourth face is added against a known figure rather than against a guess.
+
+**`font-display` is `swap` on every face, and it is the only value this hub may use.**
+The validator refuses `optional`, and the reason is measured rather than argued.
+`optional` does remove the swap, and there is little left to remove: the font-attributable layout shift on a throttled first load measures 0.00002 on the hub landing page, 0.0011 on the worst lesson and 0.027 on a course map, because the derived apparent-size layer leaves the fallback and the webfont occupying nearly the same space.
+It was 0.29 on that lesson before the derived layer landed, so the swap is cheap because of a fix rather than by nature.
+The reason `optional` is refused is separate: a face that misses the first-paint deadline is dropped for the life of that page load.
+Chrome will not apply it afterwards and `document.fonts.load()` does not bring it back: after the drop, a probe set in `"Source Serif 4"` measures exactly as wide as one set in a family that does not exist.
+A reader control that switches the body face would therefore do nothing at all until the next navigation.
+`block` and `fallback` only add invisible text, because the faces arrive 1.4s to 1.9s after first paint on a Slow 4G connection, which is inside the swap period both of them end with anyway.
+
+**Loading a face on demand is a different mechanism, and it is not governed by that descriptor.**
+Both registry faces are on every page already - `--font-body` resolves to Source Serif 4 or to Inter, and the chrome pulls Inter regardless - so switching between the two today costs no fetch at all.
+A *third* face is the case that needs this note.
+It should not be fetched before the reader picks it, and a `@font-face` rule cannot express that: the browser decides from the rendered content when to fetch, which for a registered face is always.
+The control that offers the face therefore loads it itself, with the CSS Font Loading API, and selects it only once the load has settled:
+
+```js
+var face = new FontFace('Some Face', "url('../../assets/fonts/some-face.woff2') format('woff2')", { display: 'swap', weight: '400 700' });
+face.load().then(function (loaded) {
+  document.fonts.add(loaded);
+  root.setAttribute('data-body-face', 'someface');   // the registry entry, with its three constants
+});
+```
+
+Two properties follow, and both are the point.
+A `FontFace` built in script carries its own `display`, so it is never subject to the descriptor on any `@font-face` rule and never silently dropped.
+And setting the attribute only inside the callback means the reader never sees the fallback flash on a control they just used, and never sees a measure computed from one face while another is on screen.
+The control panel owns that code; this note owns the contract it has to keep.
+
+## The palette axis
+
+A palette is the colour half of the system, and it is the only place in `hub.css` that states a literal colour.
+Seven are registered - Paper, Slate, Ink, Sage, Harbor, Aubergine and Press - and each states **18 raw values twice**, once as `--l-*` for light and once as `--d-*` for dark.
+The mode layer maps one of the two sets onto the semantic tokens every rule reads, and it is written once for the whole system, so adding a palette is a block of values plus one entry in the `PALETTES` array in `hub.js`.
+
+Sixteen of the eighteen are colours. The other two are the ground treatment and the reading pane, and they work together.
+
+`--*-wash` is a `background-image` value painted on the canvas, `none` on six of the seven palettes and two faint radial gradients on Press.
+A ground that is a flat fill reads as a screen colour; a ground with a wash reads as paper.
+
+`--*-pane` is what the reading column paints behind the prose.
+Six palettes state their own `--surface`, which is what that column has always been.
+Press states `transparent`, so the prose sits directly on the washed paper and cards and callouts read as lighter veils over it - the reference site's own arrangement, which has no separate reading pane at all.
+Text on a Press page therefore sits on `--bg` rather than on `--surface`, and both grounds are checked.
+
+Both are a palette's rather than a design's because both are colour, and both are stated by every palette rather than by the one that uses them, because a palette is data the framework consumes and never a name the framework knows.
+
+**Do not name a raw value.** `--l-*` and `--d-*` exist for the mode layer and for the appearance panel's own swatches. Everything else reads a semantic token.
+
+**Every colour is measured before it is registered.**
+`scripts/contrast.py` runs inside `validate_site.py` and holds every registered ground inside its lightness band, every ink to 7:1 on the right side of the L\* 48.9 crossover, and every other stated colour to the floor its role carries.
+`scripts/contrast_matrix.py` runs in the browser job and measures the nine `color-mix()` tints and the per-course accent over every palette, both modes and every registered course hue.
+A palette that fails is a palette to fix. The band is arithmetic, not taste.
+
+## The design axis
+
+The block above is a *design*, and `house` is its name.
+`hub.js` writes `data-design` on `<html>` in its head phase, beside `data-mode` and `data-palette`, before the first paint.
+The token block is written once under two selectors, `:root, :root[data-design="house"]`, exactly as the Paper palette is: the bare arm is what a page gets with no script at all, and the attribute arm is what the axis selects.
+
+**Two designs are registered.**
+`house` is what every reader had before the axis existed, and it is the fallback a withdrawn design falls through to.
+`press` is the form half of the reference look: a display serif set at or below 1.0 leading with tracking graded by size, prose set loose against it, monospace on every eyebrow, capitals always tracked, a 68-character column, figures growing from the prose's left edge, softer radii, a shadow that pools rather than drops, and one signature gesture that is horizontal.
+Sixty of its 317 tokens differ from House; the rest are House's, restated in full.
+Its colour half is the `press` *palette*, not part of it, so a reader may wear either without the other.
+
+**A design carries no colour.**
+Type, rhythm, shape, motion and the eyebrow treatment are the design's; the 16 raw colours and the ground treatment are the palette's, and the light-or-dark mapping is the mode's.
+That split is why a second design costs no row in the contrast matrix, and it is why the reference look's warm paper ships as a seventh palette rather than as part of a design.
+
+**A design is data, and nothing branches on its name.**
+No function in `hub.js` and no rule in `hub.css` knows a design by name; the registry is a plain array and the blocks are keyed on the attribute.
+The same is true of a palette.
+That is what keeps the door open to designs, palettes and course templates arriving from somewhere other than these two files.
+
+**Adding a design is a block of the same tokens under a new attribute value, plus one entry in the `DESIGNS` registry in `hub.js`.**
+Three checks in `scripts/validate_site.py` hold the two halves together, so none of this is left to review:
+
+- every registered design has a block and every block is registered, so the picker can offer nothing that resolves to nothing;
+- every design declares the *whole* token set, compared against the default design's, in both directions - a design that declares half of it inherits the other half and looks nearly right;
+- a design-axis token is declared in a design block and nowhere else, because a design block is `(0,2,0)` against a bare `:root` and would out-argue a media-query override in every viewport.
+
+**What a design may not reach, and why.**
+The body size is resolved outside every design block, because the 720px arm has to be able to move it and a design block would out-argue that arm.
+The reading face is a registry entry carrying three measured constants, and a design has no way to supply them, so the face registry sits *after* the design blocks and has the last word.
+Colour is the palette's.
+Everything else - the whole type scale, the leading set, the weights, the tracking, the space ramp and its roles, the reading frame, the shape, the motion vocabulary and the eyebrow treatment - is the design's, on paper as well as on screen.
+
+**Withdrawing a design is deleting its registry entry.**
+The picker stops offering it and a reader who had chosen it falls through to the registered default, because the head phase validates a stored key against the registry exactly as it does a palette key.
+No deploy, no page edit, and the fallback was measured to restore the original exactly.
+
+**A design moves faces, so anything measured at render time is repainted through `whenFontsReady`.**
+Mermaid cuts every label box to a measurement it takes at render time, and it takes that measurement in the face `hub.js` hands it - `--font-ui`, the chrome role, which is also what `hub.css` paints diagrams with.
+Test a design change by *switching*, never by loading: a diagram with stale metrics renders correctly on the next reload, which is how the defect survives review.
+
+## The panel shell
+
+`hub.js` builds every panel from one shell, `makePanel(spec)`, and a panel supplies nothing but its own name, its store key, its title and what goes in its body.
+The contract below belongs to the shell, so a second panel gets all of it by asking for one, and a correction to any of it is made once.
+Nothing here is in any page's markup, and a page served with the script blocked has no panel and no dead control in its place.
+
+**Ten classes, and the shape is fixed.** The last four arrive only when a panel asks for a foot.
+
+| Class | What it is |
+|---|---|
+| `.panel-shell` | The dialog. Every panel wears it, plus one class of its own - the appearance panel's is `.settings` - which is where that panel states its width and the height above which its body scrolls. |
+| `.panel-bar` | The title bar, which is also the whole pointer surface for a drag. |
+| `.panel-grip` | The keyboard handle inside the bar. Arrow keys move the panel, Shift is the finer step, Home or Enter puts it back. |
+| `.panel-title` | An `h2`, because a dialog's name is a heading. The tag decides the outline a screen reader navigates by and the class decides how it looks. |
+| `.panel-close` | The close control. It lives in the bar and is deliberately not part of the handle. |
+| `.panel-body` | The part that scrolls. The bar stays in view at every scroll position, because a handle that scrolls out of reach is a panel the reader cannot put back. |
+| `.panel-foot` | Optional, asked for with `foot: true`. Pinned below the body and outside it, which is the title bar's shape at the other end. |
+| `.panel-state` | The save state, in `--ok` on a good write and `--warn` on a failed one, written by the shell's `saveState` helper and never by a caller's own copy of it. |
+| `.panel-export` | The escape hatch, filled in `--warn` the moment a write fails. |
+| `.panel-do` | The one action a panel body leads with, when it has one. |
+
+**A panel that holds something the reader made takes a foot, and the foot is the shell's.**
+The two that do are the study notes panel and the highlights panel, and both of them make the same promise - that the save state is a fact rather than an intention - so both paint it with the same three classes and the same two helpers, `saveState` and `saveFailure`.
+The state is a `role="status"` line whose text is written only when it changed, because the role speaks every write and nobody needs `Saved` announced at every pause.
+A second copy of that would drift, which is the reason the shell exists at all.
+
+The root is `.panel-shell` rather than `.panel` because `panel` is already taken by chart furniture, and a bare `.panel` rule would have matched every `<rect class="panel">` in the hub's inline drawings.
+
+**A panel is non-modal, it has no backdrop, and an outside click does not close it. This is not configurable.**
+It carries `role="dialog"` and `aria-labelledby` and it does not carry `aria-modal`, because a reader parks a panel in order to keep reading with it open and telling a screen reader the page behind it is inert would be a lie.
+For the same reason focus is not trapped: Tab walks out of the panel into the page and back round.
+A parked panel that vanishes the moment the reader clicks the text beside it is a panel that cannot be parked, and a panel that dims or blurs the page behind it hides the thing the reader opened it to work on.
+The ways out are the opening button, the close control and Escape - three, all of them visible or conventional.
+
+**Focus moves into a panel when it opens, and returns to the opening button only if it was inside.**
+A reader who has tabbed back into the page and pressed Escape keeps their place instead of being thrown to the topbar.
+Escape belongs to the panel the reader is in: with focus inside another panel this one stays open, and with focus anywhere else every open panel closes.
+
+**The panel and the button that opens it can never disagree about whether it is open.**
+`attachOpener` is what ties them together, and it is the shell that writes `aria-expanded` on every open and every close.
+A button whose markup states `aria-expanded="false"` once and is never updated tells a screen reader the panel is closed while it is open; that is the defect the reference site ships and the reason this is the shell's job rather than a caller's.
+
+**A panel moves, by pointer and by keyboard, and its position is an intention.**
+What is rendered is that intention clamped into whatever viewport is in front of the reader now, so a coordinate chosen on a wide display comes back when the wide display does and on a phone the panel is re-seated rather than stranded.
+The clamp runs on every open and every resize and it never writes back.
+The band the panel is held inside is measured off the sticky topbar and the pre-production strip rather than assumed, so a panel can never be parked under either.
+Only the re-seat glides - it carries `[data-settling]` - and every move the reader aims takes that attribute off first, because a step that animates is a step nobody can aim.
+`[data-motion="reduced"]` zeroes the glide with every other transition, so reduced motion is answered by the stylesheet and never by a branch in the script.
+
+**Each panel remembers its own position under its own key**, so two panels remember two places and neither can overwrite the other's.
+The appearance panel's key is `coursehub.panel`.
+
+**A panel is `hidden` while it is closed, and that is a requirement rather than a detail.**
+The element is in the DOM of all 797 pages; without `hidden`, `scripts/focus_walk.py` would tab through every control in it on every page and so would every reader.
+
+**Three tokens belong to the shell and are read by every panel**: `--panel-target`, the square the grip and the close control take, at the WCAG 2.2 SC 2.5.8 floor; `--sp-inset-panel-bar`; and `--sp-inset-panel-body`.
+`--set-w` and `--set-h` are the appearance panel's own width and height and are not the shell's, and neither are `--notes-*` or `--marks-*`.
+
+**Adding a panel is a call and a class, and nothing else.**
+Ask `makePanel` for a shell, fill `shell.body`, optionally ask for a foot and fill `shell.foot`, hand it the button that opens it, and give it a class of its own for the two lengths it states.
+It may not reintroduce a backdrop, make the close-on-outside-click behaviour configurable, trap focus, share another panel's store key, or write its own drag.
+Every colour it uses is a token, and every control in it must show the hub's focus ring, because `focus_walk.py` presses real Tab keys through the open panel.
+
+## The reader control panel
+
+`hub.js` builds one panel from the shell above and it reaches every page, because every page already links the shared assets.
+It is the shell plus six controls: everything a reader can do to the panel itself - open it, close it, pick it up, step it with the arrow keys, put it back, have it remembered - is stated in "The panel shell" and is not restated here.
+What follows is what this panel *contains*, and why.
+
+**Six controls, and three axes that are deliberately not among them.**
+The six are the ground (mode and palette), the body size, the reading face, the measure, the line spacing and the density.
+A control earns its place when readers genuinely differ on it, when the reader can perceive the difference and judge it, and when a wrong setting is recoverable.
+The display face, the mono face and the eyebrow treatment fail all three in the same way: a reader sets one once out of curiosity and never returns to it, and they are exactly the axes a *course* has every reason to differ on, so they are author tokens on the course contract instead.
+The accent is not a seventh control either.
+It is carried by the palette the reader already chooses and rotated per course, and expanding it into a colour picker would put a contrast criterion in the reader's hands.
+
+**A control is an input to a derivation, never a setting of its own.**
+The four couplings in "The derived axes" above are why: a reader who set a measure of 72 and then changed the face would move their line length without touching the measure control.
+So the measure names real characters, the body size names apparent size on the Source Serif 4 reference scale, the code size follows the reading face on its own, and the leading nudges above a wide measure unless the reader has stated one.
+`--measure`, `--fs-body`, `--fs-mono` and the per-face constants are outputs and no control writes one.
+
+**Every control writes a `--*-user` property or a registered axis attribute, and nothing else.**
+Two of the reader's choices are attributes rather than properties, because what they carry does not compose into a single value: `data-body-face` selects a family together with the three measured constants that have to travel with it, and `data-motion` selects a block of rules.
+Check 11 in `scripts/validate_site.py` gates both halves - hub.js may write no other attribute on `<html>` and no property that is not a `--*-user` one hub.css resolves.
+
+**Density scales the reading column's rhythm and reaches nothing else, and that is structural rather than promised.**
+It writes the twenty prose-rhythm roles as `calc(var(--x-default) * 0.75)`, so a design that restates a role is scaled rather than overruled, and the only names it *can* write are ones hub.css resolves.
+There is no headroom in the chrome for a compact mode: one control already fails WCAG 2.2 SC 2.5.8, seven more pass on the spacing exception alone, and the smallest compliant control has two pixels of margin.
+
+**The panel passes the floors it enforces.**
+Its labels are `--ink` or `--ink-soft` and never faint ink on a recessed surface at a small size - the comment on the copy button in `hub.css` records that this codebase has already failed that once.
+Every control clears 24 by 24 CSS pixels, which is why the range thumb is drawn rather than inherited: the browser's own is about 16px square.
+`scripts/focus_walk.py` opens the panel and presses Tab through all of it in both modes.
+The panel's own chrome - the grip, the title and the close control - is the shell's and clears the same floor through `--panel-target`.
+
+**"Back to this course's defaults" is exact.**
+It removes every `--*-user` property, every reader axis attribute and the panel's own position, which leaves the stylesheet's own values with nothing to unwind.
+That is a property of the three-layer rule rather than a feature of the button: a reader value that competed with a token instead of feeding one would have to be unwound rather than removed.
+
+## The floating control cluster
+
+`hub.js` builds a five-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
+The fifth, the highlights launcher, is the only one that is conditional: it is absent on a browser with no CSS Custom Highlight API, because the panel it would open was never built there.
+It is chrome you never author, exactly as the topbar and the rail are: it arrives on a page because that page links the shared assets.
+
+**It exists because the panel above was invisible.**
+Every reader control sat behind one unlabelled glyph at the right of the topbar, and the person who commissioned the framework could not find it.
+A reader who never opens that glyph never learns that the palettes, the designs, the text size or the reading face exist, so the framework was shipped and not delivered.
+
+**The light and dark control is what teaches, and that is why it is in the cluster rather than only in the panel.**
+One click repaints the whole page, which is a demonstration rather than a label; a reader who has watched it happen reads the launcher beside it as an offer.
+It names the mode it will switch to rather than the mode that is on, in its glyph and in its `aria-label`, and it follows the operating system's preference while the reader has stated none.
+The reference site's own button shows the current theme and reads as an instruction, so `Light` there means "you are in Light" and every reader who takes it for a label presses it expecting the opposite.
+
+**Each panel has two openers and no owner, and the shell is where that lives.**
+`attachOpener` registers a button rather than replacing the last one, so both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was actually used.
+The study notes panel and the highlights panel each take their second way in the same way, which is one call apiece in `mountCluster`.
+A reader who opened the panel from the corner and was thrown to the topbar has lost their place, which is the thing the panel's focus contract exists to prevent.
+A third way in, or a second panel with two of its own, is one call and no new code.
+
+**Scroll-to-top is absent until there is somewhere to go back to**, which is one viewport of scrolling rather than a literal distance.
+It is the first control in the row, because the cluster hugs the right edge and a control that comes and goes on the left never moves the other two under the reader's thumb.
+It is never taken away while it holds focus, because hiding the element a keyboard reader is standing on drops focus to the body.
+Activating it scrolls with no `behavior` named, so the browser reads `scroll-behavior` off the stylesheet and the motion axis governs it, and then moves focus to the wordmark: a page that scrolls to the top and leaves the keyboard at the foot of it has moved only half the reader.
+
+**Three positioning decisions, and each is read rather than assumed.**
+The bottom edge is `--dock-offset` plus everything already fixed across the foot, read through `--foot-h`, so the live site, the review site and a page carrying the chapter bar are one declaration.
+`z-index: 64` puts the cluster under the rail's drawer scrim below 1040px and under every panel shell, so a click on it while the drawer is open dismisses the drawer, which is what the reader meant.
+It is a `role="group"` and not a `role="toolbar"`, because a toolbar owes the reader arrow-key roving focus and three plain buttons owe nothing beyond Tab.
+
+**It is chrome, so it is out of the density control's reach and it is not on the paper.**
+The print block hides it with the topbar, the rail, the panel and the pager.
+
+Three tokens are its own: `--dock-target`, the square each control takes, at 36px because it is aimed at with a thumb while the reader is reading rather than with a pointer while they are looking at it; `--dock-offset`, the distance from the two viewport edges it hugs; and `--sp-inset-dock`, the padding around the row.
+All three are design-axis tokens, so a design may raise the target and may never lower it below the 24px WCAG 2.2 SC 2.5.8 asks for.
+## The fixed chapter bar
+
+`hub.js` builds a band across the foot of the viewport carrying the previous page, where you are and the next page, and no page's markup mentions it.
+It is chrome you never author, exactly as the topbar, the rail and the floating cluster are: it arrives on a page because that page links the shared assets.
+
+**It exists because the end-of-page pager is at the end of the page.**
+A reader who has decided to move on is almost never at the foot of the document when they decide it, so the pager costs a scroll to the bottom before it can be used at all.
+The pager stays and is not restyled: it is the page's own last word, it is what a reader with scripting switched off has, and it is the half of this that prints.
+The bar is the same two destinations held in view the whole way down.
+
+**The order comes from the generated outline, never from the pager's own markup.**
+`outline.js` is written by `scripts/gen_outline.py` from the course map, check 3 in `validate_site.py` fails the pull request when it and `lessons/` disagree, and check 7 holds every title in it against the map and against every pager pointing at the page.
+A page's committed pager is hand-written per page, which makes it a claim about two neighbours rather than a sequence: a bar built from it could not say how far through the course the reader is, could not tell a missing neighbour from a first page, and would go quietly wrong on exactly the page whose pager was the one nobody updated.
+A routed course is the same source by another route.
+Its `outline.js` derives `window.COURSE_OUTLINE` from `routes.js` for the route in play, so the bar follows the route the reader is actually on, carries `?route=` on both links because the outline already does, and no code in `hub.js` knows routes exist.
+
+**The sequence is the outline's own reading order**: every lesson of every section in order, then the reference pages the rail shows under `Reference`.
+A page the outline does not name gets no bar at all - a course map, the hub landing page and the design system reference have no place in that sequence, and a bar that could not say where you are would be answering two thirds of the question.
+On a routed course that also covers a page the active route does not contain, which is the same answer the rail gives it.
+
+**The first and the last page omit the dead control rather than disabling it.**
+A disabled control is a promise the page cannot keep: it holds a tab stop, it reads as something that would work if the reader tried harder, and there is nowhere for it to go.
+The three parts are placed by grid column rather than by source order, so the survivor stays on its own side of the bar and the centre stays centred.
+
+**The centre names the position and the page, and it is text rather than a link.**
+The topbar already carries the way back to the course map, and a third destination in a bar whose whole job is two destinations is a third thing to read past.
+It reads `3 of 68` rather than `3 / 68` because a screen reader says the second one as "3 slash 68", and it is a position rather than a progress reading: the rail owns how much of a course has been read, and a second answer to that question in the same viewport would be two answers.
+
+**Everything fixed across the foot of the viewport is summed once, in `--foot-h`.**
+Three things can occupy it and any two can be there at once: the pre-production strip, this bar, and the device's own bottom inset.
+Every rule that has to give that space back - the body's padding, the rail's scroll foot, the floating cluster's offset, both panels' heights - reads that one token rather than restating the sum, so a fourth occupant is one term and no edit anywhere else.
+`--preprod-h` and `--chapbar-h` are each declared only where the thing they measure exists, so the fallback in each `var()` is the answer for every page that does not carry it.
+`--foot-h` is declared on `body` rather than on `:root` because `--chapbar-h` is: `hub.js` may write no attribute on `<html>` but a registered reader axis, so the flag that says a bar was built is `body[data-chapbar]`, and a custom property resolves against the element that declares it.
+
+**The bar's height is the token, not the other way round.**
+`height` is `--chapbar-h` and the reserve reads the same token, so the two cannot disagree.
+That is why both lines inside it are pinned to one line each and clipped with an ellipsis rather than wrapped: a wrapped title would make the bar taller than the space given back for it and hide the last line of the page behind it.
+
+**`z-index: 63` is one below the floating cluster**, so the two can never contend for a pixel, and it inherits the cluster's reasoning for everything above it: under the rail's drawer scrim at 65 and under every panel shell at 90.
+The panels go further than the stacking order.
+`bounds()` in the panel shell measures this bar along with the pre-production strip, so a parked panel cannot be dropped over it, and measuring is what makes the strip's two-line phone height and the bar's one-line phone height both correct there without either being restated.
+
+**It is full-bleed rather than inset to the reading column.**
+The topbar is, the pre-production strip is, and a band that started at the rail's right edge would have to track `--rail-w` through the drawer arm below 1040px, where that token still holds a width the layout is no longer using.
+
+**Below 720px it is one line, and the title is what survives.**
+A phone reader still needs the name of the page they are moving to, which is the whole reason the bar carries titles rather than two arrows, so the direction word goes and the arrow and the title stay; the centre gives up its title the same way and keeps the position.
+The link's accessible name states the direction in full at both widths - `Previous: <title>` - because a hidden element is out of the accessibility tree as well as off the screen, and WCAG 2.2 SC 2.5.3 is satisfied at both because the visible label is contained in that name.
+The arrow carries `flex: none`: `* { min-width: 0 }` at the head of the sheet takes the flex automatic minimum off every element, and measured at 320px the arrow was laid out 5.2px wide against a 15px glyph and rendered as a stub.
+The title is the item that may give up width, because an ellipsis still reads.
+
+**It is a `nav` with a name of its own**, `Previous and next lesson`, because the page already has two: the rail is `Course outline` and a routed course's committed pager is `Lesson navigation`.
+Three landmarks with one name between them is three landmarks a screen-reader user cannot choose from.
+
+**It is chrome, so it is out of the density control's reach and it is not on the paper.**
+The print block hides it with the topbar, the rail, the panel, the pager and the cluster, and zeroes the reserve with it.
+
+Three tokens are its own: `--chapbar-h`, its height, declared only under `body[data-chapbar="on"]` and again in the narrow arm where the bar is one line; `--sp-inset-chapbar`; and `--sp-inset-chapbar-sm`.
+The two insets are design-axis tokens; the height is not, for the same reason `--topbar-h` and `--preprod-h` are not.
+
+## The study notes panel
+
+`hub.js` builds a second panel from the shell above and it reaches every page, from a topbar button beside `Appearance` and from a launcher in the floating cluster.
+It is chrome and only chrome: no page names it, no page markup changes, and a page served with the script blocked has no button, no panel and no trace.
+Everything a reader can do to the panel itself - open it, close it, pick it up, step it with the arrow keys, put it back, have it remembered - is stated in "The panel shell" and is not restated here.
+What follows is what this panel *contains*, and what it promises.
+
+**The save state is a fact, never an intention. That is the whole point of the panel.**
+Three states, and each one says what actually happened:
+
+| State | What it means |
+|---|---|
+| `Saving` | what the reader typed is not in storage yet |
+| `Saved HH:MM` | the store was written and read back equal |
+| `Not saved: ...` | the write failed; the words are still on screen and Export is the way out |
+
+The panel writes through `setChecked` and `dropChecked`, which return whether the store now holds what was asked for, and never through `set` and `drop`, which swallow.
+Swallowing is right for a preference - a lost palette costs one click, and saying so would be noise - and it is the defect itself for a document.
+The reference site this was replicated from paints a green `Saved` on every keystroke because `setItem` was *called*, so a reader whose quota is full is told their work is safe on every keystroke and loses all of it on the next reload.
+The read-back is not belt and braces: a `setItem` that raises is the loud failure, and a store that accepts the call and keeps nothing is the quiet one, so the only honest answer is to ask the store what it now holds.
+
+**Four ways to lose text, all closed, and each one is a rule rather than a fix.**
+
+- *Nothing is written until you stop typing.* The debounce carries a **ceiling** as well as a pause: a keystroke waits 400ms for the next one, and no keystroke waits longer than 2s whatever the reader does. A trailing debounce alone means a reader who types without pausing has nothing in storage however long they type.
+- *Nothing flushes on the way out.* `visibilitychange`, `pagehide` and the editor's own `blur` all commit, so a keystroke followed inside the debounce by a link click, a tab close or a background switch is written rather than lost.
+- *Closing the panel throws the last keystroke away.* The shell's `onClose` commits before the panel goes; that hook exists because this panel asked for it.
+- *A read runs over the live editor.* It cannot here. What the reader can still see is authoritative and storage is never read over the top of it, which is also what leaves the words on screen for Export to take away after a failed write.
+
+**A note is keyed on the two things this repository has committed never to change.**
+The key is `coursehub.note:` plus a tier and an identifier, one key per document, and the identifier is the course key and the file name: `AGENTS.md` forbids renumbering or renaming a lesson because its URL is public, and a course folder is in every cross-course link in the hub.
+A lesson's *title* is none of those things and is rewritten often, which is the mistake the reference makes - it keys on a slug built from a hand-maintained title array, so editing a chapter's title orphans every note under it, silently, with the old key left in storage unreachable.
+The course key is `COURSE_OUTLINE.key` where a course ships an outline and the `data-course` folder without its suffix otherwise, which are two derivations of one identifier rather than two identifiers, and it is the same key the reading progress map already uses.
+
+**Three scopes, and the control is real.**
+`This page`, `This course` and `All courses`, each its own document.
+A page with no course - the hub landing page, the design system - offers the two tiers it actually has, and the panel names the key it is editing underneath, so the answer to "where did that go" is on screen.
+The reference shows a badge in this position reading `All Masterclass Lessons`; it is a `div` with no handler, no role and no keyboard behaviour, and it says the same thing on every page.
+A control that appears to offer a choice and offers none is worse than no control.
+
+**The editor is a plain `textarea` and the formatting is nine splices.**
+No library, no `contenteditable`, no model: each toolbar button puts literal markdown characters around the selection or in front of the lines it covers, and then dispatches a real `input` event, so a toolbar press reaches the save machinery by the same path a keystroke does.
+`Ctrl/Cmd+B`, `Ctrl/Cmd+I`, `Ctrl/Cmd+S` and `Ctrl/Cmd+Shift+C` do the same four things from the keyboard.
+The heading button *cycles* `#`, `##`, `###` and back to plain, so no level is out of reach and none is a trap.
+
+**Tab is bound to nothing in the editor, and that is deliberate.**
+The reference indents with it, which makes the editor a keyboard trap and fails WCAG 2.1.2.
+`scripts/focus_walk.py` presses real Tab keys through this panel in both modes, on three pages, and every one of its stops has to wear the hub's ring.
+
+**The preview renders the hub's own widgets and never a second vocabulary.**
+Headings, paragraphs, rules, nested bullet and numbered lists, tasks, fenced code, inline code, `**bold**`, `*italic*`, `==highlight==`, `~~strike~~`, links, blockquotes, and `> [!note]` / `[!warning]` / `[!tip]` mapped onto `.callout`, `.callout.warn` and `.callout.key`.
+So a note looks like the page it was written beside, in all seven palettes and both modes, and costs the contrast matrix no row of its own.
+A note's `#` renders as an `h3`, because the panel's own title is the `h2` a dialog's name has to be and the outline a screen reader walks has to stay in order; how big each level looks is the stylesheet's, which is the tag-and-size split stated everywhere else in this file.
+
+Three departures from the reference renderer, and each closes a measured defect:
+
+- **`_underscores_` are not italics.** Theirs turns `user_id_field` into `user<em>id</em>field`, on a hub whose courses are about `top_p`, `--max_tokens` and `attention_mask`. Only `*asterisks*` italicise.
+- **Every placeholder restore is a function replacement**, so a code span containing `$&` or `$1` survives being put back.
+- **A link's scheme is on an allowlist.** The document is the reader's own, so this is not a trust boundary, but a note pasted from somewhere else is not, and `javascript:` in it renders as text.
+
+**Export is the escape hatch, and it exports what is on screen.**
+Front matter - title, scope, the storage key, the source URL and the date - then the document as the editor holds it, never as storage holds it, because a failed write is exactly the case where storage cannot be trusted.
+The button is filled in `--warn` when the last write failed, so a reader who has just been told their words are not saved does not have to read a fourth sentence to find out what to do about it.
+The front-matter guard is a real one: a block is a fence, a body and a closing fence, so a note that opens with a horizontal rule still gets its own front matter.
+
+**The foot is pinned to the panel and the body scrolls above it.**
+It is the one place this panel departs from the appearance panel's shape, and the save state is what earns it: a state that can be below the fold is a state a reader can miss.
+The foot itself, the state line and the export button are the shell's `.panel-foot`, `.panel-state` and `.panel-export`: this panel asked for them first and the highlights panel needs the identical three, so they belong to the shell rather than to either.
+
+**What this panel deliberately does not have.**
+No images and no attachment store - theirs is what fills the quota that then causes the silent data loss.
+No `Clear` - theirs wipes every chapter's highlights from the landing page while deleting only one document, and a reader who wants an empty note selects all and deletes, which saves as an empty note and drops the key.
+No page-text highlighter: that is its own feature, its own panel and its own anchoring contract, stated below.
+
+**Seven tokens belong to this panel and are read by nothing else**: `--notes-w`, `--notes-h` and `--notes-edit-h` for the two lengths it states and the editor's floor, and `--sp-notes-rows`, `--sp-notes-block`, `--sp-notes-indent` and `--sp-inset-notes-edit` for its rhythm.
+The highlights panel states its own four and reads none of these.
+The preview's block rhythm is a chrome distance rather than one of the twenty reading roles on purpose: a `.callout` inside a panel that took a reading role would put the density control into the chrome, which is the split the space ramp exists to prevent.
+
+## The text highlighter
+
+A reader selects a sentence, marks it, and finds it marked when they come back.
+`hub.js` builds all of it and no page's markup mentions it: it is chrome you never author, exactly as the topbar, the rail, the cluster and the two panels are, and it reaches all 797 pages because those pages link the shared assets.
+A page served with the script blocked has no control, no panel and no trace.
+
+**It is painted with the browser's own highlight mechanism and never with a `<mark>` element.**
+`CSS.highlights` takes a set of `Range` objects and `::highlight()` styles them, so nothing in the page is wrapped, split or rewritten and the DOM a screen reader walks is byte for byte the one the author wrote.
+The alternative is to split the text nodes a selection crosses and wrap each piece, which is how this feature is usually built and is why it usually breaks: a sentence a screen reader read as one string becomes three, and it is read out in fragments with a pause at each seam.
+It is also a live edit of a document the section rail, Mermaid and the print pass all hold references into, and it cannot be undone cleanly - removing a mark means merging text nodes back.
+A range highlight has none of those properties, and the worst failure available to it is a mark that does not appear.
+
+**What that costs is semantics, and the panel is the answer to it.**
+There is no element, so there is nothing in the accessibility tree to announce and a screen reader is not told the words are marked.
+That trade is made on purpose: the panel lists every mark on the page as text, in reading order, which is what a screen reader reads instead of a shredded sentence.
+
+**Where the API is missing there is no button, no panel and no cue.**
+The feature is simply not on that browser, and it does not fall back to splitting the DOM, because the fallback is the defect.
+
+### The anchoring contract
+
+A highlight is a reference into text that can change under it, so where it lands on return is the whole design.
+
+**The domain** is the page's own prose flattened to one string: every text node under `main.wrap` or `main.wide`, in document order, with each run of whitespace collapsed to a single space.
+Five things are left out and each has a reason - `script` and `style` are not prose, `svg` and `.mermaid` are drawings whose text is replaced when they render, form controls and buttons are chrome inside the column, `.sr-only` is text no sighted reader can select, and anything `hidden` or `aria-hidden` is not on the page.
+Collapsing whitespace is what makes the domain the text the reader sees rather than the file's indentation, so re-wrapping a lesson's source moves nothing.
+
+**What is stored** is four fields and no ids into the DOM: the exact quote, the offset it was taken from, and up to 48 characters of the text either side.
+That is a position selector plus a quote selector with context, which is the shape the W3C Web Annotation model settled on for the same reason.
+
+**How it is placed on return**, in order, and every step is an exact match:
+
+| Step | What is asked | What answers it |
+|---|---|---|
+| 1 | Is the quote at the offset it was saved at? | The whole of the cost on a page nobody has edited. |
+| 2 | Does `before + quote + after` occur **exactly once**? | A new paragraph above moves every offset below it and moves no words. |
+| 3 | Does the quote occur **exactly once**? | An edit to the sentences either side of the marked one. |
+| 4 | Nothing else. | The highlight is not painted, and the panel says so. |
+
+**Two or more occurrences at any step is a failure rather than a guess.**
+There is no fuzzy match, no nearest match and no edit distance anywhere in the file.
+A highlight that no longer fits **fails visibly** rather than landing on the wrong words, because a silently misplaced highlight - marking the wrong sentence with complete confidence - is worse than one that openly did not come back.
+The panel names the ones that did not place, quotes the words they were made of so the reader can find them by eye, and offers to remove them; nothing is thrown away, so restoring the paragraph restores the mark.
+
+**Placing never writes.**
+Re-anchoring through step 2 or step 3 does not rewrite the stored offset: a load that quietly rewrote storage could report a write failure the reader did not cause.
+
+**A selection that crosses element boundaries is one highlight.**
+The domain is one string over the whole content region, so a selection spanning a paragraph break, a list, a code block or a figure caption has one anchor and the browser paints it across every element it crosses.
+Nothing in the DOM is touched, so there is no partial mark and no broken markup available here at all.
+A selection is clipped to the content region - the part inside is marked and the part outside is dropped - and a selection with no prose in it, one made entirely inside a diagram or in the chrome, is refused and said to be refused.
+
+**A stroke over words already marked merges with them**, so the reader ends with one highlight over the union rather than two stacked ones, which is what a marker pen does and what makes Remove mean one thing.
+
+### Where a page's highlights live
+
+Beside the notes, and on the same identifier: `coursehub.mark:` plus the tier and the course-key-and-file-name `pageKey` derives, so a note and a highlight on one page can never disagree about what a page is.
+One key per page holding one array, because a page's marks are one document.
+The storage discipline is the notes panel's and is not negotiable: writes go through `setChecked` and `dropChecked`, the state is painted from what they returned, and a mark whose write failed is still on screen with the export button filled and the sentence saying it will not survive the reload.
+The panel tells the two failures apart by what the write itself raised rather than by a second probe - a store full to the last byte refuses a probe as well, and the reader would then be told the browser is storing nothing when it is storing five megabytes of theirs.
+
+### The two ways in
+
+**A pointer reader gets the cue**, a floating `Highlight` offer over the selection, which borrows the cluster's `--dock-target` and `--sp-inset-dock` because it is the same kind of control - a floating one aimed at with a thumb while the reader is reading.
+It prevents the default on `mousedown` so pressing it does not collapse the selection it is about to mark, and it is positioned into the band between the sticky topbar and everything fixed across the foot, so it never opens where it cannot be pressed.
+
+**A keyboard reader gets the panel.**
+The last selection made inside the content region is held as an anchor, so opening the panel and pressing its first button marks it whatever the selection did when focus moved, and the panel names the words it is about to mark underneath.
+There is no global shortcut key: a single-character one is an SC 2.1.4 problem and every free modifier combination is taken by a browser on some platform.
+The held selection is re-placed through the same contract a stored one is, so a reader who selected a sentence and then answered a quiz below it still marks the right words.
+
+### On paper
+
+**The control comes off and the mark stays, as an underline.**
+The cue is hidden with the rest of the interactive chrome, `--mark-soft` is white in the print block, and `::highlight()` carries a grey rule instead - so a marked page prints the reader's own annotation without printing a grey block behind every marked paragraph.
+Verified in Chrome at A4: the fill is gone and the underline is there.
+
+### What it costs the design system
+
+**One colour, and it comes from the palette.**
+`--mark-soft` is `color-mix(in srgb, var(--gold) 26%, var(--surface))`, so it is the palette's own gold in every one of the seven and never a hard-coded yellow.
+26% is the strongest tint that still clears the 7:1 body floor on every palette in both modes, which is arithmetic rather than taste: `scripts/contrast_matrix.py` measures `--ink` and `--ink-soft` on it over all 266 combinations, and the worst is 8.08:1 against a 7:1 floor.
+The highlight the panel is pointing at, after `Show`, adds an `--accent-2` underline, which is the only shape `::highlight()` can carry - it takes colour, background, text-decoration, text-shadow and the stroke, and nothing else - and that pair is measured too, at 4.14:1 against a 3:1 floor.
+
+**Four tokens belong to this feature and are read by nothing else**: `--marks-w` and `--marks-h`, the two lengths its panel states, and `--sp-marks-rows` and `--sp-inset-mark` for its rhythm.
+
+**What CI proves.**
+`scripts/focus_walk.py` makes three highlights through the cue, on three pages, in both modes, before it walks the panel - so every run proves the highlighter works end to end in a browser and not only that its panel opens.
+
+## The in-page section rail
+
+`hub.js` builds a strip of ticks down the right-hand margin of every page, one per section of that page, and no page's markup mentions it.
+It is chrome you never author, exactly as the topbar, the course rail and the floating cluster are: it arrives on a page because that page links the shared assets.
+
+**It is derived from the page's own headings, at runtime, and from nothing else.**
+That is the whole design and it is the reason there is no authoring step here at all.
+A model of a page's sections held anywhere but in the page is a second source that can disagree with it, and a lesson rewritten in the afternoon would leave that model wrong by the evening.
+The headings cannot drift from the page, because they are the page.
+
+**Which headings is one rule, and it was read off the corpus rather than guessed.**
+An `h2` that is a direct child of the content region and is not wearing a smaller face.
+Inside `main`, the hub's 744 lesson pages carry 6,260 `h2`, 1,236 `h3` and 10 `h4`, and 5,559 of those `h2` are direct children, so `h2` is this hub's section level, `h3` is an occasional subdivision inside a section rather than a section of its own, and `h4` barely exists.
+It is the same rule [`.numbered`](#the-numbered-section-badge-numbered) already applies when it draws the section badges, so the squares down the page and the ticks down the margin can never name different sections.
+Direct children is also what keeps everything else out without naming any of it: the topbar, the course rail, both panels and the cluster are children of `body`, and a figure's caption, a callout's heading and a card's title are deeper than one level, so none of them can appear in the list and a widget added next year cannot leak into it either.
+
+**Four sections, or no rail.**
+A rail answers two questions - where am I, and how much is left - and on a page of three sections the scrollbar has already answered both, so a list of three is chrome that outweighs what it indexes.
+Fifty-seven of the hub's 789 content pages carry three sections or fewer and get nothing at all, which is the intended outcome and not a gap.
+A course map gets none either, and for the same reason rather than by an exception: its headings sit inside `.module` blocks and are not direct children of anything.
+
+**A heading keeps its own id and is given one only if it has none.**
+The generated id is `sec-` plus the heading's text, lowercased, with accents folded onto their letters, apostrophes dropped so a possessive stays one word, and every other run of non-alphanumeric characters folded to a single dash.
+It is deterministic, so a link a reader shared last month still lands in the right place today.
+The collision rule: a candidate is taken only if nothing in the document already answers to it, which covers an id an author wrote elsewhere on the page and a second heading whose words match an earlier one's in the same test.
+Otherwise the next free `-2`, `-3` and so on is taken, counting in document order, so the first heading with those words keeps the plain id and a later one can never take it away.
+A heading whose text yields no slug at all takes its own position in the sequence instead.
+
+**The reader is in the last section whose heading has reached the reading line, and in exactly one.**
+The reading line is `--secrail-line`, which is also every direct-child `h2`'s `scroll-margin-top`, so a jump lands a heading on the line and the section jumped to is current the moment the reader arrives.
+`hub.js` reads that value back in pixels off the heading itself rather than restating it, so the distance that positions a jump and the distance that decides which section is current are one number with one home.
+When two sections are on screen at once - the tail of one and the heading of the next - the reader is in the earlier of the two, because they have not reached the later heading yet.
+Above the first heading no section is current, and nothing is highlighted: a page's opening is not a section, and saying it is would be a small lie told on every page load.
+
+**It is tracked with an `IntersectionObserver`, and the observer's shape is what makes that honest.**
+The root is the viewport from one pixel above the reading line down; the thresholds are 0 and 1.
+A heading's top crossing that edge is a crossing of threshold 1 - it stops being wholly inside the root - and its bottom crossing is a crossing of threshold 0, so every transition of "has this heading reached the line" raises a callback.
+Neither threshold alone would do: with 0 the highlight lagged by the height of the heading, and a one-pixel band was stepped over between two frames by any fast scroll and never fired at all.
+The callback reads the headings' own rectangles rather than the entries it was handed, so what is painted is the geometry at the moment of painting and never a fact remembered from an earlier frame.
+
+**Ticks always, labels on hover and on focus.**
+Collapsed, the strip is about 35px wide and stands in the content gutter beside the breakout band rather than over it; the reader's own section is drawn on a longer tick in the course accent, so "where am I" is answered with no label showing and without asking anyone to tell two colours apart.
+Hovering the strip, or tabbing into it, opens the labels leftwards over the page for as long as the reader is there.
+That is the trade the widget exists to make: a permanently labelled list would sit on every figure and every table on the page, and a list of ticks nobody can read is not a list.
+Opening changes colours and the labels' own width, never anything under the pointer - the ticks are the elements nearest the edge and they do not move.
+
+**Every row is a plain anchor and deliberately nothing else.**
+The browser scrolls it, reads `scroll-behavior` off the stylesheet so the motion axis governs whether the jump animates, puts the address bar on the section the reader is now reading, and moves the sequential focus starting point to the heading so the next Tab carries on from the page rather than from the rail.
+Four user stories, and not one line of script.
+The strip is a `nav` with an accessible name, the rows are an ordered list, and the current row carries `aria-current="location"` - `location` rather than `page`, because the course rail's `page` says which page of the course this is and this says which place within the page the reader is at.
+A label is clipped rather than hidden, so it stays in the link's accessible name whether the labels are open or shut.
+
+**Its band stops where the foot begins.**
+The strip spans the viewport from the foot of the topbar to the top of the floating cluster, and what is fixed across the foot below the cluster is [`--foot-h`](#the-fixed-chapter-bar), which this reads as one token exactly as the cluster does.
+So the pre-production strip, the chapter bar and the device inset are already summed and a fourth occupant reaches this rail with no edit to it.
+It carries `z-index: 63`, the chapter bar's layer, and the two never contend for a pixel because the strip ends above where the bar begins.
+
+**It runs at 1281px and up, and it is absent below that.**
+The strip stands in the content gutter, which is `--pad`: 3rem above 1280px, where there is room for it beside the widest figure on the page, and 2rem or less below, where the same strip would stand on the edge of every breakout element instead.
+That threshold is above the course rail's own by construction, so the two never compete.
+Below 1041px the course rail leaves the grid and becomes a drawer over the content, the reading column takes the whole viewport, and there is no gutter at all; a second navigation floating over the same prose would be a second thing between the reader and the page, and a phone reader's whole width is the reading width.
+So the section rail is simply not there, and the page keeps the navigation it has always had.
+It is not printed either, with the rest of the chrome.
+
+**Seven tokens belong to it and are read by nothing else**: `--secrail-w`, the width the labels open to; `--secrail-tick` and `--secrail-tick-on`, one section's tick and the reader's own; `--secrail-target`, the height of a row; `--secrail-offset`, from the right edge of the viewport; `--secrail-line`, the reading line; and `--sp-inset-secrail`, around the ticks.
+A row is `--secrail-target` tall and no wider than its own tick, so it meets WCAG 2.2 SC 2.5.8 on the spacing exception rather than outright: the nearest other target is the row above or below and nothing else on the page comes within the strip's own width.
+Widening a row to clear the criterion outright would put the strip on the breakout band at the width the rail starts at, which is the one thing it may not do, and closing the gap between rows would take the exception away, so nothing here may be tightened.
+
+## The course contract
+
+A course declares its identity through **seven tokens, in one block, and through nothing else**.
+The block is keyed on the `data-course` attribute `hub.js` writes onto `<html>` from the URL path, and it sits in `assets/hub.css` with the other registrations under "the course contract".
+Adding a course adds no framework code, and every control the framework offers works on the new course automatically, because every control operates on tokens the new course inherits.
+
+```css
+:root[data-course="statistical-foundations-ml-course"] {
+  --course-hue: -50;                  /* required */
+  --font-display: var(--serif);       /* optional */
+  --font-mono: var(--mono);           /* optional */
+  --eyebrow-family: var(--font-mono); /* optional */
+  --eyebrow-tracking: .18em;          /* optional */
+  --eyebrow-case: uppercase;          /* optional */
+  --eyebrow-size: var(--fs-xs);       /* optional */
+}
+```
+
+| Token | Required | Constraint |
+|---|---|---|
+| `--course-hue` | yes | A unitless number. Never a `deg` value: inside a relative colour `h` is a number and not an angle, so `calc(h + 25deg)` is a type error that drops the whole declaration in silence. |
+| `--font-display` | no | A face in the registry, named as `var(--serif)` or `var(--font-mono)`, never a font stack of your own. |
+| `--font-mono` | no | A face in the registry. |
+| `--eyebrow-family` | no | A face in the registry. |
+| `--eyebrow-tracking` | no | `0em` to `.34em`, or `var(--tracking-eyebrow)`. |
+| `--eyebrow-case` | no | `uppercase` or `none`, and `uppercase` only on a label of about five words or fewer. |
+| `--eyebrow-size` | no | Inside the `--fs-xs` band, `.625rem` to `.78125rem`, or `var(--fs-xs)`. |
+
+Three of the seven are deliberately absent from the reader's panel.
+The display face, the mono face and the eyebrow treatment decide a heading voice and a two to four word label, so a reader has no basis on which to choose them and would set them once and forget them, while a course has every reason to differ on them.
+They are author-level for that reason, and for no other.
+
+**Six of the seven carry two names, and a course writes the shorter one.**
+A design block and a course block are both `(0,2,0)`, so if they wrote the same property the cascade would settle the contest silently on source order.
+The design therefore writes `--x-default`, a course writes `--x`, and every rule reads `--x`.
+The resolution line at bare `:root` is `(0,1,0)`, so a course block wins it wherever either one appears in the file.
+`--course-hue` needs no such layer, because a design carries no colour and nothing else may write it.
+
+`validate_site.py` checks every constraint in that table except one, and the exception is the hue itself.
+Rotation preserves OKLCH lightness and chroma, but the gamut is not a cylinder, so at some hues the browser clips the result and quietly changes what the reader sees.
+Choosing a hue and proving it is therefore yours, and the pull request says how you did it: [`new-course.md`](../new-course.md) carries the canvas readback that measures it.
+The eyebrow rule is checked, but only once a page exists, so keep it while you write rather than finding out afterwards: two to four words is the target and about five is the limit.
+
+### What you may rely on
+
+Every line here is measured on published pages, and it is a promise rather than a description.
+
+| Guarantee | Where it lives |
+|---|---|
+| Every colour on a page comes from a semantic token. There is not one literal hex colour in any published page. | The theme blocks in `assets/hub.css` |
+| The three grid zones. `main.wrap` is one grid with the named lines `text`, `wide` and `full`: prose sits at the measure, figures and tables and code break out. | "Page chrome", above |
+| The closed widget vocabulary, styled by the hub sheet and documented in this file. Nothing outside it is authored by hand. | This file |
+| Type, rhythm and shape are tokens, so a rule reads a token rather than a literal. | "The design tokens", above |
+| The six legacy aliases `--paper`, `--paper-2`, `--card-bg`, `--rule`, `--maxw` and `--readw` keep resolving. | `assets/hub.css` |
+| The eight-colour chart ramp stays palette-independent, so a course that teaches "statistics is teal" keeps that whichever palette the reader picked. | "Inline SVG, for anything quantitative", above |
+| `--gold` and `--ok` are never aliased to each other in any palette or either mode, because the capability matrix uses them for two states that make opposite claims. The print block flattens both to one ink, which is why the `absent` cell also carries the words *No equivalent*. | "The capability matrix", above |
+| `.h-sub` and `.h-label` hold visual rank separately from outline rank, so a heading can be retagged for outline order without being redesigned. | "Headings", above |
+| Mermaid follows the tokens for free: a new palette needs no colour table. | "Mermaid, for structure", above |
+| Diagrams print as ink on paper, from a copy drawn ahead of time during browser idle. | `assets/hub.js` |
+| A page renders fully styled and readable with no script at all. Anything the script adds is an enhancement, never a requirement. | Measured, and protected by every issue in this series |
+| A lesson URL never changes. | `AGENTS.md`, hard rule 6 |
+
+### What is forbidden
+
+| Forbidden | Why |
+|---|---|
+| A course shipping its own colour, type, spacing or component shape in CSS. | If a course can ship a design, seventeen courses ship seventeen designs and the hub is back to the six byte-identical `course.css` forks it already paid to remove. |
+| A course sheet at all, beyond the three that already exist. | A widget a second course could want has one owner, and that owner is `assets/hub.css`. `validate_site.py` fails a fourth sheet. |
+| A course-local rule that restates type or spacing the design axis owns. | Measured: a course sheet sets `.metric .v` to 24px, a design rule at `:root[data-design=...] .metric .v` computes 48px and wins at `(0,2,2)` against `(0,1,1)`, and the course's considered typography is gone with nothing to warn. |
+| A literal colour in a page or in an SVG. | Zero exist today. It reads in one mode, vanishes in the other, and cannot follow the print stylesheet. |
+| New markup for a new design. | A design expressible as CSS over the existing markup costs three files. The same design plus one required wrapper `<div>` costs 796 pages and a migration no validator can check. This is the line to hold in every design review. |
+| Uppercase body text, or a heading that runs to a full line in capitals. | Capitals read 9.53% to 19.01% slower than lowercase, and 90% of readers prefer lowercase. An eyebrow is looked at rather than read, which is why it is the one exception. |
+| A token invented under a course's own selector. | The author surface is these seven. Anything else in a course block is a fork with a shorter name, and `validate_site.py` fails it. |
+
+### The three course sheets are grandfathered, not a precedent
+
+`llm-evolution-course`, `llm-inference-course` and `statistical-foundations-ml-course` each ship an `assets/course-extras.css`, layered after the hub sheet.
+They predate this contract and they stay, because their pages link them.
+No course gets a fourth.
+
+Two of them carry a hazard worth knowing before you change a shared rule.
+`llm-evolution-course` still restyles shared elements - `.stub-note h4`, `.routecard` and `.route-map .module` among them - so grep every `*.css` in the repository for a selector before you touch it, never just `hub.css`.
+`statistical-foundations-ml-course` sets `.parts` and `.pn` in literal `rem` sizes and spacings, and names `--sans` and `--mono` from the registry rather than a role token, which is exactly the restatement the table above forbids: a design that moves the type scale or the face roles will not move those two rules, and the course's cards will drift out of step with everything around them.
+Neither is repaired here.
+They are recorded so the next change to either is made with its eyes open.
+
+### What CI checks
+
+`check_course_contract()` in `scripts/validate_site.py` reads the registrations straight out of `assets/hub.css` and fails on a hue with a unit, a token that is not one of the seven, a face that is not in the registry, a value outside its range, two courses on one hue, a course folder with no registration, a fourth course sheet, a design block writing a course token, and an eyebrow set in capitals that runs past five words in a segment.
+Assertion A3 in `scripts/style_snapshot.py` proves the other half in a browser: it registers two throwaway courses, wears each in turn, and checks that a hue alone moves the accent and nothing else, that all seven move the two faces and the eyebrow and still nothing else, that an unregistered name is dull rather than broken, that the reader's controls keep working underneath, and that removing the block restores the page exactly.
+
+## Printing
+
+A lesson prints. Readers do print them, the paper is the third render state, and a rule that fixes one of the three can break another.
+`hub.css` carries one `PAPER` block near the end, and everything below is what an author has to know about it.
+
+**Paper is a set of token overrides, not a second stylesheet.**
+The block redefines the semantic colour tokens - one ground, one ink - and every existing rule follows.
+So a widget that reads tokens prints correctly with no work, and a widget that hard-codes a colour prints wrong with no warning.
+That is the whole reason the sheet forbids a literal: a literal is unreachable from the print block by construction.
+
+**A width media query names its medium.**
+Write `@media screen and (max-width: 720px)`, never `@media (max-width: 720px)`.
+A width feature is answered by the *page box* in print, and the page box is narrow: A4 inside the browser's own margins is about 717px and US Letter about 739px.
+An unqualified query therefore straddles the hub's own breakpoint, so the same lesson lays out as a phone on one paper and as a laptop on the other.
+This is not theoretical. It is how the rail's drawer arm reached paper, and with it a `position: fixed` scrim carrying a literal `rgb(0 0 0 / .35)` that repeated on every single printed sheet: a 35% black rectangle over all 37 pages of a lesson, in a hub whose readers print.
+Check 15 in `validate_site.py` fails an unqualified width query in `hub.css` or in any course sheet.
+
+**Every sheet says what it is.**
+`@page` margin boxes carry the identity on the left and `counter(page) " / " counter(pages)` on the right.
+The identity is `--print-id`, a custom property `hub.js` writes from `document.title` and `hub.css` declares a fallback for, so a page with the script removed still prints an identified sheet.
+It is the one property `hub.js` may write on `<html>` that is not a reader's, and check 14 holds the two halves together.
+`string-set` with `string()` is the standard way to run a heading into a margin box and was measured first: Chrome renders it on the first page and then stops, which is the one sheet that never needed it.
+
+**Eight print tokens sit in the design block** with the rest of the type and space scale, so a second design sets its own paper: `--fs-print-body`, `--fs-print-foot`, `--fs-print-url`, `--sp-print-page`, `--sp-print-foot`, `--sp-print-figure`, `--sp-print-row` and `--sp-print-cell`.
+Colour is not among them. A design carries no colour on paper any more than on screen.
+
+**What the block does to each widget, and why.**
+
+| Widget | On paper | Why |
+|---|---|---|
+| Chrome: topbar, rail, appearance panel, pager, copy buttons, reading bar, pre-production strip | Gone | Nothing on paper can be clicked. The running foot carries what the pre-production strip was there to say, on every sheet rather than one. |
+| `pre`, `.term`, `.math`, `.diagram`, `table` | Wrap or fit; never scroll | A box that scrolls sideways on screen is cut at the sheet edge on paper, and the rest of the line is not merely unreachable, it is gone. |
+| A Mermaid diagram | Scaled to fit the page box, both dimensions | `hub.js` draws its ink-on-paper copy off-screen with no column to fit, so it arrives at its natural size: the widest on the sample was 884px against a 587px column and the tallest 1270px against a page box near 1017px. `--sp-print-figure` is in `vh`, which is the page box in print, so one cap fits both papers. |
+| An absolute link | Prints its destination after the text | Paper cannot be clicked. Relative links do not, because `../index.html` tells a reader nothing the link text does not, and the capability matrix is exempt, because 700 vendor URLs would bury the table it is trying to be. |
+| A quiz | Question and options, no answer | A printed lesson has to still be answerable. `.q-fb` is hidden until the reader answers, and paper leaves that alone: a question already answered prints its feedback, one not yet answered prints as a question. |
+| A practice problem | Solution open | The opposite of the quiz, deliberately. A solution sits behind a disclosure the reader chose, and printing is a request for the whole document; `hub.js` opens each one and restores it afterwards. |
+| The capability matrix | Five columns, service names and cell states, no prose | The stacked phone layout printed as 105 pages. It is now 23, at the width of the page box rather than the reading measure, and the four cell states still read as shapes once colour is gone. |
+
+**Verify a print change by printing.**
+Neither CI check can see paper: `validate_site.py` does not render, and `style_snapshot.py` holds the viewport at 1280px, where the narrow arms match in no medium at all.
+Produce a PDF at A4 *and* at US Letter, look at it, and check that no ink reaches the edge of a sheet.
+## The design system reference page
+
+Everything above is also *rendered*, live, at [`design-system/index.html`](../../../../design-system/index.html): every token with the value the browser resolved for it and a specimen painted by that token itself, every widget beside its markup, every reader control working, and the accessibility floor as numbers.
+Open it when you are unsure what a token does, and copy the markup from it rather than from here.
+It cannot go stale in the way a written list can: nothing on it restates a value, and it counts the custom properties `assets/hub.css` declares against the names it carries and says on the page which ones it misses.
+
+**Two attributes name a token, and `validate_site.py` checks both.**
+`data-token` marks the cell the page fills with the resolved value; `data-spec` marks a specimen the page's own sheet paints with that same token.
+A name in either that `assets/hub.css` does not declare fails the pull request, so a rename cannot leave the reference describing something that is gone.
+Any page may use them; the reference page is simply the one that does.
+
+**Two classes belong to that page and to no lesson.**
+They are furniture for showing the system, not vocabulary for teaching with, and they live in `design-system/assets/course-extras.css` rather than in the hub sheet for exactly that reason.
+
+```html
+<span class="ds-spec" data-kind="colour" data-spec="--accent"></span>
+<span class="ds-spec" data-kind="size" data-spec="--fs-1">Handgloves</span>
+<code data-token="--fs-1">var(--fs-1)</code>
+
+<div class="ds-demo wide">
+  <div class="card tldr">...the widget, rendered...</div>
+  <div class="code-cap">the markup &middot; copy it, do not approximate it</div>
+  <pre><code>...the same markup, escaped...</code></pre>
+</div>
+```
+
+`.ds-spec` is one specimen and `data-kind` says which property it sets - one kind, one property, so a reader sees the token doing its own job rather than a picture of it.
+`.ds-demo` pairs a rendered widget with the markup that made it; the markup goes in an ordinary `pre`, so `hub.js` gives it the copy button every code block has.
+
+**Adding a token means adding a row there**, in the same pull request as the declaration and the first rule that reads it.
+Nothing forces it - a check that failed every sibling pull request adding a token would be a check people route around - but the page says out loud when a token is missing from it, and that line is the reason to go back.
+
+**Quotes inside a shown code block are written `&quot;`.**
+A reader sees the same characters and a copy takes the same text, because `textContent` decodes the entity.
+Written as plain quotes, `validate_site.py`'s link check reads a sample `href` as a link the page makes and fails on a file that was never meant to exist.

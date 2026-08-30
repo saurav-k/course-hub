@@ -57,7 +57,7 @@ scripts/validate_site.py      structure and link checker that gates every pull r
 
 <course-name>/
   index.html                  the course map; every lesson is linked from here
-  assets/                     optional course-extras.css only, for rules unique to this course
+  assets/                     three courses only, a grandfathered course-extras.css
   lessons/NNNN-kebab.html     the lessons, zero-padded and in teaching order
   reference/*.html            print-friendly cheat sheets and glossaries
   learning-records/*.md       progress notes; never published to the site

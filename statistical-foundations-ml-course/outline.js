@@ -273,6 +273,160 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0057-the-four-boxes.html"
         }
       ]
+    },
+    {
+      "n": "L5",
+      "title": "Lecture 5: the road from counting to the binomial",
+      "lessons": [
+        {
+          "title": "Lecture 5: start here",
+          "href": "lessons/0058-lecture-5-start-here.html"
+        },
+        {
+          "title": "The mini-batch that can repeat",
+          "href": "lessons/0059-the-mini-batch-that-can-repeat.html"
+        },
+        {
+          "title": "Both classes in the batch",
+          "href": "lessons/0060-both-classes-in-the-batch.html"
+        },
+        {
+          "title": "The quality check that finds nothing",
+          "href": "lessons/0061-the-quality-check-that-finds-nothing.html"
+        },
+        {
+          "title": "Exactly r mislabelled",
+          "href": "lessons/0062-exactly-r-mislabelled.html"
+        },
+        {
+          "title": "The binomial shape",
+          "href": "lessons/0063-the-binomial-shape.html"
+        },
+        {
+          "title": "When counting outcomes stops working",
+          "href": "lessons/0064-when-counting-outcomes-stops-working.html"
+        },
+        {
+          "title": "Count the configurations, then multiply",
+          "href": "lessons/0065-count-the-configurations.html"
+        },
+        {
+          "title": "The gaps argument",
+          "href": "lessons/0066-the-gaps-argument.html"
+        },
+        {
+          "title": "Conditioning on one image",
+          "href": "lessons/0067-conditioning-on-one-image.html"
+        },
+        {
+          "title": "Which shape did it land in",
+          "href": "lessons/0068-which-shape-did-it-land-in.html"
+        }
+      ]
+    },
+    {
+      "n": "TA2",
+      "title": "TA Session 2: Week 2",
+      "lessons": [
+        {
+          "title": "TA Session 2: start here",
+          "href": "lessons/0069-ta-session-2-start-here.html"
+        },
+        {
+          "title": "Independence on eight outcomes",
+          "href": "lessons/0070-independence-on-eight-outcomes.html"
+        },
+        {
+          "title": "Inclusion-exclusion on a million",
+          "href": "lessons/0071-inclusion-exclusion-on-a-million.html"
+        },
+        {
+          "title": "The conditional machinery, given twice",
+          "href": "lessons/0072-the-conditional-machinery.html"
+        },
+        {
+          "title": "Two conditionals on a shrunken space",
+          "href": "lessons/0073-two-conditionals-on-a-shrunken-space.html"
+        },
+        {
+          "title": "The rainy day question",
+          "href": "lessons/0074-the-rainy-day-question.html"
+        },
+        {
+          "title": "The reported six",
+          "href": "lessons/0075-the-reported-six.html"
+        },
+        {
+          "title": "The false positive paradox",
+          "href": "lessons/0076-the-false-positive-paradox.html"
+        }
+      ]
+    },
+    {
+      "n": "L6",
+      "title": "Lecture 6: the random variable",
+      "lessons": [
+        {
+          "title": "Lecture 6: start here",
+          "href": "lessons/0077-lecture-6-start-here.html"
+        },
+        {
+          "title": "Why a number instead of an outcome",
+          "href": "lessons/0078-why-a-number-instead-of-an-outcome.html"
+        },
+        {
+          "title": "The function with the wrong name",
+          "href": "lessons/0079-the-function-with-the-wrong-name.html"
+        },
+        {
+          "title": "The support, and the PMF",
+          "href": "lessons/0080-the-support-and-the-pmf.html"
+        },
+        {
+          "title": "The CDF is a running sum",
+          "href": "lessons/0081-the-cdf-is-a-running-sum.html"
+        },
+        {
+          "title": "Four things every CDF does",
+          "href": "lessons/0082-four-things-every-cdf-does.html"
+        },
+        {
+          "title": "Reading probability off the staircase",
+          "href": "lessons/0083-reading-probability-off-the-staircase.html"
+        },
+        {
+          "title": "Bernoulli and the discrete uniform",
+          "href": "lessons/0084-bernoulli-and-the-discrete-uniform.html"
+        },
+        {
+          "title": "The binomial, now a distribution",
+          "href": "lessons/0085-the-binomial-as-a-distribution.html"
+        },
+        {
+          "title": "The geometric, and memorylessness",
+          "href": "lessons/0086-the-geometric-and-memorylessness.html"
+        },
+        {
+          "title": "The Poisson, and the shape of N",
+          "href": "lessons/0087-the-poisson-and-the-shape-of-n.html"
+        },
+        {
+          "title": "When mass becomes density",
+          "href": "lessons/0088-when-mass-becomes-density.html"
+        },
+        {
+          "title": "The uniform and the exponential",
+          "href": "lessons/0089-the-uniform-and-the-exponential.html"
+        },
+        {
+          "title": "The Gaussian, and its missing formula",
+          "href": "lessons/0090-the-gaussian-and-its-missing-formula.html"
+        },
+        {
+          "title": "Light tails against heavy tails",
+          "href": "lessons/0091-light-tails-against-heavy-tails.html"
+        }
+      ]
     }
   ],
   "extras": [
@@ -291,6 +445,14 @@ window.COURSE_OUTLINE = {
     {
       "title": "Lecture 4 Formula Sheet",
       "href": "reference/lecture-4-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 5 Formula Sheet",
+      "href": "reference/lecture-5-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 6 Formula Sheet",
+      "href": "reference/lecture-6-formula-sheet.html"
     }
   ]
 };

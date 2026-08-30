@@ -69,6 +69,9 @@ It is an estimate and it only has to be honest; the point is that a reader arriv
 | pages that are all flowchart | **0** |
 | figures without a `<figcaption>` | **0** |
 | figcaptions without a bolded takeaway | **0** |
+| figures on a new page without a `.fig-cap` label | **0** |
+| `.fig-cap` labels over 5 words | **0** |
+| `.fig-claim` sentences over 15 words | **0** |
 
 The kind bar exists because a flowchart is the diagram you reach for when you have not asked what the reader is confused about.
 A reader confused about *order* needs a `sequenceDiagram`.
@@ -80,6 +83,20 @@ The kinds, and what each is for, are in [`widgets.md`](widgets.md).
 **Quantitative claims need a quantitative figure.** A page that states a distribution, a trend over time, a spread, or a magnitude comparison owes the reader an inline `<svg class="chart">`, hand-authored. Prose saying "the tail is heavy" next to a flowchart is a claim without a picture.
 
 **A figure with no takeaway is decoration.** If you cannot write the bolded sentence in the figcaption, cut the figure. Every figcaption explains the diagram in plain English and bolds the one thing to carry away.
+
+**The figure's text budget is fifteen words above the drawing and a short reading below.**
+The label is the subject, the claim is what the drawing proves, and the caption is the reading a learner checks their own understanding against.
+The shape of the two lines above is in [`widgets.md`](widgets.md); the numbers are here, because they are what a page is measured on.
+
+Figure text is not counted by the word ceiling - `check_pages.py` strips the whole `<figure>` block before it counts prose - so it is the one place on a page where length is nobody's problem, and it has become the place where length goes.
+Measured across the hub: 2,934 captions, a median of 57 words, 165,597 words in total.
+That is 219 words a lesson page, 12% of the prose ceiling, none of it counted.
+When a caption runs past about 40 words, the sentence it is really trying to write belongs in the `.fig-claim` and the rest belongs in the body or nowhere.
+
+The first of the three new rows is a bar and not a gate, and the difference matters.
+The other two are gates: `validate_site.py` fails a label over five words, on the same rule that already holds a page's own `.eyebrow` to five, and `check_pages.py` fails a label or a claim written as a question and warns on a claim past fifteen words.
+Nothing fails a figure with no label at all, and nothing must: requiring one would fail every figure written before the widget existed, and a generated label is worse than none.
+A page you are writing now is held to the bar; a page you are not touching is not.
 
 ## Cognitive load
 
