@@ -186,6 +186,8 @@ It is decoration beside a heading, and the heading's own name is what a reader n
 An `h2` already carries a hairline above it.
 Do not add a second rule under the heading to go with the badge; the sheet ships one and one is what the page should have.
 
+Inline markup inside a numbered heading behaves exactly as it does in any other heading: the badge hangs in a gutter beside the block rather than turning the heading into a row of boxes, so `Practice <span class="note-sm">about 15 minutes</span>` still reads as one line and still wraps.
+
 ## The one-minute version
 
 Opens every page. Three to five bullets, each a claim, each bolding its own key term.
