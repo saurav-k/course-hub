@@ -107,6 +107,26 @@ Both are mandatory on every lesson page. See the ladder in [`pedagogy.md`](pedag
 
 A one-sentence framing line may use `<p class="lead">` instead, above `.paper-meta`, where the page has no attribution to carry.
 
+### The part eyebrow, `.part-eyebrow`
+
+Optional, and the topmost thing on the page when it is there, above the breadcrumb and above `.eyebrow`.
+It names the division of the course this page belongs to, which is the one piece of bearing the rest of the head block does not carry: `.eyebrow` says which module and which lesson, and this says which part of the whole.
+
+```html
+<div class="part-eyebrow"><span>Part II / Methods and semantics</span><span>Where the argument turns</span></div>
+```
+
+One span or two.
+The first is the part itself and is the only one that matters.
+A second span is the part's own subtitle, and it prints faint at the far end of the row; it needs no class, because a widget that can be told apart by counting its children should be.
+Write both in sentence case and let the stylesheet decide about capitals, exactly as `.fig-cap` does: the row takes the course's own eyebrow face, tracking and case from the design in force.
+
+It is a row rather than a label, and the hairline under it is what makes it read as a divider of the course rather than as a second caption.
+The rule's style is `--part-rule-style`, so the House design draws it solid and Press draws it dashed.
+
+Do not put one on every page of a course that has no parts.
+The widget answers "where am I in the whole", and a course whose whole is one sequence has already answered it in the eyebrow.
+
 ### The breadcrumb, `.crumbs`
 
 Optional, and above the eyebrow when it is there.
@@ -131,6 +151,39 @@ An ordinary course whose spine already names the hub and the course map does not
 Fix a broken heading order by retagging the heading and adding the matching class, never by leaving the tag wrong because the right one looks wrong.
 
 That is why the house forms below read `<h2 class="h-label">` rather than `<h4>`: they sit directly under the page `<h1>` and a bare `<h4>` there skips two levels.
+
+### The numbered section badge, `.numbered`
+
+Optional, and one class on the container does the whole job.
+
+```html
+<main class="wrap numbered">
+  <h2>What routing is</h2>
+  <h2>The keeper and the viewer</h2>
+</main>
+```
+
+Every `h2` that is a direct child of the container gets a filled square in front of it carrying its number: `01`, `02`, `03`.
+Nothing is written on the headings, and nothing may be.
+The numbers come from a CSS counter, so they cannot drift from the headings the way a typed number does, and adding a section in the middle renumbers the rest with no edit anywhere.
+
+Four things to know before you use it.
+
+**It is opt-in, and that is the point.**
+A course map and a reference sheet are lists rather than arguments, and neither is a numbered sequence.
+Put `.numbered` on the pages that really do proceed in sections.
+
+**`.h-label` and `.h-sub` are stepped over.**
+Both are `h2` tags wearing a smaller face - "The one-minute version" is the common one - and neither is a section of the argument, so neither takes a number and neither advances the count.
+
+**The number is not part of the heading's accessible name.**
+The badge is drawn with empty alternative text, so a screen reader announces "The keeper and the viewer" rather than "02 The keeper and the viewer".
+It is decoration beside a heading, and the heading's own name is what a reader navigates by.
+
+**One rule above the heading, never two.**
+An `h2` already carries a hairline above it.
+Do not add a second rule under the heading to go with the badge; the sheet ships one and one is what the page should have.
+
 
 ## The one-minute version
 
@@ -675,13 +728,13 @@ The groups, and what each is for.
 | Group | Count | What a rule reads |
 |---|---|---|
 | Faces | 4 | `--font-body` for reading prose, `--font-display` for `h1` to `h4`, `--font-ui` for chrome and captions, `--font-mono` for code. The three `--sans` / `--serif` / `--mono` tokens above them are the registry of what is loaded; do not name those. `--font-body` is set by the face registry rather than in this block; see the derived axes below. |
-| Type scale | 62 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
+| Type scale | 63 | `--fs-1` to `--fs-4` are the four heading sizes, `--fs-body`, `--fs-lead`, `--fs-ui`, `--fs-sm`, `--fs-xs`, `--fs-foot` and `--fs-mono` the named roles, and the rest are component sizes named for the component. `--fs-body` and `--fs-mono` are derived, not set; see the derived axes below. |
 | Leading | 15 | `--lh-tight` for headings, `--lh-body` for prose, then one per component role. `--lh-body` carries the measure nudge; see the derived axes below. |
 | Weight | 6 | `--fw-normal` 400, `--fw-medium` 600, `--fw-strong` 650, `--fw-bold` 700, `--fw-metric` 750, `--fw-heavy` 800. |
 | Tracking | 14 | Negative on display type, positive on anything set in capitals. |
-| Space | 176 | Two layers; see below. |
+| Space | 182 | Two layers; see below. |
 | Reading frame | 3 | `--measure-chars-default`, the column width in real characters, and `--wide-left` / `--wide-right`, unitless shares summing to 1 that say how the breakout band sits around it. `.5` and `.5` centres the prose; `0` and `1` grows figures from its left edge. The rule does the arithmetic, because `--measure-wide` differs by element. |
-| Shape | 17 | The seven radii, the four border widths, and the six that are the shadow *shape* - its colour stays on the mode layer. |
+| Shape | 20 | The seven radii, the four border widths, and the six that are the shadow *shape* - its colour stays on the mode layer. Three more are one widget's shape each: `--part-rule-style`, `--sec-badge-size` and `--sec-badge-radius`. |
 | Focus ring | 5 | `--focus-ring-color`, `--focus-ring-width`, `--focus-ring-style` and the two offsets; see below. |
 | Motion | 11 | Six durations, two easings, two lift distances and one slide distance. `--motion-slide` is `0px` in House; a design whose signature gesture is horizontal sets it and every lesson card follows. |
 | Eyebrow | 5 | Family, case, tracking, size and weight, as one author-level treatment. |
