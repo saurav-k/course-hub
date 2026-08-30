@@ -9,9 +9,10 @@
      1. head phase   - restore mode, palette, design and the two reading
                        preferences from localStorage
      2. mount phase  - build the rail and the fixed chapter bar from
-                       window.COURSE_OUTLINE, build the topbar controls and
-                       settings popover, and the pre-production bar when the
-                       host says so
+                       window.COURSE_OUTLINE, build the in-page section rail
+                       from the page's own headings, build the topbar controls
+                       and settings popover, and the pre-production bar when
+                       the host says so
      3. wire phase   - quiz, copy buttons, reading progress, Mermaid
 
    Every page links this one file. There is no per-course runtime.
@@ -1579,6 +1580,222 @@
     window.addEventListener('resize', judge);
     judge();
     syncCluster();
+  }
+
+
+  /* ============================================================
+     THE IN-PAGE SECTION RAIL
+
+     A reader half-way down a 3,000-word lesson has no idea where they are in
+     it. The rail on the left names the pages of the course; nothing named the
+     sections of the page in front of them. This does, on all 797 pages, and no
+     page's markup mentions it: it is chrome, exactly as the topbar, the course
+     rail and the floating cluster are, and it arrives because the page links
+     the shared assets.
+
+     It is DERIVED FROM THE PAGE'S OWN HEADINGS, at runtime, and from nothing
+     else. That is the whole design. A model of the page's sections held
+     anywhere but in the page is a second source that can disagree with it, and
+     a lesson rewritten in the afternoon would leave it wrong by the evening.
+     The headings are the one source that cannot drift from the page, because
+     they are the page.
+
+     Which headings, and why those. Measured from the corpus rather than
+     guessed: inside `main`, the hub's 744 lesson pages carry 6,260 `h2`, 1,236
+     `h3` and 10 `h4`, and 5,559 of the `h2` are direct children of the content
+     region. So `h2` is this hub's section level, `h3` is an occasional
+     subdivision inside one section rather than a section of its own, and `h4`
+     barely exists. The rule is therefore one line - an `h2` that is a direct
+     child of the content region and is not wearing a smaller face - and it is
+     the same rule `.numbered` already applies when it draws the section
+     badges, so the numbered squares down the page and the ticks down the rail
+     can never name different sections.
+
+     Direct children is also what keeps everything else out without naming any
+     of it. The topbar, the course rail, both panels and the floating cluster
+     are children of `body`; a figure's caption, a callout's heading and a
+     card's title are grandchildren at best. None of them is a child of `main`,
+     so none of them can appear in a list built this way, and a widget added
+     next year cannot leak into it either.
+
+     WHERE THE READER IS, in one sentence: the reader is in the last section
+     whose heading has reached the reading line. The reading line is the
+     stylesheet's `--secrail-line`, read back in pixels off the heading that
+     has to land on it, so the distance that positions a jump and the distance
+     that decides which section is current are the same number and can never
+     drift apart. When two sections are on screen at once - the tail of one and
+     the heading of the next - the reader is in the earlier of the two, because
+     they have not reached the later heading yet. The reader is in exactly one
+     section, or, above the first heading, in none: a page's opening is not a
+     section and saying it is would be a small lie told on every page load.
+
+     It is tracked with an IntersectionObserver rather than a scroll handler,
+     and the observer's shape is what makes that honest. The root is the
+     viewport from the reading line down; the thresholds are 0 and 1. A
+     heading's top crossing the line is a crossing of threshold 1 - it stops
+     being wholly inside the root - and a heading's bottom crossing the line is
+     a crossing of threshold 0. Between them, every transition of "has this
+     heading reached the line" raises a callback, which is what a single
+     threshold could not promise: with 0 alone the highlight lagged by the
+     height of the heading, and with a one-pixel band a fast scroll stepped
+     over the band between two frames and the callback never came. The callback
+     itself reads the headings' own rectangles rather than the entries, so what
+     is painted is the geometry at the moment of painting and not a fact
+     remembered from an earlier frame.
+
+     It appears above a stated heading count and not before. It is not printed.
+     It does not compete with the course rail, and the media query that holds
+     it to wide viewports carries the reason.
+     ============================================================ */
+
+  /* Four sections, and below that no rail at all. A rail answers two questions
+     - where am I, and how much is left - and on a page of three sections the
+     scrollbar has already answered both, so a list of three is chrome that
+     outweighs what it indexes. Fifty-seven of the hub's 789 content pages
+     carry three sections or fewer and get nothing, which is the intended
+     outcome rather than a gap. */
+  var SECTION_MIN = 4;
+
+  /* The sections of the page, in document order. The whole rule, and the
+     reasoning behind every clause of it, is in the block above. */
+  function pageSections(region) {
+    var out = [];
+    for (var node = region.firstElementChild; node; node = node.nextElementSibling) {
+      if (node.tagName !== 'H2') continue;
+      // `.h-label` and `.h-sub` are h2 tags wearing a smaller face - "The
+      // one-minute version" is the common one - and neither is a section of
+      // the argument. The tag sets the outline; the class sets the size.
+      if (node.classList.contains('h-label') || node.classList.contains('h-sub')) continue;
+      out.push(node);
+    }
+    return out;
+  }
+
+  /* A heading's text as a fragment identifier. Deterministic, so the same
+     heading yields the same id on every load and in every build, which is what
+     makes a link a reader shared last month still land in the right place
+     today. Accents fold onto their letters, an apostrophe is dropped rather
+     than turned into a word break, and every other run of non-alphanumeric
+     characters becomes one dash. */
+  function sectionSlug(text) {
+    return text
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/['\u2018\u2019]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  /* The id a section is linked by. An author's own id is used exactly as
+     written and is never replaced - it is the one a page may already be linked
+     by from outside - and a heading without one is given `sec-` plus its slug.
+
+     The collision rule. The candidate is taken only if nothing in the document
+     already answers to it, which covers both halves of the problem at once: an
+     id an author wrote elsewhere on the page, and a second heading whose words
+     match an earlier one's. Otherwise the next free `-2`, `-3` and so on is
+     taken, counting in document order, so the first heading with those words
+     keeps the plain id and a later one can never take it away from it. A
+     heading whose text yields no slug at all - punctuation alone - takes its
+     own position in the sequence instead, which is unique by construction. */
+  function anchorFor(head, ordinal) {
+    if (head.id) return head.id;
+    var slug = sectionSlug(head.textContent || '');
+    var stem = 'sec-' + (slug || String(ordinal));
+    var id = stem;
+    var next = 1;
+    while (document.getElementById(id)) { next += 1; id = stem + '-' + next; }
+    head.id = id;
+    return id;
+  }
+
+  function mountSectionRail() {
+    var region = document.querySelector('main.wrap, main.wide');
+    if (!region) return;
+    var heads = pageSections(region);
+    if (heads.length < SECTION_MIN) return;
+
+    var nav = el('nav', 'secrail');
+    /* A navigation region with no name is one a screen reader announces as
+       "navigation" beside two others that say the same thing. This one says
+       which page's sections it holds. */
+    nav.setAttribute('aria-label', 'Sections on this page');
+    var list = el('ol');
+    var links = [];
+
+    heads.forEach(function (head, index) {
+      var link = el('a');
+      link.href = '#' + anchorFor(head, index + 1);
+      /* A plain anchor, and deliberately nothing else. The browser scrolls it,
+         reads `scroll-behavior` off the stylesheet - so the motion axis governs
+         whether the jump animates and no branch here has to - puts the address
+         bar on the section the reader is now reading, and moves the sequential
+         focus starting point to the heading, so the next Tab carries on from
+         there rather than from the rail. Every one of those is a user story,
+         and none of them is a line of script. */
+      /* The label first and the tick second, so the tick is the element
+         nearest the edge of the viewport. Opening the labels then grows the
+         list leftwards and every tick stays exactly where it was, under
+         whatever pointer was aiming at one. */
+      link.appendChild(el('span', 'secrail-label', (head.textContent || '').trim()));
+      link.appendChild(el('span', 'secrail-tick'));
+      var row = el('li');
+      row.appendChild(link);
+      list.appendChild(row);
+      links.push(link);
+    });
+
+    nav.appendChild(list);
+    /* Immediately before the content it indexes, so a keyboard reader meets
+       the sections of the page and then the page, in that order. */
+    region.parentNode.insertBefore(nav, region);
+
+    /* The reading line, in pixels, read off the stylesheet rather than stated
+       twice. `--secrail-line` is the section headings' own `scroll-margin-top`,
+       so a jump lands a heading exactly on the line and the same heading is at
+       once the current one. A literal here would be that number's second home
+       and the two would part company the first time a design moved one. */
+    var line = parseFloat(getComputedStyle(heads[0]).scrollMarginTop) || 0;
+    /* One pixel above the line, and it is the same number twice on purpose:
+       the root's top edge and the test below. A heading is wholly inside the
+       root while its top is at or below that edge and stops being wholly
+       inside the moment its top rises past it, so the observation and the
+       answer are one event rather than two that agree most of the time. The
+       pixel is what makes a jump land right: `scroll-margin-top` puts the
+       heading's top exactly on the line, which is inside the edge, so the
+       section the reader jumped to is current the moment they arrive. */
+    var edge = line + 1;
+    var current = -1;
+
+    function paint() {
+      var found = -1;
+      for (var index = 0; index < heads.length; index += 1) {
+        // The headings are in document order, so their tops rise together and
+        // the first one still below the edge ends the search.
+        if (heads[index].getBoundingClientRect().top >= edge) break;
+        found = index;
+      }
+      if (found === current) return;
+      if (current >= 0) links[current].removeAttribute('aria-current');
+      current = found;
+      /* `location` rather than `page`: the course rail's `page` says which page
+         of the course this is, and this says which place within the page the
+         reader is at. Two different claims, and a screen reader announces the
+         difference. */
+      if (current >= 0) links[current].setAttribute('aria-current', 'location');
+    }
+
+    if (!window.IntersectionObserver) return;
+    /* The root is the viewport from the reading line down, and both thresholds
+       are watched. See the block above for why one of them is not enough. A
+       resize or a reflow changes the geometry rather than the scroll position,
+       and the observer recomputes on both, so nothing here listens for either. */
+    var watch = new IntersectionObserver(paint, {
+      rootMargin: (-edge) + 'px 0px 0px 0px',
+      threshold: [0, 1]
+    });
+    heads.forEach(function (head) { watch.observe(head); });
   }
 
   /* ---------- the appearance panel ---------- */
@@ -3370,6 +3587,7 @@
     /* After the cluster, because both insert themselves straight after the
        topbar and this one has to land in front of it in the tab order. */
     if (hasRail) mountChapterBar(outline);
+    mountSectionRail();
     mountStageFlag();
     wireQuizzes();
     wireCopyButtons();
