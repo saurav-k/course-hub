@@ -29,6 +29,8 @@ Order matters: the template's order is the teaching order.
 
 **Mental model, then mechanism, then trade-off.** The reader gets a picture they can hold before they get a thing they must follow, and they never get a technique without its cost. A section that introduces a technique and lists only benefits is unfinished.
 
+**Two lines above every drawing, and neither does the other's job.** `.fig-cap` names the subject in two to five words and never argues; `.fig-claim` says in one sentence what the drawing proves and never describes the picture. Write them before you draw, not after: if you cannot say what the figure proves, you do not yet know what to draw. The markup is in [`references/widgets.md`](references/widgets.md), "What a figure is".
+
 **Diagram before the paragraph it illustrates, not after.** A diagram that appears after the explanation is a summary; a diagram that appears before it is a scaffold, and scaffolds are what lower cognitive load.
 
 **When a paragraph and a figure say the same thing, the paragraph goes.** Not both. A paragraph that walks the reader through a diagram node by node is the diagram typed out, and it is the first thing to cut when the page is over the word ceiling. 1,800 prose words is the ceiling and 400 words per figure is the density bar; both are counted by `check_pages.py`.
