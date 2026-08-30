@@ -1270,6 +1270,115 @@
     appearance.attachOpener(button);
   }
 
+  /* ---------- the floating control cluster ----------
+     Three controls, fixed to the bottom-right corner of every page, built here
+     and present in no page's markup. The stylesheet section of the same name
+     carries why it exists and where it sits; this is what it does.
+
+     It is inserted straight after the topbar rather than appended to the body,
+     so a reader on a keyboard reaches it in the same breath as the rest of the
+     chrome instead of after every paragraph, figure and footer link on the
+     page. That leaves a fixed overlay whose focus position is not its visual
+     position, which is true of any fixed overlay and is the lesser of the two:
+     a control cluster that costs eighty tab presses to reach is a control
+     cluster keyboard readers do not have.
+
+     It is a `role="group"` rather than a `role="toolbar"`, and that is a
+     promise not made on purpose. A toolbar owes the reader arrow-key roving
+     focus between its controls; three plain buttons in a labelled group owe
+     nothing beyond Tab, which is what they implement. */
+  var dockMode = null;
+  var dockTop = null;
+
+  /* The mode control names what it will do rather than what is on. The
+     reference site's own button shows the current theme and reads as an
+     instruction, so `Light` there means "you are in Light" and every reader
+     who takes it for a button label presses it expecting the opposite. */
+  function syncCluster() {
+    if (!dockMode) return;
+    var next = isDark() ? 'light' : 'dark';
+    var say = 'Switch to ' + next + ' mode';
+    dockMode.firstChild.textContent = next === 'dark' ? '\u263E' : '\u2600';
+    dockMode.setAttribute('aria-label', say);
+    dockMode.title = say;
+  }
+
+  function dockButton(glyph, label) {
+    var control = el('button', 'dock-btn');
+    control.type = 'button';
+    control.title = label;
+    control.setAttribute('aria-label', label);
+    control.appendChild(el('span', 'tb-icon', glyph));
+    return control;
+  }
+
+  function mountCluster() {
+    var dock = el('div', 'dock');
+    dock.setAttribute('role', 'group');
+    dock.setAttribute('aria-label', 'Reader controls');
+
+    /* Scroll to top, and it is the first child because the cluster hugs the
+       right edge: a control that appears and disappears on the left grows the
+       cluster away from the other two rather than pushing them under the
+       reader's thumb. */
+    dockTop = dockButton('\u2191', 'Back to the top of the page');
+    dockTop.hidden = true;
+    dockTop.addEventListener('click', function () {
+      /* No `behavior` is named, so the browser reads `scroll-behavior` off the
+         stylesheet: smooth by default and `auto` under either arm of the motion
+         axis. Naming `smooth` here would animate a scroll for a reader who
+         asked the whole system for no animation. */
+      window.scrollTo({ top: 0 });
+      /* Scrolling moves the page and leaves the keyboard where it was, so the
+         next Tab would carry on from the foot of a document the reader has just
+         left. Focus follows the scroll to the first thing at the top. It is
+         `preventScroll` because the smooth scroll is already under way, and it
+         is the wordmark because that is the page's first stop. A pointer
+         activation sets the browser's modality to pointer, so this paints no
+         ring for a reader using a mouse and paints one for a reader using
+         Tab, which is what `:focus-visible` is for. */
+      var first = document.querySelector('.spine .home');
+      if (first) first.focus({ preventScroll: true });
+    });
+    dock.appendChild(dockTop);
+
+    /* Nothing to launch on a page with no topbar, and no dead control either.
+       The shell owns opening, closing and where focus goes; this is a second
+       button asking it for the same contract the topbar's already has. */
+    if (appearance) {
+      var launch = dockButton('\u25D1', 'Appearance and reading settings');
+      appearance.attachOpener(launch);
+      dock.appendChild(launch);
+    }
+
+    dockMode = dockButton('\u263E', 'Switch to dark mode');
+    dockMode.addEventListener('click', function () { applyMode(isDark() ? 'light' : 'dark'); });
+    dock.appendChild(dockMode);
+
+    var spine = document.querySelector('.spine');
+    if (spine && spine.parentNode) spine.parentNode.insertBefore(dock, spine.nextSibling);
+    else document.body.appendChild(dock);
+
+    /* A page the reader has not left yet has nowhere to go back to, so the
+       control is not there. The threshold is one viewport rather than a
+       literal, because "far enough to have lost the top" is a property of the
+       screen in front of the reader and not of a number.
+
+       It is never taken away while it holds focus. Hiding the element a
+       keyboard reader is standing on drops focus to the body and loses their
+       place in the tab order, and a reader can reach the top with the wheel
+       while the control is focused. */
+    var judge = function () {
+      var far = (window.scrollY || document.documentElement.scrollTop || 0) > window.innerHeight;
+      if (!far && dockTop.contains(document.activeElement)) return;
+      dockTop.hidden = !far;
+    };
+    window.addEventListener('scroll', judge, { passive: true });
+    window.addEventListener('resize', judge);
+    judge();
+    syncCluster();
+  }
+
   /* ---------- the appearance panel ---------- */
   var MODES = [
     { key: '',      label: 'System', glyph: '◐' },
@@ -1588,6 +1697,14 @@
     var placed = null;
     var dragging = null;
     var suppressClick = false;
+    /* A panel can have more than one way in - the topbar button and the
+       cluster's launcher both open the appearance panel - so the shell holds
+       every attached opener and remembers which one was actually used. All of
+       them wear the state; only the one that opened it gets focus back. A
+       reader who opened the panel from the corner of the screen and was thrown
+       to the topbar on Escape has lost their place, which is the thing the
+       focus contract exists to prevent. */
+    var openers = [];
     var opener = null;
 
     var panel = el('div', spec.className ? 'panel-shell ' + spec.className : 'panel-shell');
@@ -1808,18 +1925,27 @@
        on a smaller screen, finding the panel parked off the edge. */
     window.addEventListener('resize', reseat);
 
+    function announce(shown) {
+      openers.forEach(function (button) {
+        button.setAttribute('aria-expanded', shown ? 'true' : 'false');
+      });
+    }
+
     function close(restoreFocus) {
       if (panel.hidden) return;
       var inside = document.activeElement && panel.contains(document.activeElement);
       panel.hidden = true;
-      if (opener) opener.setAttribute('aria-expanded', 'false');
+      announce(false);
       if (restoreFocus && inside && opener) opener.focus();
     }
 
-    function open() {
+    function open(from) {
       if (!panel.hidden) return;
+      // Opened by script rather than by a control, the last button used is
+      // still where focus should go back to.
+      if (from) opener = from;
       panel.hidden = false;
-      if (opener) opener.setAttribute('aria-expanded', 'true');
+      announce(true);
       if (spec.onOpen) spec.onOpen();
       // The panel has no size while it is hidden, so the constraint that keeps
       // it on screen can only be applied now. This is also what re-seats a
@@ -1845,11 +1971,12 @@
        the reference site ships: `aria-expanded` written once into the markup and
        never updated again. */
     function attachOpener(button) {
-      opener = button;
+      openers.push(button);
+      if (!opener) opener = button;
       button.setAttribute('aria-haspopup', 'dialog');
       button.setAttribute('aria-expanded', String(!panel.hidden));
       button.addEventListener('click', function () {
-        if (panel.hidden) open(); else close(true);
+        if (panel.hidden) open(button); else close(true);
       });
     }
 
@@ -1878,6 +2005,10 @@
   }
 
   function syncSettings() {
+    /* Before the early return, because the cluster is built whether or not the
+       panel was and its mode control has to keep up with every path that moves
+       the mode: the panel, the reset, and the cluster's own button. */
+    syncCluster();
     if (!appearance) return;
     /* Four of these read an attribute straight off <html> and two read the
        chosen key, because a step whose value is "write nothing" leaves no trace
@@ -2312,6 +2443,7 @@
       document.body.dataset.rail = isWide() ? (get(STORE.rail) || 'on') : 'off';
     }
     mountTopbar(hasRail);
+    mountCluster();
     mountStageFlag();
     wireQuizzes();
     wireCopyButtons();
@@ -2331,7 +2463,12 @@
 
     if (window.matchMedia) {
       window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', function () {
-        if (!root.getAttribute('data-mode')) renderMermaid();
+        if (root.getAttribute('data-mode')) return;
+        // The cluster names the mode it will switch to, so a reader following
+        // the system whose machine has just gone dark needs the label back the
+        // other way round.
+        syncCluster();
+        renderMermaid();
       });
     }
 
