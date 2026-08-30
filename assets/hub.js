@@ -1371,7 +1371,10 @@
     var judge = function () {
       var far = (window.scrollY || document.documentElement.scrollTop || 0) > window.innerHeight;
       if (!far && dockTop.contains(document.activeElement)) return;
-      dockTop.hidden = !far;
+      // Only on a change. This runs on every frame of a scroll, and writing the
+      // same state back each time is work the browser has to look at.
+      var away = !far;
+      if (dockTop.hidden !== away) dockTop.hidden = away;
     };
     window.addEventListener('scroll', judge, { passive: true });
     window.addEventListener('resize', judge);
