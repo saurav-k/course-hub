@@ -121,6 +121,7 @@ One span or two.
 The first is the part itself and is the only one that matters.
 A second span is the part's own subtitle, and it prints faint at the far end of the row.
 It needs no class of its own: the row can tell one span from two without being told.
+Each span is a cell of the row, so keep a cell's own markup inside its span; bare text beside a span reads as a second cell and is pushed to the far end.
 Write both in sentence case and let the stylesheet decide about capitals, exactly as `.eyebrow` is written: the row takes the course's own eyebrow face, tracking and case from the design in force.
 
 It is a row rather than a label, and the hairline under it is what makes it read as a divider of the course rather than as a second caption.
