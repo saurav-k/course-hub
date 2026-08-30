@@ -1085,7 +1085,7 @@ That is a property of the three-layer rule rather than a feature of the button: 
 
 ## The floating control cluster
 
-`hub.js` builds a three-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
+`hub.js` builds a four-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
 It is chrome you never author, exactly as the topbar and the rail are: it arrives on a page because that page links the shared assets.
 
 **It exists because the panel above was invisible.**
@@ -1097,8 +1097,9 @@ One click repaints the whole page, which is a demonstration rather than a label;
 It names the mode it will switch to rather than the mode that is on, in its glyph and in its `aria-label`, and it follows the operating system's preference while the reader has stated none.
 The reference site's own button shows the current theme and reads as an instruction, so `Light` there means "you are in Light" and every reader who takes it for a label presses it expecting the opposite.
 
-**The panel now has two openers and no owner, and the shell is where that lives.**
+**Each panel has two openers and no owner, and the shell is where that lives.**
 `attachOpener` registers a button rather than replacing the last one, so both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was actually used.
+The study notes panel takes its second way in the same way, which is one call in `mountCluster`.
 A reader who opened the panel from the corner and was thrown to the topbar has lost their place, which is the thing the panel's focus contract exists to prevent.
 A third way in, or a second panel with two of its own, is one call and no new code.
 
@@ -1117,6 +1118,80 @@ The print block hides it with the topbar, the rail, the panel and the pager.
 
 Three tokens are its own: `--dock-target`, the square each control takes, at 36px because it is aimed at with a thumb while the reader is reading rather than with a pointer while they are looking at it; `--dock-offset`, the distance from the two viewport edges it hugs; and `--sp-inset-dock`, the padding around the row.
 All three are design-axis tokens, so a design may raise the target and may never lower it below the 24px WCAG 2.2 SC 2.5.8 asks for.
+## The study notes panel
+
+`hub.js` builds a second panel from the shell above and it reaches every page, from a topbar button beside `Appearance` and from a launcher in the floating cluster.
+It is chrome and only chrome: no page names it, no page markup changes, and a page served with the script blocked has no button, no panel and no trace.
+Everything a reader can do to the panel itself - open it, close it, pick it up, step it with the arrow keys, put it back, have it remembered - is stated in "The panel shell" and is not restated here.
+What follows is what this panel *contains*, and what it promises.
+
+**The save state is a fact, never an intention. That is the whole point of the panel.**
+Three states, and each one says what actually happened:
+
+| State | What it means |
+|---|---|
+| `Saving` | what the reader typed is not in storage yet |
+| `Saved HH:MM` | the store was written and read back equal |
+| `Not saved: ...` | the write failed; the words are still on screen and Export is the way out |
+
+The panel writes through `setChecked` and `dropChecked`, which return whether the store now holds what was asked for, and never through `set` and `drop`, which swallow.
+Swallowing is right for a preference - a lost palette costs one click, and saying so would be noise - and it is the defect itself for a document.
+The reference site this was replicated from paints a green `Saved` on every keystroke because `setItem` was *called*, so a reader whose quota is full is told their work is safe on every keystroke and loses all of it on the next reload.
+The read-back is not belt and braces: a `setItem` that raises is the loud failure, and a store that accepts the call and keeps nothing is the quiet one, so the only honest answer is to ask the store what it now holds.
+
+**Four ways to lose text, all closed, and each one is a rule rather than a fix.**
+
+- *Nothing is written until you stop typing.* The debounce carries a **ceiling** as well as a pause: a keystroke waits 400ms for the next one, and no keystroke waits longer than 2s whatever the reader does. A trailing debounce alone means a reader who types without pausing has nothing in storage however long they type.
+- *Nothing flushes on the way out.* `visibilitychange`, `pagehide` and the editor's own `blur` all commit, so a keystroke followed inside the debounce by a link click, a tab close or a background switch is written rather than lost.
+- *Closing the panel throws the last keystroke away.* The shell's `onClose` commits before the panel goes; that hook exists because this panel asked for it.
+- *A read runs over the live editor.* It cannot here. What the reader can still see is authoritative and storage is never read over the top of it, which is also what leaves the words on screen for Export to take away after a failed write.
+
+**A note is keyed on the two things this repository has committed never to change.**
+The key is `coursehub.note:` plus a tier and an identifier, one key per document, and the identifier is the course key and the file name: `AGENTS.md` forbids renumbering or renaming a lesson because its URL is public, and a course folder is in every cross-course link in the hub.
+A lesson's *title* is none of those things and is rewritten often, which is the mistake the reference makes - it keys on a slug built from a hand-maintained title array, so editing a chapter's title orphans every note under it, silently, with the old key left in storage unreachable.
+The course key is `COURSE_OUTLINE.key` where a course ships an outline and the `data-course` folder without its suffix otherwise, which are two derivations of one identifier rather than two identifiers, and it is the same key the reading progress map already uses.
+
+**Three scopes, and the control is real.**
+`This page`, `This course` and `All courses`, each its own document.
+A page with no course - the hub landing page, the design system - offers the two tiers it actually has, and the panel names the key it is editing underneath, so the answer to "where did that go" is on screen.
+The reference shows a badge in this position reading `All Masterclass Lessons`; it is a `div` with no handler, no role and no keyboard behaviour, and it says the same thing on every page.
+A control that appears to offer a choice and offers none is worse than no control.
+
+**The editor is a plain `textarea` and the formatting is nine splices.**
+No library, no `contenteditable`, no model: each toolbar button puts literal markdown characters around the selection or in front of the lines it covers, and then dispatches a real `input` event, so a toolbar press reaches the save machinery by the same path a keystroke does.
+`Ctrl/Cmd+B`, `Ctrl/Cmd+I`, `Ctrl/Cmd+S` and `Ctrl/Cmd+Shift+C` do the same four things from the keyboard.
+The heading button *cycles* `#`, `##`, `###` and back to plain, so no level is out of reach and none is a trap.
+
+**Tab is bound to nothing in the editor, and that is deliberate.**
+The reference indents with it, which makes the editor a keyboard trap and fails WCAG 2.1.2.
+`scripts/focus_walk.py` presses real Tab keys through this panel in both modes, on three pages, and every one of its stops has to wear the hub's ring.
+
+**The preview renders the hub's own widgets and never a second vocabulary.**
+Headings, paragraphs, rules, nested bullet and numbered lists, tasks, fenced code, inline code, `**bold**`, `*italic*`, `==highlight==`, `~~strike~~`, links, blockquotes, and `> [!note]` / `[!warning]` / `[!tip]` mapped onto `.callout`, `.callout.warn` and `.callout.key`.
+So a note looks like the page it was written beside, in all seven palettes and both modes, and costs the contrast matrix no row of its own.
+A note's `#` renders as an `h3`, because the panel's own title is the `h2` a dialog's name has to be and the outline a screen reader walks has to stay in order; how big each level looks is the stylesheet's, which is the tag-and-size split stated everywhere else in this file.
+
+Three departures from the reference renderer, and each closes a measured defect:
+
+- **`_underscores_` are not italics.** Theirs turns `user_id_field` into `user<em>id</em>field`, on a hub whose courses are about `top_p`, `--max_tokens` and `attention_mask`. Only `*asterisks*` italicise.
+- **Every placeholder restore is a function replacement**, so a code span containing `$&` or `$1` survives being put back.
+- **A link's scheme is on an allowlist.** The document is the reader's own, so this is not a trust boundary, but a note pasted from somewhere else is not, and `javascript:` in it renders as text.
+
+**Export is the escape hatch, and it exports what is on screen.**
+Front matter - title, scope, the storage key, the source URL and the date - then the document as the editor holds it, never as storage holds it, because a failed write is exactly the case where storage cannot be trusted.
+The button is filled in `--warn` when the last write failed, so a reader who has just been told their words are not saved does not have to read a fourth sentence to find out what to do about it.
+The front-matter guard is a real one: a block is a fence, a body and a closing fence, so a note that opens with a horizontal rule still gets its own front matter.
+
+**The foot is pinned to the panel and the body scrolls above it.**
+It is the one place this panel departs from the appearance panel's shape, and the save state is what earns it: a state that can be below the fold is a state a reader can miss.
+
+**What this panel deliberately does not have.**
+No images and no attachment store - theirs is what fills the quota that then causes the silent data loss.
+No `Clear` - theirs wipes every chapter's highlights from the landing page while deleting only one document, and a reader who wants an empty note selects all and deletes, which saves as an empty note and drops the key.
+No page-text highlighter; that is its own feature and its own investigation.
+
+**Seven tokens belong to this panel and are read by nothing else**: `--notes-w`, `--notes-h` and `--notes-edit-h` for the two lengths it states and the editor's floor, and `--sp-notes-rows`, `--sp-notes-block`, `--sp-notes-indent` and `--sp-inset-notes-edit` for its rhythm.
+The preview's block rhythm is a chrome distance rather than one of the twenty reading roles on purpose: a `.callout` inside a panel that took a reading role would put the density control into the chrome, which is the split the space ramp exists to prevent.
 
 ## The course contract
 
