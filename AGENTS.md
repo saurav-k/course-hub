@@ -163,7 +163,17 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 - Do not change `.github/workflows/` or `scripts/` unless the task is explicitly about the pipeline.
 - If the task needs a decision you cannot make from the repository - a course's direction, a licence question, a deployment change - stop and ask. Do not guess.
 
-## The reader control panel
+## The panel shell, and the reader control panel
+
+**A panel is built by one shell, `makePanel` in `hub.js`, and never by hand.** The shell owns the
+whole contract: drag by pointer and keyboard, the viewport clamp, a position remembered under that
+panel's own key, open and close, the focus contract and the settling glide. A panel supplies its
+name, its store key, its title and what goes in its body, and it wears `.panel-shell` plus one class
+of its own for the two lengths it states. Never copy the contract into a second panel; ask for a
+shell. It is **non-modal, has no backdrop and does not close on an outside click**, and none of that
+is configurable - a reader parks a panel in order to keep reading beside it. The author-facing
+statement is `.claude/skills/course-authoring/references/widgets.md`, "The panel shell". Do not
+restate it here.
 
 `hub.js` builds one panel and it reaches every page, with no page markup anywhere. Six controls,
 plus motion in the accessibility defaults and one reset: ground (mode and palette), body size,
@@ -177,13 +187,6 @@ criterion in the reader's hands.
 apparent size, and `--measure`, `--fs-body`, `--fs-mono` and the per-face constants are outputs
 nothing may write. See the derived axes under "Editing the shared assets" for why the four are
 coupled.
-
-**The panel moves, by pointer and by keyboard**, and its position is stored as an intention that is
-clamped into whatever viewport is in front of the reader. The band is measured off the sticky
-topbar and the pre-production strip rather than assumed. It is a **non-modal** dialog - no
-`aria-modal`, no focus trap, and an outside click does not close it - because a reader parks it in
-order to keep reading with it open. Escape and the close control both return focus to the opening
-button, but only when focus was inside the panel.
 
 **Density is the one control with a hard limit.** It scales the twenty prose-rhythm roles and
 reaches nothing else, because there is no headroom in the chrome: one control already fails SC
