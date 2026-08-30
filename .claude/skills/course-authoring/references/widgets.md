@@ -109,7 +109,8 @@ A one-sentence framing line may use `<p class="lead">` instead, above `.paper-me
 
 ### The part eyebrow, `.part-eyebrow`
 
-Optional, and the topmost thing on the page when it is there, above the breadcrumb and above `.eyebrow`.
+Optional, and it sits directly above `.eyebrow`.
+Where a page also carries a breadcrumb it goes below that, because navigation comes before the page's own labels.
 It names the division of the course this page belongs to, which is the one piece of bearing the rest of the head block does not carry: `.eyebrow` says which module and which lesson, and this says which part of the whole.
 
 ```html
@@ -118,7 +119,8 @@ It names the division of the course this page belongs to, which is the one piece
 
 One span or two.
 The first is the part itself and is the only one that matters.
-A second span is the part's own subtitle, and it prints faint at the far end of the row; it needs no class, because a widget that can be told apart by counting its children should be.
+A second span is the part's own subtitle, and it prints faint at the far end of the row.
+It needs no class of its own: the row can tell one span from two without being told.
 Write both in sentence case and let the stylesheet decide about capitals, exactly as `.eyebrow` is written: the row takes the course's own eyebrow face, tracking and case from the design in force.
 
 It is a row rather than a label, and the hairline under it is what makes it read as a divider of the course rather than as a second caption.
