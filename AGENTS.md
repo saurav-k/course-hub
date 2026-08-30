@@ -303,7 +303,7 @@ rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub
 attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries COUNT_TOTAL of them: `--font-display`,
+near the head of `hub.css`, marked "the design axis", carries 339 of them: `--font-display`,
 `--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
 eight-step space ramp with a role layer over it, the reading frame, shape, motion and the eyebrow
 treatment. Six of
