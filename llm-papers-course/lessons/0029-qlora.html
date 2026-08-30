@@ -42,6 +42,8 @@
   <p>LoRA solved the <em>gradient</em> side of fine-tuning. You freeze the giant base model and train two skinny adapter matrices, so you update maybe 0.1% of the parameters. That slashes the optimizer state and the gradients. But there is a stubborn cost LoRA does not touch: the frozen base weights themselves. A 65-billion-parameter model in 16-bit is about <strong>130 GB</strong> just to hold still in memory. No single consumer or workstation GPU has that. The adapters are cheap; the tenant they live with is not.</p>
 
   <figure class="diagram">
+    <div class="fig-cap">Where the memory goes</div>
+    <div class="fig-claim">LoRA left the biggest block, the frozen base, entirely untouched.</div>
     <div class="mermaid">
 flowchart TB
   subgraph FULL["Full 16-bit finetuning"]
@@ -66,6 +68,8 @@ flowchart TB
   <p><strong>Quantization</strong> means mapping a wide range of real numbers onto a small set of buckets, then storing only the bucket index. A 16-bit weight uses 16 bits per number; a 4-bit weight uses 4. That is a 4x saving, but only if the 16 available buckets are placed where the weights actually are. Placing buckets badly wastes precision on values that never occur.</p>
 
   <figure class="diagram">
+    <div class="fig-cap">Store then restore</div>
+    <div class="fig-claim">A frozen weight can be lossy as long as the multiply is not.</div>
     <div class="mermaid">
 flowchart LR
   W["16-bit weight&lt;br/&gt;e.g. 0.0137"] --> Q["quantize&lt;br/&gt;find nearest bucket"]
@@ -80,6 +84,8 @@ flowchart LR
   <p>Here is the observation NF4 is built on. Trained neural-net weights are not spread evenly; they cluster in a <strong>bell curve</strong> (a zero-centered normal distribution). Most weights are small, near zero; extreme values are rare. So a good 4-bit format should place <em>many</em> buckets near zero, where the weights are dense, and <em>few</em> buckets out in the tails, where weights are scarce.</p>
 
   <figure class="diagram">
+    <div class="fig-cap">Even buckets against quantile buckets</div>
+    <div class="fig-claim">Placing buckets where weights cluster buys accuracy at the same bit count.</div>
     <div class="mermaid">
 flowchart TB
   subgraph INT4["Plain INT4: evenly spaced buckets"]
@@ -103,6 +109,8 @@ flowchart TB
   <p>Blocking creates a new, smaller cost. Every block of 64 weights needs its own scaling constant, and those constants are stored in 32-bit floats. Across a 65B model that is a lot of little numbers - about 0.5 bits of overhead <em>per weight</em>, which partly undoes the saving. QLoRA's fix is delightfully recursive: <strong>quantize the quantization constants too</strong>.</p>
 
   <figure class="diagram">
+    <div class="fig-cap">Quantizing the constants too</div>
+    <div class="fig-claim">The blocking overhead is itself data, and compresses nearly four times.</div>
     <div class="mermaid">
 flowchart TB
   W["weights"] --> B["group into blocks of 64"]
@@ -119,6 +127,8 @@ flowchart TB
   <p>The third piece is not about steady-state memory but about <strong>spikes</strong>. During training, a long sequence or a big mini-batch can momentarily balloon memory for a single step - long enough to trigger an out-of-memory crash even when the average usage is fine. QLoRA uses NVIDIA <strong>unified memory</strong> to give the optimizer state <em>paging</em>, just like an operating system pages RAM to disk.</p>
 
   <figure class="diagram">
+    <div class="fig-cap">Paging the optimizer state</div>
+    <div class="fig-claim">A memory spike becomes a slowdown rather than a crash.</div>
     <div class="mermaid">
 sequenceDiagram
   participant GPU as GPU memory
@@ -138,6 +148,8 @@ sequenceDiagram
   <p>Now the full picture. The base model is stored once in 4-bit NF4 and never changes. On top of the layers you want to adapt, you attach LoRA adapters, which stay in 16-bit because they are the only thing being trained. In the forward pass, each 4-bit weight block is dequantized back to 16-bit <em>on the fly</em>, used in the matrix multiply, and thrown away. Gradients flow only into the tiny adapters.</p>
 
   <figure class="diagram">
+    <div class="fig-cap">The QLoRA forward pass</div>
+    <div class="fig-claim">Storage is 4-bit while every multiply that matters stays 16-bit.</div>
     <div class="mermaid">
 flowchart LR
   X["input x (16-bit)"] --> DQ["dequantize NF4 base&lt;br/&gt;4-bit &rarr; 16-bit on the fly"]
