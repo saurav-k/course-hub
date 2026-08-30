@@ -194,9 +194,19 @@ reaches nothing else, because there is no headroom in the chrome: one control al
 margin. The limit is structural rather than promised - `hub.js` can only write `--*-user` names
 that `hub.css` resolves, and those are the twenty-four reader-reachable tokens.
 
+**The panel has two openers, and a floating cluster in the bottom-right corner of every page is
+the second.** Three controls, also built by `hub.js` with no page markup: light and dark, the panel
+launcher, and scroll-to-top. It exists because a control nobody finds is a control nobody has, and
+the mode toggle is the part that teaches - one click repaints the page, so the launcher beside it
+reads as an offer. Both openers wear `aria-expanded` and closing returns focus to whichever one was
+used. Its bottom edge reads `var(--preprod-h, 0px)` rather than assuming the foot of the viewport is
+free, and it sits under the rail's drawer scrim and under the panel, so the corner needs none of the
+`!important` arms race the reference site's own cluster carries. Its three tokens are
+`--dock-target`, `--dock-offset` and `--sp-inset-dock`, all on the design axis.
+
 The author-facing statement, including the focus contract in full, is
-`.claude/skills/course-authoring/references/widgets.md`, "The reader control panel". Do not restate
-it here.
+`.claude/skills/course-authoring/references/widgets.md`, "The reader control panel" and "The
+floating control cluster". Do not restate it here.
 
 ## The course contract
 
@@ -282,7 +292,7 @@ rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub
 attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries 332 of them: `--font-display`,
+near the head of `hub.css`, marked "the design axis", carries 335 of them: `--font-display`,
 `--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
 eight-step space ramp with a role layer over it, the reading frame, shape, motion and the eyebrow
 treatment. Six of

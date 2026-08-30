@@ -1021,6 +1021,40 @@ The panel's own chrome - the grip, the title and the close control - is the shel
 It removes every `--*-user` property, every reader axis attribute and the panel's own position, which leaves the stylesheet's own values with nothing to unwind.
 That is a property of the three-layer rule rather than a feature of the button: a reader value that competed with a token instead of feeding one would have to be unwound rather than removed.
 
+## The floating control cluster
+
+`hub.js` builds a three-control cluster in the bottom-right corner of every page, and no page's markup mentions it.
+It is chrome you never author, exactly as the topbar and the rail are: it arrives on a page because that page links the shared assets.
+
+**It exists because the panel above was invisible.**
+Every reader control sat behind one unlabelled glyph at the right of the topbar, and the person who commissioned the framework could not find it.
+A reader who never opens that glyph never learns that the palettes, the designs, the text size or the reading face exist, so the framework was shipped and not delivered.
+
+**The light and dark control is what teaches, and that is why it is in the cluster rather than only in the panel.**
+One click repaints the whole page, which is a demonstration rather than a label; a reader who has watched it happen reads the launcher beside it as an offer.
+It names the mode it will switch to rather than the mode that is on, in its glyph and in its `aria-label`, and it follows the operating system's preference while the reader has stated none.
+The reference site's own button shows the current theme and reads as an instruction, so `Light` there means "you are in Light" and every reader who takes it for a label presses it expecting the opposite.
+
+**The panel now has two openers and no owner.**
+Both the topbar button and the cluster's launcher wear `aria-expanded`, and Escape or the close control returns focus to whichever one was used.
+A reader who opened the panel from the corner and was thrown to the topbar has lost their place, which is the thing the panel's focus contract exists to prevent.
+
+**Scroll-to-top is absent until there is somewhere to go back to**, which is one viewport of scrolling rather than a literal distance.
+It is the first control in the row, because the cluster hugs the right edge and a control that comes and goes on the left never moves the other two under the reader's thumb.
+It is never taken away while it holds focus, because hiding the element a keyboard reader is standing on drops focus to the body.
+Activating it scrolls with no `behavior` named, so the browser reads `scroll-behavior` off the stylesheet and the motion axis governs it, and then moves focus to the wordmark: a page that scrolls to the top and leaves the keyboard at the foot of it has moved only half the reader.
+
+**Three positioning decisions, and each is read rather than assumed.**
+The bottom edge is `--dock-offset` plus whatever the pre-production strip occupies, through the fallback in `var(--preprod-h, 0px)`, so the live site and the review site are one declaration.
+`z-index: 64` puts the cluster under the rail's drawer scrim below 1040px and under the appearance panel, so a click on it while the drawer is open dismisses the drawer, which is what the reader meant.
+It is a `role="group"` and not a `role="toolbar"`, because a toolbar owes the reader arrow-key roving focus and three plain buttons owe nothing beyond Tab.
+
+**It is chrome, so it is out of the density control's reach and it is not on the paper.**
+The print block hides it with the topbar, the rail, the panel and the pager.
+
+Three tokens are its own: `--dock-target`, the square each control takes, at 36px because it is aimed at with a thumb while the reader is reading rather than with a pointer while they are looking at it; `--dock-offset`, the distance from the two viewport edges it hugs; and `--sp-inset-dock`, the padding around the row.
+All three are design-axis tokens, so a design may raise the target and may never lower it below the 24px WCAG 2.2 SC 2.5.8 asks for.
+
 ## The course contract
 
 A course declares its identity through **seven tokens, in one block, and through nothing else**.
