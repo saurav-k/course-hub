@@ -43,7 +43,10 @@
 
   <p>That third question is the whole injection family. SQL injection, cross-site scripting, and server-side request forgery look like three different subjects in a syllabus. They are one bug wearing three costumes. A string the user controls reaches a parser or a fetcher, and the parser cannot tell the difference between the part you wrote and the part they wrote. Once you see it that way, the fix stops being a list of dangerous characters and becomes a structural rule: give the interpreter a separate channel for data, and it will never mistake data for code.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">The three gates</div>
+  <div class="fig-claim">Teams instrument the first two gates and never draw the interpretation boundary.</div>
+  <div class="mermaid">
 flowchart TB
   R["Incoming request"] --> A{"Authentication&lt;br/&gt;who are you?"}
   A -->|"no proof"| D1["401 reject"]
@@ -85,7 +88,10 @@ ratio = 3,888,000 / 1,800 = 2,160
   <p>The code exchange has one structural weakness: on a mobile device or in a single-page application there is no client secret, because anything shipped to the user is not a secret. A malicious application registered for the same redirect URI can intercept the code. RFC 7636 fixes this with Proof Key for Code Exchange. The client generates a random <span class="code-cap">code_verifier</span>, sends only its SHA-256 hash as the <span class="code-cap">code_challenge</span> when it starts the flow, and presents the original verifier when it redeems the code. An attacker who steals the code never saw the verifier, so the code is useless to them. RFC 9700, published as BCP 240, makes this mandatory: public clients MUST use PKCE, redirect URIs must be compared by exact string matching rather than pattern matching, the implicit grant is discouraged because it cannot prevent access token leakage, and the resource owner password credentials grant is deprecated outright because it exposes the user's password to the client.</p>
   <p>Spotify's Web API is a published example from streaming: its developer documentation names authorisation code with PKCE as the recommended flow for mobile apps, single-page applications, and any client where a client secret cannot be stored safely. Millions of third-party players and playlist tools authenticate this way, and none of them ever sees a user's Spotify password.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">Authorisation code with PKCE</div>
+  <div class="fig-claim">The code and the verifier travel apart, so a stolen code is useless.</div>
+  <div class="mermaid">
 sequenceDiagram
   participant U as User agent
   participant C as Client, public and secretless
@@ -114,7 +120,10 @@ sequenceDiagram
   <p>That property is also the defect, and it is worth stating without hedging. <b>A self-contained JWT cannot be revoked.</b> There is no revocation mechanism because there is no conversation with the issuer in which revocation could be communicated. RFC 7009, which defines the OAuth token revocation endpoint, says this in its own implementation note: where deployments use self-contained access tokens and the resource server performs no additional check with the authorisation server, revoked tokens may remain valid until they expire, and the standard remedies are a non-standardised back-channel between the servers or simply issuing short-lived tokens that can be refreshed at any time.</p>
   <p>So the three real mitigations are lifetime, rotation, and a revocation list, and each one buys revocation speed with a different currency. Short lifetimes buy it with refresh traffic. A revocation list, meaning a deny-list of <span class="code-cap">jti</span> values checked on every request, buys it with a lookup on the hot path and a distributed cache to keep it fast. Refresh token rotation, which RFC 9700 requires for public clients that do not use sender-constrained tokens, buys detection rather than prevention: each refresh issues a new refresh token and invalidates the old one, so if a stolen refresh token is ever replayed, the authorisation server sees a used token presented twice and can revoke the entire chain.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">Access token states</div>
+  <div class="fig-claim">The gap between revoked and expired is exactly what a lifetime buys.</div>
+  <div class="mermaid">
 stateDiagram-v2
   state "Issued by the authorisation server" as Issued
   state "Accepted by every resource server" as Active
@@ -162,7 +171,10 @@ revocation_latency = cache_ttl                   = 30 s
   <p>Transport Layer Security gives a connection three properties: confidentiality, integrity, and authentication of the server, optionally of the client too. TLS 1.3, specified in RFC 8446, is a substantial simplification of what came before. It pruned the symmetric algorithms down to authenticated encryption with associated data only, removed static RSA and static Diffie-Hellman key exchange entirely so that every key exchange now provides forward secrecy, and encrypts everything after the ServerHello. Forward secrecy is the property worth being precise about: it means that compromising the server's long-term private key tomorrow does not decrypt the traffic you captured today, because the session keys came from an ephemeral exchange that was discarded.</p>
   <p>The performance story is the handshake. TLS 1.3 completes a full handshake in one round trip before application data flows. Resumption is redesigned around pre-shared keys: after a successful handshake the server sends a NewSessionTicket carrying a PSK identity, and a returning client presents that identity instead of repeating the full exchange. RFC 8446 also defines 0-RTT early data, where the client sends application data in its very first flight, and is explicit about the price: that data is not forward secret and the protocol provides no replay protection for it between connections. Cloudflare's implementation shows what that means operationally in the content delivery industry: 0-RTT is offered for GET, HEAD, and OPTIONS requests but not for POST, and requests that arrived as early data are tagged with an <span class="code-cap">Early-Data: 1</span> header so the origin can decide for itself.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">Full handshake against resumption</div>
+  <div class="fig-claim">0-RTT buys back a round trip by surrendering forward secrecy and replay protection.</div>
+  <div class="mermaid">
 sequenceDiagram
   participant C as Client
   participant S as Server
@@ -203,7 +215,10 @@ latency saved per resumed connection = 1 RTT = 40 ms at an assumed 40 ms RTT
   <p>Encryption at rest protects data on storage media against an attacker who obtains the media rather than the application: a stolen disk, a decommissioned drive, a snapshot copied to the wrong account, a backup left in a public bucket. It does not protect against an attacker who has valid application credentials, because your application decrypts for a living. Saying that out loud is what separates a real threat model from a compliance checkbox.</p>
   <p>The mechanism that makes it workable at scale is envelope encryption. You do not encrypt terabytes of data directly with a key held in a hardware security module; you generate a fresh data key per object, encrypt the object with it, encrypt the data key with a wrapping key that never leaves the module, and store the wrapped data key alongside the ciphertext. AWS describes exactly this flow: each message is encrypted under a unique data key, the data key is encrypted by the wrapping keys you specify, the plaintext data key is discarded immediately after use, and decryption starts by asking the key service to unwrap one encrypted data key. A healthcare provider storing patient documents this way gets per-object cryptographic isolation and a single auditable choke point, because every decryption is an API call that lands in the audit log.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">Envelope encryption</div>
+  <div class="fig-claim">Rotating the wrapping key re-protects nothing that was already written.</div>
+  <div class="mermaid">
 flowchart TB
   subgraph HSM["Key service, hardware backed"]
     KEK["Wrapping key&lt;br/&gt;never leaves the module&lt;br/&gt;rotating key material"]
@@ -245,7 +260,10 @@ re-encrypting the payloads instead, at 4 MB per object:
   <p>This is the topic where the industry's collective mental model is wrong, so here is the correction first. <b>Cross-Origin Resource Sharing is not a security control for your server.</b> It is a mechanism defined in the Fetch Standard by which a server can <em>relax</em> the browser's same-origin policy, and it is enforced entirely by the user agent. It protects your users' browsers from reading responses they should not read. It does nothing whatsoever to protect your API from a client that is not a browser. A request from curl, a script, a mobile app, or an attacker's server reaches your endpoint and gets a full response regardless of what your <span class="code-cap">Access-Control-Allow-Origin</span> header says, because there is no browser in the loop to enforce anything.</p>
   <p>The mechanism is worth knowing precisely. For a request the standard considers simple, using a CORS-safelisted method such as GET, HEAD, or POST and only safelisted headers, the browser sends the request and then decides whether the calling page may read the response based on the <span class="code-cap">Access-Control-Allow-Origin</span> response header. Note the ordering: the request already happened, which is why CORS is not a defence against state change. For anything else, the browser first sends a preflight OPTIONS request carrying <span class="code-cap">Access-Control-Request-Method</span> and <span class="code-cap">Access-Control-Request-Headers</span>, and only proceeds if the response permits it; <span class="code-cap">Access-Control-Max-Age</span> says how long that permission may be cached. One hard rule follows from the credentials mode: when a request includes credentials, the server may not answer with a wildcard origin and must name the exact origin instead, so that credentialed responses are never shared with an origin nobody vetted.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">One endpoint, two callers</div>
+  <div class="fig-claim">A non-browser caller never consults CORS, so CORS never protects your API.</div>
+  <div class="mermaid">
 flowchart TB
   REQ["A cross-origin request&lt;br/&gt;arrives at your API"] --> WHO{"Is the caller&lt;br/&gt;a browser?"}
   WHO -->|"no: curl, script,&lt;br/&gt;mobile app, attacker server"| DIRECT["No CORS check exists&lt;br/&gt;anywhere in the path"]
@@ -310,7 +328,10 @@ flowchart TB
   <p>Server-Side Request Forgery is the same bug again, with a URL fetcher as the interpreter. Your application takes a user-supplied URL, for a webhook target, an avatar import, a link preview, or a PDF renderer following an image reference, and fetches it. The attacker does not control your code; they control your destination. <b>What makes SSRF dangerous is not the request itself but what your server can reach that the attacker cannot.</b> Your server sits inside a network where internal admin panels have no authentication because "it is internal", where databases listen on private addresses, and, above all, where a link-local metadata service hands out cloud credentials to anyone who asks from that instance.</p>
   <p>That metadata service is the prize. OWASP names it directly: AWS, Azure, and Google Cloud all expose metadata at <span class="code-cap">169.254.169.254</span>, these endpoints grant access to credentials and tokens, and the guidance is to block them and to migrate to IMDSv2 on AWS. In the original request-response design, a single unauthenticated GET to the instance's credentials path returns an access key, a secret, and a session token, and from that moment the attacker acts as your instance role from anywhere on the internet.</p>
 
-  <figure class="diagram"><div class="mermaid">
+  <figure class="diagram">
+  <div class="fig-cap">SSRF against the metadata service</div>
+  <div class="fig-claim">Impact is decided by what the server can reach, not by the URL.</div>
+  <div class="mermaid">
 sequenceDiagram
   participant A as Attacker
   participant W as Webhook worker in your VPC

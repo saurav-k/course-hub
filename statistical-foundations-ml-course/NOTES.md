@@ -52,6 +52,8 @@ This is the part the learner asked for loudest, so it gets the most care.
 - **`th` is uppercased,** which flattens `x - x̄` into `X - X` and drops the macron. Wrap any header carrying real notation in `<span class="exact">`.
 - **The browser caches `hub.css` hard.** When a style change appears not to take effect, add a query string to the page URL before concluding the CSS is wrong.
 - **`.keynum` is `white-space: nowrap`, so a long one makes the whole page scroll sideways.** Measured on Lecture 5: a 45-character quoted expression rendered 408px wide against a 287px column at 360px, and nothing in the repository catches it - the validator passes and the page looks fine on a laptop. Keep `.keynum` for a stated figure or a short coefficient, roughly thirty characters at the most, and put a full expression in `<b>` or inside a `.math` block, which scrolls within itself. Lecture 4 already uses `<b>` this way; follow it.
+  This trap was walked into twice, on Lecture 5 and again on TA Session 2, so check for it rather than remembering it:
+  `python3 -c "import re,html,glob;[print(len(t),f,t) for f in glob.glob('statistical-foundations-ml-course/**/*.html',recursive=True) for m in re.finditer(r'<span class=\"keynum\">(.*?)</span>',open(f).read(),re.S) for t in [html.unescape(re.sub(r'<[^>]+>','',m.group(1)))] if len(t)>26]"`
 - **A parenthesis inside a Mermaid `mindmap` node is parsed as node-shape syntax.** `C(n, k) p to the k` becomes node `C` with a shape, the diagram renders as an error box, and nothing reaches the console. Double quotes do not rescue a mindmap node the way they rescue a flowchart label, so write the words instead. Keep mindmap leaves to about fifteen characters as well: a wide mindmap overflows its `.diagram` box and the reader has to scroll a figure sideways to read it.
 - **The validator only checks links, not correctness.** It will happily pass a page with a wrong exponent. Check the arithmetic yourself against the slide images.
 
@@ -77,6 +79,6 @@ Lecture 5 carries three more, all named on its hub page 0058:
 
 ## Open threads
 
-- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5. One idea per page is the constraint; the total falls out of it.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
 - A print-friendly formula sheet exists for Lectures 1, 2, 3, 4 and 5. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.

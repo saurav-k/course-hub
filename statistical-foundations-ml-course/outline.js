@@ -323,6 +323,44 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0068-which-shape-did-it-land-in.html"
         }
       ]
+    },
+    {
+      "n": "TA2",
+      "title": "TA Session 2: Week 2",
+      "lessons": [
+        {
+          "title": "TA Session 2: start here",
+          "href": "lessons/0069-ta-session-2-start-here.html"
+        },
+        {
+          "title": "Independence on eight outcomes",
+          "href": "lessons/0070-independence-on-eight-outcomes.html"
+        },
+        {
+          "title": "Inclusion-exclusion on a million",
+          "href": "lessons/0071-inclusion-exclusion-on-a-million.html"
+        },
+        {
+          "title": "The conditional machinery, given twice",
+          "href": "lessons/0072-the-conditional-machinery.html"
+        },
+        {
+          "title": "Two conditionals on a shrunken space",
+          "href": "lessons/0073-two-conditionals-on-a-shrunken-space.html"
+        },
+        {
+          "title": "The rainy day question",
+          "href": "lessons/0074-the-rainy-day-question.html"
+        },
+        {
+          "title": "The reported six",
+          "href": "lessons/0075-the-reported-six.html"
+        },
+        {
+          "title": "The false positive paradox",
+          "href": "lessons/0076-the-false-positive-paradox.html"
+        }
+      ]
     }
   ],
   "extras": [
