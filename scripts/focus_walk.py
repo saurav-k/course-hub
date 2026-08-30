@@ -26,15 +26,15 @@ because Chrome keeps ``:focus-visible`` on an element that already had it, so th
 same click tested after a walk would be measuring the walk's own keyboard
 modality rather than the click.
 
-The walk covers three pages, both panels, and one narrow viewport, in both
+The walk covers three pages, all three panels, and one narrow viewport, in both
 modes. The panels are here because a settings panel is the classic place a
 design system fails its own floor, because a study notes panel is thirteen more
-controls and a textarea on the same footing, and because both are built by
-script at the moment they are opened, so neither existed when the page was
-first painted - which is exactly the state a capture of the first paint cannot
-see. The narrow viewport is here because a scroll container only earns its tab
-stop when it genuinely scrolls, and at a full-width column nothing in this hub
-does.
+controls and a textarea on the same footing, because a highlights panel is a
+list whose every row carries two more, and because all three are built by
+script at the moment they are opened, so none existed when the page was first
+painted - which is exactly the state a capture of the first paint cannot see.
+The narrow viewport is here because a scroll container only earns its tab stop
+when it genuinely scrolls, and at a full-width column nothing in this hub does.
 
 The palettes are not walked. The ring's colour is a token, and the token is
 measured against every surface in every palette and mode by
@@ -152,19 +152,61 @@ STOP = """
 })()
 """
 
-# The two panels, each reached by the button that names it. The selector is
-# `aria-controls` rather than `aria-haspopup="dialog"` because two buttons in
+# The three panels, each reached by the button that names it. The selector is
+# `aria-controls` rather than `aria-haspopup="dialog"` because three buttons in
 # the topbar now say they open a dialog, and a positional selector between them
-# would silently walk one panel twice the day either is appended in the other
-# order. `attachOpener` in hub.js writes the attribute, so a panel that reaches
-# the topbar at all is reachable here.
+# would silently walk one panel twice the day any of them is appended in
+# another order. `attachOpener` in hub.js writes the attribute, so a panel that
+# reaches the topbar at all is reachable here.
 #
-# Both are left open. Two open panels is a state a reader can reach - they are
-# non-modal and neither closes the other - and the second walk is bounded by
-# its own container either way.
-PANELS: tuple[tuple[str, str, str], ...] = (
-    ("the appearance panel", '.tb-btn[aria-controls="panel-appearance"]', ".settings"),
-    ("the study notes panel", '.tb-btn[aria-controls="panel-notes"]', ".notes"),
+# All three are left open. Three open panels is a state a reader can reach -
+# they are non-modal and none closes another - and each walk is bounded by its
+# own container either way.
+#
+# The highlighter's button is built only where the browser has the CSS Custom
+# Highlight API, which every Chrome this harness can run does; a browser that
+# did not would fail this entry loudly rather than skip it, which is the right
+# way round for a gate.
+
+# A panel whose controls are its DATA has to be given some before it is walked.
+# The highlights panel with nothing highlighted is a title bar and two disabled
+# buttons, which is a real state and not the one worth walking: every control
+# this feature adds lives on a row, and a row exists because a reader made one.
+# So the walk makes three, through the cue the reader uses, which also proves in
+# CI that the highlighter works end to end in a browser rather than only that
+# its panel opens.
+PREPARE_MARKS = """
+(async function () {
+  var pause = function (ms) { return new Promise(function (done) { window.setTimeout(done, ms); }); };
+  var region = document.querySelector('main.wrap, main.wide');
+  var button = document.querySelector('.mark-cue-btn');
+  var cue = button && button.closest('.mark-cue');
+  if (!region || !cue) return 'the highlighter was never built on this page';
+  var paragraphs = Array.prototype.filter.call(region.querySelectorAll('p'), function (item) {
+    return !item.closest('.sr-only') && item.textContent.trim().length > 40;
+  }).slice(0, 3);
+  if (paragraphs.length < 3) return 'the page carries fewer than three paragraphs to mark';
+  for (var i = 0; i < paragraphs.length; i++) {
+    var range = document.createRange();
+    range.selectNodeContents(paragraphs[i]);
+    var selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    // The cue waits for the reader to stop moving the selection before it
+    // appears, so the walk waits for the cue rather than for a frame.
+    await pause(240);
+    if (cue.hidden) return 'the cue never appeared over the selection';
+    button.click();
+  }
+  window.getSelection().removeAllRanges();
+  return 'prepared';
+})()
+"""
+
+PANELS: tuple[tuple[str, str, str, str | None], ...] = (
+    ("the appearance panel", '.tb-btn[aria-controls="panel-appearance"]', ".settings", None),
+    ("the study notes panel", '.tb-btn[aria-controls="panel-notes"]', ".notes", None),
+    ("the highlights panel", '.tb-btn[aria-controls="panel-marks"]', ".marks", PREPARE_MARKS),
 )
 
 # The button the mouse check clicks. It only has to be a control that opens
@@ -293,6 +335,15 @@ def walk(chrome: Chrome, where: str, within: str | None = None) -> tuple[list[di
     failures: list[Failure] = []
 
     if within is not None:
+        # A second settle before the first stop of a panel walk, on top of the
+        # one the caller already ran. Opening a panel focuses a control and
+        # relays the dialog in the same turn, and a panel whose body is built
+        # from stored data - the highlights list - is the one that relays most.
+        # Reading the ring inside that turn hands back the half-applied style
+        # this module's `settle` was written for: the outline is solid and the
+        # colour is still the element's own, which is indistinguishable from
+        # the browser's own ring and fails a stop for a reason that is not real.
+        settle(chrome)
         first = chrome.evaluate(STOP)
         if isinstance(first, dict):
             stops.append(first)
@@ -391,8 +442,13 @@ def run(quiet: bool) -> int:
                 walked.append((where, stops))
                 failures += found
 
-                for label, opener, selector in PANELS:
+                for label, opener, selector, prepare in PANELS:
                     where = f"{label} on {page} [{PALETTE}/{mode}]"
+                    if prepare is not None:
+                        made = str(chrome.evaluate(prepare))
+                        if made != "prepared":
+                            failures.append(Failure(where, made))
+                            continue
                     opened = str(chrome.evaluate(
                         OPEN_PANEL % {"selector": json.dumps(opener), "within": json.dumps(selector)}
                     ))
