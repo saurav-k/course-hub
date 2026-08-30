@@ -273,6 +273,56 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0057-the-four-boxes.html"
         }
       ]
+    },
+    {
+      "n": "L5",
+      "title": "Lecture 5: the road from counting to the binomial",
+      "lessons": [
+        {
+          "title": "Lecture 5: start here",
+          "href": "lessons/0058-lecture-5-start-here.html"
+        },
+        {
+          "title": "The mini-batch that can repeat",
+          "href": "lessons/0059-the-mini-batch-that-can-repeat.html"
+        },
+        {
+          "title": "Both classes in the batch",
+          "href": "lessons/0060-both-classes-in-the-batch.html"
+        },
+        {
+          "title": "The quality check that finds nothing",
+          "href": "lessons/0061-the-quality-check-that-finds-nothing.html"
+        },
+        {
+          "title": "Exactly r mislabelled",
+          "href": "lessons/0062-exactly-r-mislabelled.html"
+        },
+        {
+          "title": "The binomial shape",
+          "href": "lessons/0063-the-binomial-shape.html"
+        },
+        {
+          "title": "When counting outcomes stops working",
+          "href": "lessons/0064-when-counting-outcomes-stops-working.html"
+        },
+        {
+          "title": "Count the configurations, then multiply",
+          "href": "lessons/0065-count-the-configurations.html"
+        },
+        {
+          "title": "The gaps argument",
+          "href": "lessons/0066-the-gaps-argument.html"
+        },
+        {
+          "title": "Conditioning on one image",
+          "href": "lessons/0067-conditioning-on-one-image.html"
+        },
+        {
+          "title": "Which shape did it land in",
+          "href": "lessons/0068-which-shape-did-it-land-in.html"
+        }
+      ]
     }
   ],
   "extras": [
@@ -291,6 +341,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Lecture 4 Formula Sheet",
       "href": "reference/lecture-4-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 5 Formula Sheet",
+      "href": "reference/lecture-5-formula-sheet.html"
     }
   ]
 };

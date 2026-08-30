@@ -22,8 +22,9 @@ Status marks used below:
 | 4 | **TA Session 1** (tutorial) | written | Lessons `0025` to `0033`: a hub plus eight parts, the twelve tutorial problems worked in full from the Week 1 question sheet and tutorial notes, dated August 22, 2026. It follows Lecture 3 and sits there in the map, not in a list at the bottom. Its twelve problems are its own; they are not duplicated by the problem sets below. |
 | 5 | **Homework 1: Practice Set 1, explained not solved** | written | Lessons `0034` to `0044`: a hub plus ten parts. The four graded problems get one page each and the thirty practice problems are grouped by concept. Nothing on those pages is solved, on purpose. Due Sunday 6 September. |
 | 6 | **Lecture 4: the applied pass** | written | Lessons `0045` to `0057`: a hub plus twelve parts, plus the Lecture 4 formula sheet in `reference/`. Dated Aug 25, 2026, six handwritten pages. The worked medical-test example, independence as a check on a table, and the counting and sampling machinery. It sits after Homework 1 by the captain's own placement, which is also the true chronological order. |
-| 7 | **Second tutorial session** | reserved | No source deck exists yet, so nothing is named or anchored. The position after the current material is held, and the exact anchor is pinned in this file and in `index.html` on the day its deck arrives. |
-| 8 | **Third tutorial session** | reserved | As above. |
+| 7 | **Lecture 5: counting and sampling, applied** | written | Lessons `0058` to `0068`: a hub plus ten parts, plus the Lecture 5 formula sheet in `reference/`. Dated Aug 29, 2026, five handwritten pages of class notes alongside the lecturer's typeset examples handout for the same three problems. Three machine-learning problems worked end to end, the page on where the equally-likely formula stops being legal, and the road to the binomial. It follows Lecture 4 directly, which is both its true position and the chronological one. |
+| 8 | **Second tutorial session** | reserved | No source deck exists yet, so nothing is named or anchored. The position after the current material is held, and the exact anchor is pinned in this file and in `index.html` on the day its deck arrives. |
+| 9 | **Third tutorial session** | reserved | As above. |
 
 After the positions above sit the remaining lectures of the source series, planned but unwritten and listed as roadmap entries in `index.html`: random variables and CDFs, discrete PMFs, continuous PDFs, expectation, variance and covariance, moment generating functions, tail inequalities, the law of large numbers and CLT, and conditional expectation with MMSE.
 
@@ -31,6 +32,7 @@ Note the divergence between plan and delivery, because the roadmap numbering in 
 Slide 20 of Lecture 1 plans Lecture 4 as random variables and the CDF.
 The session delivered as Lecture 4, on 25 August 2026, is the applied conditional-probability pass plus counting and sampling, which slide 20 had placed earlier.
 Delivery therefore runs one lecture behind the slide-20 plan, and the roadmap list is kept as the deck wrote it rather than renumbered.
+The same divergence holds for Lecture 5: slide 20 plans it as discrete random variables and the PMF, while the session delivered on 29 August 2026 is the applied counting and sampling pass that ends at the binomial.
 Each entry takes its true place in this table when its deck arrives; a tutorial deck that lands among them slots in after the lecture it supports rather than at the end.
 
 ## Planned but unwritten, off the main line
@@ -38,7 +40,7 @@ Each entry takes its true place in this table when its deck arrives; a tutorial 
 - **Problem sets**, tracked in hub issues #102 and #103: nine concept sets for Lectures 1 and 2, then six sets for Lecture 3 plus three of extra tutorial practice, landing in a `problems/` folder with its own index.
   Problem sets attach to lectures concept by concept rather than holding a position in the read, so they are recorded here but not as sequence rows.
 - **A closing pass** that wires lessons to their problem sets and back, reconciles the glossary, and reads the whole map against this file.
-- **One formula sheet per lecture.** The policy in `NOTES.md` is to keep one per lecture rather than grow a single sheet nobody prints. Lectures 1, 2, 3 and 4 each have one in `reference/`; the Lecture 2 sheet is linked from its own lessons but not yet from the course map.
+- **One formula sheet per lecture.** The policy in `NOTES.md` is to keep one per lecture rather than grow a single sheet nobody prints. Lectures 1, 2, 3, 4 and 5 each have one in `reference/`; the Lecture 2 sheet is linked from its own lessons but not yet from the course map.
 
 ## Adding a session to this course
 
