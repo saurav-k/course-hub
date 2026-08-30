@@ -490,6 +490,17 @@ explicit choice computes, and a page switched after load must compute what the s
 when loaded on that setting directly. Read the script's docstring before changing it - the sample,
 the property list and the two assertions each carry the reason they are shaped that way.
 
+**Every snapshot file is per page, and coverage is asserted rather than recorded.** The gate is only
+as wide as the sample, so the run proves the sample renders every class in the closed vocabulary and
+fails by name when it does not; `--coverage` prints the table behind that verdict, and the CI step
+passes it so the table is in the job log. There is deliberately no committed count of it. A shared
+generated file in this repository is not a record, it is a lock: `COVERAGE.txt` recomputed itself on
+every run, so it held nothing the run did not already know, and requiring byte-equality on it
+serialised eighteen per-course pull requests that touched nothing in common - each merge left the
+other seventeen holding a stale count, red on that one line and nothing else. Never re-introduce a
+shared generated file the whole hub has to rewrite; assert the property instead, and key anything
+that must be stored per course, the way the page snapshots already are.
+
 **The accessibility floor is measured, not asserted, and it is a gate.** A ground of a given
 lightness bounds the best contrast any ink can reach on it, which is arithmetic rather than taste:
 no ground between L\* 43.8 and 54.1 reaches AA with either of the hub's inks, and the two cross

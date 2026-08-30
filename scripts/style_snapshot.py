@@ -15,12 +15,13 @@ That is what converts a large mechanical edit from "hope review catches it" into
 
     python3 scripts/style_snapshot.py                  # compare against the snapshot
     python3 scripts/style_snapshot.py --write          # record a new snapshot
+    python3 scripts/style_snapshot.py --coverage       # compare, and print the coverage table
     python3 scripts/style_snapshot.py --refresh-sample # re-pick the sample pages
     python3 scripts/style_snapshot.py --sample-only    # print the sample and stop
 
 Exit code 0 means nothing moved. Exit code 1 lists every difference.
 
-Five decisions worth knowing before you read the code.
+Six decisions worth knowing before you read the code.
 
 *The run is hermetic.* Chrome resolves nothing but the loopback address, so the
 Mermaid CDN never answers and no diagram renders. ``hub.js`` guards every
@@ -73,6 +74,21 @@ contract, which is a promise rather than a state.
         runs once, not per page, because it proves a mechanism rather than a
         page.
 
+*Coverage is asserted, never stored.* The gate is only as wide as the sample, so
+the run proves the sample reaches every class in the closed vocabulary: a
+documented class that no sampled page renders fails the run by name, in a
+comparison and in a ``--write`` alike, and the table behind that verdict prints
+on ``--coverage``. It used to be a committed count table compared byte for byte,
+and that was the wrong shape for it twice over. The count is recomputed from the
+repository on every run, so the file carried nothing the run did not already
+know; and being one file that every branch rewrites, it serialised work that
+touches nothing in common - eighteen disjoint per-course pull requests could not
+land in any order, because each merge left the other seventeen holding a stale
+count. What is genuinely weaker: a class that drops from nineteen sampled pages
+to one no longer shows up anywhere, where a diff on the count table would have
+shown it. What is stronger: an uncovered class now fails, where before it was
+recordable as the expected answer.
+
 There is no dependency and no build. Chrome is driven over its own pipe
 transport with the standard library alone: NUL-delimited JSON on file
 descriptors 3 and 4.
@@ -99,7 +115,6 @@ REPO_ROOT: Path = Path(__file__).resolve().parent.parent
 WIDGETS: Path = REPO_ROOT / ".claude" / "skills" / "course-authoring" / "references" / "widgets.md"
 SAMPLE_FILE: Path = REPO_ROOT / "scripts" / "style-sample.txt"
 BASELINE_DIR: Path = REPO_ROOT / "scripts" / "style-baseline"
-COVERAGE_FILE: Path = BASELINE_DIR / "COVERAGE.txt"
 
 VIEWPORT: tuple[int, int] = (1280, 900)
 
@@ -288,8 +303,9 @@ def widget_vocabulary() -> tuple[str, ...]:
 
     The vocabulary is closed and documented, so coverage is a real check rather
     than a sample. Reading it from ``widgets.md`` rather than from a list here
-    means the reference stays the single source of truth and drift in it shows
-    up as a diff in the coverage file.
+    means the reference stays the single source of truth: a class documented
+    here and rendered by no sampled page fails the run rather than widening the
+    blind spot in silence.
     """
     source = WIDGETS.read_text(encoding="utf-8")
     names: set[str] = set()
@@ -966,29 +982,44 @@ def render_page_snapshot(page: str, captures: dict[str, dict[str, dict[str, str]
     return "\n".join(lines) + "\n"
 
 
-def render_coverage(sample: list[str], covered: dict[str, list[str]]) -> str:
-    """Which of the documented vocabulary the sample actually exercises.
+def uncovered_classes(covered: dict[str, list[str]]) -> list[str]:
+    """Documented classes no sampled page rendered, which is the gate's blind spot.
 
-    A class nobody in the sample uses is a class this gate cannot see, so the
-    gap is written down rather than left to be discovered. A change to the line
-    for any class is a change in what is guarded, and it shows up as a diff.
+    This is the whole of the coverage guarantee, stated as the property it is
+    rather than as a table to diff. The gate can only see what the sample
+    renders, so a class in the closed vocabulary that no sampled page renders is
+    a class the snapshot could not catch a change to. Naming that condition
+    directly is what lets the count behind it move freely: two pull requests
+    that add captions to two different courses both raise ``fig-cap``'s page
+    count and neither one changes whether it is covered.
+    """
+    return [name for name in widget_vocabulary() if not covered.get(name)]
+
+
+def render_coverage(sample: list[str], covered: dict[str, list[str]]) -> str:
+    """Which of the documented vocabulary the sample exercises, and on how many pages.
+
+    Printed on ``--coverage`` and never stored. The count is derived from the
+    repository on every run, so a committed copy of it would hold nothing the
+    run does not recompute, while making every branch that moves a single count
+    wait its turn behind every other one.
     """
     vocabulary = widget_vocabulary()
     lines = [
-        "# Coverage of the closed widget vocabulary by the harness sample.",
-        "#",
-        "# The vocabulary is read from",
-        "# .claude/skills/course-authoring/references/widgets.md, which is the single",
-        "# documented source. A class with no page beside it is styled by nothing this",
-        "# gate can see; a class that loses its pages has stopped being used.",
-        "#",
-        f"# {len(sample)} sample pages, {len(vocabulary)} documented classes, "
-        f"{len([name for name in vocabulary if covered.get(name)])} covered.",
+        "Coverage of the closed widget vocabulary by the harness sample.",
+        "",
+        "The vocabulary is read from",
+        ".claude/skills/course-authoring/references/widgets.md, which is the single",
+        "documented source. A class with no page beside it is styled by nothing this",
+        "gate can see, and fails the run.",
+        "",
+        f"{len(sample)} sample pages, {len(vocabulary)} documented classes, "
+        f"{len(vocabulary) - len(uncovered_classes(covered))} covered.",
         "",
     ]
     for name in vocabulary:
         pages = covered.get(name, [])
-        lines.append(f"{name}: {len(pages)} page(s)" if pages else f"{name}: UNCOVERED")
+        lines.append(f"  {name}: {len(pages)} page(s)" if pages else f"  {name}: UNCOVERED")
     return "\n".join(lines) + "\n"
 
 
@@ -1278,7 +1309,7 @@ def assert_course_contract(capture: Capture, page: str) -> list[Difference]:
     ]
 
 
-def run(write: bool, assertions: bool) -> int:
+def run(write: bool, assertions: bool, show_coverage: bool) -> int:
     sample = read_sample()
     gaps = sample_gaps(sample)
     if gaps:
@@ -1321,15 +1352,8 @@ def run(write: bool, assertions: bool) -> int:
         chrome.close()
         server.shutdown()
 
-    coverage = render_coverage(sample, covered)
     if write:
-        COVERAGE_FILE.parent.mkdir(parents=True, exist_ok=True)
-        COVERAGE_FILE.write_text(coverage, encoding="utf-8")
         prune(sample)
-    elif not COVERAGE_FILE.is_file() or COVERAGE_FILE.read_text(encoding="utf-8") != coverage:
-        moved.append(
-            Difference("scripts/style-baseline/COVERAGE.txt", "-", "-", "(coverage)", "recorded", "changed")
-        )
 
     elapsed = time.time() - started
     print(
@@ -1349,16 +1373,44 @@ def run(write: bool, assertions: bool) -> int:
     # defect as the expected answer.
     if failed_assertions:
         report("a render state disagrees with the recorded one", failed_assertions)
-    return 1 if moved or failed_assertions else 0
+
+    # Coverage is asserted for the same reason and in both modes: the gate is
+    # only as wide as the sample, and a hole in it recorded by a --write run is
+    # a hole nobody would look at again.
+    missing = uncovered_classes(covered)
+    if show_coverage:
+        print("\n" + render_coverage(sample, covered))
+    else:
+        vocabulary = widget_vocabulary()
+        print(f"coverage: {len(vocabulary) - len(missing)} of {len(vocabulary)} documented classes rendered.")
+    if missing:
+        report_uncovered(missing)
+    return 1 if moved or failed_assertions or missing else 0
+
+
+def report_uncovered(missing: list[str]) -> None:
+    """The blind spot, named, with the two things that can have caused it."""
+    print(f"\nthe sample renders none of {len(missing)} documented class(es):\n")
+    for name in missing:
+        print(f"  - {name}")
+    print(
+        "\nthe snapshot cannot see a class no sampled page renders. Either the hub uses"
+        "\nit somewhere and the sample has to reach it:"
+        "\n\n    python3 scripts/style_snapshot.py --refresh-sample"
+        "\n\nor nothing uses it at all, and the widget reference is documenting a widget"
+        "\nthat is gone."
+    )
 
 
 def prune(sample: list[str]) -> None:
     """Drop snapshots for pages the sample no longer names.
 
     A refreshed sample would otherwise leave the old page's file behind, and a
-    snapshot nothing compares against is a file that rots quietly.
+    snapshot nothing compares against is a file that rots quietly. That is also
+    what takes out a ``COVERAGE.txt`` left behind by a branch written before
+    coverage became an assertion.
     """
-    kept = {baseline_path(page) for page in sample} | {COVERAGE_FILE}
+    kept = {baseline_path(page) for page in sample}
     for recorded in sorted(BASELINE_DIR.rglob("*.txt")):
         if recorded not in kept:
             recorded.unlink()
@@ -1378,6 +1430,11 @@ def report(headline: str, differences: list[Difference], limit: int = 200) -> No
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--write", action="store_true", help="record a new snapshot instead of comparing")
+    parser.add_argument(
+        "--coverage",
+        action="store_true",
+        help="print the whole coverage table, not just its one-line verdict",
+    )
     parser.add_argument("--refresh-sample", action="store_true", help="re-pick the sample pages by rule")
     parser.add_argument("--sample-only", action="store_true", help="print the sample and stop")
     parser.add_argument(
@@ -1396,7 +1453,11 @@ def main() -> int:
         for page in read_sample():
             print(page)
         return 0
-    return run(write=arguments.write, assertions=not arguments.no_assertions)
+    return run(
+        write=arguments.write,
+        assertions=not arguments.no_assertions,
+        show_coverage=arguments.coverage,
+    )
 
 
 if __name__ == "__main__":
