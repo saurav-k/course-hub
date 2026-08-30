@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Static checks for the Course Hub before anything is published.
 
-Eighteen checks, all deterministic and offline:
+Nineteen checks, all deterministic and offline:
 
 1. Every course folder has an ``index.html`` and the hub ``index.html`` links it.
 2. Every ``lessons/*.html`` file is linked from its own course ``index.html``.
@@ -68,9 +68,16 @@ Eighteen checks, all deterministic and offline:
    how ``design-system/index.html`` documents the system, and a rename in the
    stylesheet would otherwise leave the reference page describing something that
    no longer exists, with nothing red anywhere.
+19. The figure caption pair is well formed wherever a page uses it: a ``.fig-cap``
+   and a ``.fig-claim`` are direct children of ``figure.diagram``, in that order,
+   and both sit above the drawing. ``hub.css`` selects them as direct children,
+   so one nested in a wrapper div takes no styling and renders as unstyled body
+   text at figure width. Presence is not checked and must not be: a label cannot
+   be generated, and requiring one would fail every figure written before the
+   widget existed.
 
-Checks 9 to 16 read the shared asset files rather than the pages; 17 reads the
-pages; and check 18 reads both. What the design system then *renders* is the
+Checks 9 to 16 read the shared asset files rather than the pages; 17 and 19 read
+the pages; and check 18 reads both. What the design system then *renders* is the
 computed-style harness's job; see ``scripts/style_snapshot.py``.
 
 A course may ship a ``routes.js`` manifest instead of a static ``outline.js``,
@@ -93,6 +100,7 @@ import html
 import json
 import re
 import sys
+from html.parser import HTMLParser
 from dataclasses import dataclass
 from pathlib import Path
 from urllib import request as _urlrequest
@@ -2336,6 +2344,173 @@ def check_the_font_contract() -> list[Problem]:
     return problems
 
 
+# ---------- the figure caption pair ----------
+# The two lines that sit above a drawing: `.fig-cap` names the subject and
+# `.fig-claim` states what the drawing proves. `hub.css` styles them as
+# `figure.diagram > .fig-cap`, so the shape is load-bearing rather than a
+# convention, and every way of getting it wrong renders as unstyled body text
+# at figure width with nothing in the console.
+FIG_CAP_CLASS: str = "fig-cap"
+FIG_CLAIM_CLASS: str = "fig-claim"
+
+# HTML's void elements never take a close tag, so they never go on the stack.
+VOID_ELEMENTS: frozenset[str] = frozenset({
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr",
+})
+
+# What counts as the drawing a caption pair has to precede. `svg` covers the
+# hand-authored chart and `canvas` the interactive build; `div.mermaid` is the
+# generated one and is matched by its class rather than by its tag.
+DRAWING_TAGS: frozenset[str] = frozenset({"svg", "canvas"})
+
+
+@dataclass(frozen=True)
+class CaptionPart:
+    """One `.fig-cap` or `.fig-claim`, with what the parser saw around it."""
+
+    role: str
+    parent: str
+    after_drawing: bool
+
+
+class FigureReader(HTMLParser):
+    """Collect every caption part on a page, and the figure that holds it.
+
+    An element stack is what makes "direct child of ``figure.diagram``" exact
+    rather than a guess a regular expression makes: a `.fig-cap` nested inside
+    a wrapper div is the defect this check exists to catch, and the two shapes
+    are indistinguishable to any pattern that does not track nesting.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.stack: list[tuple[str, frozenset[str]]] = []
+        # One entry per figure that carries at least one caption part, keyed by
+        # the order the figure opens in, so a report names the same figure the
+        # author counts.
+        self.figures: dict[int, list[CaptionPart]] = {}
+        self.orphans: list[CaptionPart] = []
+        self.opened = 0
+        self.drawn: set[int] = set()
+        self.index_of: list[int] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        classes = frozenset((dict(attrs).get("class") or "").split())
+        if tag == "figure":
+            self.opened += 1
+            self.index_of.append(self.opened - 1)
+        if self._is_drawing(tag, classes) and self.index_of:
+            self.drawn.add(self.index_of[-1])
+        self._record(tag, classes)
+        if tag not in VOID_ELEMENTS:
+            self.stack.append((tag, classes))
+
+    def handle_startendtag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        classes = frozenset((dict(attrs).get("class") or "").split())
+        if self._is_drawing(tag, classes) and self.index_of:
+            self.drawn.add(self.index_of[-1])
+        self._record(tag, classes)
+
+    def handle_endtag(self, tag: str) -> None:
+        for depth in range(len(self.stack) - 1, -1, -1):
+            if self.stack[depth][0] == tag:
+                del self.stack[depth:]
+                break
+        if tag == "figure" and self.index_of:
+            self.index_of.pop()
+
+    @staticmethod
+    def _is_drawing(tag: str, classes: frozenset[str]) -> bool:
+        return tag in DRAWING_TAGS or "mermaid" in classes
+
+    def _record(self, tag: str, classes: frozenset[str]) -> None:
+        for role in (FIG_CAP_CLASS, FIG_CLAIM_CLASS):
+            if role not in classes:
+                continue
+            parent_tag, parent_classes = self.stack[-1] if self.stack else ("", frozenset())
+            parent = f"{parent_tag}.{'.'.join(sorted(parent_classes))}" if parent_classes else parent_tag or "the document"
+            inside = self.index_of[-1] if self.index_of else None
+            part = CaptionPart(role, parent, inside in self.drawn if inside is not None else False)
+            if inside is None or parent_tag != "figure" or "diagram" not in parent_classes:
+                self.orphans.append(part)
+            else:
+                self.figures.setdefault(inside, []).append(part)
+
+
+def caption_problems(page: Path) -> list[Problem]:
+    """Every way one page gets the caption pair wrong."""
+    reader = FigureReader()
+    try:
+        reader.feed(page.read_text(encoding="utf-8", errors="replace"))
+    except AssertionError:  # a malformed page; the link and nesting checks own that
+        return []
+    where = relative(page)
+    problems: list[Problem] = []
+
+    for part in reader.orphans:
+        problems.append(
+            Problem(where, f'.{part.role} sits inside <{part.parent}>; hub.css selects it as '
+                           '"figure.diagram > .' + part.role + '", so this one takes no styling at '
+                           "all and renders as body text at figure width")
+        )
+
+    for index, parts in sorted(reader.figures.items()):
+        roles = [part.role for part in parts]
+        if FIG_CLAIM_CLASS in roles and FIG_CAP_CLASS not in roles:
+            problems.append(
+                Problem(where, f"figure {index} has a .fig-claim and no .fig-cap above it; the claim "
+                               "argues for a subject the label was going to name, and alone it reads "
+                               "as a stray sentence")
+            )
+        for role in (FIG_CAP_CLASS, FIG_CLAIM_CLASS):
+            if roles.count(role) > 1:
+                problems.append(
+                    Problem(where, f"figure {index} carries {roles.count(role)} .{role} elements; "
+                                   "the caption pair is one line each")
+                )
+        if roles.count(FIG_CAP_CLASS) == 1 and roles.count(FIG_CLAIM_CLASS) == 1:
+            if roles.index(FIG_CLAIM_CLASS) < roles.index(FIG_CAP_CLASS):
+                problems.append(
+                    Problem(where, f"figure {index} puts its .fig-claim above its .fig-cap; "
+                                   "the label names the subject the claim then argues about")
+                )
+        for part in parts:
+            if part.after_drawing:
+                problems.append(
+                    Problem(where, f"figure {index} puts its .{part.role} after the drawing; "
+                                   "both lines go above, so the reader meets the question "
+                                   "before the answer")
+                )
+    return problems
+
+
+def check_figure_caption_pairs() -> list[Problem]:
+    """The caption pair is well formed wherever a page uses it.
+
+    Four shapes, and every one of them ships green without this check.
+
+    A `.fig-cap` nested in a wrapper div takes no styling, because the
+    stylesheet selects a direct child, and renders as unstyled body text at
+    figure width - which looks like a paragraph that lost its formatting and
+    reaches no console. A `.fig-claim` with no `.fig-cap` is a proposition with
+    no subject. A pair in the wrong order asks the reader to argue before they
+    know what about. And either line placed after the drawing gives up the only
+    reason the pair sits above it.
+
+    Presence is deliberately not checked. Requiring a `.fig-cap` would fail
+    2,872 existing figures on the first run, and a generated label is worse than
+    none: the measured pass over the hub's own captions produces 434 figures all
+    labelled WHERE THIS SITS. The bar for a new page is in the skill's
+    ``references/pedagogy.md``; this gate only checks the shape of what an
+    author actually wrote.
+    """
+    problems: list[Problem] = []
+    for page in html_pages():
+        problems.extend(caption_problems(page))
+    return problems
+
+
 def main() -> int:
     problems = (
         check_courses_are_registered()
@@ -2360,6 +2535,7 @@ def main() -> int:
         + check_width_queries_name_a_medium()
         + check_the_font_contract()
         + check_named_tokens_exist()
+        + check_figure_caption_pairs()
     )
     if "--vendor-links" in sys.argv[1:]:
         # Opt-in live reachability for the matrix's vendor links. The default
