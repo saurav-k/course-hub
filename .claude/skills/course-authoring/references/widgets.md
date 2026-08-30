@@ -1109,7 +1109,7 @@ It is never taken away while it holds focus, because hiding the element a keyboa
 Activating it scrolls with no `behavior` named, so the browser reads `scroll-behavior` off the stylesheet and the motion axis governs it, and then moves focus to the wordmark: a page that scrolls to the top and leaves the keyboard at the foot of it has moved only half the reader.
 
 **Three positioning decisions, and each is read rather than assumed.**
-The bottom edge is `--dock-offset` plus whatever the pre-production strip occupies, through the fallback in `var(--preprod-h, 0px)`, so the live site and the review site are one declaration.
+The bottom edge is `--dock-offset` plus everything already fixed across the foot, read through `--foot-h`, so the live site, the review site and a page carrying the chapter bar are one declaration.
 `z-index: 64` puts the cluster under the rail's drawer scrim below 1040px and under every panel shell, so a click on it while the drawer is open dismisses the drawer, which is what the reader meant.
 It is a `role="group"` and not a `role="toolbar"`, because a toolbar owes the reader arrow-key roving focus and three plain buttons owe nothing beyond Tab.
 
@@ -1118,6 +1118,66 @@ The print block hides it with the topbar, the rail, the panel and the pager.
 
 Three tokens are its own: `--dock-target`, the square each control takes, at 36px because it is aimed at with a thumb while the reader is reading rather than with a pointer while they are looking at it; `--dock-offset`, the distance from the two viewport edges it hugs; and `--sp-inset-dock`, the padding around the row.
 All three are design-axis tokens, so a design may raise the target and may never lower it below the 24px WCAG 2.2 SC 2.5.8 asks for.
+## The fixed chapter bar
+
+`hub.js` builds a band across the foot of the viewport carrying the previous page, where you are and the next page, and no page's markup mentions it.
+It is chrome you never author, exactly as the topbar, the rail and the floating cluster are: it arrives on a page because that page links the shared assets.
+
+**It exists because the end-of-page pager is at the end of the page.**
+A reader who has decided to move on is almost never at the foot of the document when they decide it, so the pager costs a scroll to the bottom before it can be used at all.
+The pager stays and is not restyled: it is the page's own last word, it is what a reader with scripting switched off has, and it is the half of this that prints.
+The bar is the same two destinations held in view the whole way down.
+
+**The order comes from the generated outline, never from the pager's own markup.**
+`outline.js` is written by `scripts/gen_outline.py` from the course map, check 3 in `validate_site.py` fails the pull request when it and `lessons/` disagree, and check 7 holds every title in it against the map and against every pager pointing at the page.
+A page's committed pager is hand-written per page, which makes it a claim about two neighbours rather than a sequence: a bar built from it could not say how far through the course the reader is, could not tell a missing neighbour from a first page, and would go quietly wrong on exactly the page whose pager was the one nobody updated.
+A routed course is the same source by another route.
+Its `outline.js` derives `window.COURSE_OUTLINE` from `routes.js` for the route in play, so the bar follows the route the reader is actually on, carries `?route=` on both links because the outline already does, and no code in `hub.js` knows routes exist.
+
+**The sequence is the outline's own reading order**: every lesson of every section in order, then the reference pages the rail shows under `Reference`.
+A page the outline does not name gets no bar at all - a course map, the hub landing page and the design system reference have no place in that sequence, and a bar that could not say where you are would be answering two thirds of the question.
+On a routed course that also covers a page the active route does not contain, which is the same answer the rail gives it.
+
+**The first and the last page omit the dead control rather than disabling it.**
+A disabled control is a promise the page cannot keep: it holds a tab stop, it reads as something that would work if the reader tried harder, and there is nowhere for it to go.
+The three parts are placed by grid column rather than by source order, so the survivor stays on its own side of the bar and the centre stays centred.
+
+**The centre names the position and the page, and it is text rather than a link.**
+The topbar already carries the way back to the course map, and a third destination in a bar whose whole job is two destinations is a third thing to read past.
+It reads `3 of 68` rather than `3 / 68` because a screen reader says the second one as "3 slash 68", and it is a position rather than a progress reading: the rail owns how much of a course has been read, and a second answer to that question in the same viewport would be two answers.
+
+**Everything fixed across the foot of the viewport is summed once, in `--foot-h`.**
+Three things can occupy it and any two can be there at once: the pre-production strip, this bar, and the device's own bottom inset.
+Every rule that has to give that space back - the body's padding, the rail's scroll foot, the floating cluster's offset, both panels' heights - reads that one token rather than restating the sum, so a fourth occupant is one term and no edit anywhere else.
+`--preprod-h` and `--chapbar-h` are each declared only where the thing they measure exists, so the fallback in each `var()` is the answer for every page that does not carry it.
+`--foot-h` is declared on `body` rather than on `:root` because `--chapbar-h` is: `hub.js` may write no attribute on `<html>` but a registered reader axis, so the flag that says a bar was built is `body[data-chapbar]`, and a custom property resolves against the element that declares it.
+
+**The bar's height is the token, not the other way round.**
+`height` is `--chapbar-h` and the reserve reads the same token, so the two cannot disagree.
+That is why both lines inside it are pinned to one line each and clipped with an ellipsis rather than wrapped: a wrapped title would make the bar taller than the space given back for it and hide the last line of the page behind it.
+
+**`z-index: 63` is one below the floating cluster**, so the two can never contend for a pixel, and it inherits the cluster's reasoning for everything above it: under the rail's drawer scrim at 65 and under every panel shell at 90.
+The panels go further than the stacking order.
+`bounds()` in the panel shell measures this bar along with the pre-production strip, so a parked panel cannot be dropped over it, and measuring is what makes the strip's two-line phone height and the bar's one-line phone height both correct there without either being restated.
+
+**It is full-bleed rather than inset to the reading column.**
+The topbar is, the pre-production strip is, and a band that started at the rail's right edge would have to track `--rail-w` through the drawer arm below 1040px, where that token still holds a width the layout is no longer using.
+
+**Below 720px it is one line, and the title is what survives.**
+A phone reader still needs the name of the page they are moving to, which is the whole reason the bar carries titles rather than two arrows, so the direction word goes and the arrow and the title stay; the centre gives up its title the same way and keeps the position.
+The link's accessible name states the direction in full at both widths - `Previous: <title>` - because a hidden element is out of the accessibility tree as well as off the screen, and WCAG 2.2 SC 2.5.3 is satisfied at both because the visible label is contained in that name.
+The arrow carries `flex: none`: `* { min-width: 0 }` at the head of the sheet takes the flex automatic minimum off every element, and measured at 320px the arrow was laid out 5.2px wide against a 15px glyph and rendered as a stub.
+The title is the item that may give up width, because an ellipsis still reads.
+
+**It is a `nav` with a name of its own**, `Previous and next lesson`, because the page already has two: the rail is `Course outline` and a routed course's committed pager is `Lesson navigation`.
+Three landmarks with one name between them is three landmarks a screen-reader user cannot choose from.
+
+**It is chrome, so it is out of the density control's reach and it is not on the paper.**
+The print block hides it with the topbar, the rail, the panel, the pager and the cluster, and zeroes the reserve with it.
+
+Three tokens are its own: `--chapbar-h`, its height, declared only under `body[data-chapbar="on"]` and again in the narrow arm where the bar is one line; `--sp-inset-chapbar`; and `--sp-inset-chapbar-sm`.
+The two insets are design-axis tokens; the height is not, for the same reason `--topbar-h` and `--preprod-h` are not.
+
 ## The study notes panel
 
 `hub.js` builds a second panel from the shell above and it reaches every page, from a topbar button beside `Appearance` and from a launcher in the floating cluster.

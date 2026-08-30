@@ -209,7 +209,7 @@ appearance launcher, the study notes launcher, and scroll-to-top. It exists beca
 the mode toggle is the part that teaches - one click repaints the page, so the launcher beside it
 reads as an offer. Both openers wear `aria-expanded` and closing returns focus to whichever one was
 used, and the shell owns that: `attachOpener` registers a button rather than replacing the last one,
-so a third way in costs one call. Its bottom edge reads `var(--preprod-h, 0px)` rather than assuming
+so a third way in costs one call. Its bottom edge reads `--foot-h` rather than assuming
 the foot of the viewport is free, and it sits under the rail's drawer scrim and under every panel
 shell, so the corner needs none of the `!important` arms race the reference site's own cluster
 carries. Its three tokens are `--dock-target`, `--dock-offset` and `--sp-inset-dock`, all on the
@@ -233,6 +233,21 @@ editor, because indenting with it is a keyboard trap and fails SC 2.1.2. It open
 and from the cluster, which is one `attachOpener` call each. The author-facing
 statement is `.claude/skills/course-authoring/references/widgets.md`, "The study notes panel". Do
 not restate it here.
+
+**A band across the foot of every lesson carries the previous page, where you are and the next
+page, and its order comes from the generated outline.** The end-of-page pager is at the end of the
+page, so a reader who decides to move on pays a scroll before they can; the pager stays, because it
+prints and it is what a page with no script has. `hub.js` builds the bar from
+`window.COURSE_OUTLINE` and never from a page's own pager markup - the outline is generated from the
+course map and gated by checks 3 and 7, a pager is hand-written per page, and only the outline is a
+sequence rather than a claim about two neighbours. A page the outline does not name gets no bar.
+**Everything fixed across the foot is summed once, in `--foot-h` on `body`**: the pre-production
+strip, this bar and the device inset. The body's padding, the rail's scroll foot, the cluster's
+offset and both panels' heights read that one token, so a third occupant is one term and no edit
+anywhere else, and the panel shell's `bounds()` measures the two bars rather than assuming either.
+`--chapbar-h` is the bar's height and the reserve reads the same token, so the two cannot disagree.
+The author-facing statement is `.claude/skills/course-authoring/references/widgets.md`, "The fixed
+chapter bar". Do not restate it here.
 
 ## The course contract
 

@@ -8,9 +8,10 @@
    What it does, in order:
      1. head phase   - restore mode, palette, design and the two reading
                        preferences from localStorage
-     2. mount phase  - build the rail from window.COURSE_OUTLINE,
-                       build the topbar controls and settings popover,
-                       and the pre-production bar when the host says so
+     2. mount phase  - build the rail and the fixed chapter bar from
+                       window.COURSE_OUTLINE, build the topbar controls and
+                       settings popover, and the pre-production bar when the
+                       host says so
      3. wire phase   - quiz, copy buttons, reading progress, Mermaid
 
    Every page links this one file. There is no per-course runtime.
@@ -1251,6 +1252,119 @@
     }
   }
 
+  /* ---------- the fixed chapter bar ----------
+     Previous page, where you are, next page, held across the foot of the
+     viewport for the whole of a lesson rather than only at its end. It reaches
+     every page a course outline names because those pages link this file, and no
+     page's markup mentions it. The stylesheet section of the same name carries
+     where it sits and why; this is what it says.
+
+     THE ORDER COMES FROM THE OUTLINE, NOT FROM THE PAGER. Two sources of page
+     order were available and only one of them is generated: `outline.js` is
+     written by `scripts/gen_outline.py` from the course map, `validate_site.py`
+     check 3 fails the pull request when it and `lessons/` disagree, and check 7
+     holds every title in it against the map and against every pager pointing at
+     the page. The committed pager in a page's own markup is the other, and it
+     is hand-written per page, which makes it a claim about two neighbours
+     rather than a sequence: a bar built from it could not say how far through
+     the course the reader is, could not tell a missing neighbour from a first
+     page, and would go quietly wrong on exactly the page whose pager was the
+     one nobody updated. The routed course is the same source by another route -
+     its `outline.js` derives `window.COURSE_OUTLINE` from `routes.js` for the
+     route in play, so this bar follows the route the reader is actually on with
+     no code here that knows routes exist.
+
+     The sequence is the outline's own reading order: every lesson of every
+     section in order, then the reference pages the rail shows under `Reference`.
+     A page the outline does not name gets no bar at all - the hub landing page,
+     the design system and a course map have no place in that sequence, and a
+     bar that could not say where you are would be answering two thirds of the
+     question. */
+  function chapterSequence(outline) {
+    var pages = [];
+    outline.sections.forEach(function (section) {
+      section.lessons.forEach(function (lesson) { pages.push(lesson); });
+    });
+    (outline.extras || []).forEach(function (extra) { pages.push(extra); });
+    return pages;
+  }
+
+  /* The visible text names the direction and the destination; the accessible
+     name states both whatever is drawn. Below 720px the direction word is not
+     rendered, and a hidden element is out of the accessibility tree as well as
+     off the screen, so a link relying on it would be announced as a bare title
+     on a phone. WCAG 2.2 SC 2.5.3 is satisfied at both widths because the
+     visible label - the title, with or without the word in front of it - is
+     contained in the accessible name. */
+  function chapterLink(page, forward, base) {
+    var link = el('a', 'chapbar-link ' + (forward ? 'chapbar-next' : 'chapbar-prev'));
+    link.href = new URL(page.href, base).href;
+    link.setAttribute('aria-label', (forward ? 'Next: ' : 'Previous: ') + page.title);
+
+    var direction = el('span', 'chapbar-dir');
+    var arrow = el('span', 'chapbar-arrow', forward ? '\u2192' : '\u2190');
+    var word = el('span', 'chapbar-word', forward ? 'Next' : 'Previous');
+    if (forward) { direction.appendChild(word); direction.appendChild(arrow); }
+    else { direction.appendChild(arrow); direction.appendChild(word); }
+
+    link.appendChild(direction);
+    link.appendChild(el('span', 'chapbar-ttl', page.title));
+    return link;
+  }
+
+  function mountChapterBar(outline) {
+    var pages = chapterSequence(outline);
+    var here = fileOf(location.pathname);
+    var at = -1;
+    for (var i = 0; i < pages.length; i += 1) {
+      if (fileOf(pages[i].href) === here) { at = i; break; }
+    }
+    if (at === -1) return;
+
+    var base = courseBase();
+    var bar = el('nav', 'chapbar');
+    /* A `nav` with a name of its own, because the page already has two: the
+       rail is `Course outline` and the committed pager at the foot of the
+       document is `Lesson navigation` on a routed course. Three landmarks with
+       one name between them is three landmarks a screen-reader user cannot
+       choose from. */
+    bar.setAttribute('aria-label', 'Previous and next lesson');
+
+    /* The first and the last page omit the control rather than disabling it. A
+       disabled control is a promise the page cannot keep: it holds a tab stop,
+       it reads as something that would work if the reader tried harder, and
+       there is nowhere for it to go. The stylesheet places the two links by
+       grid column, so the survivor stays on its own side of the bar. */
+    if (at > 0) bar.appendChild(chapterLink(pages[at - 1], false, base));
+
+    var where = el('span', 'chapbar-here');
+    /* `of` rather than a slash: a screen reader says "3 of 68" and reads
+       "3 / 68" as "3 slash 68". It is a position and not a progress reading -
+       the rail already owns how much of a course has been read, and a second
+       answer to that question in the same viewport would be two. */
+    where.appendChild(el('span', 'chapbar-count', (at + 1) + ' of ' + pages.length));
+    where.appendChild(el('span', 'chapbar-ttl', pages[at].title));
+    bar.appendChild(where);
+
+    if (at < pages.length - 1) bar.appendChild(chapterLink(pages[at + 1], true, base));
+
+    /* Inserted straight after the topbar rather than appended to the body, for
+       the reason the floating cluster gives above: a reader on a keyboard
+       reaches it in the same breath as the rest of the chrome instead of after
+       every paragraph, figure and footer link on the page. It goes in ahead of
+       the cluster, which `start` has already inserted there, because a way on
+       to the next page is wanted more often than a way into the settings.
+
+       The attribute is what the stylesheet reserves room from, and it is
+       written in the same breath as the element goes in so the two can never
+       disagree. It is on `body` and not on `<html>`: check 11 in
+       validate_site.py holds this file to the registered reader axes there. */
+    var spine = document.querySelector('.spine');
+    if (spine && spine.parentNode) spine.parentNode.insertBefore(bar, spine.nextSibling);
+    else document.body.appendChild(bar);
+    document.body.dataset.chapbar = 'on';
+  }
+
   /* ---------- the pre-production warning bar ----------
      A fixed strip along the foot of the viewport, so it stays in view at every
      scroll position on all 781 pages without touching the body grid, the
@@ -1766,10 +1880,10 @@
      left rather than where the phone could fit it.
 
      The band the panel is held inside is measured rather than assumed. The
-     topbar is sticky and the pre-production strip is fixed to the foot of the
-     viewport and wraps to two lines on a narrow screen, so both are read off
-     the elements themselves. A panel parked under either of them is a panel the
-     reader cannot reach.
+     topbar is sticky, and the pre-production strip and the chapter bar are both
+     fixed to the foot of the viewport and both change height on a narrow
+     screen, so all three are read off the elements themselves. A panel parked
+     under any of them is a panel the reader cannot reach.
      ============================================================ */
   var PANEL_EDGE = 8;      // the gap a panel keeps from every edge
   var PANEL_STEP = 20;     // one arrow key
@@ -1849,10 +1963,19 @@
 
     function bounds() {
       var spine = document.querySelector('.spine');
-      var flag = document.querySelector('.preprod-flag');
       var box = panel.getBoundingClientRect();
       var ceiling = (spine ? spine.getBoundingClientRect().bottom : 0) + PANEL_EDGE;
-      var floor = window.innerHeight - (flag ? flag.getBoundingClientRect().height : 0) - PANEL_EDGE;
+      /* Everything fixed across the foot, measured rather than assumed: the
+         pre-production strip and the chapter bar. Each is absent on some pages
+         and the two are present together on a pre-production lesson, so the
+         floor is their sum and not whichever one this code was written for.
+         Measuring is what makes the strip's two-line phone height and the bar's
+         one-line phone height correct here without either being restated. */
+      var footHeight = 0;
+      Array.prototype.forEach.call(document.querySelectorAll('.preprod-flag, .chapbar'), function (fixed) {
+        footHeight += fixed.getBoundingClientRect().height;
+      });
+      var floor = window.innerHeight - footHeight - PANEL_EDGE;
       return {
         minX: PANEL_EDGE,
         maxX: Math.max(PANEL_EDGE, window.innerWidth - box.width - PANEL_EDGE),
@@ -3244,6 +3367,9 @@
     }
     mountTopbar(hasRail);
     mountCluster();
+    /* After the cluster, because both insert themselves straight after the
+       topbar and this one has to land in front of it in the tab order. */
+    if (hasRail) mountChapterBar(outline);
     mountStageFlag();
     wireQuizzes();
     wireCopyButtons();
