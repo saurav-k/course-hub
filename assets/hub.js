@@ -27,10 +27,19 @@
     density: 'coursehub.density',   // a density key
     motion:  'coursehub.motion',    // "reduced" | "full" | "" (follow the system)
     panel:   'coursehub.panel',     // where the reader put the appearance panel
+    notePanel: 'coursehub.notepanel', // where the reader put the notes panel
+    noteScope: 'coursehub.notescope', // "page" | "course" | "hub"
     rail:    'coursehub.rail',      // "on" | "off"
     read:    'coursehub.read',      // { courseKey: [lesson file names] }
     legacy:  'llmcourse-theme'      // what the first design system wrote
   };
+
+  /* A reader's note is not a preference, and it does not live in STORE. It
+     lives under `coursehub.note:` plus the tier and the identifier, one key per
+     document, so nothing has to read or rewrite a map of every note in order to
+     save one. See "THE STUDY NOTES PANEL" below for the key and why it is that
+     one. */
+  var NOTE_PREFIX = 'coursehub.note:';
 
   /* ============================================================
      THE SIX READER CONTROLS
@@ -264,6 +273,50 @@
   function get(key) { try { return localStorage.getItem(key); } catch (e) { return null; } }
   function set(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* read-only session */ } }
   function drop(key) { try { localStorage.removeItem(key); } catch (e) { /* read-only session */ } }
+
+  /* ---------- storage that says whether it worked ----------
+     The three helpers above swallow, which is right for a preference: a lost
+     palette costs the reader one click and telling them about it would be
+     noise. It is exactly wrong for a document the reader wrote. The reference
+     site swallows in the same shape and then paints `Saved` from the caller,
+     so a reader whose quota is full is told their work is safe on every
+     keystroke and loses all of it on the next reload.
+
+     So the notes panel writes through these two instead, and paints what they
+     return rather than what it hoped. The read-back is not belt and braces: a
+     `setItem` that raises is the loud failure and easy to catch, and a store
+     that accepts the call and keeps nothing is the quiet one - which is what a
+     private window and some extensions do - so the only honest answer is to
+     ask the store what it now holds. */
+  function setChecked(key, value) {
+    try {
+      localStorage.setItem(key, value);
+      return localStorage.getItem(key) === value;
+    } catch (e) { return false; }
+  }
+  function dropChecked(key) {
+    try {
+      localStorage.removeItem(key);
+      return localStorage.getItem(key) === null;
+    } catch (e) { return false; }
+  }
+
+  /* Whether this browser will keep anything here at all, asked with one byte.
+     Chrome gives every file:// page its own opaque origin and every call
+     raises; a reader with site data blocked is in the same position. Asking
+     before the reader has written anything is what lets the panel say so on
+     open, rather than after a page of typing. A byte also distinguishes the
+     two failures the panel has to name apart: a store that refuses one byte is
+     switched off, and a store that takes one byte and refuses the document is
+     full. */
+  function storageAccepts() {
+    var probe = NOTE_PREFIX + 'probe';
+    try {
+      localStorage.setItem(probe, '1');
+      localStorage.removeItem(probe);
+      return true;
+    } catch (e) { return false; }
+  }
 
   /* ============================================================
      1. HEAD PHASE - runs before the body is parsed
@@ -1001,6 +1054,11 @@
      panel is made of belongs to the shell and nothing outside it may reach in. */
   var appearance = null;
 
+  /* The second panel, on the same terms. Two handles rather than one list,
+     because nothing in this file loops over panels: each is opened by its own
+     button and each answers Escape for itself. */
+  var studyNotes = null;
+
   function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -1268,6 +1326,20 @@
     appearance = buildAppearancePanel();
     document.body.appendChild(appearance.el);
     appearance.attachOpener(button);
+
+    /* The second opener, and the second panel. It is appended after the
+       appearance button rather than before it because the topbar reads left to
+       right as the page does: the control that changes how the page looks
+       comes before the one that opens a workspace beside it. */
+    var noteButton = el('button', 'tb-btn');
+    noteButton.type = 'button';
+    noteButton.appendChild(el('span', 'tb-icon', '\u270E'));
+    noteButton.appendChild(el('span', 'hide-sm', 'Notes'));
+    inner.appendChild(noteButton);
+
+    studyNotes = buildNotesPanel();
+    document.body.appendChild(studyNotes.el);
+    studyNotes.attachOpener(noteButton);
   }
 
   /* ---------- the floating control cluster ----------
@@ -1353,6 +1425,15 @@
       var launch = dockButton('\u25D1', 'Appearance and reading settings');
       appearance.attachOpener(launch);
       dock.appendChild(launch);
+    }
+
+    /* The second panel's second way in, and it costs one call because the
+       shell holds every opener rather than the last one. Escape returns the
+       reader to whichever of the two buttons they actually used. */
+    if (studyNotes) {
+      var notesLaunch = dockButton('\u270E', 'Study notes for this page');
+      studyNotes.attachOpener(notesLaunch);
+      dock.appendChild(notesLaunch);
     }
 
     dockMode = dockButton('\u263E', 'Switch to dark mode');
@@ -1625,6 +1706,11 @@
     applyDesign(DESIGNS[0].key);
     applyMode('');
     if (appearance) appearance.goHome();
+    /* Where a panel sits is a setting the reader can reach, so both panels come
+       back. What the reader wrote is not a setting and this button does not go
+       near it: a reset that quietly deleted a page of notes would be the worst
+       defect in the hub, and it is one line away at all times. */
+    if (studyNotes) studyNotes.goHome();
     syncSettings();
   }
 
@@ -1717,6 +1803,12 @@
     var panel = el('div', spec.className ? 'panel-shell ' + spec.className : 'panel-shell');
     panel.hidden = true;
     panel.setAttribute('role', 'dialog');
+    /* The panel's own id, which is what `attachOpener` points `aria-controls`
+       at. A button that says it opens a dialog and does not say which one
+       leaves a screen reader to guess between two, and it leaves a harness the
+       same problem: `scripts/focus_walk.py` walks both panels and reaches each
+       by the button that names it. */
+    panel.id = 'panel-' + spec.name;
     var titleId = 'panel-' + spec.name + '-title';
     var hintId = 'panel-' + spec.name + '-hint';
     panel.setAttribute('aria-labelledby', titleId);
@@ -1938,8 +2030,15 @@
       });
     }
 
+    /* `onClose` runs before the panel goes away and while its controls still
+       hold whatever the reader last put in them. The notes panel is what asked
+       for it: closing the panel is one of the four ways the reference site
+       loses text, because it removes the drawer without flushing the write
+       that was still in flight. A panel that has something to settle settles
+       it here. */
     function close(restoreFocus) {
       if (panel.hidden) return;
+      if (spec.onClose) spec.onClose();
       var inside = document.activeElement && panel.contains(document.activeElement);
       panel.hidden = true;
       announce(false);
@@ -1981,6 +2080,7 @@
       openers.push(button);
       if (!opener) opener = button;
       button.setAttribute('aria-haspopup', 'dialog');
+      button.setAttribute('aria-controls', panel.id);
       button.setAttribute('aria-expanded', String(!panel.hidden));
       button.addEventListener('click', function () {
         if (panel.hidden) open(button); else close(true);
@@ -1997,18 +2097,711 @@
     };
   }
 
+  /* ============================================================
+     THE STUDY NOTES PANEL
+
+     A second panel on the shared shell, and the whole of it is chrome: no page
+     in the hub names it, no page markup changes, and a page served with the
+     script blocked has no button, no panel and no trace. Everything the reader
+     can do to the panel itself belongs to the shell above and is not restated
+     here; what follows is what this panel contains and what it promises.
+
+     ---------- the promise, which is that the save state is true ----------
+     The reference implementation this was read from paints a green `Saved` on
+     every keystroke because `setItem` was called, never because it worked. Its
+     write swallows the exception, the caller consults no return value, and a
+     reader whose quota is full watches the panel confirm every save and loses
+     every word on the next reload. That is the defect this panel exists not to
+     copy, and it is why `setChecked` and `dropChecked` are separate helpers
+     from `set` and `drop` rather than the same ones with a flag.
+
+     Three states, and each is a fact rather than an intention:
+
+       Saving                what the reader typed is not in storage yet
+       Saved HH:MM           the store was written and read back equal
+       Not saved: ...        the write failed, and Export is the way out
+
+     Research counted four ways to lose text in the reference. Each is closed
+     here and each fix is named where it lives:
+
+       a  the silent quota failure         `setChecked`, and the state above
+       b  nothing flushes on exit          `visibilitychange`, `pagehide`, blur
+       c  closing the panel does not save  the shell's `onClose`
+       d  a stale read overwrites the live editor
+                                           `drafts`, below: what the reader can
+                                           see is authoritative and storage is
+                                           never read over the top of it
+
+     ---------- where a note lives ----------
+     Under `coursehub.note:` plus a tier and an identifier, one key per
+     document. The identifier is the course key and the file name, which are
+     the two things this repository has committed never to change: `AGENTS.md`
+     forbids renumbering or renaming a lesson because its URL is public, and a
+     course folder is in every cross-course link in the hub. A lesson's title
+     is not among them and is rewritten often, which is exactly the mistake the
+     reference makes - it keys on a slug built from a hand-maintained title
+     array, so editing a chapter's title orphans every note under it, silently,
+     with the old key left in storage unreachable.
+
+     The course key comes from `COURSE_OUTLINE.key` where a course ships an
+     outline and from the `data-course` folder otherwise, and the two are made
+     to agree rather than being two identifiers. It is the same key the reading
+     progress map already uses, so notes and progress cannot disagree about
+     what a lesson is.
+
+     ---------- what the scope control means ----------
+     The reference site shows a badge reading `All Masterclass Lessons` beside
+     its editor. It is a `div`. It has no handler, no role and no keyboard
+     behaviour: it is a label that looks like a selector, and it says the same
+     thing whatever page it is on. A control that appears to offer a choice and
+     offers none is worse than no control, so this one is real. Three tiers,
+     because the hub is eighteen courses and the reference was one:
+
+       This page      the lesson, the course map or the reference page in front
+                      of the reader
+       This course    one running document for the whole course, reachable from
+                      every page in it
+       All courses    one document for the hub
+
+     A page with no course - the hub landing page, the design system - offers
+     the two tiers it actually has. The panel names the key it is editing under
+     the control, so the answer to "where did that go" is on screen.
+     ============================================================ */
+
+  /* The pause that commits, and the longest a keystroke may go unwritten. The
+     reference has the first and not the second, so a reader who types without
+     pausing has nothing in storage however long they type. The ceiling is what
+     bounds the loss to two seconds rather than to a paragraph. */
+  var NOTE_SETTLE = 400;
+  var NOTE_LATEST = 2000;
+
+  var NOTE_VIEWS = [
+    { key: 'write', label: 'Write' },
+    { key: 'read',  label: 'Preview' }
+  ];
+
+  /* The toolbar, as data. Every entry is one splice of literal markdown
+     characters around the selection and there is no model behind it, which is
+     the part of the reference worth taking whole: a plain textarea and two
+     primitives do all of the formatting, so there is nothing to vendor and
+     nothing to keep in step with the text.
+
+     `wrap` puts characters either side of the selection; `line` puts them in
+     front of every line it covers. `heading` and `code` are the two that read
+     what is already there, and each says why below. */
+  var NOTE_TOOLS = [
+    { key: 'bold',    glyph: 'B',  name: 'Bold',          wrap: ['**', '**'], sample: 'bold text',   keys: 'Ctrl+B' },
+    { key: 'italic',  glyph: 'I',  name: 'Italic',        wrap: ['*', '*'],   sample: 'italic text', keys: 'Ctrl+I' },
+    { key: 'heading', glyph: 'H',  name: 'Heading, one level deeper each press' },
+    { key: 'mark',    glyph: '==', name: 'Highlight',    wrap: ['==', '=='], sample: 'highlighted' },
+    { key: 'strike',  glyph: 'S',  name: 'Strikethrough', wrap: ['~~', '~~'], sample: 'struck out' },
+    { key: 'code',    glyph: '‹›', name: 'Code', keys: 'Ctrl+Shift+C' },
+    { key: 'list',    glyph: '•', name: 'Bulleted list', line: '- ',    sample: 'list item' },
+    { key: 'task',    glyph: '☐', name: 'Task',          line: '- [ ] ', sample: 'something to review' },
+    { key: 'callout', glyph: '!',  name: 'Callout',       line: '> ',
+      sample: '[!tip] Key idea\nwhat the idea is' }
+  ];
+
+  /* ---------- which document this page is looking at ----------
+     Two derivations of one identifier rather than two identifiers. A course
+     that ships an outline states its own key; every other page falls back to
+     the folder in the URL with the suffix taken off, which is the same string
+     the generator would have written. */
+  function courseKey() {
+    var outline = window.COURSE_OUTLINE;
+    if (outline && outline.key) return String(outline.key);
+    var folder = root.getAttribute('data-course');
+    return folder ? folder.replace(/-course$/, '') : '';
+  }
+
+  function pageKey() {
+    return (courseKey() || 'hub') + '/' + (fileOf(location.pathname) || 'index.html');
+  }
+
+  function noteScopes() {
+    var course = courseKey();
+    var scopes = [{
+      key: 'page',
+      label: 'This page',
+      store: NOTE_PREFIX + 'page:' + pageKey(),
+      file: (course || 'hub') + '-' + (fileOf(location.pathname) || 'index.html').replace(/\.html?$/i, '')
+    }];
+    if (course) {
+      scopes.push({
+        key: 'course',
+        label: 'This course',
+        store: NOTE_PREFIX + 'course:' + course,
+        file: course + '-course'
+      });
+    }
+    scopes.push({
+      key: 'hub',
+      label: 'All courses',
+      store: NOTE_PREFIX + 'hub',
+      file: 'course-hub'
+    });
+    return scopes;
+  }
+
+  /* ---------- the two splice primitives ----------
+     Both end by dispatching a real `input` event, so a toolbar press reaches
+     the save machinery and the counter by the same path a keystroke does and
+     neither has to know the toolbar exists. */
+  function wrapSelection(field, before, after, sample) {
+    var start = field.selectionStart;
+    var end = field.selectionEnd;
+    var body = field.value.slice(start, end) || sample;
+    field.value = field.value.slice(0, start) + before + body + after + field.value.slice(end);
+    field.focus();
+    field.setSelectionRange(start + before.length, start + before.length + body.length);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function prefixLines(field, prefix, sample) {
+    var value = field.value;
+    var from = value.lastIndexOf('\n', field.selectionStart - 1) + 1;
+    var to = value.indexOf('\n', field.selectionEnd);
+    if (to === -1) to = value.length;
+    var block = value.slice(from, to) || sample;
+    var written = block.split('\n').map(function (line) { return prefix + line; }).join('\n');
+    field.value = value.slice(0, from) + written + value.slice(to);
+    field.focus();
+    field.setSelectionRange(from, from + written.length);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /* The heading button cycles rather than pinning one level, which the
+     reference does not: theirs is hard-wired to `###`, so an H1 or an H2 means
+     typing the hashes by hand and the button is no help at the two levels a
+     note most wants. Four presses walk `#`, `##`, `###` and back to plain, so
+     there is no level the button cannot reach and none it cannot leave. */
+  function cycleHeading(field) {
+    var value = field.value;
+    var from = value.lastIndexOf('\n', field.selectionStart - 1) + 1;
+    var to = value.indexOf('\n', field.selectionStart);
+    if (to === -1) to = value.length;
+    var line = value.slice(from, to);
+    var worn = line.match(/^(#{1,3})\s+/);
+    var body = worn ? line.slice(worn[0].length) : line;
+    var next = worn && worn[1].length >= 3 ? '' : new Array((worn ? worn[1].length : 0) + 2).join('#') + ' ';
+    var written = next + (body || 'Heading');
+    field.value = value.slice(0, from) + written + value.slice(to);
+    field.focus();
+    field.setSelectionRange(from + next.length, from + written.length);
+    field.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  /* A selection spanning more than one line wants a fence and a selection
+     inside one line wants a span, because a fence around three words puts them
+     on a plate of their own and a span around a function body loses every line
+     break. The reference reads the selection the same way and it is right. */
+  function insertCode(field) {
+    var body = field.value.slice(field.selectionStart, field.selectionEnd);
+    if (body.indexOf('\n') === -1) wrapSelection(field, '`', '`', 'code');
+    else wrapSelection(field, '```\n', '\n```', body);
+  }
+
+  /* ============================================================
+     THE PREVIEW, AND THE SUBSET IT RENDERS
+
+     A hand-written renderer over a closed subset, for the same reason the rest
+     of the hub has no build step: a markdown library is a dependency this
+     repository does not take, and the subset a study note needs is small.
+
+     What it renders is the hub's own widgets and never a second vocabulary. A
+     callout in a note is `.callout`, `.callout.warn` and `.callout.key` - the
+     three the lessons already use, tokenised across seven palettes and both
+     modes - so a note looks like the page it was written beside and costs no
+     colour of its own.
+
+     Three deliberate departures from the reference, and each closes a defect
+     research measured on the live site.
+
+     `_underscores_` are not italics. Their renderer turns `user_id_field` into
+     `user<em>id</em>field`, on a hub whose courses are about `top_p`,
+     `--max_tokens` and `attention_mask`. Only `*asterisks*` italicise here.
+
+     Every placeholder restore is a function replacement rather than a string
+     one, so a code span containing `$&` or `$1` survives being put back.
+
+     A link's scheme is on an allowlist. The document is the reader's own, so
+     this is not a trust boundary, but a note pasted from somewhere else is not
+     the reader's own and `javascript:` in it should render as text. */
+  var NOTE_SAFE_LINK = /^(https?:|mailto:|#|\/|\.{1,2}\/)/i;
+  var NOTE_ITEM = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/;
+  var NOTE_CALLOUT = /^\[!([a-z]+)\]\s*(.*)$/i;
+  /* The placeholder a pulled-out code span leaves behind. A NUL is not on any
+     keyboard and nothing else in this renderer treats it as a character, so it
+     cannot collide with anything the reader wrote. */
+  var NOTE_HOLD = '\u0000';
+  var NOTE_HOLD_BACK = /\u0000(\d+)\u0000/g;
+
+  /* Nine names onto the three widgets the hub has. A name it does not know
+     falls through to a plain blockquote rather than to a fourth appearance. */
+  var NOTE_CALLOUTS = {
+    note: '', info: '', example: '',
+    warning: 'warn', danger: 'warn', caution: 'warn',
+    tip: 'key', key: 'key', important: 'key'
+  };
+
+  function escapeText(text) {
+    return String(text).replace(/[&<>"]/g, function (ch) {
+      if (ch === '&') return '&amp;';
+      if (ch === '<') return '&lt;';
+      if (ch === '>') return '&gt;';
+      return '&quot;';
+    });
+  }
+
+  function renderInline(text) {
+    var spans = [];
+    /* Code comes out first and goes back last, so nothing in between rewrites
+       what is inside a span. */
+    var work = String(text).replace(/`([^`]+)`/g, function (whole, span) {
+      spans.push(span);
+      return NOTE_HOLD + (spans.length - 1) + NOTE_HOLD;
+    });
+    work = escapeText(work);
+    work = work.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    work = work.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    work = work.replace(/==([^=]+)==/g, '<mark>$1</mark>');
+    work = work.replace(/~~([^~]+)~~/g, '<del>$1</del>');
+    work = work.replace(/\[([^\]]*)\]\(([^)\s]+)\)/g, function (whole, label, href) {
+      if (!NOTE_SAFE_LINK.test(href)) return whole;
+      return '<a href="' + href + '" rel="noreferrer">' + (label || href) + '</a>';
+    });
+    return work.replace(NOTE_HOLD_BACK, function (whole, index) {
+      return '<code>' + escapeText(spans[Number(index)]) + '</code>';
+    });
+  }
+
+  function noteIndent(space) { return space.replace(/\t/g, '  ').length; }
+
+  /* One list, and every list nested under it. A deeper line belongs to the
+     item above it rather than to a list of its own, which is the reference's
+     most visible gap: theirs renders every item as an independent flat row, so
+     a two-level outline arrives with no outline at all. */
+  function renderList(lines, start, indent) {
+    var opening = lines[start].match(NOTE_ITEM);
+    var ordered = /\d/.test(opening[2]);
+    var items = [];
+    var at = start;
+    while (at < lines.length) {
+      var item = lines[at].match(NOTE_ITEM);
+      if (!item) break;
+      var width = noteIndent(item[1]);
+      if (width < indent) break;
+      if (width > indent) {
+        if (!items.length) break;
+        var deeper = renderList(lines, at, width);
+        items[items.length - 1].html += deeper.html;
+        at = deeper.next;
+        continue;
+      }
+      if (/\d/.test(item[2]) !== ordered) break;
+      var task = item[3].match(/^\[([ xX])\]\s*(.*)$/);
+      if (task) {
+        var done = task[1] !== ' ';
+        items.push({
+          cls: ' class="notes-task"',
+          /* The box is a glyph and the state is a word, because the glyph
+             carries the whole of the information and a screen reader cannot
+             say it. It is not a checkbox: a preview that offered one would be
+             offering to change a document it is not editing. */
+          html: '<span class="notes-box" aria-hidden="true">' + (done ? '☑' : '☐') + '</span>'
+            + '<span class="sr-only">' + (done ? 'Done: ' : 'To do: ') + '</span>'
+            + renderInline(task[2])
+        });
+      } else {
+        items.push({ cls: '', html: renderInline(item[3]) });
+      }
+      at += 1;
+    }
+    var tag = ordered ? 'ol' : 'ul';
+    var body = items.map(function (item) { return '<li' + item.cls + '>' + item.html + '</li>'; }).join('');
+    return { html: '<' + tag + ' class="notes-list">' + body + '</' + tag + '>', next: at };
+  }
+
+  function renderQuote(lines, start) {
+    var body = [];
+    var at = start;
+    while (at < lines.length && /^\s*>/.test(lines[at])) {
+      body.push(lines[at].replace(/^\s*>\s?/, ''));
+      at += 1;
+    }
+    var head = body.length ? body[0].match(NOTE_CALLOUT) : null;
+    var kind = head ? NOTE_CALLOUTS[head[1].toLowerCase()] : undefined;
+    if (kind === undefined) {
+      return { html: '<blockquote>' + renderBlocks(body) + '</blockquote>', next: at };
+    }
+    return {
+      html: '<div class="' + (kind ? 'callout ' + kind : 'callout') + '">'
+        + '<span class="tag">' + escapeText(head[2] || head[1]) + '</span>'
+        + renderBlocks(body.slice(1)) + '</div>',
+      next: at
+    };
+  }
+
+  /* Headings start at `h3`. The panel's own title is the `h2` a dialog's name
+     has to be, so a note's own `#` sits under it and the outline a screen
+     reader walks stays in order. How big each one looks is the stylesheet's,
+     which is the tag-and-size split the hub states everywhere else. */
+  function renderBlocks(lines) {
+    var out = [];
+    var at = 0;
+    while (at < lines.length) {
+      var line = lines[at];
+      if (/^\s*```/.test(line)) {
+        var code = [];
+        at += 1;
+        while (at < lines.length && !/^\s*```/.test(lines[at])) { code.push(lines[at]); at += 1; }
+        at += 1;   // the closing fence, or the end of the document
+        out.push('<pre><code>' + escapeText(code.join('\n')) + '</code></pre>');
+        continue;
+      }
+      if (/^\s*>/.test(line)) {
+        var quote = renderQuote(lines, at);
+        out.push(quote.html);
+        at = quote.next;
+        continue;
+      }
+      var head = line.match(/^(#{1,4})\s+(.*)$/);
+      if (head) {
+        var level = head[1].length + 2;
+        out.push('<h' + level + '>' + renderInline(head[2]) + '</h' + level + '>');
+        at += 1;
+        continue;
+      }
+      if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) { out.push('<hr>'); at += 1; continue; }
+      var item = line.match(NOTE_ITEM);
+      if (item) {
+        var list = renderList(lines, at, noteIndent(item[1]));
+        out.push(list.html);
+        at = list.next;
+        continue;
+      }
+      if (!line.trim()) { at += 1; continue; }
+      var para = [];
+      while (at < lines.length && lines[at].trim()
+        && !/^\s*(>|```|#{1,4}\s)/.test(lines[at]) && !NOTE_ITEM.test(lines[at])) {
+        para.push(lines[at]);
+        at += 1;
+      }
+      out.push('<p>' + renderInline(para.join('\n')).replace(/\n/g, '<br>') + '</p>');
+    }
+    return out.join('');
+  }
+
+  function renderNote(source) {
+    return renderBlocks(String(source).replace(/\r\n?/g, '\n').split('\n'));
+  }
+
+  /* ---------- what the reader takes away ----------
+     Front matter first, then the document as it stands in the editor rather
+     than as it stands in storage: the whole point of the button on a failed
+     write is that storage is exactly what cannot be trusted.
+
+     The guard on an existing front-matter block is a real one. The reference
+     tests `content.trim().indexOf('---') === 0`, so a note that opens with a
+     horizontal rule is mistaken for a note that already carries front matter
+     and is exported with none. A block is a fence, a body and a closing fence,
+     and that is what this asks for. */
+  var NOTE_FRONT = /^---\r?\n[\s\S]*?\r?\n---(\r?\n|$)/;
+
+  function yamlString(text) { return '"' + String(text).replace(/"/g, '\\"') + '"'; }
+
+  function exportBody(scope, text) {
+    if (NOTE_FRONT.test(text)) return text;
+    var today = new Date();
+    var day = today.getFullYear()
+      + '-' + ('0' + (today.getMonth() + 1)).slice(-2)
+      + '-' + ('0' + today.getDate()).slice(-2);
+    return [
+      '---',
+      'title: ' + yamlString(document.title),
+      'scope: ' + yamlString(scope.label),
+      'notes-key: ' + yamlString(scope.store),
+      'source: ' + yamlString(location.href),
+      'exported: ' + day,
+      '---',
+      '',
+      text.replace(/\s*$/, ''),
+      ''
+    ].join('\n');
+  }
+
+  /* The anchor is put in the document before it is clicked and the object URL
+     is revoked on the next turn of the loop. The reference does neither - it
+     clicks a detached anchor and revokes on the very next line - and both are
+     races a browser is entitled to lose on a large document. */
+  function downloadMarkdown(name, body) {
+    var url = URL.createObjectURL(new Blob([body], { type: 'text/markdown;charset=utf-8' }));
+    var link = el('a');
+    link.href = url;
+    link.download = name;
+    link.hidden = true;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(function () { URL.revokeObjectURL(url); }, 0);
+  }
+
+  /* Counted over the markdown the reader wrote rather than over the rendered
+     prose, which is what the `title` on the readout says out loud: a count
+     that silently meant one of the two would be wrong for whoever assumed the
+     other. */
+  function noteCount(text) {
+    var words = text.trim() ? text.trim().split(/\s+/).length : 0;
+    return words + (words === 1 ? ' word, ' : ' words, ')
+      + text.length + (text.length === 1 ? ' character' : ' characters');
+  }
+
+  function clockStamp() {
+    var now = new Date();
+    return ('0' + now.getHours()).slice(-2) + ':' + ('0' + now.getMinutes()).slice(-2);
+  }
+
+  function buildNotesPanel() {
+    var scopes = noteScopes();
+    var scope = scopes[0];
+    var chosen = get(STORE.noteScope);
+    scopes.forEach(function (item) { if (item.key === chosen) scope = item; });
+
+    var view = NOTE_VIEWS[0].key;
+    var timer = null;
+    var ceiling = 0;
+    var spoken = '';
+
+    /* What the editor holds, per scope, for this page load. Storage is the
+       durable copy and this is the live one, and the live one wins: a read
+       that put storage over the top of the editor is loss path (d) in the
+       reference, where saving a highlight rewrites the textarea from a
+       document that predates whatever the reader has just typed. Nothing here
+       reads storage over text the reader can still see, so a failed write
+       leaves the words on screen for Export to take away. */
+    var drafts = {};
+
+    var shell = makePanel({
+      name: 'notes',
+      className: 'notes',
+      title: 'Study notes',
+      closeLabel: 'Close study notes',
+      storeKey: STORE.notePanel,
+      onOpen: function () { load(scope); },
+      onClose: function () { flush(); }
+    });
+    var body = shell.body;
+
+    /* ---------- 1. which document ---------- */
+    var scopeField = el('div', 'notes-field');
+    var scopeLabel = el('span', 'notes-lbl', 'Notes for');
+    scopeLabel.id = 'notes-scope-label';
+    var scopeCards = segmented('scope', scopes, function (key) { switchScope(key); });
+    scopeCards.setAttribute('role', 'group');
+    scopeCards.setAttribute('aria-labelledby', scopeLabel.id);
+    var where = el('p', 'notes-where');
+    scopeField.appendChild(scopeLabel);
+    scopeField.appendChild(scopeCards);
+    scopeField.appendChild(where);
+    body.appendChild(scopeField);
+
+    /* ---------- 2. write or read ---------- */
+    var viewField = el('div', 'notes-field');
+    var viewLabel = el('span', 'sr-only', 'Editor view');
+    viewLabel.id = 'notes-view-label';
+    var viewCards = segmented('view', NOTE_VIEWS, function (key) { switchView(key); });
+    viewCards.setAttribute('role', 'group');
+    viewCards.setAttribute('aria-labelledby', viewLabel.id);
+    viewField.appendChild(viewLabel);
+    viewField.appendChild(viewCards);
+    body.appendChild(viewField);
+
+    /* ---------- 3. the toolbar ---------- */
+    var tools = el('div', 'notes-tools');
+    tools.setAttribute('role', 'toolbar');
+    tools.setAttribute('aria-label', 'Formatting');
+    NOTE_TOOLS.forEach(function (tool) {
+      var button = el('button', 'notes-tool');
+      button.type = 'button';
+      button.dataset.tool = tool.key;
+      button.setAttribute('aria-label', tool.name + (tool.keys ? ', ' + tool.keys : ''));
+      button.title = tool.name + (tool.keys ? ' (' + tool.keys + ')' : '');
+      var glyph = el('span', null, tool.glyph);
+      glyph.setAttribute('aria-hidden', 'true');
+      button.appendChild(glyph);
+      button.addEventListener('click', function () { applyTool(tool); });
+      tools.appendChild(button);
+    });
+    body.appendChild(tools);
+
+    /* ---------- 4. the editor, and the preview in its place ---------- */
+    var field = el('textarea', 'notes-edit');
+    field.setAttribute('aria-label', 'Study notes, in Markdown');
+    field.placeholder = 'Write here. Markdown: # heading, - list, **bold**, `code`, > [!tip] callout.';
+    body.appendChild(field);
+
+    var preview = el('div', 'notes-view');
+    preview.hidden = true;
+    body.appendChild(preview);
+
+    /* ---------- 5. the truth, the count, and the way out ----------
+       The foot is pinned to the panel rather than put in the scrolling body,
+       which is the one place this panel departs from the appearance panel's
+       shape and it is the save state that earns it: a reader whose write has
+       just failed must not have to scroll to find that out, and the button
+       that gets their words back out must not be the thing below the fold. It
+       sits outside `shell.body` for that reason, in the panel the shell
+       returns, exactly as the title bar does at the other end. */
+    var foot = el('div', 'notes-foot');
+    var state = el('p', 'notes-state');
+    state.setAttribute('role', 'status');
+    var count = el('p', 'notes-count');
+    count.title = 'Counted over the Markdown you wrote, not over the rendered preview.';
+    var take = el('button', 'notes-export');
+    take.type = 'button';
+    take.textContent = 'Export Markdown';
+    take.addEventListener('click', function () {
+      downloadMarkdown(scope.file + '-notes.md', exportBody(scope, field.value));
+    });
+    foot.appendChild(state);
+    foot.appendChild(count);
+    foot.appendChild(take);
+    shell.el.appendChild(foot);
+
+    /* ---------- the state, which is never more than what happened ---------- */
+    function say(kind, text) {
+      state.dataset.state = kind;
+      /* Written only when it changed, because `role="status"` speaks every
+         write and a reader on a screen reader does not need "Saved" announced
+         at every pause in a long paragraph. */
+      if (text !== spoken) { state.textContent = text; spoken = text; }
+      take.dataset.urgent = kind === 'failed' ? 'yes' : 'no';
+    }
+
+    function tally() {
+      count.textContent = noteCount(field.value);
+      take.disabled = !field.value.trim();
+    }
+
+    function commit() {
+      window.clearTimeout(timer);
+      timer = null;
+      ceiling = 0;
+      var text = field.value;
+      drafts[scope.store] = text;
+      var kept = text.trim() ? setChecked(scope.store, text) : dropChecked(scope.store);
+      if (kept) say('saved', 'Saved ' + clockStamp());
+      else if (storageAccepts()) say('failed', 'Not saved: browser storage is full. Export to keep this.');
+      else say('failed', 'Not saved: this browser is storing nothing here. Export to keep this.');
+      return kept;
+    }
+
+    function flush() { if (timer) commit(); }
+
+    function schedule() {
+      var now = Date.now();
+      if (!ceiling) ceiling = now + NOTE_LATEST;
+      window.clearTimeout(timer);
+      timer = window.setTimeout(commit, Math.max(0, Math.min(NOTE_SETTLE, ceiling - now)));
+      say('saving', 'Saving');
+    }
+
+    /* ---------- loading, which never runs over the reader ---------- */
+    function load(next) {
+      scope = next;
+      var draft = drafts[scope.store];
+      field.value = draft === undefined ? (get(scope.store) || '') : draft;
+      where.textContent = scope.store;
+      pressGroup(shell.el, 'scope', scope.key);
+      pressGroup(shell.el, 'view', view);
+      tally();
+      if (!storageAccepts()) {
+        say('failed', 'Not saved: this browser is storing nothing here. Export to keep this.');
+      } else if (field.value) {
+        say('saved', 'Saved earlier in this browser.');
+      } else {
+        say('idle', 'Nothing written for ' + scope.label.toLowerCase() + ' yet.');
+      }
+    }
+
+    function switchScope(key) {
+      if (key === scope.key) return;
+      /* The document on screen is written before the other is read, so a
+         scope change can never be the thing that loses a paragraph. If that
+         write fails the draft is still held in memory, which is why `drafts`
+         is keyed by store and never cleared. */
+      flush();
+      drafts[scope.store] = field.value;
+      scopes.forEach(function (item) { if (item.key === key) load(item); });
+      set(STORE.noteScope, scope.key);
+      if (view === 'read') preview.innerHTML = renderNote(field.value);
+    }
+
+    function switchView(key) {
+      view = key;
+      var reading = key === 'read';
+      if (reading) preview.innerHTML = renderNote(field.value);
+      preview.hidden = !reading;
+      field.hidden = reading;
+      pressGroup(shell.el, 'view', view);
+    }
+
+    function applyTool(tool) {
+      /* A formatting press in Preview means the reader wants to write, so the
+         panel goes back to the editor rather than doing nothing visible. */
+      if (view === 'read') switchView('write');
+      if (tool.key === 'heading') cycleHeading(field);
+      else if (tool.key === 'code') insertCode(field);
+      else if (tool.wrap) wrapSelection(field, tool.wrap[0], tool.wrap[1], tool.sample);
+      else prefixLines(field, tool.line, tool.sample);
+    }
+
+    field.addEventListener('input', function () { tally(); schedule(); });
+    /* Leaving the field is a pause the reader can see, so it commits. Tab is
+       bound to nothing here on purpose: the reference indents with it, which
+       makes the editor a keyboard trap and fails WCAG 2.1.2, and this panel is
+       walked with real Tab keys by `scripts/focus_walk.py`. */
+    field.addEventListener('blur', flush);
+    field.addEventListener('keydown', function (event) {
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+      var key = event.key.toLowerCase();
+      if (key === 's') { event.preventDefault(); commit(); return; }
+      if (event.shiftKey) {
+        if (key === 'c') { event.preventDefault(); insertCode(field); }
+        return;
+      }
+      if (key === 'b') { event.preventDefault(); wrapSelection(field, '**', '**', 'bold text'); }
+      else if (key === 'i') { event.preventDefault(); wrapSelection(field, '*', '*', 'italic text'); }
+    });
+
+    /* The two exits the reference has neither of. A keystroke followed inside
+       the debounce by a link click, a tab close, a background switch or the
+       browser's own back button is written rather than lost. */
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'hidden') flush();
+    });
+    window.addEventListener('pagehide', flush);
+
+    load(scope);
+    return shell;
+  }
+
   /* ---------- the panel reads the page back, never its own memory ----------
      Every control's state is read off the attribute or the computed token that
      actually decides the page, so the panel and the page cannot disagree about
      what is on. A control that remembered what it drew would be right until the
      first time something else moved. */
-  function syncGroup(attribute, current) {
-    if (!appearance) return;
-    var cards = appearance.el.querySelectorAll('[data-' + attribute + ']');
+  function pressGroup(scope, attribute, current) {
+    var cards = scope.querySelectorAll('[data-' + attribute + ']');
     Array.prototype.forEach.call(cards, function (card) {
       if (card.tagName !== 'BUTTON') return;
       card.setAttribute('aria-pressed', String(card.dataset[attribute] === current));
     });
+  }
+
+  function syncGroup(attribute, current) {
+    if (!appearance) return;
+    pressGroup(appearance.el, attribute, current);
   }
 
   function syncSettings() {

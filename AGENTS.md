@@ -203,9 +203,9 @@ reaches nothing else, because there is no headroom in the chrome: one control al
 margin. The limit is structural rather than promised - `hub.js` can only write `--*-user` names
 that `hub.css` resolves, and those are the twenty-four reader-reachable tokens.
 
-**The panel has two openers, and a floating cluster in the bottom-right corner of every page is
-the second.** Three controls, also built by `hub.js` with no page markup: light and dark, the panel
-launcher, and scroll-to-top. It exists because a control nobody finds is a control nobody has, and
+**Each panel has two openers, and a floating cluster in the bottom-right corner of every page is
+the second.** Four controls, also built by `hub.js` with no page markup: light and dark, the
+appearance launcher, the study notes launcher, and scroll-to-top. It exists because a control nobody finds is a control nobody has, and
 the mode toggle is the part that teaches - one click repaints the page, so the launcher beside it
 reads as an offer. Both openers wear `aria-expanded` and closing returns focus to whichever one was
 used, and the shell owns that: `attachOpener` registers a button rather than replacing the last one,
@@ -218,6 +218,21 @@ design axis.
 The author-facing statement, including the focus contract in full, is
 `.claude/skills/course-authoring/references/widgets.md`, "The reader control panel" and "The
 floating control cluster". Do not restate it here.
+
+**The second panel on the shell is the study notes panel, and its one hard rule is that the save
+state is a fact.** It writes through `setChecked` / `dropChecked`, which set, read back and return
+whether the store now holds it, and never through `set` / `drop`, which swallow - right for a
+preference, and the defect itself for a document. A failed write shows `Not saved` in `--warn`,
+keeps the reader's words in the editor, and fills the Export button. The four ways the reference
+site loses text are closed and each closure is a rule: the debounce carries a 2s ceiling as well as
+a 400ms pause; `visibilitychange`, `pagehide` and `blur` all commit; the shell's `onClose` commits
+before the panel goes; and storage is never read over text the reader can still see. A note is
+keyed `coursehub.note:` plus a tier and the course key and file name, which are the two identifiers
+this repository has committed never to change - never a title. Tab is bound to nothing in the
+editor, because indenting with it is a keyboard trap and fails SC 2.1.2. It opens from the topbar
+and from the cluster, which is one `attachOpener` call each. The author-facing
+statement is `.claude/skills/course-authoring/references/widgets.md`, "The study notes panel". Do
+not restate it here.
 
 ## The course contract
 
@@ -303,7 +318,7 @@ rules. `AXIS_ATTRIBUTES` in `scripts/validate_site.py` is the registry, and `hub
 attribute on `<html>` that is not in it.
 
 **Type, rhythm and shape are tokens too, and a rule reads one rather than a literal.** One block
-near the head of `hub.css`, marked "the design axis", carries 339 of them: `--font-display`,
+near the head of `hub.css`, marked "the design axis", carries 346 of them: `--font-display`,
 `--font-ui` and `--font-mono` by role, the type scale, the leading set, weight, tracking, an
 eight-step space ramp with a role layer over it, the reading frame, shape, motion and the eyebrow
 treatment. Six of

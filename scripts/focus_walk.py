@@ -26,13 +26,15 @@ because Chrome keeps ``:focus-visible`` on an element that already had it, so th
 same click tested after a walk would be measuring the walk's own keyboard
 modality rather than the click.
 
-The walk covers three pages, the appearance panel, and one narrow viewport, in
-both modes. The panel is here because a settings panel is the classic place a
-design system fails its own floor, and because it is built by script at the
-moment it is opened, so it never existed when the page was first painted - which
-is exactly the state a capture of the first paint cannot see. The narrow
-viewport is here because a scroll container only earns its tab stop when it
-genuinely scrolls, and at a full-width column nothing in this hub does.
+The walk covers three pages, both panels, and one narrow viewport, in both
+modes. The panels are here because a settings panel is the classic place a
+design system fails its own floor, because a study notes panel is thirteen more
+controls and a textarea on the same footing, and because both are built by
+script at the moment they are opened, so neither existed when the page was
+first painted - which is exactly the state a capture of the first paint cannot
+see. The narrow viewport is here because a scroll container only earns its tab
+stop when it genuinely scrolls, and at a full-width column nothing in this hub
+does.
 
 The palettes are not walked. The ring's colour is a token, and the token is
 measured against every surface in every palette and mode by
@@ -150,9 +152,24 @@ STOP = """
 })()
 """
 
-# The appearance panel's own button, which is the one that says it opens a
-# dialog. The topbar carries a second .tb-btn for the rail.
-PANEL_BUTTON: str = '.tb-btn[aria-haspopup="dialog"]'
+# The two panels, each reached by the button that names it. The selector is
+# `aria-controls` rather than `aria-haspopup="dialog"` because two buttons in
+# the topbar now say they open a dialog, and a positional selector between them
+# would silently walk one panel twice the day either is appended in the other
+# order. `attachOpener` in hub.js writes the attribute, so a panel that reaches
+# the topbar at all is reachable here.
+#
+# Both are left open. Two open panels is a state a reader can reach - they are
+# non-modal and neither closes the other - and the second walk is bounded by
+# its own container either way.
+PANELS: tuple[tuple[str, str, str], ...] = (
+    ("the appearance panel", '.tb-btn[aria-controls="panel-appearance"]', ".settings"),
+    ("the study notes panel", '.tb-btn[aria-controls="panel-notes"]', ".notes"),
+)
+
+# The button the mouse check clicks. It only has to be a control that opens
+# something, and the appearance panel's is the one that has always been it.
+PANEL_BUTTON: str = PANELS[0][1]
 
 CLICK_TARGET = """
 (function (selector) {
@@ -164,18 +181,18 @@ CLICK_TARGET = """
 """
 
 OPEN_PANEL = """
-(function (selector) {
+(function (selector, within) {
   var button = document.querySelector(selector);
-  if (!button) return 'no appearance button in the topbar';
+  if (!button) return 'no button matching ' + selector + ' in the topbar';
   button.click();
-  var panel = document.querySelector('.settings');
+  var panel = document.querySelector(within);
   if (!panel) return 'the panel was never built';
   if (panel.hidden) return 'the panel did not open';
   var first = panel.querySelector('a, button, input, select, textarea, [tabindex]');
   if (!first) return 'the panel has no control to focus';
   first.focus();
   return 'open';
-})(%(selector)s)
+})(%(selector)s, %(within)s)
 """
 
 INSIDE = """
@@ -374,15 +391,18 @@ def run(quiet: bool) -> int:
                 walked.append((where, stops))
                 failures += found
 
-                opened = str(chrome.evaluate(OPEN_PANEL % {"selector": json.dumps(PANEL_BUTTON)}))
-                if opened != "open":
-                    failures.append(Failure(f"the appearance panel on {page} [{PALETTE}/{mode}]", opened))
-                    continue
-                settle(chrome)
-                where = f"the appearance panel on {page} [{PALETTE}/{mode}]"
-                stops, found = walk(chrome, where, within=".settings")
-                walked.append((where, stops))
-                failures += found
+                for label, opener, selector in PANELS:
+                    where = f"{label} on {page} [{PALETTE}/{mode}]"
+                    opened = str(chrome.evaluate(
+                        OPEN_PANEL % {"selector": json.dumps(opener), "within": json.dumps(selector)}
+                    ))
+                    if opened != "open":
+                        failures.append(Failure(where, opened))
+                        continue
+                    settle(chrome)
+                    stops, found = walk(chrome, where, within=selector)
+                    walked.append((where, stops))
+                    failures += found
             chrome.page(
                 "Emulation.setDeviceMetricsOverride",
                 {"width": NARROW[0], "height": NARROW[1], "deviceScaleFactor": 1, "mobile": False},
