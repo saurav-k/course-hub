@@ -249,6 +249,23 @@ anywhere else, and the panel shell's `bounds()` measures the two bars rather tha
 The author-facing statement is `.claude/skills/course-authoring/references/widgets.md`, "The fixed
 chapter bar". Do not restate it here.
 
+**The in-page section rail is chrome derived from the page itself, and that is the rule that
+matters.** `hub.js` reads the page's own headings at runtime - an `h2` that is a direct child of the
+content region and is not wearing `.h-label` or `.h-sub`, which is the rule `.numbered` already
+applies - and builds a strip of ticks in the right-hand margin. No page's markup mentions it, no
+lesson edit is ever needed, and there is no second model of a page's sections that could disagree
+with the page. Four things are decided and none may be re-decided casually: the rail appears at four
+sections and not fewer; a generated id is `sec-` plus the heading's slug, taking the next free `-2`,
+`-3` only when the document already answers to the candidate; the reader is in the last section
+whose heading has reached `--secrail-line`, which is also every direct-child `h2`'s
+`scroll-margin-top` and is read back in pixels by `hub.js` rather than restated; and the
+`IntersectionObserver` watches thresholds 0 **and** 1, because 0 alone lags by the height of a
+heading and a one-pixel band is stepped over by a fast scroll. It runs at 1281px and up - below that
+the gutter is `--pad: 2rem` and the strip would stand on the breakout band, and below 1041px the
+course rail is already a drawer over the same prose - and it is not printed. The author-facing
+statement is `.claude/skills/course-authoring/references/widgets.md`, "The in-page section rail". Do
+not restate it here.
+
 ## The course contract
 
 A course declares its identity through **seven tokens, in one block keyed on `data-course`, and
