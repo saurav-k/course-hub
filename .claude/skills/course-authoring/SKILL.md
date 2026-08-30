@@ -63,7 +63,7 @@ Read it on every branch.
 Two of those bars decide the shape of a page rather than its polish.
 
 - **The big picture comes first.** Every content page opens with an orientation figure, before the first body section, showing where this idea sits in the whole. A reader who sees the opening sentence and that figure alone can say what the page is about and why it exists. **Its `.fig-cap` is the only one on the page that may be generic - `Where this sits` is the house label for it - and every other figure needs its own subject.**
-- **A figure says what it is and what it proves, above the drawing.** Two lines: `.fig-cap` names the subject in two to five words, `.fig-claim` states what the drawing proves in one sentence under fifteen. The reader meets the question before the answer. A caption that only names the figure is half a caption, and `.fig-claim` with no `.fig-cap` fails the validator.
+- **A figure says what it is and what it proves, above the drawing.** Two lines: `.fig-cap` names the subject in two to five words, `.fig-claim` states what the drawing proves in one sentence under fifteen. The reader meets the question before the answer. A caption that only names the figure is half a caption, and `.fig-claim` with no `.fig-cap` fails the validator. Write the label in sentence case: the stylesheet upper-cases it, so capitals of your own are invisible until a course turns the treatment off, and it is held to the eyebrow's five-word limit.
 - **Fewer words.** 1,800 prose words per page, 400 prose words per figure. When a paragraph and a figure say the same thing, the paragraph goes.
 
 ## Facts

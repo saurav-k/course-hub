@@ -70,7 +70,7 @@ It is an estimate and it only has to be honest; the point is that a reader arriv
 | figures without a `<figcaption>` | **0** |
 | figcaptions without a bolded takeaway | **0** |
 | figures on a new page without a `.fig-cap` label | **0** |
-| `.fig-cap` labels over 6 words | **0** |
+| `.fig-cap` labels over 5 words | **0** |
 | `.fig-claim` sentences over 15 words | **0** |
 
 The kind bar exists because a flowchart is the diagram you reach for when you have not asked what the reader is confused about.
@@ -94,8 +94,8 @@ That is 219 words a lesson page, 12% of the prose ceiling, none of it counted.
 When a caption runs past about 40 words, the sentence it is really trying to write belongs in the `.fig-claim` and the rest belongs in the body or nowhere.
 
 The first of the three new rows is a bar and not a gate, and the difference matters.
-`check_pages.py` fails a label over six words and a label that is a question, because both are defects in what an author wrote.
-It does not fail a figure with no label at all, and it must not: requiring one would fail every figure written before the widget existed, and a generated label is worse than none.
+The other two are gates: `validate_site.py` fails a label over five words, on the same rule that already holds a page's own `.eyebrow` to five, and `check_pages.py` fails a label or a claim written as a question and warns on a claim past fifteen words.
+Nothing fails a figure with no label at all, and nothing must: requiring one would fail every figure written before the widget existed, and a generated label is worse than none.
 A page you are writing now is held to the bar; a page you are not touching is not.
 
 ## Cognitive load

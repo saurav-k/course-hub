@@ -240,7 +240,7 @@ flowchart LR
 
 | Part | What it is | Length |
 |---|---|---|
-| `.fig-cap` | the **subject**. What the drawing is of. | 2 to 5 words |
+| `.fig-cap` | the **subject**. What the drawing is of. | 2 to 5 words, and 5 is a gate |
 | `.fig-claim` | the **claim**. What the drawing proves. | one sentence, under 15 words |
 | the drawing | `div.mermaid` or `svg.chart` | - |
 | `<figcaption>` | the reading, with the bolded takeaway | as short as it can be and still teach |
@@ -257,6 +257,11 @@ Write `.fig-cap` in sentence case.
 The stylesheet upper-cases it, and it takes the eyebrow family, tracking and case from the design in force, so it is mono under Press and Inter under House with the page naming no face.
 Both lines cost no colour: the label is `--accent-2` and the claim `--ink`, which the contrast matrix already holds over the diagram card in every palette, both modes and every course hue.
 
+**Five words is the ceiling, and it is the eyebrow's rather than a second number.**
+`.fig-cap` wears the eyebrow treatment, so `validate_site.py` holds it to exactly the limit a page's own `.eyebrow` already answers to: no more than five words in a segment while the case is uppercase, because capitals read 9.53% to 19.01% slower than lowercase.
+The house target is two to four.
+A label that needs more than five words has stopped naming a subject and started making the claim, which is the line below it.
+
 A figure may carry neither line.
 It may not carry only the claim.
 **A `.fig-claim` with no `.fig-cap` above it is a proposition with no subject, and it reads as a stray sentence that lost its paragraph.**
@@ -269,7 +274,11 @@ The bar for a page you are writing now is in [`pedagogy.md`](pedagogy.md).
 ### Two ways the caption pair breaks silently
 
 - **`.fig-cap` and `.fig-claim` are direct children of `figure.diagram`, in that order, before the drawing.** The stylesheet selects them as `figure.diagram > .fig-cap`, so one wrapped in a `<div>` for spacing takes no styling at all and renders as unstyled body text at figure width. Nothing reaches the console and the page still validates against every other check.
-- **A `.fig-cap` longer than about six words wraps, and the rule mark is on the first line only.** The mark is a `::before` on a flex row, so a wrapped label leaves its second line with no anchor and the figure loses its left edge. There is no ellipsis and no warning; it looks correct on a laptop and broken at narrow widths, which is the order nobody checks in.
+- **Write the label in sentence case, never in capitals of your own.** The stylesheet upper-cases it, so `WHERE THIS SITS` and `Where this sits` are the same pixels under the default treatment and the mistake is invisible on the page you wrote it on. A course that sets `--eyebrow-case: none`, which the course contract allows, then renders your capitals as capitals, on a page nobody is going to look at again. The treatment is the stylesheet's decision, and a page that takes it back has taken a reading-speed penalty nobody asked for.
+
+The rule mark is not one of them, and it used to be.
+It rides the first line by a half-line offset rather than by centring on the box, so a label that wraps keeps its anchor and its second line stays indented under its first.
+That was worth fixing rather than documenting: measured at 320px, a five-word label wraps under Press and a six-word one under House, both inside the bar above, so the wrap is reachable by an author who did nothing wrong.
 
 ### The orientation figure, which opens every content page
 

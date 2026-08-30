@@ -40,8 +40,9 @@ Nineteen checks, all deterministic and offline:
    author tokens and only values inside their stated ranges; the six tokens a
    design also declares keep their two names, so a design and a course never
    contend for one; no two courses hold one hue; no course ships a stylesheet
-   of its own beyond the three grandfathered ones; and no eyebrow set in
-   capitals runs past five words in a segment. What the registered hue then
+   of its own beyond the three grandfathered ones; and no label wearing the
+   eyebrow treatment - a page's ``.eyebrow`` or a figure's ``.fig-cap`` - runs
+   past five words in a segment while it is set in capitals. What the registered hue then
    looks like needs a browser and is asserted in ``scripts/style_snapshot.py``.
 
 13. The accessibility floor, by the arithmetic half of checks G1, G2 and G3 in
@@ -1864,6 +1865,12 @@ LONG_UPPERCASE_EYEBROWS: dict[str, int] = {
 # An eyebrow is looked at rather than read, which is what makes capitals
 # defensible. Five words is the limit the specification states as "about five",
 # and the house target is two to four.
+#
+# Two elements wear the treatment and both are held to it. `.eyebrow` is the
+# page's own label; `.fig-cap` is a figure's, and it is upper-cased by the same
+# four tokens, so a six-word figure label is the same defect in a second place.
+# One limit rather than two: a second number in a second gate is a number that
+# drifts.
 EYEBROW_WORD_LIMIT: int = 5
 
 CSS_COMMENT: re.Pattern[str] = re.compile(r"/\*.*?\*/", re.DOTALL)
@@ -1873,7 +1880,7 @@ DECLARATION: re.Pattern[str] = re.compile(r"(--[\w-]+)\s*:\s*([^;]+)")
 UNITLESS_NUMBER: re.Pattern[str] = re.compile(r"^-?(?:\d+(?:\.\d+)?|\.\d+)$")
 FACE_REFERENCE: re.Pattern[str] = re.compile(r"^var\(\s*(--[\w-]+)\s*\)$")
 LENGTH: re.Pattern[str] = re.compile(r"^(-?(?:\d+(?:\.\d+)?|\.\d+))(em|rem|px)?$")
-EYEBROW_ELEMENT: re.Pattern[str] = re.compile(r'class="eyebrow"[^>]*>(.*?)</', re.DOTALL)
+EYEBROW_ELEMENT: re.Pattern[str] = re.compile(r'class="(?:eyebrow|fig-cap)"[^>]*>(.*?)</', re.DOTALL)
 EYEBROW_SEPARATOR: re.Pattern[str] = re.compile(r"&middot;|&bull;|&mdash;|&ndash;|\u00b7|\u2022|\|")
 TAG: re.Pattern[str] = re.compile(r"<[^>]+>")
 
@@ -2170,7 +2177,12 @@ def _course_sheet_problems() -> list[Problem]:
 
 
 def eyebrow_strings(page: Path) -> list[str]:
-    """The text of every eyebrow on a page, tags removed and whitespace folded."""
+    """Every string on a page wearing the eyebrow treatment, folded to plain text.
+
+    Both `.eyebrow` and a figure's `.fig-cap`: they take the same family,
+    tracking and case from the same four tokens, so they are one label in two
+    places and answer to one limit.
+    """
     source = page.read_text(encoding="utf-8", errors="replace")
     return [
         " ".join(TAG.sub(" ", found).split()) for found in EYEBROW_ELEMENT.findall(source)
