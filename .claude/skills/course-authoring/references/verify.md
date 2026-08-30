@@ -69,6 +69,8 @@ Then look anyway. A diagram that parses can still say the wrong thing.
 
 Read the page start to finish as the learner in `MISSION.md`, not as its author.
 
+- **Read each figure's two lines without looking at the drawing.** The label should name a subject and the claim should state something you could argue with. If the claim only describes the picture, the figure has a title and no point; if the label argues, the two lines have swapped jobs.
+
 - **Cover the page and look only at the h1 and the orientation figure.** Can you say what this page is about and why it exists? That is the whole test, and it is the one the machine cannot run. If the answer is no, the figure is decoration and the page has no big picture.
 - **Which paragraph does a figure already say?** Read every paragraph beside the figure nearest it. Where the two say the same thing, the paragraph goes. This is where a page comes down under the word ceiling, and cutting here costs the reader nothing.
 - **Is there one idea?** If the summary needs "and", it is two pages.
