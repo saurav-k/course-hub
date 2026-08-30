@@ -8,7 +8,8 @@ This file adds only what is true of this course and nowhere else.
 
 A deck-faithful expansion of the IIT Bombay lecture series *Statistical Foundations of Machine Learning* (Nikhil Karamchandani and D. Manjunath), written for one learner: a tech lead whose university probability has gone cold and who asked for near-zero cognitive load and many diagrams.
 The course nests three levels deep: course map, lecture hub, one-idea page.
-Lectures 1 to 5, TA Sessions 1 and 2, and Homework 1 are on the site, occupying lessons `0000` to `0076`; see [`PLOT.md`](PLOT.md) for the exact state and the true reading order.
+Lectures 1 to 6, TA Sessions 1 and 2, and Homework 1 are on the site, occupying lessons `0000` to `0091`; see [`PLOT.md`](PLOT.md) for the exact state and the true reading order.
+**Two numbering schemes run through this course and they no longer agree**: the lecturer's own numbering of his notes has drifted from this course's session numbering by one topic, so the notes titled Lecture 4 are this course's Lecture 6. `PLOT.md` records the drift; never renumber a lesson to close it.
 
 ## Read before you write
 

@@ -9,9 +9,10 @@
      1. head phase   - restore mode, palette, design and the two reading
                        preferences from localStorage
      2. mount phase  - build the rail and the fixed chapter bar from
-                       window.COURSE_OUTLINE, build the topbar controls and
-                       settings popover, and the pre-production bar when the
-                       host says so
+                       window.COURSE_OUTLINE, build the in-page section rail
+                       from the page's own headings, build the topbar controls
+                       and settings popover, and the pre-production bar when
+                       the host says so
      3. wire phase   - quiz, copy buttons, reading progress, Mermaid
 
    Every page links this one file. There is no per-course runtime.
@@ -30,6 +31,7 @@
     panel:   'coursehub.panel',     // where the reader put the appearance panel
     notePanel: 'coursehub.notepanel', // where the reader put the notes panel
     noteScope: 'coursehub.notescope', // "page" | "course" | "hub"
+    markPanel: 'coursehub.markpanel', // where the reader put the highlights panel
     rail:    'coursehub.rail',      // "on" | "off"
     read:    'coursehub.read',      // { courseKey: [lesson file names] }
     legacy:  'llmcourse-theme'      // what the first design system wrote
@@ -41,6 +43,13 @@
      save one. See "THE STUDY NOTES PANEL" below for the key and why it is that
      one. */
   var NOTE_PREFIX = 'coursehub.note:';
+
+  /* A page's highlights are not a preference either, and they live beside the
+     notes rather than inventing a second scheme: `coursehub.mark:` plus the
+     tier and the same course-key-and-file-name identifier `pageKey` derives.
+     One key per page holding one array, because a page's marks are one
+     document. See "THE TEXT HIGHLIGHTER" below. */
+  var MARK_PREFIX = 'coursehub.mark:';
 
   /* ============================================================
      THE SIX READER CONTROLS
@@ -289,17 +298,48 @@
      that accepts the call and keeps nothing is the quiet one - which is what a
      private window and some extensions do - so the only honest answer is to
      ask the store what it now holds. */
+
+  /* Why the last checked write did not take, so the sentence a panel shows is a
+     diagnosis rather than a guess. A second probe cannot answer it: a store
+     full to the last byte refuses the probe as well, and the reader is then
+     told the browser is storing nothing when it is storing five megabytes of
+     theirs. Measured, not reasoned - filling a store to refusal and then
+     highlighting reported the wrong one of the two failures until this existed.
+
+     Three outcomes and the middle one is the quiet failure the read-back is
+     here for: the call was accepted, nothing raised, and the store kept
+     nothing. */
+  var writeRefusal = '';
+
+  function isQuota(error) {
+    return !!error && (error.name === 'QuotaExceededError'
+      || error.name === 'NS_ERROR_DOM_QUOTA_REACHED'
+      || error.code === 22 || error.code === 1014);
+  }
+
   function setChecked(key, value) {
+    writeRefusal = '';
     try {
       localStorage.setItem(key, value);
-      return localStorage.getItem(key) === value;
-    } catch (e) { return false; }
+      if (localStorage.getItem(key) === value) return true;
+      writeRefusal = 'kept nothing';
+      return false;
+    } catch (e) {
+      writeRefusal = isQuota(e) ? 'full' : 'refused';
+      return false;
+    }
   }
   function dropChecked(key) {
+    writeRefusal = '';
     try {
       localStorage.removeItem(key);
-      return localStorage.getItem(key) === null;
-    } catch (e) { return false; }
+      if (localStorage.getItem(key) === null) return true;
+      writeRefusal = 'kept nothing';
+      return false;
+    } catch (e) {
+      writeRefusal = isQuota(e) ? 'full' : 'refused';
+      return false;
+    }
   }
 
   /* Whether this browser will keep anything here at all, asked with one byte.
@@ -312,11 +352,47 @@
      full. */
   function storageAccepts() {
     var probe = NOTE_PREFIX + 'probe';
+    writeRefusal = '';
     try {
       localStorage.setItem(probe, '1');
       localStorage.removeItem(probe);
       return true;
-    } catch (e) { return false; }
+    } catch (e) { writeRefusal = isQuota(e) ? 'full' : 'refused'; return false; }
+  }
+
+  /* ---------- the save state, which two panels now paint ----------
+     A panel that holds something the reader wrote says what actually happened
+     to it, and both of the panels that do say it in one shape. This is that
+     shape: a `role="status"` line whose text is written only when it changed -
+     the role speaks every write, and a reader on a screen reader does not need
+     "Saved" announced at every pause - and the escape hatch beside it filled in
+     `--warn` the moment a write fails, so nobody has to read a fourth sentence
+     to find out what to do about it.
+
+     It is a factory rather than a function because the "only when it changed"
+     is per element: two panels sharing one `spoken` would silence each other. */
+  function saveState(node, escape) {
+    var spoken = '';
+    return function (kind, text) {
+      node.dataset.state = kind;
+      if (text !== spoken) { node.textContent = text; spoken = text; }
+      if (escape) escape.dataset.urgent = kind === 'failed' ? 'yes' : 'no';
+    };
+  }
+
+  /* The two failures a store has, told apart by what the write itself raised
+     rather than by a second probe. A store that refuses on quota is full; a
+     store that refuses for any other reason, or that accepts the call and keeps
+     nothing, is storing nothing here. Naming them apart is what makes the
+     sentence actionable rather than an apology. */
+  function saveFailure(what) {
+    var reason = writeRefusal === 'full'
+      ? 'browser storage is full'
+      : 'this browser is storing nothing here';
+    /* The way out is named only when there is something to take out of it.
+       Telling a reader with nothing highlighted to export is an instruction
+       with no object. */
+    return 'Not saved: ' + reason + '.' + (what ? ' Export to keep ' + what + '.' : '');
   }
 
   /* ============================================================
@@ -1060,6 +1136,12 @@
      button and each answers Escape for itself. */
   var studyNotes = null;
 
+  /* The third, and the one that is not built on every browser: the highlighter
+     is drawn with the CSS Custom Highlight API and there is no fallback, so on
+     a browser without it this stays null and nothing is added to the topbar,
+     the cluster or the page. See "THE TEXT HIGHLIGHTER" below. */
+  var highlighter = null;
+
   function el(tag, cls, text) {
     var node = document.createElement(tag);
     if (cls) node.className = cls;
@@ -1454,6 +1536,27 @@
     studyNotes = buildNotesPanel();
     document.body.appendChild(studyNotes.el);
     studyNotes.attachOpener(noteButton);
+
+    /* The third panel, and the only one with a condition on it. The
+       highlighter is drawn with the CSS Custom Highlight API and deliberately
+       has no DOM-splitting fallback, so on a browser without the API there is
+       no button here at all rather than a control that does nothing. */
+    if (markSupported()) {
+      var markButton = el('button', 'tb-btn');
+      markButton.type = 'button';
+      markButton.appendChild(el('span', 'tb-icon', '\u25A4'));
+      markButton.appendChild(el('span', 'hide-sm', 'Highlights'));
+      inner.appendChild(markButton);
+
+      highlighter = buildHighlighter();
+      document.body.appendChild(highlighter.shell.el);
+      /* The cue is inserted where the cluster is and for the same reason: a
+         fixed control appended to the end of the body costs a keyboard reader
+         every paragraph on the page before they reach it. */
+      if (spine.parentNode) spine.parentNode.insertBefore(highlighter.cue, spine.nextSibling);
+      else document.body.appendChild(highlighter.cue);
+      highlighter.shell.attachOpener(markButton);
+    }
   }
 
   /* ---------- the floating control cluster ----------
@@ -1550,6 +1653,17 @@
       dock.appendChild(notesLaunch);
     }
 
+    /* The third panel's second way in, on the same one call. It is absent on a
+       browser with no Custom Highlight API, which is the same absence the
+       topbar shows: a launcher for a panel that was never built is a dead
+       control, and the cluster exists because dead controls are what it was
+       built to replace. */
+    if (highlighter) {
+      var markLaunch = dockButton('\u25A4', 'Highlights on this page');
+      highlighter.shell.attachOpener(markLaunch);
+      dock.appendChild(markLaunch);
+    }
+
     dockMode = dockButton('\u263E', 'Switch to dark mode');
     dockMode.addEventListener('click', function () { applyMode(isDark() ? 'light' : 'dark'); });
     dock.appendChild(dockMode);
@@ -1579,6 +1693,222 @@
     window.addEventListener('resize', judge);
     judge();
     syncCluster();
+  }
+
+
+  /* ============================================================
+     THE IN-PAGE SECTION RAIL
+
+     A reader half-way down a 3,000-word lesson has no idea where they are in
+     it. The rail on the left names the pages of the course; nothing named the
+     sections of the page in front of them. This does, on all 797 pages, and no
+     page's markup mentions it: it is chrome, exactly as the topbar, the course
+     rail and the floating cluster are, and it arrives because the page links
+     the shared assets.
+
+     It is DERIVED FROM THE PAGE'S OWN HEADINGS, at runtime, and from nothing
+     else. That is the whole design. A model of the page's sections held
+     anywhere but in the page is a second source that can disagree with it, and
+     a lesson rewritten in the afternoon would leave it wrong by the evening.
+     The headings are the one source that cannot drift from the page, because
+     they are the page.
+
+     Which headings, and why those. Measured from the corpus rather than
+     guessed: inside `main`, the hub's 744 lesson pages carry 6,260 `h2`, 1,236
+     `h3` and 10 `h4`, and 5,559 of the `h2` are direct children of the content
+     region. So `h2` is this hub's section level, `h3` is an occasional
+     subdivision inside one section rather than a section of its own, and `h4`
+     barely exists. The rule is therefore one line - an `h2` that is a direct
+     child of the content region and is not wearing a smaller face - and it is
+     the same rule `.numbered` already applies when it draws the section
+     badges, so the numbered squares down the page and the ticks down the rail
+     can never name different sections.
+
+     Direct children is also what keeps everything else out without naming any
+     of it. The topbar, the course rail, both panels and the floating cluster
+     are children of `body`; a figure's caption, a callout's heading and a
+     card's title are grandchildren at best. None of them is a child of `main`,
+     so none of them can appear in a list built this way, and a widget added
+     next year cannot leak into it either.
+
+     WHERE THE READER IS, in one sentence: the reader is in the last section
+     whose heading has reached the reading line. The reading line is the
+     stylesheet's `--secrail-line`, read back in pixels off the heading that
+     has to land on it, so the distance that positions a jump and the distance
+     that decides which section is current are the same number and can never
+     drift apart. When two sections are on screen at once - the tail of one and
+     the heading of the next - the reader is in the earlier of the two, because
+     they have not reached the later heading yet. The reader is in exactly one
+     section, or, above the first heading, in none: a page's opening is not a
+     section and saying it is would be a small lie told on every page load.
+
+     It is tracked with an IntersectionObserver rather than a scroll handler,
+     and the observer's shape is what makes that honest. The root is the
+     viewport from the reading line down; the thresholds are 0 and 1. A
+     heading's top crossing the line is a crossing of threshold 1 - it stops
+     being wholly inside the root - and a heading's bottom crossing the line is
+     a crossing of threshold 0. Between them, every transition of "has this
+     heading reached the line" raises a callback, which is what a single
+     threshold could not promise: with 0 alone the highlight lagged by the
+     height of the heading, and with a one-pixel band a fast scroll stepped
+     over the band between two frames and the callback never came. The callback
+     itself reads the headings' own rectangles rather than the entries, so what
+     is painted is the geometry at the moment of painting and not a fact
+     remembered from an earlier frame.
+
+     It appears above a stated heading count and not before. It is not printed.
+     It does not compete with the course rail, and the media query that holds
+     it to wide viewports carries the reason.
+     ============================================================ */
+
+  /* Four sections, and below that no rail at all. A rail answers two questions
+     - where am I, and how much is left - and on a page of three sections the
+     scrollbar has already answered both, so a list of three is chrome that
+     outweighs what it indexes. Fifty-seven of the hub's 789 content pages
+     carry three sections or fewer and get nothing, which is the intended
+     outcome rather than a gap. */
+  var SECTION_MIN = 4;
+
+  /* The sections of the page, in document order. The whole rule, and the
+     reasoning behind every clause of it, is in the block above. */
+  function pageSections(region) {
+    var out = [];
+    for (var node = region.firstElementChild; node; node = node.nextElementSibling) {
+      if (node.tagName !== 'H2') continue;
+      // `.h-label` and `.h-sub` are h2 tags wearing a smaller face - "The
+      // one-minute version" is the common one - and neither is a section of
+      // the argument. The tag sets the outline; the class sets the size.
+      if (node.classList.contains('h-label') || node.classList.contains('h-sub')) continue;
+      out.push(node);
+    }
+    return out;
+  }
+
+  /* A heading's text as a fragment identifier. Deterministic, so the same
+     heading yields the same id on every load and in every build, which is what
+     makes a link a reader shared last month still land in the right place
+     today. Accents fold onto their letters, an apostrophe is dropped rather
+     than turned into a word break, and every other run of non-alphanumeric
+     characters becomes one dash. */
+  function sectionSlug(text) {
+    return text
+      .normalize('NFKD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/['\u2018\u2019]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
+  /* The id a section is linked by. An author's own id is used exactly as
+     written and is never replaced - it is the one a page may already be linked
+     by from outside - and a heading without one is given `sec-` plus its slug.
+
+     The collision rule. The candidate is taken only if nothing in the document
+     already answers to it, which covers both halves of the problem at once: an
+     id an author wrote elsewhere on the page, and a second heading whose words
+     match an earlier one's. Otherwise the next free `-2`, `-3` and so on is
+     taken, counting in document order, so the first heading with those words
+     keeps the plain id and a later one can never take it away from it. A
+     heading whose text yields no slug at all - punctuation alone - takes its
+     own position in the sequence instead, which is unique by construction. */
+  function anchorFor(head, ordinal) {
+    if (head.id) return head.id;
+    var slug = sectionSlug(head.textContent || '');
+    var stem = 'sec-' + (slug || String(ordinal));
+    var id = stem;
+    var next = 1;
+    while (document.getElementById(id)) { next += 1; id = stem + '-' + next; }
+    head.id = id;
+    return id;
+  }
+
+  function mountSectionRail() {
+    var region = document.querySelector('main.wrap, main.wide');
+    if (!region) return;
+    var heads = pageSections(region);
+    if (heads.length < SECTION_MIN) return;
+
+    var nav = el('nav', 'secrail');
+    /* A navigation region with no name is one a screen reader announces as
+       "navigation" beside two others that say the same thing. This one says
+       which page's sections it holds. */
+    nav.setAttribute('aria-label', 'Sections on this page');
+    var list = el('ol');
+    var links = [];
+
+    heads.forEach(function (head, index) {
+      var link = el('a');
+      link.href = '#' + anchorFor(head, index + 1);
+      /* A plain anchor, and deliberately nothing else. The browser scrolls it,
+         reads `scroll-behavior` off the stylesheet - so the motion axis governs
+         whether the jump animates and no branch here has to - puts the address
+         bar on the section the reader is now reading, and moves the sequential
+         focus starting point to the heading, so the next Tab carries on from
+         there rather than from the rail. Every one of those is a user story,
+         and none of them is a line of script. */
+      /* The label first and the tick second, so the tick is the element
+         nearest the edge of the viewport. Opening the labels then grows the
+         list leftwards and every tick stays exactly where it was, under
+         whatever pointer was aiming at one. */
+      link.appendChild(el('span', 'secrail-label', (head.textContent || '').trim()));
+      link.appendChild(el('span', 'secrail-tick'));
+      var row = el('li');
+      row.appendChild(link);
+      list.appendChild(row);
+      links.push(link);
+    });
+
+    nav.appendChild(list);
+    /* Immediately before the content it indexes, so a keyboard reader meets
+       the sections of the page and then the page, in that order. */
+    region.parentNode.insertBefore(nav, region);
+
+    /* The reading line, in pixels, read off the stylesheet rather than stated
+       twice. `--secrail-line` is the section headings' own `scroll-margin-top`,
+       so a jump lands a heading exactly on the line and the same heading is at
+       once the current one. A literal here would be that number's second home
+       and the two would part company the first time a design moved one. */
+    var line = parseFloat(getComputedStyle(heads[0]).scrollMarginTop) || 0;
+    /* One pixel above the line, and it is the same number twice on purpose:
+       the root's top edge and the test below. A heading is wholly inside the
+       root while its top is at or below that edge and stops being wholly
+       inside the moment its top rises past it, so the observation and the
+       answer are one event rather than two that agree most of the time. The
+       pixel is what makes a jump land right: `scroll-margin-top` puts the
+       heading's top exactly on the line, which is inside the edge, so the
+       section the reader jumped to is current the moment they arrive. */
+    var edge = line + 1;
+    var current = -1;
+
+    function paint() {
+      var found = -1;
+      for (var index = 0; index < heads.length; index += 1) {
+        // The headings are in document order, so their tops rise together and
+        // the first one still below the edge ends the search.
+        if (heads[index].getBoundingClientRect().top >= edge) break;
+        found = index;
+      }
+      if (found === current) return;
+      if (current >= 0) links[current].removeAttribute('aria-current');
+      current = found;
+      /* `location` rather than `page`: the course rail's `page` says which page
+         of the course this is, and this says which place within the page the
+         reader is at. Two different claims, and a screen reader announces the
+         difference. */
+      if (current >= 0) links[current].setAttribute('aria-current', 'location');
+    }
+
+    if (!window.IntersectionObserver) return;
+    /* The root is the viewport from the reading line down, and both thresholds
+       are watched. See the block above for why one of them is not enough. A
+       resize or a reflow changes the geometry rather than the scroll position,
+       and the observer recomputes on both, so nothing here listens for either. */
+    var watch = new IntersectionObserver(paint, {
+      rootMargin: (-edge) + 'px 0px 0px 0px',
+      threshold: [0, 1]
+    });
+    heads.forEach(function (head) { watch.observe(head); });
   }
 
   /* ---------- the appearance panel ---------- */
@@ -1961,6 +2291,17 @@
     var body = el('div', 'panel-body');
     panel.appendChild(body);
 
+    /* ---------- the foot, which is pinned rather than scrolled ----------
+       Optional, because the appearance panel has nothing that belongs in one.
+       A panel that holds a document has: the notes panel asked for it first,
+       because a save state a reader has to scroll to is a save state a reader
+       can miss, and the highlighter asks for exactly the same thing. It sits in
+       the panel and outside `body`, which is the title bar's shape at the other
+       end, and it belongs to the shell rather than to either panel so that the
+       two cannot drift into two shapes. */
+    var foot = spec.foot ? el('div', 'panel-foot') : null;
+    if (foot) panel.appendChild(foot);
+
     function bounds() {
       var spine = document.querySelector('.spine');
       var box = panel.getBoundingClientRect();
@@ -2213,6 +2554,7 @@
     return {
       el: panel,
       body: body,
+      foot: foot,
       open: open,
       close: close,
       goHome: goHome,
@@ -2643,7 +2985,7 @@
       '---',
       'title: ' + yamlString(document.title),
       'scope: ' + yamlString(scope.label),
-      'notes-key: ' + yamlString(scope.store),
+      (scope.keyName || 'notes-key') + ': ' + yamlString(scope.store),
       'source: ' + yamlString(location.href),
       'exported: ' + day,
       '---',
@@ -2693,7 +3035,6 @@
     var view = NOTE_VIEWS[0].key;
     var timer = null;
     var ceiling = 0;
-    var spoken = '';
 
     /* What the editor holds, per scope, for this page load. Storage is the
        durable copy and this is the live one, and the live one wins: a read
@@ -2710,6 +3051,7 @@
       title: 'Study notes',
       closeLabel: 'Close study notes',
       storeKey: STORE.notePanel,
+      foot: true,
       onOpen: function () { load(scope); },
       onClose: function () { flush(); }
     });
@@ -2773,14 +3115,15 @@
        shape and it is the save state that earns it: a reader whose write has
        just failed must not have to scroll to find that out, and the button
        that gets their words back out must not be the thing below the fold. It
-       sits outside `shell.body` for that reason, in the panel the shell
-       returns, exactly as the title bar does at the other end. */
-    var foot = el('div', 'notes-foot');
-    var state = el('p', 'notes-state');
+       is the shell's `panel-foot` rather than this panel's own, because the
+       highlighter needs the identical thing and two of them would drift. */
+    var foot = shell.foot;
+    foot.classList.add('notes-foot');
+    var state = el('p', 'panel-state');
     state.setAttribute('role', 'status');
     var count = el('p', 'notes-count');
     count.title = 'Counted over the Markdown you wrote, not over the rendered preview.';
-    var take = el('button', 'notes-export');
+    var take = el('button', 'panel-export');
     take.type = 'button';
     take.textContent = 'Export Markdown';
     take.addEventListener('click', function () {
@@ -2789,17 +3132,10 @@
     foot.appendChild(state);
     foot.appendChild(count);
     foot.appendChild(take);
-    shell.el.appendChild(foot);
 
-    /* ---------- the state, which is never more than what happened ---------- */
-    function say(kind, text) {
-      state.dataset.state = kind;
-      /* Written only when it changed, because `role="status"` speaks every
-         write and a reader on a screen reader does not need "Saved" announced
-         at every pause in a long paragraph. */
-      if (text !== spoken) { state.textContent = text; spoken = text; }
-      take.dataset.urgent = kind === 'failed' ? 'yes' : 'no';
-    }
+    /* The state is never more than what happened, and how it is painted is the
+       shell's - see `saveState` above, which the highlighter reads too. */
+    var say = saveState(state, take);
 
     function tally() {
       count.textContent = noteCount(field.value);
@@ -2814,8 +3150,7 @@
       drafts[scope.store] = text;
       var kept = text.trim() ? setChecked(scope.store, text) : dropChecked(scope.store);
       if (kept) say('saved', 'Saved ' + clockStamp());
-      else if (storageAccepts()) say('failed', 'Not saved: browser storage is full. Export to keep this.');
-      else say('failed', 'Not saved: this browser is storing nothing here. Export to keep this.');
+      else say('failed', saveFailure('this'));
       return kept;
     }
 
@@ -2839,7 +3174,7 @@
       pressGroup(shell.el, 'view', view);
       tally();
       if (!storageAccepts()) {
-        say('failed', 'Not saved: this browser is storing nothing here. Export to keep this.');
+        say('failed', saveFailure('this'));
       } else if (field.value) {
         say('saved', 'Saved earlier in this browser.');
       } else {
@@ -2907,6 +3242,704 @@
 
     load(scope);
     return shell;
+  }
+
+  /* ============================================================
+     THE TEXT HIGHLIGHTER
+
+     A reader marks the sentence that mattered and finds it marked when they
+     come back. It is chrome, exactly as the two panels above are: no page in
+     the hub names it, no lesson markup changes, and a page served with the
+     script blocked has no control, no panel and no trace.
+
+     ---------- what a highlight is DRAWN with ----------
+     The browser's own highlight mechanism - `CSS.highlights` and the
+     `::highlight()` pseudo-element - and never a wrapper element around the
+     words. The alternative is to split the text nodes a selection crosses and
+     put a `<mark>` around each piece, which is how this feature is usually
+     built and is why it usually breaks:
+
+       a  It rewrites the prose. A sentence a screen reader read as one string
+          becomes three, and a reader on VoiceOver or NVDA hears the sentence
+          in fragments with a pause at each seam. That is the whole of user
+          story 7 and it is the defect the specification asked to avoid.
+       b  It is a live edit of a document other code holds references into: the
+          section rail has put ids on the headings, Mermaid re-renders on every
+          palette change, and the print pass copies the page. A splitter has to
+          be right about all of them.
+       c  It cannot be undone cleanly. Removing a mark means merging text nodes
+          back, and a page marked and unmarked twenty times is a page whose DOM
+          no longer matches its source.
+
+     A range highlight has none of those properties. The DOM is byte-identical
+     before and after, the paint is thrown away and rebuilt from the anchors
+     whenever anything moves, and the worst failure available to it is a mark
+     that does not appear.
+
+     What it costs is that a `::highlight()` mark carries no semantics: there is
+     no element, so there is nothing in the accessibility tree to announce and a
+     screen reader is not told the words are marked. That trade is made on
+     purpose and the panel below is the answer to it - it lists every mark on
+     the page as text, in reading order, which is what a screen reader reads
+     instead of a shredded sentence.
+
+     Where the API is missing there is no button, no panel, no cue and no
+     keyboard path: the feature is simply not on that browser. It does not fall
+     back to splitting the DOM, because the fallback is the defect.
+
+     ---------- THE ANCHORING CONTRACT ----------
+     A highlight is a reference into text that can change under it, so where it
+     lands on return is the whole design.
+
+     THE DOMAIN. The page's own prose, flattened to one string: every text node
+     under `main.wrap` or `main.wide`, in document order, with each run of
+     whitespace collapsed to a single space. Five things are left out of it and
+     each has a reason - `script` and `style` are not prose, `svg` and
+     `.mermaid` are drawings whose text is replaced when they render, form
+     controls and buttons are chrome inside the column, `.sr-only` is text no
+     sighted reader can select, and anything `hidden` or `aria-hidden` is not on
+     the page. Collapsing whitespace is what makes the domain the text the
+     reader sees rather than the file's indentation, so re-wrapping the source
+     of a lesson moves nothing.
+
+     WHAT IS STORED. Four fields and no ids into the DOM: the exact quote, the
+     offset it was taken from, and up to 48 characters of the text either side
+     of it. That is a position selector and a quote selector with context, which
+     is the shape the W3C Web Annotation model settled on for the same reason.
+
+     HOW IT IS PLACED ON RETURN, in order, and every step is an EXACT match:
+
+       1  The offset it was saved at. If the domain carries the quote at exactly
+          that offset, that is the highlight. This is the whole of the cost on a
+          page nobody has edited.
+       2  The quote inside the context it was taken from. Otherwise the domain
+          is searched for `before + quote + after`. If it occurs EXACTLY ONCE,
+          that is the highlight. This is what survives an edit somewhere else on
+          the page: a new paragraph above moves every offset below it and moves
+          no words.
+       3  The quote on its own. Otherwise the domain is searched for the quote.
+          If it occurs EXACTLY ONCE, that is the highlight. This is what
+          survives an edit to the sentences either side of the marked one.
+       4  Nothing. The highlight is not painted. It stays in storage and it is
+          listed in the panel, in full, under `Not placed`.
+
+     WHAT MAKES IT FAIL, deliberately. Two or more occurrences at any step is an
+     ambiguity, and an ambiguity is a failure rather than a guess: a mark placed
+     on the wrong one of two identical sentences is a mark the reader will trust
+     and should not. There is no fuzzy match, no nearest match and no edit
+     distance anywhere in this file. A highlight that no longer fits FAILS
+     VISIBLY rather than landing on the wrong words, because a silently
+     misplaced highlight - marking the wrong sentence with complete confidence -
+     is worse than one that openly did not come back. The panel says which
+     highlights did not place, quotes the words they were made of so the reader
+     can find them by eye, and offers to remove them; restoring the paragraph
+     restores the mark, because nothing was thrown away.
+
+     PLACEMENT NEVER WRITES. Re-anchoring through step 2 or 3 does not rewrite
+     the stored offset. A load that quietly rewrote storage could report a write
+     failure the reader did not cause, and the search it saves is a few
+     milliseconds on a page the reader is already reading.
+
+     ---------- a selection that crosses element boundaries ----------
+     The domain is one string over the whole content region, so a selection that
+     spans a paragraph break, a list, a code block or a figure caption is ONE
+     highlight with one anchor, and the browser paints it across every element
+     it crosses. Nothing in the DOM is touched, so there is no partial mark and
+     no broken markup available here at all. The block boundary itself collapses
+     to a single space in the domain, so the stored quote reads
+     `...end of one. Start of the next...`.
+
+     A selection is clipped to the content region: the part of it inside the
+     region is marked and the part outside is dropped. A selection with no prose
+     in it at all - one made entirely inside a diagram, or in the chrome - is
+     refused, and the panel says so rather than storing a mark that can never
+     paint.
+
+     ---------- overlaps ----------
+     A stroke over words that are already marked MERGES with them, so the reader
+     ends with one highlight over the union rather than two stacked ones. That
+     is what a marker pen does. Removing that highlight removes the whole of the
+     merged run, which is the same rule read backwards.
+
+     ---------- the two ways in, and the keyboard ----------
+     A pointer reader gets a cue over the selection. A keyboard reader gets the
+     panel: the last selection made inside the content region is held, so
+     opening the panel and pressing its first button marks it whatever the
+     selection did when focus moved. That is why there is no global shortcut
+     key - a single-character one is an SC 2.1.4 problem, and every free
+     modifier combination is taken by a browser on some platform - and it is
+     why the button acts on a held anchor rather than on the live selection.
+     ============================================================ */
+
+  /* The characters of context stored either side of a quote. Long enough that
+     `before + quote + after` is unique in a lesson-length page, short enough
+     that a page's worth of highlights is a few kilobytes. */
+  var MARK_CONTEXT = 48;
+  /* The pause after the reader stops moving a selection. A drag fires
+     `selectionchange` on every pixel and the cue must not follow the pointer. */
+  var MARK_SETTLE = 120;
+  /* How much of a quote a control's accessible name carries. A button whose
+     name is a whole paragraph is a button nobody can listen to. */
+  var MARK_LABEL = 60;
+  var MARK_EDGE = 8;               // the gap the cue keeps from every edge
+  var MARK_PAINT = 'coursehub-mark';
+  var MARK_PAINT_ON = 'coursehub-mark-on';
+
+  /* Not prose, and none of it is selectable text a reader means to mark.
+     `.mermaid` is here rather than in the tag list because before it renders it
+     is a div full of graph source, and after it renders it is an svg: a domain
+     that included it would move under every palette change. */
+  var MARK_SKIP_TAGS = /^(SCRIPT|STYLE|SVG|NOSCRIPT|TEXTAREA|INPUT|SELECT|BUTTON)$/;
+  var MARK_SKIP_CLASS = /(^|\s)(sr-only|mermaid)(\s|$)/;
+
+  function markSupported() {
+    return !!(window.CSS && window.CSS.highlights && window.Highlight);
+  }
+
+  /* The same region the in-page section rail derives from, so the two chrome
+     features cannot disagree about where a page's content begins. */
+  function markRegion() { return document.querySelector('main.wrap, main.wide'); }
+
+  function markSkipped(node, region) {
+    var parent = node.parentElement;
+    while (parent && parent !== region) {
+      if (MARK_SKIP_TAGS.test(parent.tagName)) return true;
+      if (parent.hidden || parent.getAttribute('aria-hidden') === 'true') return true;
+      if (MARK_SKIP_CLASS.test(parent.className || '')) return true;
+      parent = parent.parentElement;
+    }
+    return false;
+  }
+
+  /* ---------- the domain, and the map back into the DOM ----------
+     `text` is what an anchor is stated in. `owner` and `at` say, for every
+     character of it, which text node it came from and where in that node, which
+     is what turns a pair of offsets back into a Range the browser can paint.
+     `spans` is the same map the other way round, one entry per text node, which
+     is what turns a Range the reader made into a pair of offsets. */
+  function markIndex() {
+    var region = markRegion();
+    if (!region) return null;
+    var walker = document.createTreeWalker(region, NodeFilter.SHOW_TEXT, null);
+    var text = '';
+    var owner = [];
+    var at = [];
+    var spans = [];
+    var node;
+    // True to start with, so leading whitespace never becomes character zero.
+    var space = true;
+    while ((node = walker.nextNode())) {
+      var value = node.nodeValue;
+      if (!value || markSkipped(node, region)) continue;
+      var from = owner.length;
+      for (var i = 0; i < value.length; i++) {
+        var ch = value.charAt(i);
+        var blank = ch === ' ' || ch === '\n' || ch === '\t' || ch === '\r' || ch === '\f';
+        if (blank && space) continue;
+        text += blank ? ' ' : ch;
+        space = blank;
+        owner.push(node);
+        at.push(i);
+      }
+      if (owner.length > from) spans.push({ node: node, from: from, to: owner.length });
+    }
+    return { region: region, text: text, owner: owner, at: at, spans: spans };
+  }
+
+  function markRange(index, from, to) {
+    if (!index || from < 0 || to <= from || to > index.owner.length) return null;
+    var range = document.createRange();
+    range.setStart(index.owner[from], index.at[from]);
+    range.setEnd(index.owner[to - 1], index.at[to - 1] + 1);
+    return range;
+  }
+
+  function markHeadOf(index, span, offset) {
+    for (var i = span.from; i < span.to; i++) if (index.at[i] >= offset) return i;
+    return span.to;
+  }
+
+  function markTailOf(index, span, offset) {
+    for (var i = span.to - 1; i >= span.from; i--) if (index.at[i] < offset) return i + 1;
+    return span.from;
+  }
+
+  /* A Range the reader made, in the domain's own offsets, clipped to the region.
+     Every text node the range touches is asked for its own overlap, so a
+     selection that starts in the chrome or ends inside a diagram contributes
+     the part of itself that is prose and nothing else. */
+  function markBounds(index, range) {
+    var from = null;
+    var to = null;
+    index.spans.forEach(function (span) {
+      if (!range.intersectsNode(span.node)) return;
+      var head = range.startContainer === span.node ? range.startOffset : 0;
+      var tail = range.endContainer === span.node ? range.endOffset : span.node.nodeValue.length;
+      if (tail <= head) return;
+      var a = markHeadOf(index, span, head);
+      var b = markTailOf(index, span, tail);
+      if (b <= a) return;
+      if (from === null || a < from) from = a;
+      if (to === null || b > to) to = b;
+    });
+    return from === null ? null : { from: from, to: to };
+  }
+
+  /* The four stored fields, taken from a pair of offsets. The edges are trimmed
+     first: a reader who drags past the end of a sentence has selected the space
+     after it, and a quote that begins or ends in whitespace is a quote whose
+     context match is decided by trailing spaces. */
+  function markAnchorAt(index, from, to) {
+    var raw = index.text.slice(from, to);
+    var body = raw.replace(/^\s+/, '');
+    var head = from + (raw.length - body.length);
+    body = body.replace(/\s+$/, '');
+    if (!body) return null;
+    return {
+      text: body,
+      start: head,
+      before: index.text.slice(Math.max(0, head - MARK_CONTEXT), head),
+      after: index.text.slice(head + body.length, head + body.length + MARK_CONTEXT)
+    };
+  }
+
+  /* Exactly once, or nowhere. A second occurrence is what makes step 2 and step
+     3 of the contract refuse rather than pick, and it is the whole of the
+     promise that a highlight never lands on the wrong words. */
+  function markOnly(haystack, needle) {
+    if (!needle) return -1;
+    var first = haystack.indexOf(needle);
+    if (first < 0) return -1;
+    return haystack.indexOf(needle, first + 1) < 0 ? first : -1;
+  }
+
+  /* The contract, in the order the block above states it. */
+  function markPlace(index, anchor) {
+    var quote = anchor.text;
+    var length = quote.length;
+    if (!length) return null;
+    if (index.text.slice(anchor.start, anchor.start + length) === quote) {
+      return { from: anchor.start, to: anchor.start + length, how: 'position' };
+    }
+    var context = anchor.before + quote + anchor.after;
+    var found = markOnly(index.text, context);
+    if (found >= 0) {
+      var head = found + anchor.before.length;
+      return { from: head, to: head + length, how: 'context' };
+    }
+    found = markOnly(index.text, quote);
+    if (found >= 0) return { from: found, to: found + length, how: 'quote' };
+    return null;
+  }
+
+  /* ---------- where a page's highlights live ----------
+     Beside the notes panel's, and on the same identifier: `coursehub.mark:`
+     plus the tier and the course key and file name that `pageKey` derives, so a
+     note and a highlight on one page can never disagree about what a page is.
+     One key per page holding one JSON array, which is the same "one key per
+     document" the notes panel keeps - a page's marks are the document here, and
+     nothing has to read or rewrite another page's key in order to save one. */
+  function markStore() { return MARK_PREFIX + 'page:' + pageKey(); }
+
+  function markRead() {
+    var raw = get(markStore());
+    if (!raw) return [];
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e) { return []; }
+    if (!Array.isArray(parsed)) return [];
+    /* Storage is the reader's own and is not a trust boundary, but it is the
+       one input this file does not write itself: a hand-edited key, or one left
+       by a future version, must not be able to throw on the way in. */
+    return parsed
+      .filter(function (item) { return item && typeof item.text === 'string' && item.text; })
+      .map(function (item) {
+        return {
+          text: item.text,
+          start: typeof item.start === 'number' && item.start >= 0 ? item.start : 0,
+          before: typeof item.before === 'string' ? item.before : '',
+          after: typeof item.after === 'string' ? item.after : ''
+        };
+      });
+  }
+
+  function markShorten(text, limit) {
+    return text.length > limit ? text.slice(0, limit - 1).replace(/\s+\S*$/, '') + '…' : text;
+  }
+
+  function buildHighlighter() {
+    /* The anchors, in the order they were made, which is the order they are
+       stored in. A row's identity is its position in this array: the array is
+       only ever replaced whole, so there is no id to keep in step with it. */
+    var anchors = markRead();
+    /* One entry per anchor, in the same order, holding what placing it found.
+       Rebuilt from the page whenever anything moves and never stored. */
+    var placed = [];
+    /* The last selection the reader made inside the content region, held as an
+       anchor. This is what the panel's button marks, so the keyboard path does
+       not depend on a selection surviving a change of focus. */
+    var pending = null;
+    /* Which row the panel is pointing at, or -1. Painted one step above the
+       others so a reader who pressed Show on one of four marks in a paragraph
+       can see which one answered. */
+    var showing = -1;
+    var watch = null;
+
+    var shell = makePanel({
+      name: 'marks',
+      className: 'marks',
+      title: 'Highlights',
+      closeLabel: 'Close highlights',
+      storeKey: STORE.markPanel,
+      foot: true,
+      onOpen: function () { replace(); render(); }
+    });
+    var body = shell.body;
+
+    /* ---------- 1. the keyboard path, and the only control that acts ---------- */
+    var make = el('button', 'panel-do');
+    make.type = 'button';
+    make.textContent = 'Highlight the selected text';
+    make.addEventListener('click', function () { add(); });
+    body.appendChild(make);
+
+    /* The words the button will mark, said under it and pointed at from it, so
+       a screen reader announces the button and what it is about to act on
+       together rather than leaving the second sentence to be found. */
+    var chosen = el('p', 'mark-chosen');
+    chosen.id = 'marks-chosen';
+    make.setAttribute('aria-describedby', chosen.id);
+    body.appendChild(chosen);
+
+    /* ---------- 2. what is on this page ---------- */
+    var tally = el('p', 'mark-tally');
+    tally.id = 'marks-tally';
+    body.appendChild(tally);
+
+    /* A list of quotations, named by the line that counts them, so a screen
+       reader reaching it is told what it is a list of. */
+    var list = el('ol', 'mark-list');
+    list.setAttribute('aria-labelledby', tally.id);
+    body.appendChild(list);
+
+    /* ---------- 3. the truth, and the way out ---------- */
+    var state = el('p', 'panel-state');
+    state.setAttribute('role', 'status');
+    var take = el('button', 'panel-export');
+    take.type = 'button';
+    take.textContent = 'Export Markdown';
+    take.addEventListener('click', function () {
+      downloadMarkdown(markFile() + '-highlights.md', markExport());
+    });
+    shell.foot.appendChild(state);
+    shell.foot.appendChild(take);
+    var say = saveState(state, take);
+
+    /* ---------- the cue, which is the pointer path ----------
+       Inserted straight after the topbar for the same reason the cluster is,
+       and `mousedown` is prevented on it so that pressing it does not collapse
+       the selection it is about to mark. */
+    var cue = el('div', 'mark-cue');
+    cue.hidden = true;
+    var cueBtn = el('button', 'mark-cue-btn');
+    cueBtn.type = 'button';
+    cueBtn.textContent = 'Highlight';
+    cueBtn.addEventListener('mousedown', function (event) { event.preventDefault(); });
+    cueBtn.addEventListener('click', function () { add(); });
+    cue.appendChild(cueBtn);
+
+    function markFile() {
+      return (courseKey() || 'hub') + '-'
+        + (fileOf(location.pathname) || 'index.html').replace(/\.html?$/i, '');
+    }
+
+    /* ---------- placing, painting, and the order they are shown in ---------- */
+    function replace() {
+      var index = markIndex();
+      placed = anchors.map(function (anchor) {
+        var spot = index ? markPlace(index, anchor) : null;
+        return {
+          from: spot ? spot.from : -1,
+          how: spot ? spot.how : '',
+          range: spot ? markRange(index, spot.from, spot.to) : null
+        };
+      });
+      if (!placed[showing] || !placed[showing].range) showing = -1;
+      paint();
+    }
+
+    function paint() {
+      var marks = new window.Highlight();
+      placed.forEach(function (item) { if (item.range) marks.add(item.range); });
+      if (marks.size) window.CSS.highlights.set(MARK_PAINT, marks);
+      else window.CSS.highlights.delete(MARK_PAINT);
+
+      var one = placed[showing];
+      if (one && one.range) {
+        var focus = new window.Highlight(one.range);
+        focus.priority = 1;
+        window.CSS.highlights.set(MARK_PAINT_ON, focus);
+      } else {
+        window.CSS.highlights.delete(MARK_PAINT_ON);
+      }
+    }
+
+    /* Reading order, which is what makes the list a study aid rather than a
+       log. A highlight that did not place has no position on the page, so it
+       goes after the ones that did, in the order it was made. */
+    function ordered() {
+      return anchors
+        .map(function (anchor, at) { return { anchor: anchor, at: at, spot: placed[at] }; })
+        .sort(function (one, other) {
+          var a = one.spot && one.spot.range ? one.spot.from : Infinity;
+          var b = other.spot && other.spot.range ? other.spot.from : Infinity;
+          if (a === b) return one.at - other.at;
+          return a - b;
+        });
+    }
+
+    /* ---------- the reader's three actions ---------- */
+    function add() {
+      if (!pending) return;
+      var index = markIndex();
+      /* The held selection is re-placed through the same contract a stored one
+         is, against the page as it stands now. A reader who selected a sentence
+         and then answered a quiz below it has moved every offset after the
+         answer, and this is what makes the mark land anyway. */
+      var spot = index ? markPlace(index, pending) : null;
+      if (!spot) {
+        say('failed', 'Nothing highlighted: those words are no longer on the page.');
+        return;
+      }
+      var from = spot.from;
+      var to = spot.to;
+      var keep = [];
+      /* Merged rather than stacked: a stroke that touches a mark becomes one
+         mark over the union of the two, which is what a marker pen does and
+         what makes Remove mean one thing. */
+      placed.forEach(function (item, at) {
+        if (item.range && item.from <= to && item.from + anchors[at].text.length >= from) {
+          from = Math.min(from, item.from);
+          to = Math.max(to, item.from + anchors[at].text.length);
+        } else {
+          keep.push(anchors[at]);
+        }
+      });
+      var merged = markAnchorAt(index, from, to);
+      if (!merged) {
+        say('failed', 'Nothing highlighted: that selection holds no text.');
+        return;
+      }
+      anchors = keep.concat([merged]);
+      /* The new mark is not left in the pointed-at state. That state answers
+         "which of these four is the one I pressed Show on", and a mark the
+         reader has just made needs no answer to it: they are looking at it. */
+      showing = -1;
+      pending = null;
+      hide();
+      commit('Highlighted.');
+    }
+
+    function remove(at) {
+      if (at < 0 || at >= anchors.length) return;
+      var here = shell.el.contains(document.activeElement);
+      anchors = anchors.slice(0, at).concat(anchors.slice(at + 1));
+      showing = -1;
+      commit('Removed.');
+      /* The row the reader pressed is gone, so the focus that was on it has
+         nowhere to return to. It goes to the panel's own first control rather
+         than to <body>, which is where the browser would drop it. */
+      if (here) make.focus();
+    }
+
+    /* Nothing here rebuilds the list. The reader has just pressed a button
+       inside it, and replacing that button drops their focus to <body> and
+       costs them their place in the tab order - which is the defect the quiz
+       options were fixed for and is one line away in any panel built from
+       data. Only the paint and the scroll position change. */
+    function show(at) {
+      var item = placed[at];
+      if (!item || !item.range) return;
+      showing = at;
+      paint();
+      var box = item.range.getBoundingClientRect();
+      var spine = document.querySelector('.spine');
+      var ceiling = (spine ? spine.getBoundingClientRect().height : 0) + MARK_EDGE * 2;
+      window.scrollTo({ top: (window.scrollY || 0) + box.top - ceiling });
+    }
+
+    /* The write, and then the state that says what actually happened. The mark
+       is painted either way: on a failed write the reader can still see it, and
+       the sentence they are being told is that it will not survive the reload.
+       That is the notes panel's rule, kept: never paint a save the store did not
+       take. */
+    function commit(did) {
+      var kept = markWrite(anchors);
+      replace();
+      render();
+      if (kept) say('saved', did + ' Saved ' + clockStamp() + '.');
+      else say('failed', saveFailure('these'));
+      return kept;
+    }
+
+    function markWrite(list) {
+      var key = markStore();
+      return list.length ? setChecked(key, JSON.stringify(list)) : dropChecked(key);
+    }
+
+    /* ---------- the list ---------- */
+    function renderChosen() {
+      make.disabled = !pending;
+      chosen.textContent = pending
+        ? 'Selected: “' + markShorten(pending.text, MARK_LABEL) + '”'
+        : 'Select text in the page, then press the button above.';
+    }
+
+    function render() {
+      renderChosen();
+      var lost = placed.filter(function (item) { return !item.range; }).length;
+      var total = anchors.length;
+      if (!total) tally.textContent = 'Nothing highlighted on this page yet.';
+      else {
+        tally.textContent = total + (total === 1 ? ' highlight' : ' highlights') + ' on this page'
+          + (lost ? ', ' + lost + ' not placed.' : '.');
+      }
+
+      list.textContent = '';
+      list.hidden = !total;
+      ordered().forEach(function (row) {
+        var item = el('li', 'mark-row');
+        var label = markShorten(row.anchor.text, MARK_LABEL);
+        if (!row.spot || !row.spot.range) item.dataset.lost = 'yes';
+        var quote = el('p', 'mark-quote', '“' + row.anchor.text + '”');
+        item.appendChild(quote);
+        if (!row.spot || !row.spot.range) {
+          item.appendChild(el('p', 'mark-why',
+            'Not placed: these words are no longer on the page, or the page now carries them twice.'));
+        }
+        var acts = el('div', 'mark-acts');
+        if (row.spot && row.spot.range) {
+          var find = el('button', 'mark-act');
+          find.type = 'button';
+          find.textContent = 'Show';
+          find.setAttribute('aria-label', 'Show the highlight “' + label + '” in the page');
+          find.addEventListener('click', function () { show(row.at); });
+          acts.appendChild(find);
+        }
+        var drop = el('button', 'mark-act');
+        drop.type = 'button';
+        drop.textContent = 'Remove';
+        drop.setAttribute('aria-label', 'Remove the highlight “' + label + '”');
+        drop.addEventListener('click', function () { remove(row.at); });
+        acts.appendChild(drop);
+        item.appendChild(acts);
+        list.appendChild(item);
+      });
+
+      take.disabled = !total;
+    }
+
+    /* ---------- export, which is what a failed write leaves the reader ----------
+       Written from the anchors in memory rather than from storage, for the same
+       reason the notes panel's is: a failed write is exactly the case where
+       storage cannot be trusted. */
+    function markExport() {
+      var lines = [];
+      ordered().forEach(function (row) {
+        lines.push('> ' + row.anchor.text);
+        if (!row.spot || !row.spot.range) {
+          lines.push('>');
+          lines.push('> *Not placed: these words are no longer on the page.*');
+        }
+        lines.push('');
+      });
+      return exportBody({
+        label: 'This page',
+        store: markStore(),
+        keyName: 'highlights-key'
+      }, lines.join('\n'));
+    }
+
+    /* ---------- the cue, and what the reader has selected ---------- */
+    function hide() { cue.hidden = true; }
+
+    function judge() {
+      var selection = window.getSelection();
+      if (!selection || !selection.rangeCount) { hide(); return; }
+      if (selection.isCollapsed) {
+        hide();
+        /* A collapse inside the prose is the reader letting go of the words,
+           and the held selection goes with it. A collapse anywhere else is not:
+           moving focus to the topbar, opening the panel and pressing its button
+           are the keyboard path, and clearing on any collapse would break it. */
+        var region = markRegion();
+        if (region && selection.anchorNode && region.contains(selection.anchorNode)) {
+          pending = null;
+          renderChosen();
+        }
+        return;
+      }
+      var range = selection.getRangeAt(0);
+      var index = markIndex();
+      var bounds = index ? markBounds(index, range) : null;
+      var anchor = bounds ? markAnchorAt(index, bounds.from, bounds.to) : null;
+      if (!anchor) { hide(); return; }
+      pending = anchor;
+      renderChosen();
+      place(range);
+    }
+
+    /* Above the selection, clamped inside the band the reader can actually
+       reach: under the sticky topbar, and above everything fixed across the
+       foot, which `body`'s own padding already sums through `--foot-h`. A cue
+       under the chapter bar is a cue the reader cannot press. */
+    function place(range) {
+      cue.hidden = false;
+      var box = range.getBoundingClientRect();
+      if (!box.width && !box.height) { hide(); return; }
+      var spine = document.querySelector('.spine');
+      var ceiling = (spine ? spine.getBoundingClientRect().bottom : 0) + MARK_EDGE;
+      var floor = window.innerHeight - MARK_EDGE
+        - parseFloat(getComputedStyle(document.body).paddingBottom || '0');
+      var width = cue.offsetWidth;
+      var height = cue.offsetHeight;
+      var top = box.top - height - MARK_EDGE;
+      if (top < ceiling) top = box.bottom + MARK_EDGE;
+      top = Math.max(ceiling, Math.min(top, floor - height));
+      var left = box.left + box.width / 2 - width / 2;
+      left = Math.max(MARK_EDGE, Math.min(left, window.innerWidth - width - MARK_EDGE));
+      cue.style.top = Math.round(top) + 'px';
+      cue.style.left = Math.round(left) + 'px';
+    }
+
+    document.addEventListener('selectionchange', function () {
+      window.clearTimeout(watch);
+      watch = window.setTimeout(judge, MARK_SETTLE);
+    });
+
+    /* The cue is anchored to a rectangle in the viewport, so it follows the
+       page rather than the document. Both are passive: this runs on every frame
+       of a scroll. */
+    function follow() {
+      if (cue.hidden) return;
+      var selection = window.getSelection();
+      if (!selection || selection.isCollapsed || !selection.rangeCount) { hide(); return; }
+      place(selection.getRangeAt(0));
+    }
+    window.addEventListener('scroll', follow, { passive: true });
+    window.addEventListener('resize', follow);
+
+    /* Web fonts, Mermaid and a quiz answer all change what the page holds, and
+       a mark that could not be placed at parse time may place perfectly once
+       the page has settled. Placing again is free and never writes. */
+    window.addEventListener('load', function () { replace(); render(); });
+
+    replace();
+    render();
+    if (!storageAccepts()) say('failed', saveFailure(''));
+    else if (anchors.length) say('saved', 'Saved earlier in this browser.');
+    else say('idle', 'Nothing highlighted on this page yet.');
+
+    return { shell: shell, cue: cue };
   }
 
   /* ---------- the panel reads the page back, never its own memory ----------
@@ -3370,6 +4403,7 @@
     /* After the cluster, because both insert themselves straight after the
        topbar and this one has to land in front of it in the tab order. */
     if (hasRail) mountChapterBar(outline);
+    mountSectionRail();
     mountStageFlag();
     wireQuizzes();
     wireCopyButtons();

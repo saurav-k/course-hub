@@ -178,7 +178,10 @@ These are teaching materials, so a confident wrong explanation is worse than no 
 whole contract: drag by pointer and keyboard, the viewport clamp, a position remembered under that
 panel's own key, open and close, the focus contract and the settling glide. A panel supplies its
 name, its store key, its title and what goes in its body, and it wears `.panel-shell` plus one class
-of its own for the two lengths it states. Never copy the contract into a second panel; ask for a
+of its own for the two lengths it states. A panel that holds something the reader made asks for
+`foot: true` as well and gets the shell's pinned `.panel-foot`, `.panel-state` and `.panel-export`
+plus the `saveState` and `saveFailure` helpers, because the two panels that make the save-state
+promise must make it in one shape. Never copy the contract into a second panel; ask for a
 shell. It is **non-modal, has no backdrop and does not close on an outside click**, and none of that
 is configurable - a reader parks a panel in order to keep reading beside it. The author-facing
 statement is `.claude/skills/course-authoring/references/widgets.md`, "The panel shell". Do not
@@ -204,8 +207,10 @@ margin. The limit is structural rather than promised - `hub.js` can only write `
 that `hub.css` resolves, and those are the twenty-four reader-reachable tokens.
 
 **Each panel has two openers, and a floating cluster in the bottom-right corner of every page is
-the second.** Four controls, also built by `hub.js` with no page markup: light and dark, the
-appearance launcher, the study notes launcher, and scroll-to-top. It exists because a control nobody finds is a control nobody has, and
+the second.** Five controls, also built by `hub.js` with no page markup: light and dark, the
+appearance launcher, the study notes launcher, the highlights launcher and scroll-to-top. The
+highlights launcher is the one conditional control on the hub and it is absent where the panel it
+opens was never built. It exists because a control nobody finds is a control nobody has, and
 the mode toggle is the part that teaches - one click repaints the page, so the launcher beside it
 reads as an offer. Both openers wear `aria-expanded` and closing returns focus to whichever one was
 used, and the shell owns that: `attachOpener` registers a button rather than replacing the last one,
@@ -234,6 +239,25 @@ and from the cluster, which is one `attachOpener` call each. The author-facing
 statement is `.claude/skills/course-authoring/references/widgets.md`, "The study notes panel". Do
 not restate it here.
 
+**The third panel is the text highlighter, and its one hard rule is that a highlight fails visibly
+rather than landing on the wrong words.** It is painted with `CSS.highlights` and `::highlight()`
+and never with a `<mark>`: nothing in the page is wrapped, split or rewritten, so the DOM a screen
+reader walks is byte for byte the author's, and where the API is missing there is no button, no
+panel and no cue rather than a fallback that splits text nodes. **The anchoring contract is the
+whole design.** A highlight stores the exact quote, the offset it was taken from and 48 characters
+of context either side, and it is placed by asking three questions in order - is the quote at its
+saved offset, does `before + quote + after` occur exactly once, does the quote occur exactly once -
+and by painting nothing when none of them answers. Two or more occurrences is an ambiguity and an
+ambiguity is a failure: there is no fuzzy match, no nearest match and no edit distance in the file,
+because a mark placed on the wrong one of two identical sentences is a mark the reader will trust
+and should not. Placing never writes. A page's marks live under `coursehub.mark:` plus the same
+`pageKey` the notes use, through `setChecked` / `dropChecked` and the shell's `saveState`, so the
+save state is a fact here for the same reason it is there. The colour is `--mark-soft`, derived
+from the palette's gold at the strongest mix that still clears the 7:1 body floor everywhere, and
+`scripts/contrast_matrix.py` gates it. The author-facing statement is
+`.claude/skills/course-authoring/references/widgets.md`, "The text highlighter". Do not restate it
+here.
+
 **A band across the foot of every lesson carries the previous page, where you are and the next
 page, and its order comes from the generated outline.** The end-of-page pager is at the end of the
 page, so a reader who decides to move on pays a scroll before they can; the pager stays, because it
@@ -248,6 +272,23 @@ anywhere else, and the panel shell's `bounds()` measures the two bars rather tha
 `--chapbar-h` is the bar's height and the reserve reads the same token, so the two cannot disagree.
 The author-facing statement is `.claude/skills/course-authoring/references/widgets.md`, "The fixed
 chapter bar". Do not restate it here.
+
+**The in-page section rail is chrome derived from the page itself, and that is the rule that
+matters.** `hub.js` reads the page's own headings at runtime - an `h2` that is a direct child of the
+content region and is not wearing `.h-label` or `.h-sub`, which is the rule `.numbered` already
+applies - and builds a strip of ticks in the right-hand margin. No page's markup mentions it, no
+lesson edit is ever needed, and there is no second model of a page's sections that could disagree
+with the page. Four things are decided and none may be re-decided casually: the rail appears at four
+sections and not fewer; a generated id is `sec-` plus the heading's slug, taking the next free `-2`,
+`-3` only when the document already answers to the candidate; the reader is in the last section
+whose heading has reached `--secrail-line`, which is also every direct-child `h2`'s
+`scroll-margin-top` and is read back in pixels by `hub.js` rather than restated; and the
+`IntersectionObserver` watches thresholds 0 **and** 1, because 0 alone lags by the height of a
+heading and a one-pixel band is stepped over by a fast scroll. It runs at 1281px and up - below that
+the gutter is `--pad: 2rem` and the strip would stand on the breakout band, and below 1041px the
+course rail is already a drawer over the same prose - and it is not printed. The author-facing
+statement is `.claude/skills/course-authoring/references/widgets.md`, "The in-page section rail". Do
+not restate it here.
 
 ## The course contract
 

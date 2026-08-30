@@ -108,6 +108,14 @@ TINTS: tuple[str, ...] = (
 # The eight mindmap and timeline branch fills, each of which carries a label.
 BRANCH_TINTS: tuple[str, ...] = tuple(f"--branch-{step}-soft" for step in range(8))
 
+# The reader's own highlight, painted behind prose the reader has marked. It is
+# not in TINTS because the three rows TINTS feeds are not all reachable on it:
+# no focusable control and no chart mark is ever drawn on a highlight, and a
+# floor on a pair nobody can see is the noise this table was built to avoid.
+# What is on it is body ink, secondary ink, and the underline the panel paints
+# on the one highlight it is pointing at.
+MARK_TINTS: tuple[str, ...] = ("--mark-soft",)
+
 # The categorical chart ramp: eight marks, palette-independent on purpose, drawn
 # on any of the surfaces. Non-text graphical objects, so the floor is 3:1.
 RAMP: tuple[str, ...] = (
@@ -119,8 +127,9 @@ DRAWN_ON: tuple[str, ...] = ("--bg", "--surface", "--surface-2", "--surface-3")
 
 # (foreground, backgrounds, floor, the role that decides the floor)
 PAIRS: tuple[tuple[str, tuple[str, ...], float, str], ...] = (
-    ("--ink", SURFACES + TINTS + BRANCH_TINTS, FLOOR_BODY, "body text, SC 1.4.6"),
-    ("--ink-soft", SURFACES + TINTS + BRANCH_TINTS, FLOOR_TEXT, "secondary text and every chart label"),
+    ("--ink", SURFACES + TINTS + BRANCH_TINTS + MARK_TINTS, FLOOR_BODY, "body text, SC 1.4.6"),
+    ("--ink-soft", SURFACES + TINTS + BRANCH_TINTS + MARK_TINTS, FLOOR_TEXT,
+     "secondary text and every chart label"),
     ("--ink-faint", SURFACES, FLOOR_TEXT, "captions, panel headings, the read-time"),
     ("--accent", SURFACES + ("--accent-soft", "--accent-wash"), FLOOR_TEXT, "link text"),
     ("--accent-2", SURFACES + ("--accent2-soft",), FLOOR_TEXT, "eyebrows, callout tags, key numbers"),
@@ -134,6 +143,8 @@ PAIRS: tuple[tuple[str, tuple[str, ...], float, str], ...] = (
      "the wordmark, a section number, the rail's current lesson"),
     ("--focus-ring-color", SURFACES + TINTS, FLOOR_NON_TEXT, "the focus ring, against what it abuts"),
     ("--line-strong", SURFACES, FLOOR_NON_TEXT, "the boundary of a control, SC 1.4.11"),
+    ("--accent-2", MARK_TINTS, FLOOR_NON_TEXT,
+     "the underline on the highlight the panel is pointing at, SC 1.4.11"),
 ) + tuple((mark, DRAWN_ON, FLOOR_NON_TEXT, "a chart mark, SC 1.4.11") for mark in RAMP)
 
 # Measured and printed, never gated. Two groups, and each is here for its own
