@@ -34,3 +34,10 @@ In this order:
 Machine learning itself, measure-theoretic probability, proofs as ritual, and programming exercises.
 The full list and the reasons live in `MISSION.md`.
 Do not add model or training content because the title contains "machine learning"; that word names what this material is foundations *for*, and the other courses in the hub own the rest.
+
+## Maintaining this file
+
+Keep this file for knowledge useful to almost every future agent session in this project.
+Do not repeat what the codebase already shows; point to the authoritative file or command instead.
+Prefer rewriting or pruning existing entries over appending new ones.
+When updating this file, preserve this bar for all agents and keep entries concise.
