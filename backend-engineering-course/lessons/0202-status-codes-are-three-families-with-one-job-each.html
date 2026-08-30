@@ -1,0 +1,164 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Status codes are three families with one job each - Backend Engineering</title>
+<meta name="description" content="The first digit is the whole contract: 1xx to 3xx say where the request stands, 4xx blames the request, 5xx blames the server - and a client must understand the class even when the code is unknown.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; HTTP is the language &middot; Lesson 0202</div>
+  <h1>The first digit is the contract: 4xx blames the request and 5xx blames the server</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">7 min</span>
+    Why the class matters more than the code. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15">RFC 9110 &sect;15 - Status Codes</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Five classes, and the first digit carries the meaning: <b>1xx interim, 2xx accepted, 3xx more to do, 4xx your fault, 5xx mine</b>.</li>
+      <li>A client <b>must understand the class</b> of any status code and treat an unknown one as the x00 of that class. That is what makes the space extensible.</li>
+      <li>The <b>4xx / 5xx split is an assignment of blame</b>, and it decides who is paged, what retries, and what an error budget counts.</li>
+      <li>A single request can have <b>several interim responses and exactly one final one</b>.</li>
+      <li>What it costs: the split is a judgement your handler makes, and a mis-classified error is a real outage measured as a client bug.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The response half of the exchange the previous two lessons opened.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0200 to 0201&lt;br/&gt;the request and&lt;br/&gt;what a method promises"] --> T["THIS PAGE&lt;br/&gt;how the server&lt;br/&gt;answers, in one digit"]
+  T --> A["Lesson 0203&lt;br/&gt;the fields that carry&lt;br/&gt;the rest of the answer"]
+  T --> B["Module 06&lt;br/&gt;error shapes in&lt;br/&gt;an API design"]
+  T --> C["Module 11&lt;br/&gt;what an alert&lt;br/&gt;should fire on"]
+  W["Module 02&lt;br/&gt;HTTP is the language"] -.- T
+    </div>
+    <figcaption>The request side is complete, so this page turns the exchange round. The status class is the first thing every layer above it reads, from a retry policy to an alerting rule to an API's own error envelope. <b>Every mechanism downstream branches on the class before it looks at the code.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the digit is the interface</h2>
+
+  <p>The status space is extensible, and the way it stays extensible is a rule most engineers have never read. RFC 9110 requires a client to understand the <em>class</em> of any status code, given by the first digit, and to treat an unrecognised code as equivalent to the x00 of that class. A client receiving 471 knows from the leading 4 that something was wrong with its request and may treat it as 400. A response with a code outside 100 to 599 is invalid and should be processed as a 5xx.</p>
+
+  <p>That rule is the whole design. It means a server can invent a code without breaking clients, and it means your code that switches on 200 and 404 and falls through everything else is not merely lazy but wrong: the fallthrough is supposed to be per class, not per code.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Five classes, one question</div>
+    <div class="fig-claim">Reading the first digit answers the only question a caller has.</div>
+    <div class="mermaid">
+flowchart TB
+  R["A response arrives"] --> D["Read the first digit"]
+  D --> I["1xx - interim&lt;br/&gt;the final answer is still coming"]
+  D --> S["2xx - received, understood, accepted"]
+  D --> M["3xx - further action needed&lt;br/&gt;by the user agent"]
+  D --> C["4xx - the client seems to have erred"]
+  D --> E["5xx - the server erred, or cannot&lt;br/&gt;perform the method"]
+  I --> W["Keep waiting"]
+  S --> W2["Use the representation"]
+  M --> W3["Follow, or stop"]
+  C --> W4["Change the request&lt;br/&gt;- do not repeat it unchanged"]
+  E --> W5["Retry with backoff&lt;br/&gt;- the request may be fine"]
+    </div>
+    <figcaption>Each class answers one question and prescribes one caller behaviour. The three on the left are about where the request stands and the two on the right are about whose problem it is. <b>The caller behaviour follows from the class alone, which is why an unknown code is still actionable.</b></figcaption>
+  </figure>
+
+  <h2>2. The three that say where the request stands</h2>
+
+  <h3 id="interim-response">1xx: not an answer yet</h3>
+  <p>The 1xx class is an interim response that communicates connection status or request progress before the requested action is complete. A 1xx response is terminated by the end of the header section and can carry no content. A single request has zero or more interim responses followed by exactly one final response, which is the sentence to remember: a client that treats the first response line it sees as the answer will occasionally be wrong.</p>
+
+  <h3 id="status-class">2xx and 3xx: accepted, or redirected</h3>
+  <p>2xx means the request was successfully received, understood and accepted. 3xx means further action needs to be taken by the user agent to fulfil the request, which is not the same as failure and not the same as success: a redirect is a well-formed answer that happens to be an instruction. Both are ordinary outcomes, and treating a 3xx as an error is a common source of noisy dashboards.</p>
+
+  <h2>3. The two that assign blame</h2>
+
+  <h3 id="client-error">4xx: the request is the problem</h3>
+  <p>4xx says the client seems to have erred. The specification's own hedge is worth keeping: <em>seems</em>. The server is making a judgement, and the practical consequence is that repeating the same request unchanged will get the same answer. A well-built client does not retry a 4xx, a well-built dashboard does not alert on one, and an error budget that counts 4xx as failure will be dominated by scanners and stale bookmarks.</p>
+
+  <h3 id="server-error">5xx: the server is the problem</h3>
+  <p>5xx says the server is aware it has erred or is incapable of performing the method. Here the request may be perfectly valid, so a retry is meaningful and backoff is required to stop the retry becoming the outage. This is the class your alerts fire on. In both classes, except when answering a HEAD request, the server should send a representation explaining the situation and whether it is temporary or permanent.</p>
+
+  <p>The line between the two is a judgement, and it is genuinely hard in one place: a dependency you called has failed. The request was valid, your service could not perform it, and the class is 5xx even though the fault was somewhere else. That is worth stating explicitly in a service's error-handling code, because the tempting alternative is to pass the dependency's own 4xx straight through and blame a caller who did nothing wrong. This page owns the vocabulary and Module 11 owns the retry policy, but the classification itself is decided here, at the moment a handler picks a number.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of one exchange</div>
+    <div class="fig-claim">Interim responses can repeat, and exactly one final response ends it.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Sent
+  Sent --> Interim: a 1xx arrives
+  Interim --> Interim: another 1xx
+  Interim --> Final: the final response
+  Sent --> Final: the final response
+  Final --> [*]
+  note left of Final: 2xx, 3xx, 4xx and 5xx&lt;br/&gt;are all final - exactly&lt;br/&gt;one of them per request
+</div>
+    <figcaption>The exchange as a state machine rather than a table. A request sits in one interim state for as long as the server keeps reporting progress, and leaves it exactly once. <b>Only one response per request is final, and its class is the only part every client is required to understand.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    The expensive mistake is returning 200 with an error inside the body. It is comfortable, it makes a client library simpler, and it makes the request invisible to every layer that reads the status: no proxy retries it, no dashboard counts it, no cache declines to store it. An outage served as 200 is an outage nobody is paged for.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A client receives status 471, which it has never seen. What should it do?</div>
+      <button class="q-opt">Treat it as a 500 and retry with backoff</button>
+      <button class="q-opt">Treat it as invalid and drop the response</button>
+      <button class="q-opt">Ask the server again on a new connection</button>
+      <button class="q-opt">Treat it as a 400, from its leading digit</button>
+      <div class="q-fb">A client must understand the class, and an unrecognised code is equivalent to the x00 of that class, so 471 reads as 400. The first option reads the wrong class, the second discards a valid response, and the third is a retry the 4xx class specifically does not warrant.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which response should an availability alert fire on?</div>
+      <button class="q-opt">4xx, since the caller could not proceed</button>
+      <button class="q-opt">5xx, since the server names itself at fault</button>
+      <button class="q-opt">3xx, since the answer was not the content</button>
+      <button class="q-opt">Any non-2xx, since only 2xx is success</button>
+      <div class="q-fb">Only the 5xx class says the server erred or could not perform the method. The 4xx class blames the request, so it tracks client behaviour rather than availability; 3xx is a normal outcome; and the last option collapses all three distinctions into one noisy signal.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0203-headers-carry-what-the-body-cannot.html">headers carry what the body cannot</a></b> covers the fields that qualify a status: what the representation is, and how long it may be kept.</li>
+    <li><b>Back at <a href="0201-methods-are-verbs-with-guarantees.html">methods are verbs with guarantees</a></b> is the other side of the retry question this page raised.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Pull one hour of your service's access log and group it by first digit rather than by code. Ask the agent to help you decide which of your 4xx responses are really 5xx responses that were mis-classified, and what your availability number would be after the correction.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-15">RFC 9110 &sect;15</a> opens with the extensibility rule and then defines each class in a paragraph before it lists the codes. The five class paragraphs are shorter than any summary of them and are the part worth reading verbatim.</p>
+
+  <div class="pager">
+    <a href="0201-methods-are-verbs-with-guarantees.html"><span class="dir">&larr; Previous</span><span class="ttl">Methods are verbs with guarantees</span></a>
+    <a class="nxt" href="0203-headers-carry-what-the-body-cannot.html"><span class="dir">Next &rarr;</span><span class="ttl">Headers carry what the body cannot</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0202 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

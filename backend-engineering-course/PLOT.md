@@ -22,8 +22,8 @@ before the next depends on it.
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1 | Module 01 - The shape of a request (0000) | in progress | On-ramp: reason one request end to end before any mechanism is named. The whole map in one page. |
-| 2 | Module 02 - HTTP is the language | reserved | Methods, status, headers, caching headers, CORS. RFC 9110 owned. |
+| 1 | Module 01 - The shape of a request (0000) | written | On-ramp: reason one request end to end before any mechanism is named. The whole map in one page. |
+| 2 | Module 02 - HTTP is the language (0200-0205) | written | Methods, status, headers, caching headers, CORS. RFC 9110, RFC 9111 and RFC 9113 owned. |
 | 3 | Module 03 - Routing | reserved | How a request becomes a handler: path, method, middleware chain. |
 | 4 | Module 04 - Serialization & contracts | reserved | JSON, protobuf; validations and transformations at the boundary. |
 | 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
@@ -45,8 +45,14 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 02-13 above are all reserved from this first scaffold, mapped to the upstream chapters. Each
+Modules 03-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+
+Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
+every later module consumes the vocabulary it defines: routing consumes the method and the target,
+serialization consumes the representation fields, and auth consumes the credential fields.
+Its lesson numbers start at 0200 rather than continuing from 0000, so each module owns a hundred-block
+and a later module never renumbers an earlier one.
 
 ## Adding a session to this course
 

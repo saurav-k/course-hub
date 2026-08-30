@@ -15,6 +15,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0000-the-shape-of-a-request.html"
         }
       ]
+    },
+    {
+      "n": "02",
+      "title": "HTTP is the language",
+      "lessons": [
+        {
+          "title": "A request is a method, a target and headers",
+          "href": "lessons/0200-a-request-is-a-method-a-target-and-headers.html"
+        },
+        {
+          "title": "Methods are verbs with guarantees",
+          "href": "lessons/0201-methods-are-verbs-with-guarantees.html"
+        },
+        {
+          "title": "Status codes are three families with one job each",
+          "href": "lessons/0202-status-codes-are-three-families-with-one-job-each.html"
+        },
+        {
+          "title": "Headers carry what the body cannot",
+          "href": "lessons/0203-headers-carry-what-the-body-cannot.html"
+        },
+        {
+          "title": "Caching is a contract between two clocks",
+          "href": "lessons/0204-caching-is-a-contract-between-two-clocks.html"
+        },
+        {
+          "title": "CORS is the browser enforcing the server's own policy",
+          "href": "lessons/0205-cors-is-the-browser-enforcing-the-servers-own-policy.html"
+        }
+      ]
     }
   ],
   "extras": [

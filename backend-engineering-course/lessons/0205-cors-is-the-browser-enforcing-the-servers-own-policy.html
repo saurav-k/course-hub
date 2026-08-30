@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CORS is the browser enforcing the server's own policy - Backend Engineering</title>
+<meta name="description" content="CORS is enforced in the browser, not the server: the preflight asks permission before the real request, and a CORS error is a reading that was refused rather than a request that was blocked.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; HTTP is the language &middot; Lesson 0205</div>
+  <h1>CORS is enforced by the browser, and the server only ever states a policy</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Who enforces what, and when. &middot;
+    <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN - Cross-Origin Resource Sharing</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The browser enforces CORS. The server <b>states a policy in response fields</b> and enforces nothing, which is why <code>curl</code> never sees a CORS error.</li>
+      <li>A <b>simple request is sent first and judged afterwards</b>: the server has already acted before the browser decides whether the page may read the answer.</li>
+      <li>A request outside the simple set gets a <b>preflight</b>: an <code>OPTIONS</code> asking permission for the method and the fields, before the real request is sent.</li>
+      <li><b>Credentials change the rules</b>: a wildcard origin is refused outright and the server must name the origin and allow credentials explicitly.</li>
+      <li>What it costs: CORS protects the reader, not the resource. Anything reachable without a browser still needs real authorisation.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The module closes with the one mechanism a server cannot enforce.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0200 to 0204&lt;br/&gt;the frame, methods,&lt;br/&gt;status, fields, caching"] --> T["THIS PAGE&lt;br/&gt;a policy stated by one party&lt;br/&gt;and enforced by another"]
+  T --> A["Module 03&lt;br/&gt;routing, which must&lt;br/&gt;answer OPTIONS too"]
+  T --> B["Module 07&lt;br/&gt;auth and the&lt;br/&gt;web threat model"]
+  W["Module 02&lt;br/&gt;HTTP is the language"] -.- T
+    </div>
+    <figcaption>Every mechanism so far was enforced by whoever stated it. This one is not, and that inversion is the reason CORS is the most misdiagnosed error in web development. It also hands Module 03 a routing requirement and Module 07 a threat model. <b>The last page of this module is the one where naming the enforcer is the whole lesson.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the browser is the enforcer</h2>
+
+  <h3 id="same-origin-policy">The same-origin policy, and who obeys it</h3>
+  <p>The same-origin policy is a rule inside the browser. Script running on one origin - a scheme, host and port taken together - may not read a response from another origin unless that other origin says it may. Cross-Origin Resource Sharing is the mechanism by which the other origin says so: a set of response fields the server sends, which the browser reads and acts on.</p>
+
+  <p>Two consequences follow immediately and both are the point of this page. First, the server does not block anything. It answers the request and states its policy in fields, and a client that is not a browser ignores those fields entirely. Second, a "CORS error" in a console is not a failed request. It is usually a successful request whose response the browser refused to hand to the script, which is why the network tab shows a 200 that your code never received.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Who decides what</div>
+    <div class="fig-claim">The server states, the browser enforces, and a non-browser client ignores.</div>
+    <div class="mermaid">
+flowchart TB
+  R["A cross-origin request"] --> B{"Is the client a browser&lt;br/&gt;running page script"}
+  B -->|"no"| N["No enforcement at all&lt;br/&gt;- fields are ignored"]
+  B -->|"yes"| S["Send Origin, read the reply's&lt;br/&gt;Access-Control fields"]
+  S --> D{"Does the policy&lt;br/&gt;allow this origin"}
+  D -->|"yes"| Y["Hand the response to the script"]
+  D -->|"no"| X["Withhold it - the request&lt;br/&gt;still reached the server"]
+    </div>
+    <figcaption>The decision tree, with the branch most engineers never draw. The left-hand path is why a request that fails in a page succeeds from a terminal, and the bottom-right box is why a CORS failure is not protection against anything that matters. <b>CORS keeps one page from reading another origin's answer, and keeps nothing out of the server.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: two shapes, one policy</h2>
+
+  <h3 id="simple-request">The simple request, judged after the fact</h3>
+  <p>Some requests are sent straight out, and the browser applies the policy only to the response. MDN's conditions are narrow: the method is GET, HEAD or POST, the only request fields set by the page are the CORS-safelisted ones - <code>Accept</code>, <code>Accept-Language</code>, <code>Content-Language</code>, <code>Range</code>, and <code>Content-Type</code> limited to <code>application/x-www-form-urlencoded</code>, <code>multipart/form-data</code> or <code>text/plain</code> - with no upload progress listener and no stream body. A JSON POST is outside that set, purely because <code>application/json</code> is not one of the three content types, and that single fact accounts for most preflights an API ever sees.</p>
+
+  <h3 id="preflight-request">The preflight, which asks first</h3>
+  <p>Anything outside the simple set gets an <code>OPTIONS</code> request the page never wrote. It carries <code>Access-Control-Request-Method</code> and, when custom fields are involved, <code>Access-Control-Request-Headers</code>. The server answers with <code>Access-Control-Allow-Origin</code>, <code>Access-Control-Allow-Methods</code>, <code>Access-Control-Allow-Headers</code> and optionally <code>Access-Control-Max-Age</code>, which is how long the browser may reuse this permission - the same freshness idea as the previous lesson, applied to a policy instead of a representation. Only if the answer permits it does the real request go out.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A preflight exchange</div>
+    <div class="fig-claim">Permission is obtained before the request with effects is sent.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Page script
+  participant B as Browser
+  participant S as Server
+  P->>B: fetch a JSON POST to another origin
+  B->>S: OPTIONS with Access-Control-Request-Method POST
+  S-->>B: Allow-Origin, Allow-Methods, Allow-Headers, Max-Age
+  B->>B: cache the permission for Max-Age seconds
+  B->>S: the real POST, with Origin
+  S-->>B: 201 with Access-Control-Allow-Origin
+  B-->>P: the response, now readable by the script
+  Note over B,S: a refused preflight means the POST is never sent
+    </div>
+    <figcaption>The full exchange for a request the browser will not send unasked. The note is the part that distinguishes a preflighted request from a simple one: here the server's write never happens, whereas a refused simple request has already been acted on. <b>The preflight is the one case where the browser protects the server rather than the reader.</b></figcaption>
+  </figure>
+
+  <h2>3. Credentials, and the trade-off</h2>
+
+  <h3 id="credentialed-request">A credentialed request</h3>
+  <p>A credentialed request carries cookies or an authorization header across origins, and the rules tighten because the stakes change. The page must opt in. The server must answer <code>Access-Control-Allow-Credentials: true</code>, and it may not answer <code>*</code> for the origin, the methods, the headers or the exposed headers: a wildcard is refused rather than expanded. The preflight itself never carries credentials. On top of all of that, the browser's own third-party cookie policy still applies, so a correct CORS configuration is necessary and not sufficient.</p>
+
+  <p>Response fields have a matching restriction. By default a script may read only <code>Cache-Control</code>, <code>Content-Language</code>, <code>Content-Length</code>, <code>Content-Type</code>, <code>Expires</code>, <code>Last-Modified</code> and <code>Pragma</code> from a cross-origin response. Anything else - a pagination header, a request identifier, a rate-limit counter - has to be listed in <code>Access-Control-Expose-Headers</code>, and its absence is the second most common CORS puzzle after the preflight.</p>
+
+  <p>The trade-off is easy to state and easy to forget under a deadline. CORS buys one thing: it stops a page the reader did not trust from reading an answer meant for a page they did. It buys nothing against a script, a scraper or an attacker who is not driving a browser, because none of them is bound by a policy they can simply not read. So a resource that must not be public needs authentication and authorisation on the server, and the CORS configuration beside it is a separate decision about which front ends may talk to it.</p>
+
+  <div class="callout warn">
+    Reflecting the <code>Origin</code> field back as <code>Access-Control-Allow-Origin</code> makes every CORS error disappear, and that is exactly the problem: combined with <code>Allow-Credentials: true</code> it permits any site on the internet to make authenticated requests as your signed-in user and read the answers. It passes every test you will write. Name the origins you mean.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A fetch fails with a CORS error but the same URL works in <code>curl</code>. Why?</div>
+      <button class="q-opt">Only a browser enforces the policy the server states</button>
+      <button class="q-opt">Only a browser sends the Origin field on requests</button>
+      <button class="q-opt">The server blocks by origin and curl sends none</button>
+      <button class="q-opt">The server answers OPTIONS but refuses the POST</button>
+      <div class="q-fb">The server states a policy and never enforces it, so a non-browser client is unaffected. The second option is nearly true and still not the reason; the third has the server doing enforcement it does not do; and the fourth describes a preflight failure, which would not produce a working curl either.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which request triggers a preflight?</div>
+      <button class="q-opt">A GET with only an Accept-Language field set</button>
+      <button class="q-opt">A POST sending a multipart form data body</button>
+      <button class="q-opt">A POST sending an application/json body</button>
+      <button class="q-opt">A GET with a single Range field on the ask</button>
+      <div class="q-fb">Only three content types are safelisted and JSON is not among them, so a JSON POST is preflighted. The other three sit inside the simple set: Accept-Language and Range are CORS-safelisted fields, and multipart form data is one of the three permitted content types.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="../index.html">the course map</a></b>, where Module 03 takes the method and target this module defined and turns them into a handler.</li>
+    <li><b>Back at <a href="0204-caching-is-a-contract-between-two-clocks.html">caching is a contract between two clocks</a></b> is the freshness model that <code>Access-Control-Max-Age</code> reuses for a policy.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Send one JSON POST to your own API from a page on a different origin and watch both requests in the network tab. Ask the agent to explain, from your server's actual response fields, why the preflight passed or failed - and whether your allow list names origins or reflects them.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS">MDN's CORS guide</a> lists the safelisted fields and the credentialed-request rules with worked exchanges, and the normative definition of all of it is the <a href="https://fetch.spec.whatwg.org/">Fetch standard</a>, which is where the browser behaviour is actually specified.</p>
+
+  <div class="pager">
+    <a href="0204-caching-is-a-contract-between-two-clocks.html"><span class="dir">&larr; Previous</span><span class="ttl">Caching is a contract between two clocks</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0205 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
