@@ -30,10 +30,10 @@ before the next depends on it.
 | 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05 landed, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
-| 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
+| 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
-| 12 | Module 12 - Inter-service communication (1200-1205) | written | Three couplings and how to choose between them, gRPC and its deadline, the queue, the log, and the WebSocket. Written independently of Modules 05 and 07 to 11, because nothing in it depends on any of them. |
+| 12 | Module 12 - Inter-service communication (1200-1205) | written | Three couplings and how to choose between them, gRPC and its deadline, the queue, the log, and the WebSocket. Depends only on Modules 02, 04 and 06, so it was written without waiting for the modules numbered between. |
 | 13 | Module 13 - Scale, flight & shipping | reserved | Concurrency, scaling, containerization / K8s / CI-CD, automated testing. |
 
 Reference sheets and glossaries read alongside and are recorded as such; they are not positions in the
@@ -70,7 +70,12 @@ ordered threat before defence throughout - injection, then XSS as the same defec
 the interpreter, then CSRF as the one that needs no injected code at all - so lesson 0706 can close on
 the symmetry between the last two.
 
-Module 12 was written alongside Modules 03, 05 and 07 rather than after them, because it needs only the
+Module 09 landed while Module 08 stays reserved. It needs neither the layered service nor the data
+module: a cache is reasoned about from the request and the store, both of which Module 01 already names, and lesson 0204 deliberately taught the protocol
+cache first so that this module could be about invalidation rather than about mechanism. Where it needs
+the relational store it links Module 08 as the owner of the truth rather than restating it.
+
+Module 12 was written without waiting for the modules numbered before it, because it needs only the
 vocabulary of Modules 02, 04 and 06: the wire contract it puts on a connection, the promise it makes
 across a service boundary, and the idempotency key every one of its three transports asks for. Nothing
 in it depends on routing, on the internal layering, or on auth. Its lessons run 1200 to 1205 in the
