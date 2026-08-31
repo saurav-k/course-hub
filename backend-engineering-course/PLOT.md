@@ -32,7 +32,7 @@ before the next depends on it.
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
 | 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
-| 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
+| 11 | Module 11 - Resilience & observability (1100-1105) | written | Failures and their one owner, config parsed at boot, then the three signals - logs, traces and metrics - by the question each answers, and graceful shutdown as a sequence against a deadline. Written before Modules 05 and 07 to 10, which stay reserved, because it depends on none of them. |
 | 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
 | 13 | Module 13 - Scale, flight & shipping | reserved | Concurrency, scaling, containerization / K8s / CI-CD, automated testing. |
 
@@ -56,6 +56,12 @@ It lands after Modules 04 and 06 rather than before them, because neither of tho
 Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
 where that hand-off is made. It needs neither routing nor the layered service to be readable.
+
+Module 11 landed ahead of Modules 05 and 07 to 10, because nothing in it depends on the internal layering, or
+on a database, a cache or a queue. It reads after Module 06 and consumes Module 02's status families and
+Module 06's problem document, both of which are already written. Its observability half is ordered by
+the question a debugging session asks rather than by tool: one execution (logs), one request across processes
+(traces), then the whole population (metrics).
 
 Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
 every later module consumes the vocabulary it defines: routing consumes the method and the target,
