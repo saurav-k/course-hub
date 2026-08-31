@@ -30,7 +30,7 @@ before the next depends on it.
 | 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Module 03 landed and while Module 05 stays reserved, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth & security | reserved | Sessions, tokens, OAuth; the web's threat model (injection, XSS, CSRF). |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
-| 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written before Modules 03, 05, 07 and 08, which stay reserved, because it depends on none of them. |
+| 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Modules 05, 07 and 08 stay reserved, because it depends on none of them. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
 | 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
@@ -57,8 +57,8 @@ Module 06 landed fourth, after Module 04, because the API surface is what the se
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
 where that hand-off is made. It needs neither routing nor the layered service to be readable.
 
-Module 09 landed after Module 06 and before Modules 03, 05, 07 and 08, which stay reserved. It needs
-neither routing nor the layered service nor the data module: a cache is reasoned about from the request
+Module 09 landed while Modules 05, 07 and 08 stay reserved. It needs
+neither the layered service nor the data module: a cache is reasoned about from the request
 and the store, both of which Module 01 already names, and lesson 0204 deliberately taught the protocol
 cache first so that this module could be about invalidation rather than about mechanism. Where it needs
 the relational store it links Module 08 as the owner of the truth rather than restating it.
