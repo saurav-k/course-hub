@@ -29,7 +29,7 @@ before the next depends on it.
 | 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
 | 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Module 03 landed and while Module 05 stays reserved, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth & security | reserved | Sessions, tokens, OAuth; the web's threat model (injection, XSS, CSRF). |
-| 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
+| 8 | Module 08 - Data (0800-0806) | written | The relational model as a place to put invariants, the transaction boundary and the write-ahead log, isolation levels as a menu of anomalies, lock hold time as blast radius, the B-tree and its write cost, composite order and the planner's estimate, and the four non-relational shapes. |
 | 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
@@ -56,6 +56,13 @@ It lands after Modules 04 and 06 rather than before them, because neither of tho
 Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
 where that hand-off is made. It needs neither routing nor the layered service to be readable.
+
+Module 08 landed after Module 06 and before Modules 03, 05 and 07, which stay reserved, because nothing in it depends on
+routing, on the internal layering, or on auth. It is the module the later ones consume rather than the other way round:
+Module 09 caches what this one stores, Module 10 queues work that this one has to commit, and Module 13 scales a fleet
+whose shared state lives here. Four of its seven lessons sit on transactions and indexes, which is where a working
+engineer's model is usually thinnest, and the non-relational map is last so that every guarantee it trades away has
+already been named and priced.
 
 Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
 every later module consumes the vocabulary it defines: routing consumes the method and the target,
