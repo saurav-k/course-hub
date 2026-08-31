@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubernetes is a control loop, not a deployer - Backend Engineering</title>
+<meta name="description" content="Nothing in Kubernetes deploys anything. You write down the state you want, and non-terminating loops keep comparing that to the state that exists and acting on the difference.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 13 &middot; Scale, fleet and shipping &middot; Lesson 1304</div>
+  <h1>You write down the state you want and a loop keeps closing the gap</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The orchestration model, stated as the one idea the rest of it is built from. &middot;
+    <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Kubernetes - Controllers</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>control loop is non-terminating</b>. It compares desired state against current state and acts on the difference, forever, exactly like a thermostat.</li>
+      <li>Applying a manifest <b>deploys nothing</b>. It writes down a wish, and separate loops notice the gap and close it.</li>
+      <li>Controllers mostly do not act directly: they <b>send messages to the API server</b>, and another controller acts on those, which is how a rollout is composed.</li>
+      <li>A rolling update is arithmetic on two defaults: <b>surge 25% up and unavailable 25% down</b>, which is the whole envelope the fleet moves inside.</li>
+      <li>What it costs: a loop has no idea what a failed deploy is. It keeps retrying, so a broken release is a stable state rather than an error.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Disposable instances need something that decides how many exist.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 1302 and 1303&lt;br/&gt;interchangeable instances,&lt;br/&gt;packaged"] --> T["THIS PAGE&lt;br/&gt;what creates and&lt;br/&gt;destroys them"]
+  T --> A["Lesson 1306&lt;br/&gt;how a new digest&lt;br/&gt;reaches the loop"]
+  T --> B["Module 11&lt;br/&gt;the shutdown the&lt;br/&gt;loop asks you for"]
+  W["Module 13&lt;br/&gt;scale, fleet&lt;br/&gt;and shipping"] -.- T
+    </div>
+    <figcaption>Lesson 1302 made an instance disposable and lesson 1303 made it reproducible, and both left a question open: who decides that four of them should exist right now, and who notices when only three do. This page is that answer, and it is a smaller idea than the size of the system suggests. <b>One mechanism, applied recursively, is most of what an orchestrator is.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a thermostat, not a deploy tool</h2>
+
+  <h3 id="control-loop">The loop is the whole idea</h3>
+  <p>The Kubernetes documentation borrows its definition from control engineering: <a href="https://kubernetes.io/docs/concepts/architecture/controller/">"in robotics and automation, a control loop is a non-terminating loop that regulates the state of a system"</a>, and the analogy it offers is a thermostat. The temperature you set is the desired state, the room's temperature is the current state, and the thermostat acts to bring one closer to the other. A controller in Kubernetes tracks at least one resource type whose <code>spec</code> field is the desired state, and is "responsible for making the current state come closer to that desired state".</p>
+
+  <p>The word missing from that description is deploy. There is no moment at which a release happens and no component whose job is to perform one. Writing a manifest changes the desired state and then stops; every visible effect afterwards is a loop noticing that current and desired differ. That is why a pod deleted by hand comes back, why a rollout continues after your terminal is closed, and why there is nothing to roll back if the loop never converged in the first place.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The loop, once around</div>
+    <div class="fig-claim">There is no exit from this cycle and no completion state.</div>
+    <div class="mermaid">
+flowchart LR
+  A["Read desired state&lt;br/&gt;the spec you wrote"] --> B["Read current state&lt;br/&gt;what actually exists"]
+  B --> C{"Do they&lt;br/&gt;differ"}
+  C -->|"yes"| D["Act to close the gap&lt;br/&gt;usually by writing&lt;br/&gt;to the API server"]
+  C -->|"no"| E["Do nothing"]
+  D --> A
+  E --> A
+    </div>
+    <figcaption>Both branches return to the top, which is the property that makes the system self-healing and also the property that makes it stubborn. A node failing is a difference the loop closes without being asked, and an edit you made by hand is a difference it closes in the direction of the manifest. <b>Convergence and reversion are the same behaviour, and which one you call it depends on whether you wrote the spec.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: loops composed, and the arithmetic they obey</h2>
+
+  <h3 id="composition">Controllers talk to the API server, not to machines</h3>
+  <p>A single loop would be a small idea. What makes it a system is stated in one sentence of the same page: a controller "might carry the action out itself; more commonly, in Kubernetes, a controller will send messages to the API server that have useful side effects". So a controller's action is usually another write to desired state, which some other controller is watching. The chain from your manifest to a running process is several loops long, and no link in it knows about the whole.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four loops in a row</div>
+    <div class="fig-claim">Each link writes a wish and the next link is what reads it.</div>
+    <div class="mermaid">
+flowchart TB
+  M["You apply a Deployment&lt;br/&gt;desired - 8 replicas of&lt;br/&gt;digest sha256-9f3c"] --> D["Deployment controller&lt;br/&gt;creates a ReplicaSet"]
+  D --> R["ReplicaSet controller&lt;br/&gt;creates 8 Pod objects"]
+  R --> S["Scheduler&lt;br/&gt;assigns each Pod&lt;br/&gt;to a node"]
+  S --> K["kubelet on that node&lt;br/&gt;pulls the digest and&lt;br/&gt;starts the container"]
+    </div>
+    <figcaption>Only the last box touches a machine. Everything above it changes records, and each record is another controller's desired state. That is why a Pod stuck in Pending is diagnostic rather than mysterious: the ReplicaSet controller did its work and the scheduler has not, so the question is about nodes and constraints rather than about your image. <b>Reading the chain backwards from where it stopped is most of Kubernetes debugging.</b></figcaption>
+  </figure>
+
+  <h3 id="rolling-update">A rollout is two percentages</h3>
+  <p>A Deployment describes a desired state and "the Deployment Controller changes the actual state to the desired state at a controlled rate". Updating the pod template creates a <a href="https://kubernetes.io/docs/concepts/workloads/controllers/deployment/">new ReplicaSet, which is scaled up while the old one is scaled down</a>, and each revision is kept so a rollback is a move to an earlier one rather than a rebuild. The rate is governed by two fields whose <a href="https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/">defaults are both 25%</a>: <code>maxSurge</code>, the pods allowed above the desired count, rounded up, and <code>maxUnavailable</code>, the pods allowed to be missing, rounded down.</p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="The permitted envelope during a rolling update of eight replicas, from six available at the floor to ten total at the ceiling">
+      <line class="axis" x1="90" y1="200" x2="614" y2="200"/>
+      <line class="axis" x1="90" y1="26" x2="90" y2="200"/>
+      <rect class="f-prob" x="90" y="58" width="524" height="57"/>
+      <line class="s-signal ref" x1="90" y1="87" x2="614" y2="87"/>
+      <line class="grid" x1="90" y1="58" x2="614" y2="58"/>
+      <line class="grid" x1="90" y1="115" x2="614" y2="115"/>
+      <text class="lbl-sm" x="82" y="62"  text-anchor="end">10</text>
+      <text class="lbl-sm" x="82" y="91"  text-anchor="end">8</text>
+      <text class="lbl-sm" x="82" y="119" text-anchor="end">6</text>
+      <text class="lbl-sm" x="82" y="204" text-anchor="end">0</text>
+      <text class="lbl-sm" x="106" y="52">ceiling 10 = 8 + surge, 25% of 8 rounded up</text>
+      <text class="lbl-sm" x="106" y="133">floor 6 = 8 - unavailable, 25% of 8 rounded down</text>
+      <text class="lbl-sm" x="352" y="222" text-anchor="middle">the whole rollout, old replicas retiring as new ones become ready</text>
+      <text class="ttl" x="90" y="16">pods, for a Deployment whose desired count is 8</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-prob"></i>permitted at any instant</span><span><i class="sw-signal"></i>the desired count</span></div>
+    <figcaption>The band is the entire promise a default rolling update makes, and the two edges come straight from the defaults: 8 plus 2 at the top, 8 minus 2 at the bottom. Two things follow immediately. A cluster with no room for two extra pods stalls rather than fails, and a service sized so that 6 replicas cannot carry peak load has agreed to be overloaded during every deploy. <b>The safe deploy window is a capacity decision you make when you choose the replica count, not on the day you ship.</b></figcaption>
+  </figure>
+
+  <h3 id="probes">Readiness and liveness answer different questions</h3>
+  <p>The loop cannot know when a container is usable, so the container tells it. <a href="https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/">The three probes</a> differ in consequence rather than in shape. A readiness probe determines when a container is ready to accept traffic, and on failure "the EndpointSlice controller removes the Pod's IP address from the EndpointSlices of all Services that match the Pod": no traffic, no restart. A liveness probe determines when to restart a container, catching a deadlock where the process runs but cannot progress, and on repeated failure "the kubelet restarts that container". A startup probe gates both, so that a slow initialisation is not mistaken for a hang.</p>
+
+  <p>The two consequences are what make the choice load-bearing. A liveness probe that checks a downstream dependency turns that dependency's outage into a fleet-wide restart, because every pod fails the check at once and restarting none of them helps. A readiness probe that checks the same dependency is the correct expression of the same worry: the pod stays alive, takes no traffic, and returns on its own.</p>
+
+  <h3 id="termination">Stopping is a sequence with a clock</h3>
+  <p>Scaling down and rolling out both end at the same place, and the <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/">Pod lifecycle</a> spells it out. On deletion the Pod is removed from Service endpoints at the same time as SIGTERM is sent, a <code>preStop</code> hook runs if one is defined, and the process then has <code>terminationGracePeriodSeconds</code>, 30 by default, before SIGKILL. That is the budget module 11's graceful shutdown spends, and lesson 1303 is why it can be lost: a process that installs no SIGTERM handler is PID 1 in its namespace and ignores the signal entirely, so it is killed at the end of the window with its in-flight requests still open.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Thirty seconds to finish</div>
+    <div class="fig-claim">Traffic stops and the timer starts at the same instant.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as API server
+  participant E as EndpointSlice controller
+  participant K as kubelet
+  participant P as Your process
+  A->>E: Pod is terminating
+  E->>E: remove the Pod IP from Services
+  A->>K: Pod is terminating
+  K->>P: run preStop, then send SIGTERM
+  Note over P: stop accepting, finish in-flight work
+  P-->>K: exited cleanly
+  Note over K: if not, SIGKILL at 30 seconds
+    </div>
+    <figcaption>Removal from the Services and the SIGTERM are concurrent rather than ordered, so a request already in flight can still arrive after the signal and the process has to answer it. That is why draining means finishing what you hold rather than closing the listener and exiting. <b>A graceful shutdown is a promise about the requests you already accepted, and the grace period is how long the cluster will wait for it.</b></figcaption>
+  </figure>
+
+  <h3 id="autoscaling">Scaling is one more loop</h3>
+  <p>The <a href="https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/">HorizontalPodAutoscaler</a> is the same pattern with a metric in it. Its algorithm is a single ratio: <code>desiredReplicas = ceil(currentReplicas &times; (currentMetricValue / desiredMetricValue))</code>. It runs on a sync period that defaults to 15 seconds, and skips any action when the ratio is within a tolerance that defaults to 0.1, which is what stops the fleet oscillating on noise.</p>
+
+  <h2>3. The trade-off: a loop cannot tell a bad release from a slow one</h2>
+
+  <p>Because reconciliation never terminates, there is no built-in idea of failure. A Deployment whose new pods crash on start is not an error condition, it is a difference the controller keeps trying to close, and it will keep trying at whatever the restart backoff allows for as long as the manifest says so. Nothing raises its hand. What tells you is watching the rollout status or the readiness of the new ReplicaSet, and that watching is a thing your pipeline has to do deliberately, which is lesson 1306's subject.</p>
+
+  <p>The second cost is that the declarative model is only as good as the declaration. Anything not in the spec is not reconciled: a manually scaled Deployment stays where the autoscaler last put it, a Secret changed outside the manifest is not noticed by the pods already holding it, and a resource created by hand is orphaned rather than owned. The system is exactly as reproducible as the set of files you actually apply.</p>
+
+  <div class="callout warn">
+    Horizontal autoscaling does not apply to objects that cannot be scaled, a DaemonSet being the stated example, and it scales replicas rather than capacity. If each pod's ceiling is a database connection pool rather than CPU, adding replicas multiplies the connections and moves the failure into the database. Lesson 1300's question applies unchanged here: find the smallest pool on the path before you multiply anything.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A liveness probe checks that the database is reachable. What happens when the database fails?</div>
+      <button class="q-opt">Only the pods holding an open connection are restarted by the kubelet</button>
+      <button class="q-opt">The pods are held back from traffic and returned when the check passes</button>
+      <button class="q-opt">Every pod fails the check and every container is restarted, helping nothing</button>
+      <button class="q-opt">The Deployment is rolled back to the previous revision automatically</button>
+      <div class="q-fb">A failed liveness probe restarts the container, so a shared dependency failing means the whole fleet restarts on a problem no restart addresses. Holding back from traffic is what a readiness probe does and is the right expression of this worry, connection state is irrelevant to the probe, and nothing rolls a Deployment back on its own.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">With both rolling-update defaults, how many pods may exist during an update of 8 replicas?</div>
+      <button class="q-opt">Up to 10, because surge adds 25% of 8 rounded up to the count</button>
+      <button class="q-opt">Up to 16, because the new ReplicaSet is created at full size</button>
+      <button class="q-opt">Exactly 8, because the old pod is removed before the new one starts</button>
+      <button class="q-opt">Up to 12, because surge and unavailable are added to each other</button>
+      <div class="q-fb">maxSurge defaults to 25% and rounds up, so 8 becomes at most 10, and maxUnavailable governs the floor of 6 rather than adding to the ceiling. A full second copy is a different strategy entirely, removing before starting would breach the floor of 6, and the two defaults govern opposite ends of the band rather than summing.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1305-tests-buy-confidence-at-different-prices.html">tests buy confidence at different prices</a></b> is what decides whether the digest this loop is asked to run should have been built at all.</li>
+    <li><b>Ahead, <a href="1306-the-pipeline-ships-the-artefact-you-tested.html">the pipeline ships the artefact you tested</a></b> is the thing that writes the new desired state and then watches whether the loop converged.</li>
+    <li><b>Behind you, <a href="1302-statelessness-is-what-makes-a-fleet-possible.html">statelessness is what makes a fleet possible</a></b> is the assumption every loop on this page rests on.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one service you run and work out its rollout envelope from its replica count and the two defaults, then say whether the floor can carry your peak traffic. Ask the agent to compare that floor against your busiest hour and to say what a deploy during it would look like to a user.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://kubernetes.io/docs/concepts/architecture/controller/">Controllers</a> page is one screen long and is the single most useful thing to read about Kubernetes, because everything else in the system is that page applied again. Follow it with the <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/">Pod lifecycle</a>, which is where the promises your process has to keep are actually written down.</p>
+
+  <div class="pager">
+    <a href="1303-a-container-is-a-process-with-its-own-view.html"><span class="dir">&larr; Previous</span><span class="ttl">A container is a process with its own view</span></a>
+    <a class="nxt" href="1305-tests-buy-confidence-at-different-prices.html"><span class="dir">Next &rarr;</span><span class="ttl">Tests buy confidence at different prices</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1304 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
