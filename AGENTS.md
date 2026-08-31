@@ -423,13 +423,25 @@ design with a dark code plate does not drag inline code dark with it. Both pairs
 `scripts/contrast.py` holds both to 7:1.
 
 **`main.wrap` must not gain a background that changes on a palette switch.** It is the scroller's
-big child, and repainting it on a switch exposes a Chromium behaviour the computed-style harness
-reads straight through: after a switch, an element inside a closed `<details>` keeps the computed
-style it had while every ancestor updates correctly. It is measured, not inferred - the harness
-printed the ancestor chain with the child a palette behind its parent - and it cannot be waited out,
-because the stale value is perfectly stable; polling it is worse, because each read re-caches it.
-That is why the reading pane is a palette value and why `press` paints none. Anything that gives
-that element a switch-varying background again owes assertion A2 a re-run.
+big child, and repainting it on a switch exposes a Chromium behaviour: after a switch, an element
+inside a closed `<details>` keeps the computed style it had while every ancestor updates correctly.
+It is measured, not inferred - the harness printed the ancestor chain with the child a palette
+behind its parent - and it cannot be waited out, because the stale value is perfectly stable;
+polling it is worse, because each read re-caches it. That is why the reading pane is a palette value
+and why `press` paints none. Anything that gives that element a switch-varying background again owes
+assertion A2 a re-run.
+
+**The harness no longer reads through that, and a closed disclosure is now a fault rather than a
+measurement.** `style_snapshot.py` opens every `<details>` on the way in, before the first read and
+before any switch, and fails by name if one will not open. Until it did, any page carrying a
+`details.solution` could fail A2 at random - `.worked` and `.p-check` handing back the palette the
+page arrived on, an exact ink-to-paper swap, on pull requests that touched neither the page nor a
+shared asset. Opening records a state a reader reaches with one click, where the collapsed state
+renders nothing for anybody to see. Skipping the locked subtree instead would drop 20 recorded rows -
+`.worked`, `.keynum` and `.p-check`, on 11 of the 22 sampled pages - and drop them quietly, because
+other pages render all three of those classes outside a disclosure and coverage would go on passing
+at 86 of 86. Anything that hides a probed element behind a second render lock - `content-visibility`
+is the other one - owes this the same treatment.
 
 **A palette and a design are data, and nothing branches on either name.** No function in `hub.js`
 and no rule in `hub.css` knows one by name: the two registries are plain arrays, the blocks are
