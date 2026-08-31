@@ -201,6 +201,40 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "08",
+      "title": "Data",
+      "lessons": [
+        {
+          "title": "A constraint is the only rule every writer obeys",
+          "href": "lessons/0800-a-constraint-is-the-only-rule-every-writer-obeys.html"
+        },
+        {
+          "title": "A transaction is a boundary and the log keeps it",
+          "href": "lessons/0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html"
+        },
+        {
+          "title": "Isolation levels are a menu of anomalies",
+          "href": "lessons/0802-isolation-levels-are-a-menu-of-anomalies.html"
+        },
+        {
+          "title": "A lock is held until commit",
+          "href": "lessons/0803-a-lock-is-held-until-commit.html"
+        },
+        {
+          "title": "An index is a second sorted copy",
+          "href": "lessons/0804-an-index-is-a-second-sorted-copy.html"
+        },
+        {
+          "title": "A composite index has one useful order",
+          "href": "lessons/0805-a-composite-index-has-one-useful-order.html"
+        },
+        {
+          "title": "The non-relational map is four shapes",
+          "href": "lessons/0806-the-non-relational-map-is-four-shapes.html"
+        }
+      ]
+    },
+    {
       "n": "09",
       "title": "Caching",
       "lessons": [
