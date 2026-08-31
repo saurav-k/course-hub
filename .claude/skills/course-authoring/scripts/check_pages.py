@@ -89,6 +89,12 @@ READING_PILL = re.compile(r'<span class="pill">\s*(\d+)\s*min\s*</span>')
 RUNG_PILL = re.compile(r'<span class="pill (easy|med|hard)">([^<]*)</span>')
 PAGER = re.compile(r'<(?:div|nav) class="pager"')
 SVG_CLASS = re.compile(r'class="([^"]*)"')
+
+# A hand-authored figure's drawing, matched on the class list rather than on
+# the exact string `class="chart"`: all 782 in the hub are spelled that way
+# today, and a second class on one of them would otherwise make it count as no
+# kind at all rather than as the kind it is.
+CHART_SVG = re.compile(r'<svg[^>]*\bclass="[^"]*\bchart\b')
 CSS_CLASS = re.compile(r"\.([a-zA-Z_-][\w-]*)")
 
 # A Mermaid label: the text inside [] () {} (( )). Only the bracketed forms are
@@ -102,7 +108,38 @@ MERMAID_LABEL = re.compile(r"[\[\(\{]+([^\[\]\(\)\{\}]+)[\]\)\}]+")
 # raw label for ";" flags almost every diagram in the hub.
 ENTITY = re.compile(r"[&#](?:#\d+|#x[0-9a-fA-F]+|[a-zA-Z][a-zA-Z0-9]*);|#\d+;")
 
-CHART_SEMANTIC = re.compile(r"^(?:m|s|f|t|sw)-[a-z0-9-]+$")
+# The prefixed class names the stylesheet closes. `d-` is the diagram
+# vocabulary and joins the five charting prefixes here for the same reason they
+# are here: a misspelled `d-bxo` is a box that draws nothing, in every mode and
+# every palette, and nothing else in the repository would say so.
+CHART_SEMANTIC = re.compile(r"^(?:m|s|f|t|sw|d)-[a-z0-9-]+$")
+
+# Every paint value inside a figure is either absent, so a class supplies it,
+# or a var() naming a token the palette layer declares. A literal is a colour
+# nobody checked: it is one mode's answer written down, and the mode it is
+# wrong in is the one nobody looked at.
+#
+# Three forms carry a paint value and all three are read here. The rule this
+# replaces read one spelling of one of them - `fill="#hex"` - so a colour
+# written as a `style=` declaration, as `rgb()`, or by name walked straight
+# past it, and so did every Mermaid `classDef`, which writes `fill:#hex`
+# rather than `fill="#hex"`. All four were rendered on a real page before
+# being called holes.
+PAINT_PROPS = r"fill|stroke|stop-color|flood-color|lighting-color"
+PAINT_ATTR = re.compile(rf'\b({PAINT_PROPS})\s*=\s*"([^"]*)"')
+PAINT_DECL = re.compile(rf"\b({PAINT_PROPS})\s*:\s*([^;,\"']+)")
+STYLE_ATTR = re.compile(r'\bstyle\s*=\s*"([^"]*)"')
+CLASSDEF = re.compile(r"^\s*classDef\s+\S+\s+(.*)$", re.M)
+
+# What a paint value is allowed to be. `context-stroke` and `context-fill` are
+# not colours but references to one, which is how the shared arrowhead takes
+# the colour of the line it sits on; `url(#...)` is the same kind of reference
+# to a gradient or a marker.
+PAINT_OK = re.compile(
+    r"^\s*(?:none|transparent|currentColor|inherit"
+    r"|context-stroke|context-fill|url\(#[\w-]+\)"
+    r"|var\(\s*--[\w-]+\s*\))\s*$"
+)
 
 # The two lines of the caption pair. Whether they are in the right place is
 # scripts/validate_site.py check 19, which parses the element stack; what is
@@ -330,6 +367,19 @@ def check_mermaid(page: Path, src: str) -> list[Finding]:
     return found
 
 
+def literal_colours(body: str) -> list[str]:
+    """Every paint value in a figure that is neither absent nor a token."""
+    bad: list[str] = []
+    for prop, value in PAINT_ATTR.findall(body):
+        if not PAINT_OK.match(value):
+            bad.append(f'{prop}="{value}"')
+    for chunk in STYLE_ATTR.findall(body) + CLASSDEF.findall(body):
+        for prop, value in PAINT_DECL.findall(chunk):
+            if not PAINT_OK.match(value):
+                bad.append(f"{prop}:{value.strip()}")
+    return bad
+
+
 def mermaid_kinds(src: str) -> set[str]:
     """The diagram type each block declares, ignoring an %%{init}%% preamble."""
     kinds: set[str] = set()
@@ -343,6 +393,47 @@ def mermaid_kinds(src: str) -> set[str]:
                 kinds.add(word.group(1).replace("graph", "flowchart"))
             break
     return kinds
+
+
+def svg_kind(figure: str) -> str:
+    """Which instrument one hand-authored figure is drawn with.
+
+    Read from the figure's own classes, the way the section rail is read from
+    the page's own headings, because the alternative is a `data-kind` attribute
+    on 763 existing figures and a second model of a drawing that can disagree
+    with the drawing.
+
+    Three instruments, and the order below is a precedence rather than a list.
+    A structure drawing that also carries an axis - the log addressed by
+    offset is the type case - is a diagram: the boxes carry the claim and the
+    axis is how they are addressed. Asking about `d-` first is what settles it.
+    """
+    classes = {name for attribute in SVG_CLASS.findall(figure) for name in attribute.split()}
+    if any(name.startswith("d-") for name in classes):
+        return "svg-diagram"      # the claim is a structure: boxes, connectors, states
+    if classes & {"axis", "grid", "tick"}:
+        return "svg-plot"         # the claim is a quantity against a scale
+    return "svg-chart"            # marks with no frame: a comparison, a strip, a swatch
+
+
+def svg_kinds(src: str) -> set[str]:
+    """Every hand-authored instrument a page draws with.
+
+    `mermaid_kinds` counts each Mermaid type separately and this used to
+    collapse every hand-authored figure to one name, `svg-chart`, however it
+    was drawn. That asymmetry is what the kind floor was actually measuring: a
+    page with three different hand-drawn figures scored one kind and warned,
+    while two Mermaid types cleared the floor for free. Measured across the
+    hub, 98.0% of lesson pages carry a flowchart and 90.1% open with one.
+
+    A hand-drawn figure now counts the way a Mermaid one always has.
+    """
+    return {svg_kind(figure) for figure in FIGURE.findall(src) if CHART_SVG.search(figure)}
+
+
+# The hand-authored instruments, which is what the course-level floor means by
+# "something is drawn by hand here" now that there is more than one of them.
+HAND_KINDS: frozenset[str] = frozenset({"svg-chart", "svg-plot", "svg-diagram"})
 
 
 def caption_pair_findings(page: Path, index: int, body: str) -> list[Finding]:
@@ -394,8 +485,12 @@ def check_figures(page: Path, src: str, css_classes: frozenset[str]) -> list[Fin
         found.extend(caption_pair_findings(page, index, body))
         if "<svg" not in body:
             continue
-        if re.search(r'(?:fill|stroke)\s*=\s*"#[0-9a-fA-F]{3,8}"', body):
-            found.append(Finding(rel(page), "FAIL", f"figure {index} hard-codes a colour; use the semantic chart classes"))
+        literals = literal_colours(body)
+        if literals:
+            found.append(Finding(
+                rel(page), "FAIL",
+                f"figure {index} states a colour of its own ({', '.join(literals[:3])}); "
+                "paint comes from a chart class or a var(--token), never a value"))
         if 'class="chart"' in body and "aria-label" not in body:
             found.append(Finding(rel(page), "FAIL", f"figure {index} is an svg.chart with no aria-label"))
         if 'class="chart"' in body and "viewBox" not in body:
@@ -411,13 +506,14 @@ def check_figures(page: Path, src: str, css_classes: frozenset[str]) -> list[Fin
 
     if not is_lesson(page):
         return found
-    kinds = mermaid_kinds(src)
-    if 'svg class="chart"' in src or 'class="chart"' in src:
-        kinds.add("svg-chart")
+    kinds = mermaid_kinds(src) | svg_kinds(src)
     if len(figures) < MIN_DIAGRAMS_PER_PAGE:
         found.append(Finding(rel(page), "WARN", f"{len(figures)} diagrams, the floor is {MIN_DIAGRAMS_PER_PAGE}"))
     if figures and len(kinds) < MIN_DIAGRAM_KINDS_PER_PAGE:
-        found.append(Finding(rel(page), "WARN", f"one diagram kind ({', '.join(sorted(kinds))}); the floor is {MIN_DIAGRAM_KINDS_PER_PAGE}"))
+        found.append(Finding(
+            rel(page), "WARN",
+            f"{len(kinds)} diagram kind{'' if len(kinds) == 1 else 's'} "
+            f"({', '.join(sorted(kinds)) or 'none'}); the floor is {MIN_DIAGRAM_KINDS_PER_PAGE}"))
     return found
 
 
@@ -684,8 +780,8 @@ def check_course_totals(course: Path, answers: list[int], kinds: set[str], cards
                     f"{len(kinds)} diagram kinds across the course ({', '.join(sorted(kinds))}); "
                     f"the floor is {MIN_DIAGRAM_KINDS_PER_COURSE}")
         )
-    if "svg-chart" not in kinds:
-        found.append(Finding(rel(course), "WARN", "no hand-authored svg.chart anywhere; nothing quantitative is drawn"))
+    if not kinds & HAND_KINDS:
+        found.append(Finding(rel(course), "WARN", "no hand-authored svg.chart anywhere; nothing is drawn by hand"))
     lessons = len(list((course / "lessons").glob("*.html"))) if (course / "lessons").is_dir() else 0
     if lessons and cards < lessons:
         found.append(Finding(rel(course), "WARN", f"course map carries {cards} rung pills for {lessons} lessons"))
@@ -758,9 +854,7 @@ def main() -> int:
             continue
         per_course_answers.setdefault(course, []).extend(answers)
         kinds = per_course_kinds.setdefault(course, set())
-        kinds |= mermaid_kinds(src)
-        if 'svg class="chart"' in src:
-            kinds.add("svg-chart")
+        kinds |= mermaid_kinds(src) | svg_kinds(src)
 
     for course in sorted(set(per_course_answers) | set(per_course_kinds)) if whole_courses else []:
         findings += check_course_files(course)

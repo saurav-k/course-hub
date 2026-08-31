@@ -77,6 +77,11 @@ The kind bar exists because a flowchart is the diagram you reach for when you ha
 A reader confused about *order* needs a `sequenceDiagram`.
 A reader confused about *what state the thing is in* needs a `stateDiagram-v2`.
 A reader confused about *how big* needs a chart, and Mermaid cannot draw one.
+A reader confused about *what is where* needs a diagram drawn by hand, because the moment position carries meaning Mermaid has no way to express it.
+
+**A page whose figures are all the same instrument has probably not asked the question at all.**
+A chart answers *how much*. A diagram answers *what is where*. Mermaid answers *what connects to what*, when any sane layout will do.
+Most technical pages need at least two of the three, and the checker counts them that way: a hand-drawn diagram, a hand-drawn plot and a hand-drawn chart are three kinds, not one.
 
 The kinds, and what each is for, are in [`widgets.md`](widgets.md).
 
