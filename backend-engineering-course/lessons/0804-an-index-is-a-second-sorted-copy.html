@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>An index is a second sorted copy - Backend Engineering</title>
+<meta name="description" content="An index is a separate ordered structure the engine maintains beside the table. It turns a scan of every row into a walk down a few tree levels, and it is paid for on every insert, update and delete.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Data &middot; Lesson 0804</div>
+  <h1>An index is a second sorted copy, and every write pays to keep it true</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Why the depth of the tree barely grows and the write cost does. &middot;
+    <a href="https://www.postgresql.org/docs/current/indexes-intro.html">PostgreSQL - Indexes</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>With no index the engine <b>scans the whole table row by row</b>. With one it can walk a few levels down a search tree instead.</li>
+      <li>A B-tree is the default and it serves <b>equality and range on sortable data</b>: the five comparison operators, <code>BETWEEN</code>, <code>IN</code>, <code>IS NULL</code>, sorted retrieval, and a <code>LIKE</code> pattern anchored at the start.</li>
+      <li>Because the branching factor is large, <b>depth grows logarithmically</b>: a handful of levels reaches billions of rows, so a lookup on a big table is not much dearer than on a small one.</li>
+      <li>Once created, the index must be kept synchronised with the table, which <b>adds overhead to every data manipulation</b>. Reads got faster because writes got slower.</li>
+      <li>What it costs: an index that no query uses is pure write tax and storage, which is why the documentation says seldom-used indexes should be removed.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Everything so far protected the rows - this is how you find them again.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0800 to 0803&lt;br/&gt;the rows are correct&lt;br/&gt;and safely written"] --> T["THIS PAGE&lt;br/&gt;finding a row&lt;br/&gt;without reading them all"]
+  T --> A["Lesson 0805&lt;br/&gt;which index the&lt;br/&gt;planner will actually use"]
+  T --> B["Lesson 0803&lt;br/&gt;fewer rows touched&lt;br/&gt;means shorter locks"]
+  T --> C["Module 09&lt;br/&gt;caching, the other&lt;br/&gt;answer to a slow read"]
+  W["Module 08&lt;br/&gt;Data"] -.- T
+    </div>
+    <figcaption>A store that keeps facts correctly and cannot find them is a log file. This page is the structure that makes a lookup cheap, and it is the first thing in this module that is purely an engineering trade rather than a correctness one: no index changes any answer, only what the answer costs. That also means it is the one you can add and remove without asking anybody. <b>An index is a bet that a particular question will be asked often enough to justify taxing every write.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a sorted copy of one column</h2>
+
+  <h3 id="scan-vs-tree">The alternative is reading everything</h3>
+  <p>PostgreSQL describes the unindexed case without euphemism: <a href="https://www.postgresql.org/docs/current/indexes-intro.html">with no advance preparation the system would have to scan the entire table, row by row, to find all matching entries</a>, and where there are many rows and only a few matches this is clearly an inefficient method. With an index maintained on the column, it might only have to walk a few levels deep into a search tree.</p>
+
+  <p>The mental model that survives contact with real systems is this: an index is a second structure, stored separately from the table, holding the indexed values in sorted order together with a pointer to where each row lives. It is a copy. It is derived from the table and it must be kept true, and both of those facts are where its costs come from. Lesson 0800 already created one of these without saying so, because a primary key is a uniqueness constraint that produces a unique B-tree index as its enforcement mechanism.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One descent through a B-tree</div>
+    <div class="fig-claim">A lookup reads one node per level, not one node per row.</div>
+    <div class="mermaid">
+flowchart LR
+  R["Root&lt;br/&gt;the whole&lt;br/&gt;key space"] --> I1["Internal node&lt;br/&gt;keys 1 to 40,000"]
+  R -.-> I2["Internal node&lt;br/&gt;40,001 upwards&lt;br/&gt;not read"]
+  I1 --> L1["Leaf&lt;br/&gt;keys 8,200 to 8,400&lt;br/&gt;plus row pointers"]
+  I1 -.-> L2["Sibling leaves&lt;br/&gt;not read"]
+  L1 --> H[("The table&lt;br/&gt;row itself")]
+  L1 --> N["Next leaf,&lt;br/&gt;in key order"]
+  classDef read fill:var(--ok-soft),stroke:var(--ok)
+  class R,I1,L1 read
+    </div>
+    <figcaption>The solid path is everything a lookup reads and the dotted branches are what it never touches, which is almost the entire structure. Two properties of the drawing matter later. Leaves are linked in key order, so once a range query has found its start it reads forward rather than descending again, which is why one index serves both equality and <code>BETWEEN</code>. And the last hop is a separate read of the table itself, which lesson 0805 shows how to avoid. <b>The index does not find your row, it finds where your row is, and that is two reads rather than one.</b></figcaption>
+  </figure>
+
+  <h3 id="depth">Why depth is not the problem</h3>
+  <p>Engineers reason about tree lookups as if the cost grew with the table, and at the sizes a service actually reaches it barely does. Each node in a B-tree holds many keys, so the number of children per node, the fanout, is in the hundreds rather than the twos of a binary tree. That number is what decides everything.</p>
+
+  <ol class="worked">
+    <li><b>Assume a fanout.</b> Take 200 children per node, which is the right order of magnitude for a page-sized node holding short keys. The exact figure depends on key width and page size and is worth measuring rather than assuming.</li>
+    <li><b>Count what each level reaches.</b> A tree of depth <i>d</i> addresses <i>200<sup>d</sup></i> entries: 200 at one level, 40,000 at two, 8,000,000 at three.</li>
+    <li><b>Add one more level.</b> Depth four reaches 1,600,000,000 entries. So the table grew two hundredfold and the lookup got one node read more expensive.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="fig-cap">Rows reached per level</div>
+    <div class="fig-claim">A two hundredfold bigger table costs one extra node read.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart on a logarithmic scale of how many index entries a B-tree of a given depth can address, assuming two hundred children per node. Depth one reaches two hundred entries, depth two forty thousand, depth three eight million and depth four one point six billion.">
+      <line class="axis" x1="80" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="80" y1="40" x2="80" y2="250"/>
+      <line class="grid" x1="80" y1="184" x2="610" y2="184"/>
+      <line class="grid" x1="80" y1="118" x2="610" y2="118"/>
+      <line class="grid" x1="80" y1="52" x2="610" y2="52"/>
+      <text class="lbl-sm" x="72" y="188" text-anchor="end">1 thousand</text>
+      <text class="lbl-sm" x="72" y="122" text-anchor="end">1 million</text>
+      <text class="lbl-sm" x="72" y="56" text-anchor="end">1 billion</text>
+      <rect class="m-stat" x="180" y="199" width="40" height="51"/>
+      <rect class="m-stat" x="300" y="149" width="40" height="101"/>
+      <rect class="m-stat" x="420" y="98" width="40" height="152"/>
+      <rect class="m-stat" x="540" y="48" width="40" height="202"/>
+      <text class="ttl" x="80" y="26">Index entries addressable at each depth, log scale</text>
+      <text class="lbl-sm" x="200" y="268" text-anchor="middle">1 level</text>
+      <text class="lbl-sm" x="320" y="268" text-anchor="middle">2 levels</text>
+      <text class="lbl-sm" x="440" y="268" text-anchor="middle">3 levels</text>
+      <text class="lbl-sm" x="560" y="268" text-anchor="middle">4 levels</text>
+      <text class="lbl-sm t-stat" x="560" y="40" text-anchor="middle">1.6 billion</text>
+      <text class="lbl-sm" x="80" y="288">derived from a fanout of 200 - the real figure depends on key width and page size</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>entries reachable at this depth</span></div>
+    <figcaption>Derived arithmetic rather than a measurement, and the assumption is labelled on the chart because a different fanout moves every bar. What the shape says is that lookup cost is flat across every table size a single node will hold, which is the reason nobody tunes it. The corollary is the useful half: if an indexed lookup is slow, the depth of the tree is almost never the reason, and the answer is somewhere in the next lesson. <b>Indexed reads do not get slower as the table grows - indexed writes do.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: which questions a B-tree can answer</h2>
+
+  <p>An index is only useful for questions its ordering can answer, and <a href="https://www.postgresql.org/docs/current/indexes-types.html">the documentation is specific</a>. B-trees handle equality and range queries on data that can be sorted into some ordering, which means the five comparison operators, plus constructs equivalent to combinations of them such as <code>BETWEEN</code> and <code>IN</code>. An <code>IS NULL</code> or <code>IS NOT NULL</code> condition can use one. So can a pattern match, but only when the pattern is a constant anchored to the beginning of the string: <code>col LIKE 'foo%'</code> can use the index and <code>col LIKE '%bar'</code> cannot. And because the leaves are in key order, a B-tree can also be used to retrieve data in sorted order, which is how an <code>ORDER BY</code> avoids a sort.</p>
+
+  <p>That list explains most of the cases where an index exists and is not used. A leading wildcard has no prefix to descend on. A function applied to the column, such as <code>WHERE lower(email) = ...</code>, is a different value from the one the index stores. And a condition that matches most of the table is one the planner will refuse the index for on purpose, because reading most of the rows through an index means the two reads of the figure above, in random order, for nearly every row.</p>
+
+  <p>The other index types exist for the questions a sort order cannot answer. Hash serves simple equality comparisons only. GIN is an inverted index for values with several components, such as an array or a document, and is efficient at testing whether a component value is present. BRIN indexes block ranges and is most effective when a column's values are well correlated with the physical order of the rows, which is the shape a timestamp on an append-only table has. GiST and SP-GiST are infrastructure for geometric and nearest-neighbour searches. Reach for one of these when the question is not "where does this value sit in an order", and reach for the default when it is.</p>
+
+  <h2>3. The trade-off: the write path pays</h2>
+
+  <figure class="diagram">
+    <div class="fig-cap">One insert, four structures</div>
+    <div class="fig-claim">Each extra index adds another write and another log record.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant E as Engine
+  participant T as Table
+  participant X as Indexes
+  C->>E: INSERT one row
+  E->>T: place the row
+  E->>X: insert into the primary key index
+  E->>X: insert into the email index
+  E->>X: insert into the created_at index
+  Note over E,X: each insert may split a node and each change is logged
+  E-->>C: one row written, four structures updated
+    </div>
+    <figcaption>The client asked for one write and the engine performed four, plus the log records that make all of them durable. Nothing about this is visible from the statement, which is why index count creeps: each index is added by someone solving one slow query, and the cost is spread over every writer in the system rather than charged to the person who added it. <b>An index is not free to have, it is free only to the query that uses it.</b></figcaption>
+  </figure>
+
+  <p>PostgreSQL states the bill in one sentence: after an index is created, the system has to keep it synchronised with the table, and this adds overhead to data manipulation operations. It draws the obvious conclusion in the next: therefore indexes that are seldom or never used in queries should be removed.</p>
+
+  <p>That is a maintenance instruction more than a tuning tip, and it is easy to act on because the engine records index usage. An index nobody reads is a pure loss with three parts: the write amplification above, the storage, and the time it adds to every restore and every rebuild. The habit worth forming is to audit index usage on a schedule rather than to argue about each one at review time, since the only evidence that settles the question is production traffic.</p>
+
+  <div class="callout warn">
+    An index also slows down the thing it was added to speed up, if it is added to the wrong shape of table. Every insert into a B-tree on a monotonically increasing column, a timestamp or a sequence, lands on the same rightmost leaf, so a heavily written table contends on one page. It works and it is the standard shape, but it is the one case where the sequential access pattern that helps a range scan hurts the writer, and it is worth knowing before you conclude that the disk is the problem.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which condition can a plain B-tree index on <code>email</code> help with?</div>
+      <button class="q-opt">WHERE email LIKE '%@example.com'</button>
+      <button class="q-opt">WHERE lower(email) = 'ada@example.com'</button>
+      <button class="q-opt">WHERE email &lt;&gt; 'ada@example.com'</button>
+      <button class="q-opt">WHERE email LIKE 'ada%' ORDER BY email</button>
+      <div class="q-fb">A pattern anchored at the start gives the descent a prefix to follow, and the ordered leaves then serve the sort for free. A leading wildcard has no prefix, a function over the column stores a different value from the one indexed, and an inequality matches nearly the whole table so the planner will prefer to read it directly.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A table grows from 8 million rows to 1.6 billion. What happens to an indexed single-row lookup?</div>
+      <button class="q-opt">It costs roughly one more node read than before</button>
+      <button class="q-opt">It costs about two hundred times what it did</button>
+      <button class="q-opt">It is unchanged, because the depth is fixed</button>
+      <button class="q-opt">It falls back to a scan once the index exceeds memory</button>
+      <div class="q-fb">Depth grows with the logarithm of the row count at the fanout, so two hundred times the rows is one more level. A proportional cost is what a scan does rather than a tree, the depth does grow rather than being fixed, and an index larger than memory costs more page reads but does not stop being used.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0805-a-composite-index-has-one-useful-order.html">a composite index has one useful order</a></b> is where the index you have and the query you wrote fail to meet, and how the planner decides.</li>
+    <li><b>Behind you, <a href="0803-a-lock-is-held-until-commit.html">a lock is held until commit</a></b> is why touching fewer rows is a concurrency argument as well as a speed one.</li>
+    <li><b>Behind you, <a href="0800-a-constraint-is-the-only-rule-every-writer-obeys.html">a constraint is the only rule every writer obeys</a></b> is where your first index was created, as the enforcement of a primary key.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> List the indexes on your busiest table and, for each, name the query that justifies it. Ask the agent to check your list against the engine's own usage counters, and be ready for at least one index nobody can account for.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.postgresql.org/docs/current/indexes-intro.html">Indexes</a> opens with the scan-versus-tree argument and the synchronisation cost in about a page, and <a href="https://www.postgresql.org/docs/current/indexes-types.html">Index Types</a> is the exact list of what each kind can serve, including the anchored-pattern rule that decides half of all "why is my index not used" questions.</p>
+
+  <div class="pager">
+    <a href="0803-a-lock-is-held-until-commit.html"><span class="dir">&larr; Previous</span><span class="ttl">A lock is held until commit</span></a>
+    <a class="nxt" href="0805-a-composite-index-has-one-useful-order.html"><span class="dir">Next &rarr;</span><span class="ttl">A composite index has one useful order</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0804 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

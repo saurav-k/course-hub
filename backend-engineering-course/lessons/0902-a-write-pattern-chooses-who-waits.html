@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A write pattern chooses who waits - Backend Engineering</title>
+<meta name="description" content="A write touches two copies and no transaction spans them. Update the cache, remove it, ignore it or let it become the record: four answers, and each one names who waits for the write and what is lost when a process dies mid-way.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Caching &middot; Lesson 0902</div>
+  <h1>A write pattern chooses who waits for the write and what is lost if it stops half way</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Four things a write can do to the second copy. &middot;
+    <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html">AWS - Caching strategies for ElastiCache</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A write now touches two copies, and <b>no transaction spans a database and a cache</b>. Every pattern below is a two-step with a gap in the middle.</li>
+      <li>Four answers: <b>update the entry, remove the entry, ignore the entry, or let the entry be the record</b>. Those are write-through, delete-on-write, write-around and write-back.</li>
+      <li>Facebook's memcache removes rather than updates, and states the reason in four words: <b>"deletes are idempotent"</b>, so a lost or reordered removal is harmless.</li>
+      <li>Order is load-bearing: <b>write the store first and touch the cache second</b>, or a concurrent reader refills the entry with the value you just replaced.</li>
+      <li>What it costs: write-through pays two trips on every write and fills the cache with answers nobody reads; write-back is faster and hands your durability to a process that is allowed to evict things.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The write path is where a cache stops being only a performance question.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0901&lt;br/&gt;the read path, and&lt;br/&gt;who fills a miss"] --> T["THIS PAGE&lt;br/&gt;the write path, and&lt;br/&gt;what it does to the copy"]
+  T --> A["Lesson 0903&lt;br/&gt;which keys a single&lt;br/&gt;write actually touches"]
+  T --> B["Lesson 0904&lt;br/&gt;the race this page&lt;br/&gt;leaves open"]
+  T --> C["Module 12&lt;br/&gt;delivering the change&lt;br/&gt;to other services"]
+  W["Module 09&lt;br/&gt;Caching"] -.- T
+    </div>
+    <figcaption>Lesson 0901 could stay entirely inside a performance argument, because a read that misses is only slow. A write cannot: it makes two copies disagree, and the pattern chosen here decides for how long and in whose favour. <b>The read pattern decides how fast the service is and the write pattern decides how wrong it can be.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two copies, no transaction</h2>
+
+  <h3 id="no-transaction">The constraint that generates all four patterns</h3>
+  <p>When a request changes something, there is a row to update and an entry that may already hold the old value. Your database can make the row change atomic with other row changes. It cannot make the row change atomic with a network call to Redis, because the cache is not a participant in that transaction and has no mechanism to become one. So every write is at least two operations with a gap between them, and every write pattern is an answer to the question of what should be in that gap.</p>
+
+  <p>Four answers exist, and they are exhaustive because there are only four things you can do to an entry that might be stale: make it right, make it absent, leave it alone, or make it the thing that is right. Naming them that way is more useful than the industry vocabulary, because the vocabulary hides which of them changes who owns the truth.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four answers, one write</div>
+    <div class="fig-claim">Only the fourth pattern moves the authoritative copy into the cache.</div>
+    <div class="mermaid">
+flowchart TB
+  W["A write arrives"] --> A["Update the entry&lt;br/&gt;write-through"]
+  W --> B["Remove the entry&lt;br/&gt;delete-on-write"]
+  W --> C["Leave the entry&lt;br/&gt;write-around"]
+  W --> D["Write only the entry&lt;br/&gt;write-back"]
+  A --> A2["Caller waits for&lt;br/&gt;store and cache"]
+  B --> B2["Caller waits for&lt;br/&gt;store and a delete"]
+  C --> C2["Caller waits for&lt;br/&gt;the store alone"]
+  D --> D2["Caller waits for&lt;br/&gt;the cache alone"]
+  C2 --> C3["Stale until the&lt;br/&gt;lifetime runs out"]
+  D2 --> D3["Lost if the cache&lt;br/&gt;dies before the flush"]
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class C3 bad
+  class D3 bad
+    </div>
+    <figcaption>The four patterns arranged by what the caller waits for, with the two consequences that are not merely slower. Write-around is the cheapest write and buys that cheapness with an entry that is now confidently wrong. Write-back is the fastest of all and buys that with an acknowledged write that exists only in a process configured to throw things away. <b>Three of these patterns trade latency and one of them trades durability, and they are usually presented as if they were the same kind of choice.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what each one actually does</h2>
+
+  <h3 id="write-through">Write-through, and the cost AWS lists next to it</h3>
+  <p>Write-through updates the store and then writes the new value into the cache, in the same request. Its advantage is exactly stated: "data in the cache is never stale", because there is no path by which the store changes without the cache changing. Its price is two trips on every write - and AWS makes the honest observation that this is usually the right way round, since "end users are generally more tolerant of latency when updating data than when retrieving data".</p>
+
+  <p>The two disadvantages are less obvious and both are about what ends up in memory. A new cache node is empty, and write-through only fills entries that are written, so data that is read but never updated stays missing until somebody writes it - which AWS's guidance fixes by running lazy loading alongside. And most rows are never read at all, so a pure write-through cache spends memory on answers nobody wants, which AWS calls cache churn and fixes with a lifetime on every entry.</p>
+
+  <h3 id="delete-on-write">Delete-on-write, and why removal beats replacement</h3>
+  <p>The variant most large systems actually run is not to update the entry but to remove it, leaving the next reader to refill it through the ordinary cache-aside path. Facebook's memcache paper gives the reason in one sentence: "We choose to delete cached data instead of updating it because deletes are idempotent." That is a distributed-systems argument rather than a style preference. A delete can be sent twice, arrive late, arrive out of order with another delete, or be retried after a timeout, and every one of those still leaves the entry absent - which is a state the read path already handles perfectly. An update has none of those properties: two updates that arrive in the wrong order leave the older value in place, permanently.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Order is the mechanism</div>
+    <div class="fig-claim">Touching the cache before the store lets a reader restore the old value.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant W as Writer
+  participant R as Reader
+  participant C as Cache
+  participant D as Database
+  Note over W,D: the wrong order - cache first
+  W->>C: delete user-42
+  R->>C: get user-42
+  C-->>R: miss
+  R->>D: SELECT for id 42
+  D-->>R: the OLD row
+  R->>C: set user-42 to the old value
+  W->>D: UPDATE row 42
+  Note over C,D: the entry now disagrees&lt;br/&gt;with the store, indefinitely
+    </div>
+    <figcaption>Four participants and one interleaving, which is all it takes. Microsoft's guidance states the rule and the failure together: update the data store before removing the cached item, because otherwise "there's a small window of time when a client might fetch the item before the data store is updated", and the refill puts the outdated value back. The window is small, the damage is not, because nothing later removes the entry until its lifetime expires. <b>Store first, cache second, always - and note that the correct order does not close this race, it only narrows it.</b></figcaption>
+  </figure>
+
+  <h3 id="write-back">Write-back, and the durability it quietly borrows</h3>
+  <p>Write-back - write-behind in Microsoft's vocabulary, where the caching system "automatically writes any changes made to cached data back to the data store" - acknowledges the write as soon as the cache holds it, and flushes to the store later. It is the fastest write available and the only one of the four that moves the authoritative copy, because between the acknowledgement and the flush the true value of that row exists in exactly one place: the cache.</p>
+
+  <p>The reason that is worse than it sounds is that a cache is usually configured to throw things away. Redis under a <code>maxmemory</code> limit with <code>allkeys-lru</code> will "evict any key" when the limit is reached, and it has no way to know that one of them is a write nobody has flushed. So the loss does not require a crash; it requires memory pressure, which is a condition you deliberately arranged. Write-back is a real pattern with real uses - metrics counters, view tallies, anything where losing a few seconds of increments is genuinely acceptable - and it is a pattern to reach for by name, having said out loud what you are willing to lose.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A dirty entry</div>
+    <div class="fig-claim">Eviction, not only a crash, is enough to destroy an acknowledged write.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Clean: filled from the store
+  Clean --> Dirty: write acknowledged to the caller
+  Dirty --> Flushing: the background writer picks it up
+  Flushing --> Clean: the store has it now
+  Dirty --> Lost: evicted under maxmemory
+  Dirty --> Lost: the cache process restarts
+  Lost --> [*]: nobody is told
+    </div>
+    <figcaption>One entry under write-back, with the two edges into Lost drawn as what they are: ordinary, expected operational events rather than disasters. An eviction policy is a feature you turned on, and a restart is a Tuesday. Neither produces an error anywhere, because the writer was acknowledged long ago and the store was never told there was anything to expect. <b>Write-back does not make writes faster, it makes them provisional, and the caller cannot tell.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: pick the pattern per key family, not per service</h2>
+
+  <p>None of the four is a default, and choosing one for a whole service is how a system ends up with the wrong one everywhere. The choice is per key family and it follows from two facts about that family: how bad a stale read is, and how expensive a refill is. A rarely-written, expensively-computed aggregate wants write-through, because the refill is the thing you were avoiding. A frequently-written row read by one user wants delete-on-write, because the refill is one indexed query and the removal is the cheapest correct thing you can do. A write-heavy counter that nobody bills from wants write-back, having stated the loss budget.</p>
+
+  <p>The pattern that should never be chosen by default is write-around with no lifetime, which is what a service has when somebody added a cache and nobody added anything to the write path. It is the one combination with an unbounded staleness window, and it is common because it is what you get by writing no code at all.</p>
+
+  <div class="callout warn">
+    Every pattern on this page has a gap between the two steps, and the correct ordering narrows that gap without closing it. A reader that misses, queries the store, and is then descheduled before writing its result back can put a value into the cache <em>after</em> a later write has already removed it - and no ordering of the writer's two steps prevents that, because the offending write came from a read. Lesson 0904 is that race in full, and the reason a lifetime on every entry is not a lazy substitute for invalidation but the backstop that makes invalidation survivable.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does a write path delete the cached entry rather than overwrite it?</div>
+      <button class="q-opt">A delete costs the cache less work than a write does</button>
+      <button class="q-opt">A delete cannot be lost, whereas a set can be lost</button>
+      <button class="q-opt">A delete is idempotent, so a retry or a reorder is harmless</button>
+      <button class="q-opt">A delete forces every reader to see the change at once</button>
+      <div class="q-fb">Idempotence is the property being bought: repeated, delayed and reordered deletes all end in the same state, and the read path already handles absence. The first option is a real but tiny effect and not the reason; the second is false, since a delete is as losable as any other message, which is why lifetimes exist; and the fourth is wrong because a delete only guarantees the next reader refills, not that every reader has stopped holding an old copy.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Under write-back, what destroys an acknowledged write besides a crash?</div>
+      <button class="q-opt">Eviction, when the cache reaches its memory limit</button>
+      <button class="q-opt">Expiry, when the entry's lifetime elapses first</button>
+      <button class="q-opt">A refill, when a reader misses and reloads the key</button>
+      <button class="q-opt">A rollback, when the store rejects the flushed write</button>
+      <div class="q-fb">A policy such as allkeys-lru is documented to evict any key at the memory limit, and it cannot tell an unflushed write from a cached read. Expiry is a near miss and worth separating: an entry written by write-back is normally given no lifetime for exactly this reason. A refill would overwrite the pending value with the stale stored one, which is a different bug, and a rejected flush at least produces an error somewhere.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0903-invalidation-begins-with-the-key.html">invalidation begins with the key</a></b> asks the question this page assumed away: which entries does one write actually invalidate.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the same idempotence argument applied to the request rather than to the cache operation.</li>
+    <li><b>Ahead, <a href="0904-invalidation-buys-a-staleness-window.html">invalidation buys a staleness window</a></b> is the race the warning above leaves open.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> List every write path in your service that changes something a cache also holds, and mark each one as update, delete, ignore or write-back. Ask the agent which of them are "ignore" by omission rather than by decision, and what the unbounded staleness window on each of those is.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>AWS's <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html">caching strategies</a> is the shortest honest write-up of write-through, with the advantages and the two disadvantages listed rather than argued, and its closing section on combining a lifetime with both strategies is the practical answer this page ends on. Read &sect;2 of <a href="https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf">Scaling Memcache at Facebook</a> next to it for the one-sentence argument that removal beats replacement at scale.</p>
+
+  <div class="pager">
+    <a href="0901-cache-aside-puts-the-policy-in-your-code.html"><span class="dir">&larr; Previous</span><span class="ttl">Cache-aside puts the policy in your code</span></a>
+    <a class="nxt" href="0903-invalidation-begins-with-the-key.html"><span class="dir">Next &rarr;</span><span class="ttl">Invalidation begins with the key</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0902 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

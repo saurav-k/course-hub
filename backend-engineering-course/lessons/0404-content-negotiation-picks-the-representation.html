@@ -1,0 +1,165 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content negotiation picks the representation - Backend Engineering</title>
+<meta name="description" content="One resource can have many representations. Accept states a preference for the response and Content-Type states a fact about this body, and the two ways that can fail are 406 and 415 rather than 400.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Serialization and contracts &middot; Lesson 0404</div>
+  <h1>One resource has many representations, and a mismatch is 406 or 415 rather than 400</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    A wish in one direction, a label in the other. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-12.1">RFC 9110 &sect;12.1 - Proactive Negotiation</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A resource is not its bytes. One URI can answer as JSON, as CSV, in English or in German, and each of those is a <b>representation</b>.</li>
+      <li><code>Accept</code> is a <b>preference about the response</b>; <code>Content-Type</code> is a <b>statement of fact about the body in this message</b>. One is a wish, the other is a label.</li>
+      <li>The server chooses, which RFC 9110 calls <b>proactive negotiation</b>, and then names the request fields it used in <code>Vary</code> so a shared cache can replay the choice.</li>
+      <li>No acceptable response representation is <b>406</b>. A request body in a format the resource does not support is <b>415</b>. Neither is a 400 - the syntax was fine.</li>
+      <li>What it costs: every dimension you negotiate on multiplies the cache key, and RFC 9110 lists reduced cache reuse among proactive negotiation's serious disadvantages.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Negotiation is the question answered before any of the parsing starts.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0203&lt;br/&gt;the field families,&lt;br/&gt;including Accept"] --> T["THIS PAGE&lt;br/&gt;which representation,&lt;br/&gt;and the two refusals"]
+  T --> A["Lesson 0405&lt;br/&gt;how a representation&lt;br/&gt;may change over time"]
+  T --> B["Module 06&lt;br/&gt;API design, where&lt;br/&gt;versioning is argued"]
+  T --> C["Module 09&lt;br/&gt;caching, which keys&lt;br/&gt;on what Vary names"]
+  W["Module 04&lt;br/&gt;Serialization and contracts"] -.- T
+    </div>
+    <figcaption>Lesson 0403 turned a body into a trusted type, and quietly assumed the body was in a format this endpoint handles. This page is where that assumption is made explicit, in both directions, and where the two status codes that report its failure get told apart. <b>Format selection happens before parsing, so its failures are not parse failures.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the resource and its representations</h2>
+
+  <h3 id="representation">Why the same URI may return different bytes</h3>
+  <p>Lesson 0200 said the target names a resource rather than a file. This is where that distinction pays. A resource is the concept the URI identifies: <em>this order</em>, <em>the report for March</em>. A representation is one concrete rendering of it, in a particular media type, language and encoding. The order can be rendered as JSON for a mobile client, as CSV for a finance export and as HTML for a browser, and all three are the same resource answering honestly.</p>
+
+  <p>Once you accept that, the question of which one to send becomes a real decision rather than a configuration accident, and HTTP gives it a name and a mechanism.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One resource, four renderings</div>
+    <div class="fig-claim">The URI names the concept and the fields choose the bytes.</div>
+    <div class="mermaid">
+flowchart LR
+  R["/orders/482&lt;br/&gt;the resource"] --> V1["application/json&lt;br/&gt;for a service client"]
+  R --> V2["text/csv&lt;br/&gt;for a finance export"]
+  R --> V3["text/html, en&lt;br/&gt;for a browser"]
+  R --> V4["text/html, de&lt;br/&gt;for the same browser&lt;br/&gt;with a German preference"]
+  V1 --> K["The response says which&lt;br/&gt;one was chosen, in&lt;br/&gt;Content-Type and Vary"]
+  V2 --> K
+  V3 --> K
+  V4 --> K
+    </div>
+    <figcaption>Four representations behind one target, chosen by the request fields rather than by four different URIs. The last two differ only in language, which is the case that shows why the choice has to be reported: nothing in the bytes of a German page announces that a language preference decided it. <b>A response that was selected has to say what selected it, or the next cache in the path will answer the wrong client from it.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: preferences in, a labelled choice back</h2>
+
+  <h3 id="proactive-negotiation">What the server is actually given</h3>
+  <p>In proactive negotiation the client sends its preferences and an algorithm on the server picks from the representations available. RFC 9110 defines <code>Accept</code>, <code>Accept-Charset</code>, <code>Accept-Encoding</code> and <code>Accept-Language</code> for this, and a server may also use implicit signals such as the network address, which is generally a bad idea for the reasons the specification lists.</p>
+
+  <h3 id="quality-value">Weights, and the rule that resolves a tie</h3>
+  <p>Each media range in <code>Accept</code> may carry a <code>q</code> weight expressing relative preference, and ranges may be wildcards: <code>*/*</code>, <code>type/*</code>, or a full type. The specification's own example, <code>Accept: audio/*; q=0.2, audio/basic</code>, reads as a preference for <code>audio/basic</code> with any audio type acceptable at a substantial discount. Where more than one range matches a candidate type, the most specific reference takes precedence, so <code>text/html</code> beats <code>text/*</code>, which beats <code>*/*</code>.</p>
+
+  <p>Two things about this surprise people. First, the preference is advisory: a user agent cannot rely on it being honoured, and the specification says outright that a server might decide a non-conforming response is better than a 406. Second, the server's answer is a fact and not a negotiation. <code>Content-Type</code> states the media type of the representation actually enclosed, and a recipient that finds it absent may assume <code>application/octet-stream</code> or sniff the bytes, which is a security risk the specification warns about directly.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Three outcomes of one exchange</div>
+    <div class="fig-claim">The two refusals leave from opposite sides of the message.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  C->>S: POST /orders - Content-Type application/json - Accept text/csv
+  S->>S: can I read this body - the request side
+  S-->>C: 415 if the media type is not supported here
+  S->>S: can I produce something acceptable - the response side
+  S-->>C: 406 if no representation matches Accept
+  S-->>C: 200 with Content-Type text/csv and Vary Accept
+    </div>
+    <figcaption>One request carries two independent format questions, and each has its own refusal. 415 is about the body the client sent and is decided before the handler does any work; 406 is about the body the server would send back and is decided after it knows what it has. Reading the pair as a single content problem is what produces the 400 that tells the client nothing. <b>The status code says which direction failed, so a client can tell a bad upload from an impossible download.</b></figcaption>
+  </figure>
+
+  <h3 id="media-type">Which refusal, and why not 400</h3>
+  <p>RFC 9110 defines 406 as the target resource having no current representation acceptable under the request's negotiation fields, with the server unwilling to supply a default, and recommends the response list the available alternatives. It defines 415 as the origin server refusing because the content is in a format not supported by this method on this resource, and adds that the cause may be the <code>Content-Type</code>, the <code>Content-Encoding</code>, or something found by inspecting the data. A 400 says the request was malformed, and in both of these cases it was not: it parsed, it was well formed, and the disagreement is about format rather than syntax.</p>
+
+  <h2>3. The trade-off: every dimension multiplies the cache</h2>
+
+  <p>Negotiation is not free, and RFC 9110 lists its disadvantages without softening them: a server cannot really know what is best for a user, describing capabilities on every request is inefficient and a privacy risk, it complicates the server, and it limits the reusability of responses for shared caching. That last one is the operational cost you will actually feel.</p>
+
+  <p>The mechanism is the one lesson 0203 introduced. A cache that stores a negotiated response has to know which request fields decided it, and <code>Vary</code> is where the server says so. Each field named in <code>Vary</code> becomes part of the cache key, so a response varying on <code>Accept</code>, <code>Accept-Language</code> and <code>Accept-Encoding</code> is stored once per distinct combination the clients happen to send. Since client libraries send long and idiosyncratic <code>Accept</code> strings, the number of distinct keys is set by the clients rather than by you.</p>
+
+  <div class="callout warn">
+    <code>Vary</code> is the field people forget, and forgetting it is worse than not negotiating at all. A response selected by language and stored by a shared cache with no <code>Vary</code> will be served to the next reader whatever they asked for, and the bug appears only under cache pressure, only for some users, and never on a developer machine. If a request field influenced the response, name it, and if you cannot name it, do not negotiate on it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A client POSTs an XML body to a JSON-only endpoint. What is the status?</div>
+      <button class="q-opt">415, the sent body is in a format not supported</button>
+      <button class="q-opt">406, no acceptable representation could be found</button>
+      <button class="q-opt">400, the request was malformed and unreadable</button>
+      <button class="q-opt">422, the syntax held but the values did not</button>
+      <div class="q-fb">415 is defined for exactly this: the origin server refuses because the content is in a format this method does not support on this resource. 406 concerns the response the server would send rather than the body it received, 400 claims a malformed request when the XML may be perfectly well formed, and 422 requires the server to have understood the content type first.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does a negotiated response need a <code>Vary</code> field?</div>
+      <button class="q-opt">To tell the client which preferences were honoured</button>
+      <button class="q-opt">To let the client retry with a narrower Accept</button>
+      <button class="q-opt">To mark the response as safe for a shared cache</button>
+      <button class="q-opt">To name the request fields a cache must key on</button>
+      <div class="q-fb">A shared cache has to reproduce the server's selection, and it can only do that if it knows which request fields fed into it, so those fields become part of the stored key. The first two describe things a client might like but not what Vary is for, and the third inverts it: naming a field constrains reuse rather than permitting it.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0405-compatibility-is-a-rule-not-a-hope.html">compatibility is a rule, not a hope</a></b> closes the module by asking how a representation may change once clients depend on it.</li>
+    <li><b>Behind you, <a href="0203-headers-carry-what-the-body-cannot.html">headers carry what the body cannot</a></b> introduced the four field families this page draws two of them from.</li>
+    <li><b>Behind you, <a href="0204-caching-is-a-contract-between-two-clocks.html">caching is a contract between two clocks</a></b> is the machinery that <code>Vary</code> feeds.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Send your own API a request with <code>Accept: text/csv</code> and see what comes back. Ask the agent whether the response was a 406, a 200 ignoring your preference, or a 200 with no <code>Vary</code>, and which of the three would break a shared cache sitting in front of it.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-12.1">RFC 9110 &sect;12.1</a> defines proactive negotiation and lists its disadvantages in the specification's own words, which is more candid than most summaries; <a href="https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1">&sect;12.5.1</a> carries the <code>Accept</code> grammar and the worked weight examples, and <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.7">&sect;15.5.7</a> and <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.16">&sect;15.5.16</a> define 406 and 415. MDN's <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Content_negotiation">content negotiation guide</a> is the readable companion and is clear about the cache's role.</p>
+
+  <div class="pager">
+    <a href="0403-validation-belongs-at-the-boundary-once.html"><span class="dir">&larr; Previous</span><span class="ttl">Validation belongs at the boundary, once</span></a>
+    <a class="nxt" href="0405-compatibility-is-a-rule-not-a-hope.html"><span class="dir">Next &rarr;</span><span class="ttl">Compatibility is a rule, not a hope</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0404 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

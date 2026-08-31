@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation belongs at the boundary, once - Backend Engineering</title>
+<meta name="description" content="Deserialization gives a value of the right shape and never one of the right meaning, so the edge turns untrusted input into a type the rest of the program cannot construct wrongly - and a re-check deeper in is a symptom.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Serialization and contracts &middot; Lesson 0403</div>
+  <h1>Parse untrusted input into a trusted type at the edge, and the checks deeper in stop being needed</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    One check, one place, one resulting type. &middot;
+    <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">OWASP - Input Validation Cheat Sheet</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Deserialization gives you a value of the <b>right shape</b>. It never gives you a value of the <b>right meaning</b>, and the difference is this whole page.</li>
+      <li>Do the check once, at the boundary, and have it <b>produce a type</b> the rest of the program cannot construct wrongly. That is parsing rather than validating.</li>
+      <li>A re-check in the middle of a service is a <b>symptom</b>: it says the value that arrived there carried no guarantee, so someone had to re-earn it.</li>
+      <li>The boundary asks three questions in order: <b>does it parse, is the value meaningful, is this caller allowed</b>. Only the first two belong to this module.</li>
+      <li>What it costs: a second set of types at the edge, and the discipline never to pass the raw decoded map inward.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This is the last stop before a value becomes your program's problem.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0400 to 0402&lt;br/&gt;the contract, the format,&lt;br/&gt;the schema"] --> T["THIS PAGE&lt;br/&gt;untrusted bytes become&lt;br/&gt;a trusted type"]
+  T --> A["Module 05&lt;br/&gt;the service layer, which&lt;br/&gt;assumes the type is good"]
+  T --> B["Module 06&lt;br/&gt;the error shape a&lt;br/&gt;rejection is reported in"]
+  T --> C["Module 07&lt;br/&gt;auth, the third question&lt;br/&gt;the boundary asks"]
+  W["Module 04&lt;br/&gt;Serialization and contracts"] -.- T
+    </div>
+    <figcaption>Everything upstream of this page was about what the bytes can say. Everything downstream assumes somebody already decided whether they should be believed, and this page is where that decision is made and where it is turned into something the type system can carry. <b>The boundary is the only place in a service where an unchecked value legitimately exists.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: parse, do not validate</h2>
+
+  <h3 id="boundary-parsing">A check that returns a type instead of a boolean</h3>
+  <p>The common shape is a function that takes the decoded request and returns true or false, after which the request is passed onward unchanged. That function has thrown away everything it learned. The value that continues into the service has exactly the type it had before the check, so nothing downstream can tell a checked value from an unchecked one, and the only defence available to a careful author further in is to check again.</p>
+
+  <p>The alternative is to make the check constructive. The boundary takes the untrusted input and either fails or returns a value of a <em>different type</em>: not a map with a <code>quantity</code> key that might be anything, but an <code>OrderRequest</code> whose <code>quantity</code> is a positive integer because there is no way to build one where it is not. Now the knowledge is in the type, it travels with the value, and a function that accepts an <code>OrderRequest</code> is stating its precondition in its signature rather than in a comment.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two designs for one check</div>
+    <div class="fig-claim">A boolean check leaves the same doubt at every later call.</div>
+    <div class="mermaid">
+flowchart TB
+  subgraph B["Parsed - the check returns a type"]
+    direction TB
+    B1["decoded map"] --> B2["parseOrderRequest"]
+    B2 --> B3["OrderRequest&lt;br/&gt;quantity is positive&lt;br/&gt;by construction"]
+    B3 --> B4["handler, service and&lt;br/&gt;repository check nothing"]
+  end
+  subgraph A["Validated - the check returns a boolean"]
+    direction TB
+    A1["decoded map"] --> A2["isValid returns true"]
+    A2 --> A3["handler, service and&lt;br/&gt;repository each&lt;br/&gt;re-check quantity"]
+  end
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  classDef good fill:var(--ok-soft),stroke:var(--ok)
+  class A3 bad
+  class B3,B4 good
+    </div>
+    <figcaption>The validated design is not wrong so much as forgetful: the check happened, and then the fact that it happened was discarded. The parsed design spends the same effort and keeps the result, which is why the highlighted re-checks simply do not arise. <b>Scattered re-checks are not defensive depth - they are the cost of a check that returned nothing.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: three questions, in order</h2>
+
+  <p>A boundary that is doing its job asks three things, and mixing them up is what produces the wrong status code and the unhelpful error message.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">States a body passes through</div>
+    <div class="fig-claim">Each rejection leaves from a different state and reports differently.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Bytes
+  Bytes --> Decoded: the grammar holds
+  Bytes --> Malformed: syntax error - 400
+  Decoded --> Typed: fields present and well typed
+  Decoded --> Unprocessable: shape is fine, values are not - 422
+  Typed --> Trusted: the caller may do this
+  Typed --> Forbidden: authenticated but not permitted - 403
+  Trusted --> [*]
+  Malformed --> [*]
+  Unprocessable --> [*]
+  Forbidden --> [*]
+    </div>
+    <figcaption>The three questions as the states a request body actually occupies. The distinction that matters most in practice is the middle one: a body that parsed cleanly and carries a negative quantity is not a syntax problem, and reporting it as one sends the client looking in the wrong place. Module 07 owns the last transition and module 06 owns the shape of the error document. <b>The status code you return names which of the three questions failed, so getting it wrong misdirects the person debugging.</b></figcaption>
+  </figure>
+
+  <p>The middle rejection has a status code of its own. <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.21">RFC 9110 &sect;15.5.21</a> defines 422 as the server understanding the content type and finding the syntax correct, while being unable to process what the content asked for, and it says in the same paragraph that this is the case where 415 is inappropriate. A well-formed body carrying a negative quantity is exactly that.</p>
+
+  <h3 id="trusted-type">Doing it in two languages</h3>
+  <p>The mechanism is the same in a typed and an untyped language, and only the spelling differs. In Go the decoded target is a struct, the field names are bound by tags, and the strictness is a decoder option: <a href="https://pkg.go.dev/encoding/json#Decoder.DisallowUnknownFields">DisallowUnknownFields</a> makes an unrecognised key an error instead of a silent skip. The constructive step is a function that takes that struct and returns a domain type or an error, and it is the only exported way to build the domain type.</p>
+
+  <div class="code-cap">boundary.go &middot; the constructive step, Go</div>
+  <pre><code>type orderWire struct {
+    Quantity *int   `json:"quantity"`
+    Currency string `json:"currency"`
+}
+
+// OrderRequest cannot be built except through ParseOrder.
+type OrderRequest struct {
+    quantity int
+    currency string
+}
+
+func ParseOrder(r io.Reader) (OrderRequest, error) {
+    d := json.NewDecoder(r)
+    d.DisallowUnknownFields()
+    var w orderWire
+    if err := d.Decode(&amp;w); err != nil {
+        return OrderRequest{}, fmt.Errorf("malformed body: %w", err)
+    }
+    if w.Quantity == nil {
+        return OrderRequest{}, errors.New("quantity: required")
+    }
+    if *w.Quantity &lt;= 0 {
+        return OrderRequest{}, errors.New("quantity: must be positive")
+    }
+    return OrderRequest{quantity: *w.Quantity, currency: w.Currency}, nil
+}</code></pre>
+
+  <p>Note the pointer on <code>Quantity</code>. It is there for the reason lesson 0401 gave: without it an absent key and an explicit zero are the same value, and the required check silently passes for a request that never sent the field. In Python the same design is a frozen dataclass or a pydantic model whose constructor raises, and the rule that makes it work is identical: nothing in the service constructs the domain type by hand.</p>
+
+  <h2>3. The trade-off: two type sets, and the temptation to skip one</h2>
+
+  <p>The honest cost is duplication. You now have a wire type that mirrors the document and a domain type that mirrors your model, plus the function between them, for every endpoint. On a small service that feels like ceremony, and the tempting shortcut is to decode straight into the domain type and check afterwards.</p>
+
+  <p>The shortcut works until the two shapes diverge, which they always do: the wire keeps a field you renamed internally, the domain gains a field no client should ever set, an endpoint accepts a partial update. At that point a single shared type has to satisfy two contracts with different requirements, and the usual resolution is to loosen the domain type until it can hold anything the wire might send. That is the failure this separation exists to prevent, and it is worth paying the duplication before you feel the need rather than after.</p>
+
+  <div class="callout warn">
+    Rejecting input is not the same as sanitising it. Stripping suspicious characters and continuing produces a value nobody specified, from a request nobody made, and it hides the attempt from your logs. OWASP is explicit that input validation should not be the primary defence against XSS or SQL injection, though it contributes to reducing their impact, and points instead at the mechanism that sits at the sink: a <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">parameterised query</a> for a database, contextual encoding for a page. It also says to build the boundary as an allow-list, defining exactly what is permitted, rather than a list of characters to strip. Reject at the boundary, encode at the sink, and never trade one for the other.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is a quantity re-check inside the repository a design smell?</div>
+      <button class="q-opt">It duplicates work and slows the write path</button>
+      <button class="q-opt">It belongs in the database as a constraint</button>
+      <button class="q-opt">It says the value arrived carrying no guarantee</button>
+      <button class="q-opt">It hides the real error from the caller above</button>
+      <div class="q-fb">The re-check exists because the type reaching that function cannot express whether it was checked, so the author had no way to rely on the earlier check. The cost in time is negligible, a database constraint is a good idea for a different reason, and the re-check reports its error perfectly well - the problem is that it was needed at all.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A body parses cleanly but carries a negative quantity. What should it get?</div>
+      <button class="q-opt">400, because the request could not be used</button>
+      <button class="q-opt">422, because the syntax was fine and values were not</button>
+      <button class="q-opt">415, because the content was not supported here</button>
+      <button class="q-opt">500, because the handler cannot complete the work</button>
+      <div class="q-fb">The grammar held and the shape was right, so the failure is semantic and the client should be pointed at the value rather than at the syntax. A 400 is defensible and widely used but tells the client less; 415 is about the media type of the body, which the next lesson covers; and a 500 blames the server for a request that was the client's to fix.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0404-content-negotiation-picks-the-representation.html">content negotiation picks the representation</a></b> is the question that comes before this one: which format the body is in at all.</li>
+    <li><b>Behind you, <a href="0401-json-is-text-and-text-has-no-types.html">JSON is text and text has no types</a></b> is where the pointer on <code>Quantity</code> came from.</li>
+    <li><b>Behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is the class contract the three rejections above are drawn from.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Pick one endpoint and count every place a value from its request body is checked. Ask the agent to collapse those checks into one boundary function returning a domain type, and to list which downstream checks become unreachable once it does.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html">Input Validation Cheat Sheet</a> is the practitioner reference for what to check and, more usefully, for what validation does not defend against. Go's <a href="https://pkg.go.dev/encoding/json">encoding/json</a> documents the default that unmatched keys are ignored and the decoder option that reverses it, which is the single most consequential default on this page.</p>
+
+  <div class="pager">
+    <a href="0402-schema-first-makes-the-contract-the-source.html"><span class="dir">&larr; Previous</span><span class="ttl">Schema-first makes the contract the source</span></a>
+    <a class="nxt" href="0404-content-negotiation-picks-the-representation.html"><span class="dir">Next &rarr;</span><span class="ttl">Content negotiation picks the representation</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0403 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

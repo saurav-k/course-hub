@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A cache is a bet that the question repeats - Backend Engineering</title>
+<meta name="description" content="A cache is a second copy of an answer kept somewhere cheaper to reach. It only pays when the same question comes back, so the hit rate is the whole economics - and read as load rather than latency, a few points of it are worth an order of magnitude.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Caching &middot; Lesson 0900</div>
+  <h1>A cache is a bet that the same question will be asked again</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">9 min</span>
+    Why the thing exists, before any pattern is named. &middot;
+    <a href="https://s4plus.ustc.edu.cn/_upload/article/files/7a/5b/5c9fd1264e30b6881ecd7f7733f2/3ef2e159-9fd8-47a6-903c-cf9bfa836a28.pdf">Atikoglu et al., Workload Analysis of a Large-Scale Key-Value Store (SIGMETRICS 2012)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A cache is a <b>second copy of an answer</b>, kept somewhere cheaper to reach than the thing that produced it.</li>
+      <li>It only earns anything when the same question comes back, so a cache is <b>a bet on repetition</b> and the hit rate is the bet paying off.</li>
+      <li>The economics fit in one line: <b>you pay the lookup on every read and the origin only on the misses</b>.</li>
+      <li>Read the same hit rates as load rather than as latency and the picture inverts - <b>17 points of hit rate is fourteen times the database traffic</b>.</li>
+      <li>What it costs: a second copy of the truth that can disagree with the first, a miss path slower than having no cache, and one more thing that can fail.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Every later page in this module is a consequence of keeping a second copy.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Module 08&lt;br/&gt;the store that owns&lt;br/&gt;the truth"] --> T["THIS PAGE&lt;br/&gt;a second copy,&lt;br/&gt;nearer and faster"]
+  T --> A["Lessons 0901 and 0902&lt;br/&gt;how reads and writes&lt;br/&gt;reach the two copies"]
+  T --> B["Lessons 0903 to 0905&lt;br/&gt;keeping the copy honest,&lt;br/&gt;and what breaks"]
+  T --> C["Module 13&lt;br/&gt;what a fleet can&lt;br/&gt;stop asking for"]
+  W["Module 09&lt;br/&gt;Caching"] -.- T
+    </div>
+    <figcaption>Module 02 already taught the cache the protocol gives you for free. This module is about the one you operate, which means you own its correctness rather than reading it out of a header. <b>Once there are two copies of an answer, every question in this module is about which one a reader gets.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a store of answers, not of data</h2>
+
+  <h3 id="what-a-cache-is">The definition that survives every implementation</h3>
+  <p>A cache is a place to put an answer you already worked out, chosen because getting it back from there is cheaper than working it out again. That is the whole definition, and it holds for a CPU's L1, a browser's disk cache, the HTTP cache of <a href="0204-caching-is-a-contract-between-two-clocks.html">lesson 0204</a>, and the Redis instance your service talks to. What changes between them is only what "cheaper" means: fewer nanoseconds, fewer bytes on the wire, or fewer joins on a database that is already the constraint.</p>
+
+  <p>Two properties follow from the definition and they are what make a cache a cache. It is <b>not the authoritative copy</b>, so it is always allowed to have nothing, and a correct system must survive that. And it is <b>allowed to throw things away</b>, at any moment, without telling anyone. Facebook's memcache paper puts both in one sentence when it explains why writes delete rather than update: memcache "is not the authoritative source of the data and is therefore allowed to evict cached data" (<a href="https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf">Nishtala et al., NSDI 2013</a>, &sect;2). A store you are not allowed to lose is a database wearing a cache's clothes, and it will be operated like one whatever you called it.</p>
+
+  <h3 id="the-bet">The bet, and how often it pays</h3>
+  <p>The bet is repetition. Storing an answer costs memory and a write; it only returns anything if somebody asks the same question before the entry goes away. So a cache is worth having exactly when the request stream repeats itself, and worthless when every request is unique - which is why a cache in front of a search over free text usually disappoints, and a cache in front of a user profile usually does not.</p>
+
+  <p>That the stream repeats is measurable rather than assumed. Atikoglu and colleagues traced <span class="keynum">284 billion</span> requests across five of Facebook's Memcached pools and reported a mean GET hit rate for each: <span class="keynum">98.7%</span>, <span class="keynum">98.2%</span>, <span class="keynum">93.7%</span>, <span class="keynum">92.9%</span> and <span class="keynum">81.4%</span>. They also found a GET to SET ratio of <span class="keynum">30 to 1</span>, which is the same fact stated as traffic: these workloads ask far more often than they change.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Misses, not hits</div>
+    <div class="fig-claim">Hit rates 17 points apart differ fourteenfold in what the database sees.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of GET miss rate for five Facebook Memcached pools: ETC 18.6 percent, APP 7.1 percent, VAR 6.3 percent, USR 1.8 percent, SYS 1.3 percent">
+      <line class="grid" x1="70" y1="200" x2="610" y2="200"/>
+      <line class="grid" x1="70" y1="150" x2="610" y2="150"/>
+      <line class="grid" x1="70" y1="100" x2="610" y2="100"/>
+      <line class="grid" x1="70" y1="50"  x2="610" y2="50"/>
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <text class="lbl-sm" x="62" y="204" text-anchor="end">5%</text>
+      <text class="lbl-sm" x="62" y="154" text-anchor="end">10%</text>
+      <text class="lbl-sm" x="62" y="104" text-anchor="end">15%</text>
+      <text class="lbl-sm" x="62" y="54"  text-anchor="end">20%</text>
+      <rect class="m-alarm" x="100" y="64"  width="60" height="186"/>
+      <rect class="m-stat"  x="200" y="179" width="60" height="71"/>
+      <rect class="m-stat"  x="300" y="187" width="60" height="63"/>
+      <rect class="m-stat"  x="400" y="232" width="60" height="18"/>
+      <rect class="m-stat"  x="500" y="237" width="60" height="13"/>
+      <text class="lbl-b" x="130" y="56"  text-anchor="middle">18.6%</text>
+      <text class="lbl-sm" x="230" y="171" text-anchor="middle">7.1%</text>
+      <text class="lbl-sm" x="330" y="179" text-anchor="middle">6.3%</text>
+      <text class="lbl-sm" x="430" y="224" text-anchor="middle">1.8%</text>
+      <text class="lbl-sm" x="530" y="229" text-anchor="middle">1.3%</text>
+      <text class="lbl-sm" x="130" y="268" text-anchor="middle">ETC</text>
+      <text class="lbl-sm" x="230" y="268" text-anchor="middle">APP</text>
+      <text class="lbl-sm" x="330" y="268" text-anchor="middle">VAR</text>
+      <text class="lbl-sm" x="430" y="268" text-anchor="middle">USR</text>
+      <text class="lbl-sm" x="530" y="268" text-anchor="middle">SYS</text>
+      <text class="lbl-sm" x="340" y="291" text-anchor="middle">share of GETs that had to reach the backing store</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>the general-purpose pool</span><span><i class="sw-stat"></i>the four narrower pools</span></div>
+    <figcaption>The same five measurements as the paragraph above, subtracted from 100 and drawn. As hit rates they look alike - 81% and 99% are both "most of the time". As miss rates they are not alike at all: the general-purpose pool sends fourteen times as much work to the store as the narrowest one does. <b>A hit rate is a comfortable number and its complement is the one that sizes your database.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the arithmetic a hit rate buys</h2>
+
+  <h3 id="the-arithmetic">One line, and what each term is</h3>
+  <p>A read either finds the entry or does not. The lookup is paid either way, and the expensive path is paid only on the fraction that misses, so the mean cost of a read is a straight weighted average with one term.</p>
+
+  <div class="math">
+    mean read = t<sub>c</sub> + (1 &minus; h) &times; t<sub>o</sub>
+    <span class="gloss">Read as: the average time a read takes is the cache lookup <i>t<sub>c</sub></i>, which every single read pays, plus the origin cost <i>t<sub>o</sub></i>, which is paid only by the <i>1 &minus; h</i> share of reads that found nothing. <i>h</i> is the hit rate: the fraction of reads the cache answered by itself.</span>
+  </div>
+
+  <ol class="worked">
+    <li><b>Fix the two costs, and label them honestly.</b> Take <i>t<sub>c</sub></i> = 0.5 ms and <i>t<sub>o</sub></i> = 20 ms. The first is anchored: <code>redis-benchmark</code> on the loopback interface reports a median of <span class="keynum">0.143 ms</span> per SET, and a cache one host away in the same datacentre adds a network round trip on top. The second is an assumption about one indexed query, not a measurement, and every number below inherits it.</li>
+    <li><b>Read it with no cache at all.</b> <i>h</i> = 0 gives 0.5 + 1 &times; 20 = <b>20.5 ms</b>. That is worse than not having a cache, by exactly the 0.5 ms you spent asking it.</li>
+    <li><b>Read it at four hits in five.</b> <i>h</i> = 0.8 gives 0.5 + 0.2 &times; 20 = <b>4.5 ms</b>.</li>
+    <li><b>Read it at ninety-nine in a hundred.</b> <i>h</i> = 0.99 gives 0.5 + 0.01 &times; 20 = <b>0.7 ms</b>.</li>
+    <li><b>Now read the same three hit rates as load.</b> At 10,000 reads a second the store sees 10,000, then 2,000, then 100 queries a second.</li>
+  </ol>
+
+  <p>Those last two steps are the same arithmetic and they do not say the same thing. Between 4.5 ms and 0.7 ms a reader feels almost nothing; both are far below the moment anyone notices. Between 2,000 and 100 queries a second the database sees a factor of twenty, which is the difference between a replica and a fleet of them. <b>Latency is what the reader feels and load is what the store survives</b>, and past a certain hit rate you are no longer buying the first at all.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Hit path, miss path</div>
+    <div class="fig-claim">A miss pays two extra round trips a cacheless read never pays.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Application
+  participant C as Cache
+  participant D as Database
+  A->>C: get user-42
+  C-->>A: hit - the stored value
+  Note over A,C: one round trip&lt;br/&gt;the database is not touched
+  A->>C: get user-99
+  C-->>A: miss - nothing stored
+  A->>D: SELECT for id 99
+  D-->>A: the row
+  A->>C: set user-99
+  Note over A,D: three round trips&lt;br/&gt;where no cache would cost one
+    </div>
+    <figcaption>The two paths a read can take, drawn against the same three participants. AWS counts the miss the same way in its own guidance: a miss "results in three trips", the ask, the query and the write-back, and calls the sum a cache miss penalty. <b>A cache does not make reads faster - it makes most reads faster and the rest slower, and the hit rate decides whether that trade is a gain.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: what the second copy costs you</h2>
+
+  <p>The costs are not the memory. Memory is the one you can quote a price for, and it is rarely the one that hurts. The three that hurt are that the second copy can disagree with the first, that the miss path is now longer than no cache at all, and that a component your correctness does not depend on has quietly become one your capacity does.</p>
+
+  <p>That third one is the one teams meet in an incident. Once the store is provisioned for 100 queries a second because the cache absorbs the other 9,900, an empty cache is not a slow system, it is an outage - the store is asked for a hundred times the work it was sized for, by every process at once. Lesson 0905 is about that class of failure, and the important part is that it was created here, on the day the cache started working well.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What earns a slot</div>
+    <div class="fig-claim">Read frequency alone does not justify an entry - production cost decides too.</div>
+    <div class="mermaid">
+quadrantChart
+  title What is worth caching
+  x-axis Cheap to produce --> Expensive to produce
+  y-axis Rarely read --> Read constantly
+  quadrant-1 Cache it first
+  quadrant-2 Cache once it is hot
+  quadrant-3 Leave it alone
+  quadrant-4 Precompute on a schedule
+  "Home feed": [0.85, 0.88]
+  "Session record": [0.25, 0.9]
+  "Currency table": [0.2, 0.68]
+  "Yearly report": [0.88, 0.24]
+  "Admin one-off": [0.55, 0.2]
+    </div>
+    <figcaption>Two axes, because either one alone gives the wrong answer. A session record is read constantly and is cheap, so it belongs in a cache but will never repay much; a yearly report is enormously expensive and read twice, so a cache entry for it is a coincidence rather than a design and a scheduled recomputation is the honest answer. <b>The entries worth having are the ones that are both expensive to produce and asked for again.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    A hit rate reported on its own is close to meaningless, and it is the number every cache dashboard shows first. It is an average over every key, so one enormous, perfectly cacheable key family can hold the number at 95% while the family you actually care about sits at 40% and the store carries all of it. Atikoglu's team found this inside one pool: about <span class="keynum">half</span> of the general-purpose pool's keys appeared in only 1% of requests, a long tail that "benefit[s] little or not at all from a demand-filled cache" while contributing most of the misses. Measure the hit rate per key family, or you are measuring the family you were never worried about.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A read cache is at a 50% hit rate. What has it definitely bought you?</div>
+      <button class="q-opt">Half the origin load, and a slower path on the other half</button>
+      <button class="q-opt">Half the origin load, and no change to any read latency</button>
+      <button class="q-opt">Half the read latency, and no change to the origin load</button>
+      <button class="q-opt">Half the read latency, and half of the origin storage</button>
+      <div class="q-fb">Only the misses reach the origin, so half of them do, and each of those now pays a lookup it would not otherwise have paid. The second option denies the miss penalty that the three-trip path makes real; the third has the mechanism backwards, since load falls with the miss rate rather than latency falling on its own; and the fourth invents a storage saving a cache never gives, because the origin still holds every row.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which fact makes a workload a poor candidate for a cache?</div>
+      <button class="q-opt">Its reads outnumber its writes by roughly thirty to one</button>
+      <button class="q-opt">Its answers are expensive for the database to produce</button>
+      <button class="q-opt">Almost every request it serves asks a distinct question</button>
+      <button class="q-opt">Its stored answers are large enough to need real memory</button>
+      <div class="q-fb">A cache is a bet on repetition, so a stream of unique questions loses that bet on every request and pays the miss penalty for the privilege. A high read-to-write ratio and an expensive origin are the two things that make caching pay, not the reverse, and entry size is a capacity question you solve by caching fewer things rather than a reason not to cache.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0901-cache-aside-puts-the-policy-in-your-code.html">cache-aside puts the policy in your code</a></b> is the first decision this bet forces: who is responsible for filling the cache.</li>
+    <li><b>Behind you, <a href="0204-caching-is-a-contract-between-two-clocks.html">caching is a contract between two clocks</a></b> is the same idea with the freshness policy written in headers instead of in your service.</li>
+    <li><b>Ahead, <a href="0905-a-cache-moves-the-failure-it-does-not-remove-it.html">a cache moves the failure</a></b> is where the capacity dependency created on this page comes due.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one cached read path in your own service and write down its <i>t<sub>c</sub></i>, its <i>t<sub>o</sub></i> and its measured hit rate. Ask the agent what your origin's query rate would be if the cache were empty for ten minutes, and whether the origin is provisioned for that number.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://s4plus.ustc.edu.cn/_upload/article/files/7a/5b/5c9fd1264e30b6881ecd7f7733f2/3ef2e159-9fd8-47a6-903c-cf9bfa836a28.pdf">Workload Analysis of a Large-Scale Key-Value Store</a> is the rare paper that reports what a cache in production actually sees rather than what a benchmark can be made to show: hit rates per pool in Table 2, the miss breakdown in Table 3, and the key-popularity tail that explains both. Read &sect;4 next to your own dashboard.</p>
+
+  <div class="pager">
+    <a href="0806-the-non-relational-map-is-four-shapes.html"><span class="dir">&larr; Previous</span><span class="ttl">The non-relational map is four shapes</span></a>
+    <a class="nxt" href="0901-cache-aside-puts-the-policy-in-your-code.html"><span class="dir">Next &rarr;</span><span class="ttl">Cache-aside puts the policy in your code</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0900 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

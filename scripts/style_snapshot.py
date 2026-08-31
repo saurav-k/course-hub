@@ -21,7 +21,7 @@ That is what converts a large mechanical edit from "hope review catches it" into
 
 Exit code 0 means nothing moved. Exit code 1 lists every difference.
 
-Six decisions worth knowing before you read the code.
+Seven decisions worth knowing before you read the code.
 
 *The run is hermetic.* Chrome resolves nothing but the loopback address, so the
 Mermaid CDN never answers and no diagram renders. ``hub.js`` guards every
@@ -50,6 +50,24 @@ chosen explicitly and the operating system asking for the opposite, because that
 is the state the hub's mode-layer ordering was written for. The agreeing state
 is checked too, as assertion A1 below, rather than stored twice.
 
+*Every disclosure is opened before anything is measured.* A closed
+``<details>`` is skipped for rendering, and Chromium keeps the style its subtree
+last computed while every ancestor updates around it. So a page switched from
+one palette to another hands back a ``.worked`` or a ``.p-check`` still painted
+in the palette it arrived on, and A2 fails on a page the pull request never
+touched. The stale value cannot be waited out - it is perfectly stable - and
+polling is worse, because each read re-caches it, which is what made the failure
+intermittent rather than constant. The harness therefore opens every disclosure
+on the way in, before the first read and before any switch, and fails loudly if
+one stays shut. Opening records a state the reader reaches with one click, and
+the collapsed state renders nothing for anybody to see, so measuring it is
+measuring nothing. Skipping the locked subtree instead would drop 20 recorded
+rows - ``.worked``, ``.keynum`` and ``.p-check``, on 11 of the 22 sampled pages -
+and drop them quietly, because other pages render all three of those classes
+outside a disclosure and coverage would go on passing at 86 of 86. ``hub.css``
+describes the same Chromium behaviour where it explains why the reading pane is
+not repainted on a switch.
+
 *Three assertions run beside the snapshot, and none is stored.* The first two
 are render states that a single capture cannot see; the third is the course
 contract, which is a promise rather than a state.
@@ -61,7 +79,9 @@ contract, which is a promise rather than a state.
     A2  switch parity. A page loaded on one palette and mode and then switched
         to another computes exactly what the same page computes when loaded on
         that setting directly. A failure means a rule that only matches on the
-        first paint, or one that only matches after a change.
+        first paint, or one that only matches after a change. It measures with
+        every disclosure open, for the reason above: a closed one reports the
+        palette it arrived on and would fail this assertion for ever.
 
     A3  the course contract. Two throwaway courses are registered in an injected
         stylesheet and worn in turn on one published page. A registration
@@ -637,6 +657,19 @@ SETTLE = """
 })()
 """
 
+DISCLOSE = """
+(async function () {
+  var closed = Array.prototype.slice.call(document.querySelectorAll('details:not([open])'));
+  closed.forEach(function (box) { box.open = true; });
+  if (closed.length) {
+    await new Promise(function (done) {
+      requestAnimationFrame(function () { requestAnimationFrame(done); });
+    });
+  }
+  return { 'opened': closed.length, 'shut': document.querySelectorAll('details:not([open])').length };
+})()
+"""
+
 SEED = """
 try {
   localStorage.setItem('coursehub.mode', %(mode)s);
@@ -847,6 +880,33 @@ class Capture:
         wanted = f"{palette} {mode or '-'}"
         if settled != wanted:
             raise RuntimeError(f"{page} settled as {settled}, expected {wanted}")
+        self.disclose(page)
+
+    def disclose(self, page: str) -> None:
+        """Open every disclosure on the page, because a closed one cannot be read.
+
+        A closed ``<details>`` is skipped for rendering, and Chromium holds the
+        style its subtree last computed: the ancestors of a ``.worked`` update
+        on a palette switch and the ``.worked`` itself does not. Every element
+        this affects is one a reader opens with a single click, so the honest
+        reading is the open one, and it is also the only one the harness can
+        take: waiting does not clear the stale value and reading it again
+        re-caches it.
+
+        It runs on the way in rather than beside each read, so the subtree is
+        already live when ``switch`` moves the axes underneath it, and it is
+        checked rather than assumed - a disclosure that stays shut is a page
+        this harness cannot measure, and saying so is better than recording the
+        palette it arrived on.
+        """
+        measured = self.chrome.evaluate(DISCLOSE)
+        if not isinstance(measured, dict):
+            raise RuntimeError(f"{page}: the disclosure pass answered {measured!r}")
+        if measured["shut"]:
+            raise RuntimeError(
+                f"{page}: {measured['shut']} disclosure(s) would not open, so the style "
+                "inside them is whatever they last computed"
+            )
 
     def read(self, attempts: int = 16) -> dict[str, dict[str, dict[str, str]]]:
         """The whole page's computed styles, read only once the page has settled.

@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A consumer must be idempotent - Backend Engineering</title>
+<meta name="description" content="The duplicate is not a possibility to guard against, it is a delivery already scheduled by the lease and the retry policy. A consumer absorbs it by making the effect repeatable or by claiming a key in the same transaction as the work.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1003</div>
+  <h1>The duplicate is not a risk to guard against, it is a delivery you already scheduled</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    What the previous two lessons oblige you to build. &middot;
+    <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-exactly-once-processing.html">Amazon SQS - exactly-once processing</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two mechanisms you have already accepted produce duplicates on purpose: <b>the expiring lease</b> of lesson 1001 and <b>the retry policy</b> of lesson 1002. Nothing upstream will stop them.</li>
+      <li>Idempotence is a property of the <b>effect</b>, not of the code. Assignment repeats safely, accumulation does not, and the fastest fix is often to change the write rather than to add machinery.</li>
+      <li>When the effect cannot be made naturally repeatable, claim a key: a <b>row inserted under a unique constraint, in the same transaction as the work</b>. That is lesson 0605's mechanism moved to the consumer side.</li>
+      <li>Key on a value the <b>producer</b> chose, not on the broker's message id. A redelivery reuses the id, but a producer that retried its send created a genuinely new message for the same intent.</li>
+      <li>What it costs: the dedup store has a retention, so the guarantee expires - and it covers only the effects inside the transaction that claimed the key.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This page pays the bill the two before it ran up.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1001&lt;br/&gt;the lease expires&lt;br/&gt;and redelivers"] --> T["THIS PAGE&lt;br/&gt;absorbing the&lt;br/&gt;duplicate delivery"]
+  R["Lesson 1002&lt;br/&gt;the retry policy&lt;br/&gt;repeats on purpose"] --> T
+  T --> A["Lesson 1004&lt;br/&gt;the outbox relay is&lt;br/&gt;at-least-once too"]
+  T --> B["Module 11&lt;br/&gt;what you log when&lt;br/&gt;a duplicate is absorbed"]
+    </div>
+    <figcaption>Both arrows into this page are decisions the module already took and would take again. The lease has to expire or a dead worker holds the message forever; the retry has to happen or a transient failure becomes a lost job. Each is correct in isolation and each manufactures duplicates, so the consumer is where the two bills are settled. Note where the page after this one points: the outbox relay you are about to build is itself an at-least-once publisher, so it does not remove this obligation, it adds a second producer of it. <b>Idempotence is not a defence against a rare event, it is the interface every at-least-once system requires of its consumers.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the ambiguous acknowledgement, one layer down</h2>
+
+  <h3 id="ambiguous-ack">The consumer and the broker cannot agree</h3>
+  <p>Lesson 0605 named the knot on the HTTP side: a client that gets no response cannot tell a lost request from a lost response. The consumer side is the same knot with the parties swapped. The worker finishes the job, sends the acknowledgement, and the acknowledgement is lost, or the process dies in the microsecond between the commit and the delete. From the broker's position nothing distinguishes that from a worker that died before it started, and its only correct action - the action that stops work from being lost - is to hand the message to somebody else.</p>
+
+  <p>So the duplicate is not the symptom of a bug anywhere. It is the deliberate output of a system that has chosen not to lose work. Amazon writes it into the guarantee itself: even under a FIFO queue's ordering and deduplication, <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">"due to the at-least-once delivery model of Amazon SQS, there's no absolute guarantee that a message won't be delivered more than once during the visibility timeout period"</a>.</p>
+
+  <h3 id="dedup-scope">What deduplication upstream does and does not buy</h3>
+  <p>It is worth being precise about the one place a broker will deduplicate for you, because it is narrower than its name suggests. An SQS FIFO queue with a <code>MessageDeduplicationId</code> will, <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-exactly-once-processing.html">if you retry the <code>SendMessage</code> action within the 5-minute deduplication interval, not introduce any duplicates into the queue</a>. Read the two boundaries in that sentence. It is <em>send</em>-side, so it collapses a producer's retries and touches nothing about delivery. And it is five minutes, so it is a window rather than a promise.</p>
+
+  <p>That distinction decides what you key on. A redelivery caused by an expired lease carries the same message id, so the broker's id would catch it. A duplicate caused by the producer retrying its send is a different message with a different id and identical intent, and the broker's id would not catch it at all. The value that identifies the intent has to come from the party that has the intent, which is the producer - the same argument, for the same reason, as the client-generated key in lesson 0605.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The lost acknowledgement</div>
+    <div class="fig-claim">The same redelivery charges twice or once, depending on one row.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant B as Broker
+  participant W as Worker
+  participant D as Datastore
+  B->>W: deliver job - key ord-77
+  W->>D: insert the refund row
+  W--xB: the acknowledgement is lost
+  B->>W: deliver job again - key ord-77
+  W->>D: insert a second refund row
+  Note over B,D: with a claimed key, the second delivery is absorbed
+  B->>W: deliver job - key ord-77
+  W->>D: claim ord-77 and insert the refund - one transaction
+  W--xB: acknowledgement lost again
+  B->>W: deliver job again - key ord-77
+  W->>D: the claim already exists - do nothing
+  W->>B: acknowledge - one refund
+    </div>
+    <figcaption>Nothing changes in the upper and lower halves except where the transaction boundary sits. The worker cannot tell the two deliveries apart and does not need to: it asks the datastore, which can, because the datastore is the only participant that saw both attempts. Notice that the second delivery in the lower half still ends in an acknowledgement - absorbing a duplicate means completing normally, not raising an error. <b>An idempotent consumer answers a repeat instead of refusing it.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: change the effect, or claim a key</h2>
+
+  <h3 id="natural-idempotence">Assignment repeats, accumulation does not</h3>
+  <p>Before reaching for a dedup table, look at what the job actually writes. <code>UPDATE orders SET status = 'shipped' WHERE id = 77</code> can run any number of times and leaves the same row. <code>UPDATE accounts SET balance = balance + 10 WHERE id = 5</code> cannot run twice, ever. The first is an assignment and the second is an accumulation, and a surprising number of jobs can be rewritten from the second form into the first by computing the target value rather than the delta. Inserts have the same split: a plain <code>INSERT</code> duplicates and an upsert against a natural key does not.</p>
+
+  <p>Sidekiq's phrasing of the goal is the one to hold: <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">"Idempotency means that your job can safely execute multiple times."</a> When the effect can carry that property by itself, it should, because a naturally idempotent job needs no extra table, no retention policy and no second thing to keep correct during a schema change.</p>
+
+  <h3 id="claimed-key">When it cannot, claim a key in the same transaction</h3>
+  <p>Some effects have no assignment form. Appending an audit entry, incrementing a counter, allocating a sequence number and calling an external API all change something by an amount rather than to a value. For those, the mechanism is the one lesson 0605 already built: a table of processed keys with a unique constraint, and the insert into it committed together with the work.</p>
+
+  <div class="code-cap">consumer.go &middot; the claim and the effect share one transaction</div>
+  <pre><code>func Handle(ctx context.Context, db *sql.DB, job Job) error {
+    tx, err := db.BeginTx(ctx, nil)
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback() // a no-op once Commit has succeeded
+
+    // The claim goes first, and it is what makes the effect single.
+    _, err = tx.ExecContext(ctx,
+        `INSERT INTO processed_jobs (idempotency_key) VALUES ($1)`, job.Key)
+    if isUniqueViolation(err) {
+        return nil // already done - acknowledge and move on
+    }
+    if err != nil {
+        return err
+    }
+
+    if _, err = tx.ExecContext(ctx,
+        `INSERT INTO ledger_entries (account_id, amount) VALUES ($1, $2)`,
+        job.AccountID, job.Amount); err != nil {
+        return err
+    }
+    return tx.Commit()
+}</code></pre>
+
+  <p>Two properties of that shape matter more than the spelling. The claim is attempted <em>before</em> the work, so two workers racing on the same key resolve against the unique constraint rather than against luck. And the claim and the effect commit together, so there is no window in which the key says "done" and the ledger says otherwise. Writing the key after the work is the common version of this code and it is broken in exactly the way the mechanism exists to prevent: a crash between the two leaves the effect applied and unclaimed, and the redelivery applies it again.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Choosing the cheaper defence</div>
+    <div class="fig-claim">Most jobs need no dedup table once the write is rewritten.</div>
+    <div class="mermaid">
+flowchart TB
+  J["The job's effect"] --> Q{"Can it be written&lt;br/&gt;as an assignment or&lt;br/&gt;an upsert?"}
+  Q -- "yes" --> N["Naturally idempotent&lt;br/&gt;nothing to store"]
+  Q -- "no" --> E{"Is the effect&lt;br/&gt;inside your own&lt;br/&gt;transaction?"}
+  E -- "yes" --> K["Claim a key in that&lt;br/&gt;same transaction"]
+  E -- "no" --> X["Push the key outward&lt;br/&gt;the remote call carries&lt;br/&gt;an idempotency key"]
+  X --> C["What is left is a&lt;br/&gt;reconciliation job"]
+    </div>
+    <figcaption>The three leaves are three different costs and they are not interchangeable. The left one is free and should be reached for first. The middle one costs a table and a pruning job. The right one is the honest position for anything that leaves your database - an email, a payment, a webhook - because no transaction of yours can roll it back, so the only defence is that the far side recognises the repeat, which is the interface lesson 0605 asked you to publish. <b>An effect you cannot roll back has to be made idempotent by its owner, not by its caller.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the key expires and the transaction bounds it</h2>
+
+  <p>The dedup table grows by one row per job forever unless something prunes it, and pruning is what gives the guarantee an expiry date. A duplicate that arrives inside the retention window is absorbed; one that arrives after it is a new job that will do the work again. That is not a defect to be fixed, it is the same published limit that Stripe's 24-hour key pruning has, and it must be chosen deliberately: long enough to cover your longest retry schedule plus the dead-letter redrive you might perform days later.</p>
+
+  <p>The second bound is the one that catches teams after they believe they are finished. The claim protects exactly what commits with it. A job that writes a row, sends an email and publishes an event has one of those three inside the transaction, and a crash after the commit but before the email leaves a claimed key with no email sent - so the redelivery is absorbed and the email never goes. Put the unrollbackable effects after the commit and accept that they may repeat, or move them into their own job with their own key. What you cannot do is claim one key for three effects and call all three protected.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The stale duplicate</div>
+    <div class="fig-claim">A repeatable write is still wrong when it arrives after a newer one.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant B as Broker
+  participant W as Worker
+  participant D as Datastore
+  B->>W: job A - set address to Oxford, v3
+  W->>W: lease expires mid-flight
+  B->>W: job B - set address to Leeds, v4
+  W->>D: write Leeds - row is now v4
+  B->>W: job A redelivered - still v3
+  W->>D: write Oxford - the row goes backwards
+  Note over W,D: with a version check, the stale write is refused
+  W->>D: apply only where stored version is below 3
+  D-->>W: zero rows affected - the row stays at Leeds
+    </div>
+    <figcaption>Every write in the upper half is an assignment, so every one of them is idempotent by the definition on this page, and the final state is still wrong. That is the point: repeating a write safely and applying writes in a sensible order are two separate properties, and only the first is what idempotence means. The conditional in the lower half is a single <code>WHERE</code> clause carrying the version the job was built from, and its zero-row result is the success case rather than an error. <b>Idempotence protects you from the second delivery, not from the first one arriving late.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    Standard queues make best-effort ordering only - Amazon's own wording is that "messages may occasionally arrive out of order" - so the figure above is not an exotic case brought on by a long lease. It is the ordinary behaviour of the queue type most systems default to, and a version column is the cheapest defence against it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why key deduplication on a producer-supplied value rather than the broker's message id?</div>
+      <button class="q-opt">Broker ids are too long to index efficiently</button>
+      <button class="q-opt">A redelivery is given a fresh id by the broker</button>
+      <button class="q-opt">Message ids are not visible to a consumer</button>
+      <button class="q-opt">A producer retry makes a new message, same intent</button>
+      <div class="q-fb">A producer that retried its send created a second message with its own id and identical meaning, so an id-keyed check sees two different things and does the work twice. A redelivery keeps its id, which is the case the broker id does catch. Ids are indexable and are visible to consumers, so neither of those is the reason - the reason is that only the producer knows two sends were one intent.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A worker inserts the processed-key row after the effect commits. What breaks?</div>
+      <button class="q-opt">Nothing - the ordering has no effect at all</button>
+      <button class="q-opt">A crash between them leaves an unclaimed effect</button>
+      <button class="q-opt">The unique constraint can no longer be enforced</button>
+      <button class="q-opt">The dedup table grows faster than it is pruned</button>
+      <div class="q-fb">The window between the two writes is the whole hazard: a crash there leaves the effect applied and no key claiming it, so the redelivery applies it a second time - which is the failure the key existed to prevent. The constraint still functions, it is simply consulted too late to help. Growth is unchanged, since the same number of rows is written either way. And the ordering matters precisely because a crash can land between any two separate writes.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, <a href="1004-enqueue-and-commit-are-two-writes.html">enqueue and commit are two writes</a></b> builds a publisher that is itself at-least-once, so the consumer built here is what makes it usable.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the same mechanism published as an HTTP interface, and it is what the rightmost leaf of the decision figure asks a remote service for.</li>
+    <li><b>Behind you, <a href="1002-a-failed-job-is-a-policy-you-wrote-in-advance.html">a failed job is a policy</a></b> is where the attempt count that makes duplicates routine was set.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one consumer and list every effect it has: rows written, messages published, remote calls made. Mark which of them share a transaction with anything. Then ask the agent which effects would survive being run twice, and which of the survivors would still be correct if the two runs arrived out of order.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-exactly-once-processing.html">Amazon SQS exactly-once processing</a> is short and precise about what deduplication covers - the send action, inside a five-minute interval - which is the boundary this page is built on. Read <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">Sidekiq's best practices</a> for idempotence stated as a job author's obligation, and <a href="https://docs.celeryq.dev/en/stable/userguide/tasks.html">Celery's task guide</a> for the same requirement attached to <code>acks_late</code>.</p>
+
+  <div class="pager">
+    <a href="1002-a-failed-job-is-a-policy-you-wrote-in-advance.html"><span class="dir">&larr; Previous</span><span class="ttl">A failed job is a policy you wrote in advance</span></a>
+    <a class="nxt" href="1004-enqueue-and-commit-are-two-writes.html"><span class="dir">Next &rarr;</span><span class="ttl">Enqueue and commit are two writes</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1003 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
