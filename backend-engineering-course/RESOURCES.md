@@ -130,6 +130,32 @@ TBD as lessons landing.
   [ProtoJSON mapping](https://protobuf.dev/programming-guides/json/) for the name-keyed rules and the
   unknown-field default that inverts the binary one.
 
+### Module 05 - The layered service
+
+- Lesson 0500, the seam: [The Go specification, Interface types](https://go.dev/ref/spec#Interface_types) for an
+  interface as a type set, and [Implementing an interface](https://go.dev/ref/spec#Implementing_an_interface) for the
+  rule that implementation is membership rather than a declaration, which is what lets a consumer own the contract.
+- Lesson 0501, mapping an outcome onto a status: [RFC 9110 &sect;15](https://www.rfc-editor.org/rfc/rfc9110#section-15),
+  and in particular [400](https://www.rfc-editor.org/rfc/rfc9110#name-400-bad-request) against
+  [422](https://www.rfc-editor.org/rfc/rfc9110#name-422-unprocessable-content) for the syntax-against-semantics split,
+  [409](https://www.rfc-editor.org/rfc/rfc9110#name-409-conflict) for a conflict with current state, and
+  [500](https://www.rfc-editor.org/rfc/rfc9110#name-500-internal-server-error) for an unexpected condition.
+  [NestJS on controllers](https://docs.nestjs.com/controllers) for the framework statement of the responsibility.
+- Lesson 0502, the service layer: [NestJS on providers](https://docs.nestjs.com/providers) for a service as an ordinary
+  class whose collaborators are supplied, and
+  [Spring's dependency injection reference](https://docs.spring.io/spring-framework/reference/core/beans/dependencies/factory-collaborators.html)
+  for the constructor-injection argument, including components never handed back half-initialised.
+- Lesson 0503, the repository: [Spring Data repository core concepts](https://docs.spring.io/spring-data/jpa/reference/repositories/core-concepts.html)
+  for the store-agnostic interface extended by technology-specific ones, and [Go's database/sql](https://pkg.go.dev/database/sql)
+  as the counter-example whose generic interface is generic over drivers rather than over stores.
+- Lesson 0504, request context: [Go's context package](https://pkg.go.dev/context) for what a context carries, the
+  first-parameter and never-in-a-struct conventions, and the restriction of values to request-scoped data that transits
+  processes and APIs. [W3C Trace Context](https://www.w3.org/TR/trace-context/) for the four fields of `traceparent`,
+  the invalid all-zero values, and `tracestate`. [Python contextvars](https://docs.python.org/3/library/contextvars.html)
+  and [asyncio tasks](https://docs.python.org/3/library/asyncio-task.html) for the copied-context and timeout behaviour.
+- Lesson 0505, dependency direction: the Spring and NestJS references above for the inversion itself, and the Go
+  specification for what changes when interface satisfaction needs no declaration.
+
 ### Module 06 - API design
 
 - Lesson 0600, the promise: [Stripe - API upgrades](https://docs.stripe.com/upgrades) for the published

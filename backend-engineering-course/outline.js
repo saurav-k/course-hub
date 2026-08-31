@@ -107,6 +107,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "The layered service",
+      "lessons": [
+        {
+          "title": "A layer is a boundary you can test across",
+          "href": "lessons/0500-a-layer-is-a-boundary-you-can-test-across.html"
+        },
+        {
+          "title": "The controller translates transport into intent",
+          "href": "lessons/0501-the-controller-translates-transport-into-intent.html"
+        },
+        {
+          "title": "The service layer owns the decision",
+          "href": "lessons/0502-the-service-layer-owns-the-decision.html"
+        },
+        {
+          "title": "The repository hides the store behind a contract",
+          "href": "lessons/0503-the-repository-hides-the-store-behind-a-contract.html"
+        },
+        {
+          "title": "Request context carries what every layer needs",
+          "href": "lessons/0504-request-context-carries-what-every-layer-needs.html"
+        },
+        {
+          "title": "Dependency direction is the design",
+          "href": "lessons/0505-dependency-direction-is-the-design.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "API design",
       "lessons": [
