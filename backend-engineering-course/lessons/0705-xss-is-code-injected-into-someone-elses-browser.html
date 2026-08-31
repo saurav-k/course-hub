@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>XSS is code injected into someone else's browser - Backend Engineering</title>
+<meta name="description" content="Injected script runs as your origin, so every protection your origin has now works for the attacker. The defence is encoding chosen by context, and a strict Content Security Policy as the second layer for when the first one is missed.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Auth and security &middot; Lesson 0705</div>
+  <h1>Injected script runs as your origin, so every defence your origin has now protects it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The same defect as 0704, with the browser as the interpreter. &middot;
+    <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">OWASP - Cross Site Scripting Prevention</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>The threat first.</b> A value you rendered becomes markup, the browser runs it, and it runs <b>as your site</b> - same origin, same cookies, same permissions the user granted you.</li>
+      <li>That is why it is worse than it sounds: the same-origin policy is not breached, it is <b>recruited</b>. The attacker's code is inside the boundary that policy protects.</li>
+      <li>The defence is <b>output encoding chosen by context</b>. HTML body, attribute, JavaScript, CSS and URL each need a different encoding, and using the wrong one is a defect.</li>
+      <li>Where user-authored HTML is genuinely required, encoding is not an option: <b>sanitise</b> the fragment with a maintained library instead of writing a filter.</li>
+      <li>What it costs: a <b>strict Content Security Policy</b> is the second layer for the site you missed, and it is real work - a fresh nonce per response and no inline handlers.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Injection twice: one interpreter is yours, the other is the reader's.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0704&lt;br/&gt;a value became&lt;br/&gt;a database command"] --> T["THIS PAGE&lt;br/&gt;a value became&lt;br/&gt;script in a browser"]
+  T --> A["Lesson 0706&lt;br/&gt;no code needed -&lt;br/&gt;just the cookie"]
+  T --> B["Lesson 0701&lt;br/&gt;HttpOnly, which&lt;br/&gt;this is the reason for"]
+  W["Module 07&lt;br/&gt;auth and security"] -.- T
+    </div>
+    <figcaption>Both pages are one defect seen at two sinks: text that a parser reads as instructions. What changes is who runs it and with whose authority - the database ran it as your service, and the browser runs it as your origin, in a session belonging to whichever reader loaded the page. <b>The next page is the version that needs no injected code at all, which is why it comes last.</b></figcaption>
+  </figure>
+
+  <h2>1. The threat: what the attacker gets, precisely</h2>
+
+  <h3 id="as-your-origin">Execution inside the origin, not access to it</h3>
+  <p>The interesting part of cross-site scripting is not that script runs; it is where it runs from. Script injected into your page has your origin. It can read the DOM, call your API with the user's ambient credentials, register listeners on the login form, and rewrite what the user sees before they act on it. Nothing has been bypassed: the browser is enforcing the same-origin policy exactly as designed, and the attacker's code is on the inside of it.</p>
+
+  <p>Three deliveries are worth naming because their defences differ in where they sit. <em>Stored</em> XSS is persisted by your service and served to everybody who views the record. <em>Reflected</em> XSS comes back in the response to a request the victim was induced to make, so it needs a lure but leaves nothing behind. <em>DOM-based</em> XSS never reaches your server at all: the page reads a value from the URL or storage and writes it into a dangerous sink in the browser, which is why a server-side template audit finds nothing.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Stored XSS, end to end</div>
+    <div class="fig-claim">The victim's browser trusts the script because you served it.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Attacker
+  participant S as Your service
+  participant V as Victim browser
+  participant API as Your API
+  A->>S: POST a comment containing a script tag
+  S->>S: stored - it is only text so far
+  V->>S: GET the page holding that comment
+  S-->>V: HTML with the comment interpolated raw
+  V->>V: parser reaches the tag - it is markup now
+  V->>API: fetch with the session cookie attached
+  API-->>V: 200 - the request looked entirely normal
+  V->>A: exfiltrate, or act as the user in place
+    </div>
+    <figcaption>The value crosses the boundary as data and is stored as data. It becomes code at one moment - when it is interpolated into a response without encoding - and everything after that is your own site working correctly. Note the call to the API: it carries the session cookie whether or not the script can read it, so <code>HttpOnly</code> raises the cost without ending the attack. <b>The defect is a single missing transformation at render time, and its blast radius is every reader of that page.</b></figcaption>
+  </figure>
+
+  <h2>2. The defence: encode for the context you are writing into</h2>
+
+  <h3 id="five-contexts">Five places, five encodings, not interchangeable</h3>
+  <p>Escaping is the right answer here, and this is the difference from lesson 0704 worth sitting with: a database offers a separate channel for values and a browser does not, because HTML has no placeholders. What you can do is transform the value so that the browser's parser reads it as text in the exact place you are putting it - and where that is decides which transformation.</p>
+
+  <p>OWASP names five contexts and a different treatment for each: HTML body takes entity encoding, an HTML attribute takes attribute encoding with the value quoted, JavaScript takes hex escaping, CSS takes CSS hex encoding, and a URL takes percent encoding. The warning attached is the operative one - <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">using the wrong encoding method may introduce weaknesses or harm the functionality of your application</a>. HTML-encoding a value on its way into a <code>&lt;script&gt;</code> block is a real and common failure: the browser decodes the entities before the JavaScript parser ever sees the text.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Sinks, safe and dangerous</div>
+    <div class="fig-claim">A sink is safe when it cannot parse what you give it.</div>
+    <div class="mermaid">
+flowchart LR
+  V["An untrusted value"] --> D["innerHTML&lt;br/&gt;document.write&lt;br/&gt;eval, event handlers"]
+  V --> S["textContent&lt;br/&gt;createTextNode&lt;br/&gt;setAttribute, value"]
+  V --> H["genuine user HTML&lt;br/&gt;no encoding possible"]
+  D --> DR["parsed as markup&lt;br/&gt;or as code"]
+  S --> SR["inserted as text&lt;br/&gt;tags stay visible"]
+  H --> HR["sanitise: strip to an&lt;br/&gt;allowed subset"]
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef mid fill:var(--gold-soft),stroke:var(--gold)
+  class DR bad
+  class SR ok
+  class HR mid
+    </div>
+    <figcaption>The safe sinks are safe because of what they are, not because of what you checked first: <code>textContent</code> has no parser behind it, so a script tag assigned to it is four visible words. The middle path is the honest case where the feature is user-authored markup - there the answer is a maintained sanitiser such as DOMPurify, never a filter of your own. <b>Choosing the sink is a stronger move than cleaning the value, because it removes the parse instead of anticipating it.</b></figcaption>
+  </figure>
+
+  <h3 id="frameworks-and-csp">Frameworks help, and their escape hatches are named</h3>
+  <p>A modern template engine encodes interpolated values by default, which is why XSS is rarer than it was. What survives is the deliberate bypass: OWASP names React's <code>dangerouslySetInnerHTML</code>, Angular's <code>bypassSecurityTrustAs*</code> and Lit's <code>unsafeHTML</code>. Each is correctly named, each exists because somebody genuinely needed raw markup, and each is where to start reading in an unfamiliar codebase.</p>
+
+  <p>The second layer is a Content Security Policy, which MDN describes as instructions from a website to a browser <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP">to place restrictions on the things that the code comprising the site is allowed to do</a>. A strict CSP puts a random nonce on the scripts you meant to run and refuses everything else - and MDN is emphatic that the nonce <em>must be different for every HTTP response, and must not be predictable</em>, because a static nonce is a permanent password to your script-src. Two shapes to avoid: <code>'unsafe-inline'</code>, which MDN warns <em>defeats much of the purpose of having a CSP</em>, and host allow-lists, which are hard to get right and often admit an unsafe domain.</p>
+
+  <div class="callout warn">
+    A CSP is not a replacement for encoding, and MDN says so directly: setting one <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP">is not an alternative to sanitizing input</a> - do both, for defence in depth. Treat the policy as insurance against the one template that was missed, and keep the transformation at the sink as the actual fix. A site that ships a strict CSP and interpolates raw values has one layer, and it is the outer one.
+  </div>
+
+  <h2>3. The trade-off: correctness per site, not per service</h2>
+
+  <p>Injection at a database had one fix applied at one kind of call. XSS has a fix that changes with the surrounding syntax, applied at every place a value meets markup - which in a real application is thousands of places, most of them handled by a template engine you did not write. That is why the practical strategy is different in shape: rely on the framework's default, hunt the named escape hatches, and add a policy that limits the damage of the one you miss.</p>
+
+  <p>The policy costs something real. A nonce per response means the page cannot be a static file, inline handlers have to move into script files, and third-party widgets that inject their own scripts need <code>'strict-dynamic'</code> - which MDN notes <em>does make your CSP less secure</em>, because a trusted script that builds elements from untrusted input is no longer covered. None of that is a reason to skip it; all of it is a reason to plan it rather than to add a header on a Friday.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is script injected into your page more dangerous than script on the attacker's page?</div>
+      <button class="q-opt">It is served over your TLS certificate, so the browser skips its checks</button>
+      <button class="q-opt">It has your origin, so the same-origin policy now works in its favour</button>
+      <button class="q-opt">It is executed before your own scripts, so it can replace their handlers</button>
+      <button class="q-opt">It bypasses the same-origin policy, which no longer applies to the page</button>
+      <div class="q-fb">The policy is intact and that is the problem - the code is inside the boundary, so it reads your DOM and calls your API as you. TLS is unaffected by what the page contains, execution order depends on where the injection landed, and nothing is bypassed, which is what makes the last option the most tempting wrong answer here.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A value is HTML-entity encoded and then written inside a <code>&lt;script&gt;</code> block. What happens?</div>
+      <button class="q-opt">It is safe, because entity encoding neutralises every dangerous character</button>
+      <button class="q-opt">It is safe, but only when the surrounding string uses double quotes</button>
+      <button class="q-opt">It is unsafe, since the browser decodes entities before JavaScript parses</button>
+      <button class="q-opt">It is unsafe, because a script block cannot contain any encoded value</button>
+      <div class="q-fb">The HTML parser resolves entities first, so the JavaScript parser receives the original characters and the encoding has done nothing. This context needs JavaScript hex escaping instead. Quoting style does not change the decoding order, and encoded values in a script block are fine when the encoding is the right one.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0706-csrf-is-the-server-trusting-the-browser.html">CSRF is the server trusting the browser</a></b> completes the pair: this page borrows your origin, the next borrows your reader's cookie.</li>
+    <li><b>Behind you, <a href="0701-a-session-is-server-state-behind-an-opaque-id.html">a session is server state behind an opaque id</a></b> is where <code>HttpOnly</code> was set, and this is the attack it exists for.</li>
+    <li><b>Behind you, <a href="0205-cors-is-the-browser-enforcing-the-servers-own-policy.html">CORS is the browser enforcing the server's own policy</a></b> defined the origin boundary this page runs inside.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Grep your front end for <code>innerHTML</code>, <code>dangerouslySetInnerHTML</code> and their equivalents, and for each one decide whether the value can be reached by a user. Then ask the agent what a strict, nonce-based CSP would break on your busiest page, before you try shipping one.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html">OWASP's XSS Prevention Cheat Sheet</a> is organised by context, which is the way the problem actually presents itself. Read <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP">MDN's CSP guide</a> next - it is long, but the sections on nonces and on why allow-list policies fail are worth the time before you write a policy of your own.</p>
+
+  <div class="pager">
+    <a href="0704-injection-is-data-arriving-where-code-is-expected.html"><span class="dir">&larr; Previous</span><span class="ttl">Injection is data arriving where code is expected</span></a>
+    <a class="nxt" href="0706-csrf-is-the-server-trusting-the-browser.html"><span class="dir">Next &rarr;</span><span class="ttl">CSRF is the server trusting the browser</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0705 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

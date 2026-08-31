@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Path parameters and query strings say different things - Backend Engineering</title>
+<meta name="description" content="The path is hierarchical and names the resource; the query is non-hierarchical and modifies the view of it. Both are part of the identifier, which is why swapping them is a design error rather than a matter of style.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing &middot; Lesson 0301</div>
+  <h1>The path names the resource and the query modifies the view of it</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    Which half of a URL carries which fact. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc3986#section-3.3">RFC 3986 &sect;3.3 - Path</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>RFC 3986 gives the two components different characters: the path is <b>hierarchical</b> data and the query is <b>non-hierarchical</b> data.</li>
+      <li>Both are part of the identifier. The query is not an argument list bolted onto a URL - it helps <b>identify the resource</b>.</li>
+      <li>The router matches on the path only. The query reaches your code as parsed values and never chooses a handler.</li>
+      <li>A slash inside a value cannot travel in one path segment, and a repeated or reordered key cannot travel in a path at all.</li>
+      <li>What it costs: the query is part of the cache key, so every optional filter you add doubles the number of distinct entries a cache can hold for one resource.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The pattern half of a route, taken apart into its two components.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0300&lt;br/&gt;a route is a method&lt;br/&gt;and a path pattern"] --> T["THIS PAGE&lt;br/&gt;what belongs in the path&lt;br/&gt;and what in the query"]
+  T --> A["Lesson 0302&lt;br/&gt;matching the path&lt;br/&gt;against many patterns"]
+  T --> B["Module 06&lt;br/&gt;collections, filtering&lt;br/&gt;and pagination"]
+  T --> C["Module 09&lt;br/&gt;what a cache stores&lt;br/&gt;for one resource"]
+  W["Module 03&lt;br/&gt;Routing"] -.- T
+    </div>
+    <figcaption>Lesson 0300 said a route is a pattern and a method. This page decides what a pattern is allowed to contain, which is the question every API design argument in Module 06 eventually reduces to. <b>The split is in the URI standard, not in a framework's taste.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: hierarchy against modifiers</h2>
+
+  <p>RFC 3986 defines the two components in almost the same words and changes exactly one adjective. The path carries data "usually organized in hierarchical form"; the query carries "non-hierarchical data". Both, in the same sentence in both definitions, serve to identify a resource. That is the whole distinction, and it is sharper than the usual advice about nouns and verbs.</p>
+
+  <p>Hierarchical means the segments nest: <code>/orders/8123/items/4</code> reads left to right as a containment chain, and a segment only means something inside the one before it. Non-hierarchical means the pairs do not nest and have no natural order: <code>?status=open&amp;sort=date</code> says two independent things about how you want the collection presented. So the test is not "is this a noun" but <b>does it nest</b>. An order id nests inside orders. A sort direction nests inside nothing.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One URL, two halves</div>
+    <div class="fig-claim">Only the left half reaches the router - the right half reaches the handler.</div>
+    <div class="mermaid">
+flowchart LR
+  U["/orders/8123/items?fields=sku&amp;sort=name"] --> P["path&lt;br/&gt;/orders/8123/items&lt;br/&gt;nested - names one collection"]
+  U --> Q["query&lt;br/&gt;fields and sort&lt;br/&gt;flat - shapes the view"]
+  P --> R["the router&lt;br/&gt;matches a pattern&lt;br/&gt;and captures 8123"]
+  Q --> H["your handler&lt;br/&gt;reads parsed pairs&lt;br/&gt;no route depends on them"]
+  R --> H
+    </div>
+    <figcaption>The same URL feeds two different consumers. The router never sees the query, and the handler is reached before a single query key has been looked at. <b>Putting a value in the query puts it out of the router's reach for good.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what each half can carry</h2>
+
+  <h3 id="path-parameter">The path parameter: one segment, captured by name</h3>
+  <p>A path parameter is a named hole standing for a whole segment. Go's <code>ServeMux</code> matches a wildcard only up to the next literal slash, and it unescapes the pattern and the request path segment by segment, so <code>/a%2Fb/100%25</code> is two segments, <code>a/b</code> and <code>100%</code>. Flask spells the same idea with converters, and <code>&lt;path:subpath&gt;</code> is the explicit opt-out that accepts slashes. The rule underneath both: a value with a slash in it does not fit in one segment, and pretending otherwise is where encoding bugs live.</p>
+
+  <h3 id="query-string">The query string: repeatable, reorderable, optional</h3>
+  <p>The query is a flat sequence of pairs and gets three abilities the path does not have. A key may repeat, which is how a list travels. Keys may arrive in any order, because nothing nests. And a key may simply be absent, which is how a default is expressed without inventing a URL for it. Frameworks hand it over already parsed - <code>req.query</code> in Express, <code>request.args</code> in Flask - and none of them consulted it when choosing your function.</p>
+
+  <h3 id="uri-template">The template language agrees with the split</h3>
+  <p>RFC 6570 is the useful third opinion, because it had to describe both halves in one grammar and chose different operators for them. <code>{/var}</code> is path segment expansion, appending a slash and then the value. <code>{?var,var}</code> is form-style query expansion, appending a question mark and then <code>name=value</code> pairs joined by ampersands. A single template such as <code>/orders/{id}{?fields,sort}</code> therefore states the whole contract of an endpoint in one line, and the operator you reach for is a decision you have already made.</p>
+
+  <h2>3. The trade-off: the query is in the cache key</h2>
+
+  <p>RFC 9111 defines the cache key as being composed, at a minimum, of the request method and <b>the target URI</b>, and the target URI includes the query. Two requests differing only in one query key are two entries. That is correct behaviour and it is also the cost nobody prices in, because the entries multiply rather than add.</p>
+
+  <div class="math">
+    keys(n) = 2<sup>n</sup>
+    <span class="gloss">Read as: the number of distinct URLs for one resource, where <i>n</i> is the number of independent optional filters and each one is either present with a fixed value or absent.</span>
+  </div>
+
+  <ol class="worked">
+    <li><b>Count the choices.</b> Each filter is present or absent, independently, so there are two choices per filter.</li>
+    <li><b>Multiply them.</b> Independent choices multiply, so <i>n</i> filters give 2<sup>n</sup> distinct query strings.</li>
+    <li><b>Drop the fixed order.</b> If a client may also send the keys in any order, the <i>k</i> present keys can be arranged <i>k</i>! ways, and the total for five filters rises from 32 to 326.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="fig-cap">Distinct URLs per filter</div>
+    <div class="fig-claim">One resource splits into 32 cache entries by the fifth optional filter.</div>
+    <svg class="chart" viewBox="0 0 640 262" role="img" aria-label="Bar chart of distinct URLs for one resource against the number of independent optional query filters: 1, 2, 4, 8, 16 and 32 for zero to five filters">
+      <line class="axis" x1="60" y1="210" x2="610" y2="210"/>
+      <rect class="m-stat" x="80" y="205" width="46" height="5"/>
+      <rect class="m-stat" x="168" y="200" width="46" height="10"/>
+      <rect class="m-stat" x="256" y="190" width="46" height="20"/>
+      <rect class="m-stat" x="344" y="170" width="46" height="40"/>
+      <rect class="m-stat" x="432" y="130" width="46" height="80"/>
+      <rect class="m-alarm" x="520" y="50" width="46" height="160"/>
+      <text class="lbl-sm" x="103" y="198" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="191" y="193" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="279" y="183" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="367" y="163" text-anchor="middle">8</text>
+      <text class="lbl-sm" x="455" y="123" text-anchor="middle">16</text>
+      <text class="lbl-sm" x="543" y="43" text-anchor="middle">32</text>
+      <text class="lbl-sm" x="103" y="228" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="191" y="228" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="279" y="228" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="367" y="228" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="455" y="228" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="543" y="228" text-anchor="middle">5</text>
+      <text class="lbl-sm" x="335" y="252" text-anchor="middle">independent optional filters in the query</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>distinct URLs for one resource</span><span><i class="sw-alarm"></i>five filters, derived above</span></div>
+    <figcaption>The counts are derived here rather than measured: two choices per filter, multiplied. The bar heights are what a doubling looks like next to the one before it, and the last bar is where a single popular collection stops sharing any cached copy with itself. <b>Every optional filter halves the share of traffic any one cached entry can serve.</b></figcaption>
+  </figure>
+
+  <p>Two rules follow, and both are cheap to hold. Put a filter in the query when it genuinely shapes a view of one resource, and keep the set small and its keys canonically ordered by the client. Put an identifier in the path when it names a thing that exists on its own - and note the consequence in the other direction: a value in the path is a value the router can match on, so <code>/orders/{id}</code> can carry different middleware from <code>/orders</code>, while <code>?id=8123</code> can carry none.</p>
+
+  <div class="callout warn">
+    The failure this causes is a security one rather than an aesthetic one. Authorisation rules are usually written against route patterns, so a tenant identifier moved into the query - <code>/reports?tenant=42</code> - is invisible to every rule the router can express, and the check falls to whichever handler remembers to make it. The path is where a value goes when something other than your handler has to reason about it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">By RFC 3986, what separates the path from the query?</div>
+      <button class="q-opt">The path is hierarchical and the query is not</button>
+      <button class="q-opt">The path identifies and the query only filters</button>
+      <button class="q-opt">The path is required and the query is optional</button>
+      <button class="q-opt">The path is cached and the query is not cached</button>
+      <div class="q-fb">The standard defines both as identifying the resource and separates them by hierarchy alone. The second option is the common misreading, since the query identifies too; the third is true of the syntax but is not the distinction; and the fourth is backwards, because the query is inside the cache key.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which value genuinely cannot travel in one path segment?</div>
+      <button class="q-opt">A UUID with hyphens inside of it</button>
+      <button class="q-opt">A percent sign, once it is encoded</button>
+      <button class="q-opt">A file path with slashes inside it</button>
+      <button class="q-opt">An integer, however large it may be</button>
+      <div class="q-fb">A wildcard ends at the next literal slash, so a value containing one needs a multi-segment hole or a path converter. Hyphens and digits are ordinary segment characters, and an encoded percent sign survives because matching unescapes each segment before comparing it.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0302-matching-is-a-tree-not-a-list-of-ifs.html">matching is a tree, not a list of ifs</a></b> takes the path half and shows how a router compares it against every pattern at once.</li>
+    <li><b>Back at <a href="0200-a-request-is-a-method-a-target-and-headers.html">a request is a method, a target and headers</a></b> is where the target URI and its components were first named.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take the busiest collection endpoint you own and list every query key a client may send. Ask the agent how many distinct URLs that set allows, and which of the keys would be better modelled as a path segment of its own.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc3986#section-3.3">RFC 3986 &sect;3.3</a> and <a href="https://www.rfc-editor.org/rfc/rfc3986#section-3.4">&sect;3.4</a> are the two definitions, and reading them side by side is the fastest way to see that only one adjective changes. <a href="https://www.rfc-editor.org/rfc/rfc6570#section-3.2.6">RFC 6570 &sect;3.2.6</a> and <a href="https://www.rfc-editor.org/rfc/rfc6570#section-3.2.8">&sect;3.2.8</a> give the two template operators that encode the same split as syntax.</p>
+
+  <div class="pager">
+    <a href="0300-a-route-is-a-pattern-and-a-method.html"><span class="dir">&larr; Previous</span><span class="ttl">A route is a pattern and a method</span></a>
+    <a class="nxt" href="0302-matching-is-a-tree-not-a-list-of-ifs.html"><span class="dir">Next &rarr;</span><span class="ttl">Matching is a tree, not a list of ifs</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0301 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

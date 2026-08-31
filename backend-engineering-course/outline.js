@@ -47,6 +47,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Routing",
+      "lessons": [
+        {
+          "title": "A route is a pattern and a method",
+          "href": "lessons/0300-a-route-is-a-pattern-and-a-method.html"
+        },
+        {
+          "title": "Path parameters and query strings say different things",
+          "href": "lessons/0301-path-parameters-and-query-strings-say-different-things.html"
+        },
+        {
+          "title": "Matching is a tree, not a list of ifs",
+          "href": "lessons/0302-matching-is-a-tree-not-a-list-of-ifs.html"
+        },
+        {
+          "title": "Middleware is a chain, and order is the design",
+          "href": "lessons/0303-middleware-is-a-chain-and-order-is-the-design.html"
+        },
+        {
+          "title": "404 and 405 are routing verdicts",
+          "href": "lessons/0304-404-and-405-are-routing-verdicts.html"
+        },
+        {
+          "title": "Mounting composes routers",
+          "href": "lessons/0305-mounting-composes-routers.html"
+        }
+      ]
+    },
+    {
       "n": "04",
       "title": "Serialization and contracts",
       "lessons": [
@@ -103,6 +133,40 @@ window.COURSE_OUTLINE = {
         {
           "title": "Idempotency keys make retries safe",
           "href": "lessons/0605-idempotency-keys-make-retries-safe.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Auth and security",
+      "lessons": [
+        {
+          "title": "Authentication answers who, authorization answers what",
+          "href": "lessons/0700-authentication-answers-who-authorization-answers-what.html"
+        },
+        {
+          "title": "A session is server state behind an opaque id",
+          "href": "lessons/0701-a-session-is-server-state-behind-an-opaque-id.html"
+        },
+        {
+          "title": "A token moves the state to the client",
+          "href": "lessons/0702-a-token-moves-the-state-to-the-client.html"
+        },
+        {
+          "title": "OAuth delegates access without sharing the password",
+          "href": "lessons/0703-oauth-delegates-access-without-sharing-the-password.html"
+        },
+        {
+          "title": "Injection is data arriving where code is expected",
+          "href": "lessons/0704-injection-is-data-arriving-where-code-is-expected.html"
+        },
+        {
+          "title": "XSS is code injected into someone else's browser",
+          "href": "lessons/0705-xss-is-code-injected-into-someone-elses-browser.html"
+        },
+        {
+          "title": "CSRF is the server trusting the browser",
+          "href": "lessons/0706-csrf-is-the-server-trusting-the-browser.html"
         }
       ]
     },

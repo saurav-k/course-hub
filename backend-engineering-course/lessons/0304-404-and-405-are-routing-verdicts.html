@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>404 and 405 are routing verdicts - Backend Engineering</title>
+<meta name="description" content="No handler ran, so no handler can answer. The router is the only component that knows whether a target has no resource at all or a real resource that does not take that verb, and 405 owes an Allow field.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing &middot; Lesson 0304</div>
+  <h1>The router decides no such resource against wrong verb on a real one, and a 405 owes an Allow field</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The two answers no handler can give. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6">RFC 9110 &sect;15.5.6 - 405 Method Not Allowed</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>When nothing matches, <b>no handler ran</b>, so the answer has to come from the router. These two status codes are its verdicts.</li>
+      <li><b>404</b> means the origin server found no current representation for the target, or is not willing to say one exists.</li>
+      <li><b>405</b> means the method is <b>known to the server but not supported by this resource</b>, which the router can only say because it kept the method half of every route.</li>
+      <li>RFC 9110 makes the <code>Allow</code> field a <b>MUST</b> on a 405, listing the methods that resource does support. An empty value is legal and means none.</li>
+      <li>What it costs: telling 404 and 405 apart tells a stranger which of your URLs are real, and sometimes that is a leak rather than a courtesy.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The chain is only entered when the router had something to enter it with.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0303&lt;br/&gt;the chain wrapped&lt;br/&gt;around a handler"] --> T["THIS PAGE&lt;br/&gt;what is answered&lt;br/&gt;when there is none"]
+  T --> A["Lesson 0305&lt;br/&gt;whose router owns&lt;br/&gt;the verdict"]
+  T --> B["Module 06&lt;br/&gt;error shapes&lt;br/&gt;an API commits to"]
+  T --> C["Module 11&lt;br/&gt;what to alert on&lt;br/&gt;and what to ignore"]
+  W["Module 03&lt;br/&gt;Routing"] -.- T
+    </div>
+    <figcaption>Every page of this module so far assumed a match. This one is the other branch, and it is the branch your application code never sees, because it is decided before any of it is reached. <b>A routing failure is answered by the router, and it is the only component holding the facts.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: only the table knows</h2>
+
+  <p>Ask why a handler cannot return 405 and the answer is immediate: the handler for that method does not exist, so there is nobody to ask. The router is the one component that holds the whole route table, which means it is the only one that can compare the request against every registration and say which half failed. Lesson 0300 said a route is a pair; this is what the pair pays for.</p>
+
+  <p>The two verdicts differ in exactly one fact. RFC 9110 defines 404 as the origin server not finding a current representation for the target resource, and 405 as the method being <b>known by the origin server but not supported by the target resource</b>. So 405 asserts that the resource is real. It is a stronger statement than 404, and a router that discarded the method half of its patterns cannot make it.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One walk, four endings</div>
+    <div class="fig-claim">Each ending is decided by a different fact the router alone holds.</div>
+    <div class="mermaid">
+flowchart TB
+  Q["request arrives"] --> M{"is the method one&lt;br/&gt;the server implements"}
+  M -- no --> N501["501 Not Implemented"]
+  M -- yes --> P{"does any pattern&lt;br/&gt;match this path"}
+  P -- no --> N404["404 Not Found"]
+  P -- yes --> V{"is this method&lt;br/&gt;registered on it"}
+  V -- no --> N405["405 with an Allow field&lt;br/&gt;listing what is registered"]
+  V -- yes --> H["the handler, and its chain"]
+    </div>
+    <figcaption>The order matters as much as the branches. A method the server does not implement at all is a 501 and never reaches the path question, while a method it implements but this resource refuses is a 405 - and the difference is whether the verb is unknown everywhere or only here. <b>Three of the four endings never reach your code.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: one extra lookup, and one required field</h2>
+
+  <h3 id="not-found">404: no current representation</h3>
+  <p>The router walked the tree, ran out of children, and no leaf held a handler. The specification is careful about what this does and does not say: a 404 does not indicate whether the absence is temporary or permanent, and 410 Gone is preferred when the origin server knows the condition is likely to be permanent. It also stays honest about intent, since 404 covers a server that found a representation and is <em>not willing to disclose</em> that one exists.</p>
+
+  <h3 id="method-not-allowed">405: the resource is real, the verb is not</h3>
+  <p>Producing a 405 costs the router one more question. Go's <code>ServeMux</code> does it in the plainest possible way: when no node matched with the request's method, it asks the tree which methods <em>would</em> have matched this host and path. A non-empty answer is a 405 and an empty one is a 404. That second lookup is the entire implementation, and it is only possible because the method is a level of the tree rather than a field the handler reads.</p>
+
+  <h3 id="allow-field">The Allow field: not optional</h3>
+  <p>RFC 9110 says an origin server <b>MUST</b> generate an <code>Allow</code> header field in a 405 response containing the target resource's currently supported methods, and may send it in any other response. Two details are worth carrying. An empty value is legal and means the resource allows no methods, which is what a temporarily disabled resource looks like. And a proxy <b>MUST NOT</b> modify the field, so what you send is what the client reads.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A 405 that teaches</div>
+    <div class="fig-claim">The Allow field turns a refusal into the correct next request.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant R as Router
+  C->>R: DELETE /reports/2024
+  Note over R: path matches - DELETE&lt;br/&gt;is not registered on it
+  R-->>C: 405 with Allow of GET, HEAD, PUT
+  Note over C: the resource is real&lt;br/&gt;and PUT is available
+  C->>R: PUT /reports/2024
+  R-->>C: 204 No Content
+    </div>
+    <figcaption>The same client, two requests, and the second one was made possible by the field on the first. Without <code>Allow</code> the client learns only that something was refused, which is the same information a 404 would have given it. <b>A 405 without an Allow field has thrown away the only thing that made it worth sending.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: an honest verdict is also a disclosure</h2>
+
+  <p>The distinction you have just been asked to make correctly is a distinction an attacker can use. A service that answers 405 for <code>/admin/users/42</code> and 404 for <code>/admin/users/43</code> has confirmed which user identifiers exist, without ever serving a byte of either. Enumeration of that kind needs no credentials and leaves ordinary-looking traffic in your logs.</p>
+
+  <p>This is why the specification's phrasing on 404 is written the way it is. A server that is <em>not willing to disclose</em> that a representation exists is entitled to answer 404, and that permission is the escape hatch for exactly this problem. The rule that follows is a boundary rule rather than a global one: be precise on the public surface where a client is trying to use your API correctly, and be uniform behind authentication, where a wrong answer is more likely to be probing than a mistake.</p>
+
+  <p>The second cost is smaller and more common. <code>Allow</code> is a claim about this resource at this moment, so it has to be produced from the route table rather than typed into a constant. A hand-written <code>Allow: GET, POST</code> beside a resource that has since gained <code>PATCH</code> is a specification-conformant lie, and it will be believed.</p>
+
+  <div class="callout warn">
+    Watch what your monitoring does with these. A 404 is a client error, so it is not an availability signal, and a dashboard that alerts on it will page somebody every time a crawler guesses a URL. A sudden change in the <em>rate</em> of 404s is worth knowing about - it is what a broken deploy or a mistyped link looks like - but the absolute count is noise, and treating it as an error budget burns the budget on strangers.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does a 405 assert that a 404 does not?</div>
+      <button class="q-opt">That the request will succeed if retried</button>
+      <button class="q-opt">That the target resource genuinely exists</button>
+      <button class="q-opt">That the method is unknown to the server</button>
+      <button class="q-opt">That the client is missing a credential</button>
+      <div class="q-fb">405 says the method is known to the server but not supported by this resource, which asserts the resource is there. A retry of the same request gets the same answer, a method unknown to the server everywhere is 501 rather than 405, and a missing credential is 401.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your 405 response carries no <code>Allow</code> field. What is wrong?</div>
+      <button class="q-opt">Nothing, since Allow is only for OPTIONS</button>
+      <button class="q-opt">Nothing, unless a proxy sits in the path</button>
+      <button class="q-opt">The status should have been 501 instead</button>
+      <button class="q-opt">RFC 9110 makes the field a MUST on a 405</button>
+      <div class="q-fb">The specification requires the field on every 405 and permits it on any other response, so OPTIONS is a use rather than the rule. A proxy must not modify the field, which is a reason to send it rather than a condition on sending it, and 501 is for a method the server does not implement at all.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0305-mounting-composes-routers.html">mounting composes routers</a></b> closes the module, and it changes which router is the one making this verdict.</li>
+    <li><b>Back at <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families with one job each</a></b> is where 4xx was defined as blaming the request rather than the server.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Send one unregistered verb to a real resource in your service and read the status and the fields that come back. Ask the agent whether the <code>Allow</code> field is generated from the route table or written by hand, and whether your authenticated surface should be answering uniformly instead.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6">RFC 9110 &sect;15.5.6</a> is 405 in four sentences including the <code>Allow</code> requirement, <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.5">&sect;15.5.5</a> is 404 with its disclosure clause, and <a href="https://www.rfc-editor.org/rfc/rfc9110#section-10.2.1">&sect;10.2.1</a> defines the <code>Allow</code> field itself, including the empty value and the rule that a proxy must not modify it.</p>
+
+  <div class="pager">
+    <a href="0303-middleware-is-a-chain-and-order-is-the-design.html"><span class="dir">&larr; Previous</span><span class="ttl">Middleware is a chain, and order is the design</span></a>
+    <a class="nxt" href="0305-mounting-composes-routers.html"><span class="dir">Next &rarr;</span><span class="ttl">Mounting composes routers</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0304 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
