@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Statelessness is what makes a fleet possible - Backend Engineering</title>
+<meta name="description" content="Horizontal scale is not a matter of buying more machines. It is the property that any request can be served by any instance, and that property is bought by keeping nothing in the process that the next request needs.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 13 &middot; Scale, fleet and shipping &middot; Lesson 1302</div>
+  <h1>A process that remembers nothing can be replaced by any other</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The constraint that turns one server into a fleet, and the one this course promised to explain. &middot;
+    <a href="https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm">Fielding, chapter 5 - the stateless constraint</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Vertical scale buys a bigger machine and ends. Horizontal scale buys more machines and needs one property: <b>any request can be served by any instance</b>.</li>
+      <li>The stateless constraint is the price of that property: <b>each request carries everything needed to understand it</b>, and the server keeps nothing between them.</li>
+      <li>It buys three things by name - <b>visibility, reliability and scalability</b> - and each of them falls out of the same fact.</li>
+      <li>Sticky sessions look like a way around it and are not: pinning holds <b>until the instance is unavailable</b>, which is the moment you needed it.</li>
+      <li>What it costs: repeated data on every request, and state that did not vanish but moved into a shared store that must now scale in its place.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One process has a ceiling and this page is how you leave it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 1300 and 1301&lt;br/&gt;one process, as full&lt;br/&gt;as it can get"] --> T["THIS PAGE&lt;br/&gt;many processes,&lt;br/&gt;interchangeable"]
+  T --> A["Lessons 1303 and 1304&lt;br/&gt;how a fleet is&lt;br/&gt;packaged and run"]
+  T --> B["Module 09&lt;br/&gt;the shared store the&lt;br/&gt;state moved into"]
+  W["Module 13&lt;br/&gt;scale, fleet&lt;br/&gt;and shipping"] -.- T
+    </div>
+    <figcaption>The two pages before this one raised how much one process can do and then charged for it. Both end at a ceiling: a machine has a fixed number of cores and a fixed amount of memory, and no scheduling model moves that. The rest of this module is about many machines, and this page is the single property that has to hold before the count matters. <b>Every mechanism after this one assumes an instance is disposable.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: interchangeable, therefore countable</h2>
+
+  <h3 id="the-constraint">What the constraint actually says</h3>
+  <p>Fielding states it as a requirement about the request rather than about the server: <a href="https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm">each request from client to server must contain all of the information necessary to understand the request</a>, so it cannot take advantage of any stored context on the server. Session state lives entirely on the client. Three named benefits follow, and the useful exercise is to derive each from that one sentence rather than to memorise the list.</p>
+
+  <p>Visibility comes first: a monitor does not have to look beyond a single request to know what the request means, which is why a log line, a trace and a cache all become possible. Reliability follows, because recovering from a partial failure is easier when nothing was in the middle of being remembered. Scalability is the one this page is named for, and its mechanism is that the server can free every resource associated with a request as soon as it answers, so instance count and capacity move together.</p>
+
+  <p>The operational restatement is <a href="https://12factor.net/processes">the sixth factor of the twelve-factor app</a>: "twelve-factor processes are stateless and share-nothing", and "any data that needs to persist must be stored in a stateful backing service, typically a database". Same constraint, said from the deploy side rather than the protocol side.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where a request finds context</div>
+    <div class="fig-claim">Only the third source survives an instance being replaced.</div>
+    <div class="mermaid">
+flowchart TB
+  R["A request arrives&lt;br/&gt;at some instance"] --> Q{"Where is the context&lt;br/&gt;it needs"}
+  Q -->|"in the request itself"| A["A token, a cursor,&lt;br/&gt;an idempotency key"]
+  Q -->|"in a shared store"| B["A database row&lt;br/&gt;or a session in Redis"]
+  Q -->|"in this process"| C["An in-memory session&lt;br/&gt;or a local upload"]
+  A --> OK["Any instance can serve it"]
+  B --> OK
+  C --> NO["Only this instance can,&lt;br/&gt;until it restarts"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class OK ok
+  class C bad
+  class NO bad
+    </div>
+    <figcaption>The first two branches are the whole discipline, and neither is difficult once it is a rule rather than a preference. The third is not a category of design but a category of accident: nobody chooses to store a session in process memory, it is what the default did. <b>Statelessness is a property of where the context lives, not of how the handler is written.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: a balancer in front, a store behind</h2>
+
+  <h3 id="balancing">What the balancer is choosing between</h3>
+  <p>In front of the fleet sits something that picks an instance per request. <a href="https://nginx.org/en/docs/http/load_balancing.html">nginx documents three methods</a> and they differ in what they assume. Round-robin distributes in turn and assumes every request costs about the same. Least-connected sends the next request to the server with the fewest active connections, which is the better default whenever hold times vary, because it is measuring the very quantity lesson 1300 made the unit of cost. Weights bias the split for machines of different sizes.</p>
+
+  <p>The same page documents in-band health checking: if a response from a server fails with an error, nginx marks that server as failed and avoids it for a while, governed by <code>max_fails</code> and <code>fail_timeout</code>. That behaviour is only safe because the instances are interchangeable. A balancer that skips an unhealthy instance is silently asserting that the one it picks instead can do the same job, which is the property this page is about.</p>
+
+  <h3 id="sticky-sessions">Why sticky sessions are not the way out</h3>
+  <p>The third method, ip-hash, hashes the client address so that "the requests from the same client will always be directed to the same server". Read the clause that follows it in the same document: "except when this server is unavailable". That exception is not a footnote, it is the failure mode. Pinning works while nothing is wrong, and stops working during a deploy, a scale-down, a crash or a node drain, which are the four moments a user is most likely to be in the middle of something. The twelve-factor position is blunter: "sticky sessions are a violation of twelve-factor and should never be used or relied upon", with a time-expiring store such as Memcached or Redis named as the replacement.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A pinned session, interrupted</div>
+    <div class="fig-claim">The pin holds until the deploy, and then loses the user's work.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Browser
+  participant LB as Balancer
+  participant B as Instance B
+  participant C as Instance C
+  U->>LB: POST /cart - add item
+  LB->>B: routed by client address
+  Note over B: basket kept in process memory
+  B-->>U: 200 OK
+  Note over B: rolling deploy replaces instance B
+  U->>LB: POST /checkout
+  LB->>C: B is unavailable, pick another
+  Note over C: no basket here, and no error to raise
+  C-->>U: 302 to an empty cart
+    </div>
+    <figcaption>Nothing in this trace is a bug in anybody's code. The balancer did what it was configured to do, instance B was replaced on schedule, and instance C answered a request it had no context for. The user experiences a lost basket at the checkout step and reports it as a payment problem. <b>Sticky routing does not store state, it only delays the moment you find out that you did not store it.</b></figcaption>
+  </figure>
+
+  <h3 id="disposable">An instance has a lifecycle, and it is short</h3>
+  <p>Once instances are interchangeable, they also become disposable, and the fleet gains the right to create and destroy them at any time: to scale with load, to replace a failed node, or to roll out a new version. That is what lesson 1304 automates. What it demands from the process is that it be able to say when it is ready to take traffic and to finish what it is holding when told to stop, which is the same graceful-shutdown discipline module 11 owns.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of an instance</div>
+    <div class="fig-claim">Traffic is only sent between two edges the process announces itself.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Starting: process launched
+  Starting --> Ready: dependencies reachable
+  Ready --> Serving: added to the balancer
+  Serving --> Draining: told to stop
+  Draining --> Stopped: in-flight requests finished
+  Stopped --> [*]
+  Starting --> Stopped: failed to start
+    </div>
+    <figcaption>The two transitions that matter are the ones the process controls: announcing readiness, and finishing its in-flight work before exiting. A fleet that cannot see those two edges either sends traffic to an instance that is not ready yet or cuts off requests that were mid-flight, and both look to a user like an intermittent error during a deploy. <b>Disposable does not mean abrupt - it means the process is the one that says when it is safe.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the state moved, it did not disappear</h2>
+
+  <p>Fielding names two costs and both are real. The first is network performance: the same data is sent on every request because the server may not keep it, so an auth token, a tenant identifier and a cursor ride along each time and are re-parsed and re-validated each time. The second is subtler: putting application state on the client "diminishes server authority over consistent behavior", because the client may hold an old shape and the server cannot correct it, which is the same asymmetry lesson 0600 named for the interface.</p>
+
+  <p>The larger cost is architectural. Every session you take out of process memory arrives somewhere else, and that somewhere is now shared by the whole fleet. A hundred stateless instances in front of one session store have not removed the single point of failure, they have moved it and made it busier. That is why module 09 exists, and why the honest version of this page's claim is that statelessness converts a scaling problem you cannot solve into one you can buy a known answer for.</p>
+
+  <div class="callout warn">
+    An in-process cache is not automatically a violation, and the test is whether correctness depends on a hit. A cache that is consulted and falls through to the shared store is fine and every instance may hold a different one. A cache that is the only copy of something is state wearing the word cache, and it fails the moment the instance is replaced. Ask what happens on a cold start, because that is the state every new instance in a fleet begins in.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why is ip-hash routing not a substitute for storing session state elsewhere?</div>
+      <button class="q-opt">The pin is dropped exactly when the chosen instance becomes unavailable</button>
+      <button class="q-opt">The hash spreads clients unevenly across the servers in the group</button>
+      <button class="q-opt">The client address changes on every request through a proxy chain</button>
+      <button class="q-opt">The method cannot be combined with per-server weights in a group</button>
+      <div class="q-fb">The documented guarantee carries its own exception: the same client goes to the same server except when that server is unavailable, which is every deploy, scale-down and crash. Uneven spread is a real but separate cost, a changing client address breaks the pin without being the reason it is unsafe, and weights are supported alongside it.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which benefit of the stateless constraint follows most directly from a request being self-contained?</div>
+      <button class="q-opt">Responses become smaller, because context is not repeated back</button>
+      <button class="q-opt">Handlers become simpler, because there are fewer branches to write</button>
+      <button class="q-opt">Monitoring works, because one request is the full nature of the request</button>
+      <button class="q-opt">Deployments become faster, because less data is copied between hosts</button>
+      <div class="q-fb">Visibility is the benefit stated in exactly those terms: a monitoring system does not have to look beyond a single request datum. Requests get larger rather than responses getting smaller, handler simplicity is a pleasant side effect rather than a claim the constraint makes, and deploy speed has nothing to do with it.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1303-a-container-is-a-process-with-its-own-view.html">a container is a process with its own view</a></b> is how an interchangeable instance is actually built, so that two of them really are the same.</li>
+    <li><b>Ahead, <a href="1304-kubernetes-is-a-control-loop-not-a-deployer.html">Kubernetes is a control loop, not a deployer</a></b> automates creating and destroying the instances this page made disposable.</li>
+    <li><b>Behind you, <a href="0201-methods-are-verbs-with-guarantees.html">methods are verbs with guarantees</a></b> already relied on this: a cache can only answer for the origin because the request carries its own meaning.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Restart one instance of a service you own while a user session is active, and write down everything that broke. Ask the agent to help you list every place the process writes to local disk or to a module-level variable after start-up, because that list is the same list.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Section 5.1.3 of <a href="https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm">Fielding's dissertation</a> is two paragraphs long and states the constraint, its three benefits and its two costs without a single implementation detail, which is why it has outlived the technologies it was written about. Read <a href="https://12factor.net/processes">the twelve-factor processes page</a> straight afterwards for the same argument in operational language.</p>
+
+  <div class="pager">
+    <a href="1301-shared-state-is-where-concurrency-is-paid-for.html"><span class="dir">&larr; Previous</span><span class="ttl">Shared state is where concurrency is paid for</span></a>
+    <a class="nxt" href="1303-a-container-is-a-process-with-its-own-view.html"><span class="dir">Next &rarr;</span><span class="ttl">A container is a process with its own view</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1302 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

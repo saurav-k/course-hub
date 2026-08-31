@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A container is a process with its own view - Backend Engineering</title>
+<meta name="description" content="A container is not a small virtual machine. It is an ordinary process on the host kernel with two kernel features applied to it: namespaces decide what it can see, and cgroups decide what it can use.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 13 &middot; Scale, fleet and shipping &middot; Lesson 1303</div>
+  <h1>A container is an ordinary process the kernel tells a smaller story to</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    How two instances of a service come to be genuinely identical. &middot;
+    <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">namespaces(7)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>There is no guest kernel and no hypervisor. A container is a process on the host kernel with <b>two features applied</b>.</li>
+      <li>A <b>namespace</b> wraps a global resource so the process appears to have its own copy of it: its own process table, its own network stack, its own mounts.</li>
+      <li>A <b>cgroup</b> puts processes in a hierarchical group whose resource use is limited and accounted, which is where a CPU and memory limit come from.</li>
+      <li>The image is a <b>content-addressed stack of filesystem changesets</b>, so an instance is identical to another because it is the same digest, not because it was built the same way.</li>
+      <li>What it costs: the isolation boundary is the host kernel's system-call surface, and the process runs as PID 1, which changes what signals reach it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Interchangeable instances have to be built, not merely intended.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1302&lt;br/&gt;any instance may&lt;br/&gt;serve any request"] --> T["THIS PAGE&lt;br/&gt;how one instance&lt;br/&gt;is packaged"]
+  T --> A["Lesson 1304&lt;br/&gt;a loop that creates&lt;br/&gt;and destroys them"]
+  T --> B["Lesson 1306&lt;br/&gt;the artefact the&lt;br/&gt;pipeline ships"]
+  W["Module 13&lt;br/&gt;scale, fleet&lt;br/&gt;and shipping"] -.- T
+    </div>
+    <figcaption>Lesson 1302 needed instances to be interchangeable and stopped at the request boundary. Two processes serving identical code on machines with different library versions are not interchangeable, and the difference shows up as a failure on one node and not another. <b>This page is where "the same service" stops being a claim about the repository and becomes a claim about bytes.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two kernel features, no second kernel</h2>
+
+  <h3 id="namespaces">A namespace decides what the process can see</h3>
+  <p>The kernel's own definition is the clearest one available: <a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">"a namespace wraps a global system resource in an abstraction that makes it appear to the processes within the namespace that they have their own isolated instance of the global resource"</a>. There is one process table on the machine, and a PID namespace makes a process see a table containing only itself and its children. There is one network stack, and a network namespace gives it its own devices, addresses and ports, which is why two containers can both listen on port 8080.</p>
+
+  <p>The man page lists eight kinds and each isolates one named thing: Cgroup isolates the cgroup root directory, IPC isolates System V IPC and POSIX message queues, Network isolates devices and ports, Mount isolates mount points, PID isolates process IDs, Time isolates the boot and monotonic clocks, User isolates user and group IDs, and UTS isolates the hostname. Nothing on that list is a machine. Every one of them is a view of something the host already had.</p>
+
+  <h3 id="cgroups">A cgroup decides what the process may use</h3>
+  <p>Seeing less is not the same as being bounded. That is the other feature: <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">control groups are a "Linux kernel feature which allow processes to be organized into hierarchical groups whose usage of various types of resources can then be limited and monitored"</a>, with per-resource controllers doing the work, including limiting the CPU time and memory available to a group and accounting for what it used. The hierarchy has one rule worth carrying: limits set higher up cannot be exceeded by descendants, so a nested group can only ever be more constrained than its parent.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Container against machine</div>
+    <div class="fig-claim">Only one of these two shapes has a second operating system in it.</div>
+    <div class="mermaid">
+flowchart TB
+  subgraph VM["A virtual machine"]
+    V3["Your process"] --> V2["Guest kernel"]
+    V2 --> V1["Hypervisor"]
+    V1 --> V0["Host kernel"]
+  end
+  subgraph CT["A container"]
+    C3["Your process"] --> C2["Namespaces - what it sees&lt;br/&gt;cgroups - what it may use"]
+    C2 --> C0["Host kernel"]
+  end
+    </div>
+    <figcaption>The container column has one kernel in it, and the process is scheduled by the same scheduler as everything else on the box. That is where the speed comes from: starting a container is starting a process, not booting an operating system. It is also where the isolation ends, because the process is one system call away from code every other container on that host also depends on. <b>A container is cheap and a virtual machine is separate, and the two properties are the same trade seen from either end.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the image, and why it is a stack</h2>
+
+  <h3 id="the-image">Layers, digests and interchangeability</h3>
+  <p>The <a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">OCI image specification</a> defines four things: an image manifest, which describes the components of an image, an optional image index, which is an annotated list of manifests, filesystem layers, each "a changeset that describes a container's filesystem", and an image configuration, "a document determining layer ordering and configuration of the image". The manifest names each layer by its content-addressable identity, which is the property lesson 1302 actually needed. Two instances are the same instance when they run the same digest, and that is checkable rather than believed.</p>
+
+  <p>The stack has a build-time consequence that decides how long your pipeline takes. Docker's documentation states it plainly: <a href="https://docs.docker.com/build/cache/">"if a layer changes, all other layers that come after it are also affected"</a>, and those downstream layers must be rebuilt "even if they wouldn't build anything differently". So a Dockerfile that copies the source before installing dependencies rebuilds the dependency install on every commit, and one that installs first reuses it until the manifest changes.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One commit, two orderings</div>
+    <div class="fig-claim">A source change rebuilds everything written below it in the file.</div>
+    <div class="mermaid">
+flowchart TB
+  subgraph W["Source copied first"]
+    W1["FROM base"] --> W2["COPY . /app&lt;br/&gt;changed"]
+    W2 --> W3["install dependencies&lt;br/&gt;rebuilt"]
+    W3 --> W4["build&lt;br/&gt;rebuilt"]
+  end
+  subgraph R["Dependencies first"]
+    R1["FROM base"] --> R2["COPY manifest&lt;br/&gt;unchanged"]
+    R2 --> R3["install dependencies&lt;br/&gt;cached"]
+    R3 --> R4["COPY . /app&lt;br/&gt;changed"]
+    R4 --> R5["build&lt;br/&gt;rebuilt"]
+  end
+  classDef hit fill:var(--ok-soft),stroke:var(--ok)
+  classDef miss fill:var(--warn-soft),stroke:var(--warn)
+  class W2,W3,W4 miss
+  class R2,R3 hit
+  class R4,R5 miss
+    </div>
+    <figcaption>The two orderings produce the same image and cost different amounts every single build. The rule that generates the right order is mechanical rather than a matter of taste: put the instruction that changes least often nearest the top, because a cache miss cascades downwards and never upwards. <b>Layer order is a build-time decision with a compounding cost, and it is the same decision every day.</b></figcaption>
+  </figure>
+
+  <h3 id="multi-stage">Building in one image and shipping another</h3>
+  <p>The compiler, the package manager and the test dependencies are needed to produce the artefact and are liabilities in the thing you deploy: more bytes to move, and more installed software to keep patched. <a href="https://docs.docker.com/build/building/multi-stage/">Multi-stage builds</a> solve it structurally rather than by cleanup. Each <code>FROM</code> starts a new stage, <code>COPY --from</code> takes named files out of an earlier one, and only the final stage becomes the image, so "none of the build tools required to build the application are included in the resulting image".</p>
+
+  <div class="code-cap">Dockerfile &middot; the toolchain builds the binary and is then left behind</div>
+  <pre><code>FROM golang:1.24 AS build
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download          # cached until the manifest changes
+COPY . .
+RUN go build -o /out/api ./cmd/api
+
+FROM gcr.io/distroless/static
+COPY --from=build /out/api /api
+ENTRYPOINT ["/api"]
+</code></pre>
+
+  <figure class="diagram">
+    <div class="fig-cap">One digest, three places</div>
+    <div class="fig-claim">The bytes that run in production are the bytes CI tested.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant B as Build job
+  participant G as Registry
+  participant N as Node
+  participant K as Kernel
+  B->>B: build the layers
+  Note over B: manifest names each layer by digest
+  B->>G: push sha256-9f3c...
+  N->>G: pull sha256-9f3c...
+  G-->>N: the same layers, verified by hash
+  N->>K: unshare namespaces and set cgroup limits
+  K-->>N: the process is running
+    </div>
+    <figcaption>Every arrow after the build carries a hash rather than a name, so a node that pulled successfully has proved it holds the same bytes the build produced. A tag such as <code>latest</code> is a pointer that can be moved after the fact, which is why a deployment that names one has no such proof. <b>Content addressing is what turns "the same version" from a claim about process into a claim you can verify.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: one kernel, and your process is PID 1</h2>
+
+  <p>The shared kernel is the whole economy of containers and it is also the boundary. A container's isolation is enforced by kernel code that every container on the host shares, so the attack surface is the system-call interface rather than a hypervisor, and a kernel flaw is a flaw in the wall between tenants. That is a reason to run mutually distrusting workloads on separate kernels, and not a reason to avoid containers for your own fleet.</p>
+
+  <p>The second cost is smaller and bites sooner. Your process is the first in its PID namespace, which makes it that namespace's init, and <a href="https://man7.org/linux/man-pages/man7/pid_namespaces.7.html">init has special signal semantics: "only signals for which the 'init' process has established a signal handler can be sent to the 'init' process by other members of the PID namespace"</a>. A process with no SIGTERM handler therefore ignores the polite stop and is killed at the end of the grace period instead. The same page notes the other half: if init terminates, the kernel kills every remaining process in the namespace with SIGKILL. Lesson 1304 is where that grace period is spent, and module 11's graceful shutdown is what spends it.</p>
+
+  <div class="callout warn">
+    An image is immutable and the environment it runs in is not, which is the separation the twelve-factor app calls <a href="https://12factor.net/build-release-run">build, release and run</a>: the build turns a commit into a bundle, the release combines that bundle with this deploy's configuration, and the run stage executes it. Baking configuration into the image collapses those three, and the symptom is a rebuild required in order to change a hostname, with a new digest that nothing has tested.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Two containers on one host both listen on port 8080. Which feature makes that possible?</div>
+      <button class="q-opt">A cgroup, which limits the ports each group of processes may bind</button>
+      <button class="q-opt">The image manifest, which records the ports the image reserves</button>
+      <button class="q-opt">A guest kernel per container, each with its own network driver</button>
+      <button class="q-opt">A network namespace, giving each its own devices and its own ports</button>
+      <div class="q-fb">The network namespace isolates devices, stacks and ports, so each container has a port 8080 of its own. Cgroups limit and account for resource usage rather than isolating names, the manifest's exposed ports are documentation with no enforcement, and there is no guest kernel anywhere in a container.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A Dockerfile copies the whole source tree before installing dependencies. What is the cost?</div>
+      <button class="q-opt">The final image carries the source tree as well as the built binary</button>
+      <button class="q-opt">Any source change invalidates the install layer and every layer after</button>
+      <button class="q-opt">The layers are stored in reverse order, so the image pulls more slowly</button>
+      <button class="q-opt">The digest changes on every build, so the registry keeps every copy</button>
+      <div class="q-fb">A changed layer forces every downstream layer to be rebuilt even when nothing about them differs, so the dependency install runs on every commit. Carrying the source is a separate problem multi-stage builds solve, layer order is not reversed by anything, and a changed digest per build is true of any real change and is not the cost here.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1304-kubernetes-is-a-control-loop-not-a-deployer.html">Kubernetes is a control loop, not a deployer</a></b> takes this artefact and keeps a stated number of copies of it running.</li>
+    <li><b>Ahead, <a href="1306-the-pipeline-ships-the-artefact-you-tested.html">the pipeline ships the artefact you tested</a></b> is why the digest matters: it is the identity that must survive from CI to production.</li>
+    <li><b>Behind you, <a href="1302-statelessness-is-what-makes-a-fleet-possible.html">statelessness is what makes a fleet possible</a></b> asked for interchangeable instances, and this is the mechanism that supplies them.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Build one of your service images twice, changing only a comment in a source file, and time the second build. Ask the agent to reorder the Dockerfile so the dependency install sits above the source copy, then time it again and account for the difference layer by layer.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://man7.org/linux/man-pages/man7/namespaces.7.html">namespaces(7)</a> and <a href="https://man7.org/linux/man-pages/man7/cgroups.7.html">cgroups(7)</a> are the two documents a container runtime is written against, and reading the first two screens of each replaces a great deal of container folklore with two mechanisms you can name. The <a href="https://github.com/opencontainers/image-spec/blob/main/spec.md">OCI image specification</a> is the third, and it is what makes an image portable between runtimes at all.</p>
+
+  <div class="pager">
+    <a href="1302-statelessness-is-what-makes-a-fleet-possible.html"><span class="dir">&larr; Previous</span><span class="ttl">Statelessness is what makes a fleet possible</span></a>
+    <a class="nxt" href="1304-kubernetes-is-a-control-loop-not-a-deployer.html"><span class="dir">Next &rarr;</span><span class="ttl">Kubernetes is a control loop, not a deployer</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1303 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
