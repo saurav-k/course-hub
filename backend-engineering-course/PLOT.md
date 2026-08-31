@@ -33,7 +33,7 @@ before the next depends on it.
 | 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
-| 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
+| 12 | Module 12 - Inter-service communication (1200-1205) | written | Three couplings and how to choose between them, gRPC and its deadline, the queue, the log, and the WebSocket. Depends only on Modules 02, 04 and 06, so it was written without waiting for the modules numbered between. |
 | 13 | Module 13 - Scale, flight & shipping | reserved | Concurrency, scaling, containerization / K8s / CI-CD, automated testing. |
 
 Reference sheets and glossaries read alongside and are recorded as such; they are not positions in the
@@ -74,6 +74,12 @@ Module 09 landed while Module 08 stays reserved. It needs neither the layered se
 module: a cache is reasoned about from the request and the store, both of which Module 01 already names, and lesson 0204 deliberately taught the protocol
 cache first so that this module could be about invalidation rather than about mechanism. Where it needs
 the relational store it links Module 08 as the owner of the truth rather than restating it.
+
+Module 12 was written without waiting for the modules numbered before it, because it needs only the
+vocabulary of Modules 02, 04 and 06: the wire contract it puts on a connection, the promise it makes
+across a service boundary, and the idempotency key every one of its three transports asks for. Nothing
+in it depends on routing, on the internal layering, or on auth. Its lessons run 1200 to 1205 in the
+hundred-block the module owns.
 
 Module 08 landed alongside Modules 03, 05 and 07 rather than behind them, because nothing in it depends on routing, on
 the internal layering, or on auth. It is the module the later ones consume rather than the other way round: Module 09
