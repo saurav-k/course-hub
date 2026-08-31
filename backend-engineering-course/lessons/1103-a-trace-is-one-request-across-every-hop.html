@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A trace is one request across every hop - Backend Engineering</title>
+<meta name="description" content="A trace answers where the time went for one request across process boundaries, and it exists only because every hop copies the same identifier forward. One service that drops the header does not degrade the trace - it ends it.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Resilience and observability &middot; Lesson 1103</div>
+  <h1>A trace answers where the time went, and it only exists if every hop passes the context on</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    The second signal, and the one that crosses a process boundary. &middot;
+    <a href="https://www.w3.org/TR/trace-context/">W3C - Trace Context</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A trace answers one question: <b>where did the elapsed time of this request go</b>, across every process it touched.</li>
+      <li>It is built from spans. A span is a named unit of work with a start, an end and a parent, and <b>the parent link is what makes a set of spans a tree</b> rather than a pile.</li>
+      <li>The link travels in a header. W3C's <code>traceparent</code> carries <b>a version, a 32-hex trace id, a 16-hex parent id and flags</b>, and standardising it is what lets two vendors correlate one request.</li>
+      <li>Propagation is the whole mechanism and it is <b>all-or-nothing per hop</b>: a service that does not copy the header forward does not blur the trace, it ends it.</li>
+      <li>What it costs: a span per operation is data per request, so tracing is sampled, and the request you most want is the one sampling is most likely to have dropped.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This is the only signal that survives a process boundary intact.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1102&lt;br/&gt;logs, one execution&lt;br/&gt;inside one process"] --> T["THIS PAGE&lt;br/&gt;one request across&lt;br/&gt;every process"]
+  T --> A["Lesson 1104&lt;br/&gt;metrics, the population&lt;br/&gt;rather than the path"]
+  T --> B["Module 12&lt;br/&gt;inter-service calls,&lt;br/&gt;the hops drawn here"]
+  W["Module 11&lt;br/&gt;resilience and observability"] -.- T
+    </div>
+    <figcaption>Lesson 1102's log answered what one process did, and stopped at that process's edge. A distributed system's slow request is almost never slow in one place, so the question moves outward: which hop consumed the time. This page is the only one in the module whose mechanism is a wire format, because correlating across processes is the one thing a service cannot do alone. <b>The trace is the signal that turns several services back into one request.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a tree of intervals, not a list of events</h2>
+
+  <p>Take a request that took 4.2 seconds and think about what you actually need to know. Not what happened - a log gives you that - but how the 4.2 seconds was spent, and specifically whether it was one slow thing or forty ordinary things. Those two have completely different fixes, and no amount of reading log lines distinguishes them reliably, because a log line is a point in time and duration is the difference between two of them.</p>
+
+  <p>A span is that difference, made into a first-class value. OpenTelemetry defines it as a unit of work carrying a name, a parent span id, start and end timestamps, a span context, attributes, events, links and a status. The parent id is the load-bearing field: a span with a trace id and no parent is a root span, and every other span names the span that caused it. What you get is a tree of intervals, and a tree of intervals can be drawn as a waterfall that answers the question by eye.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where the time went</div>
+    <div class="fig-claim">Two spans running one after another explain nearly all of the elapsed time.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A trace waterfall for one 4.2 second request. The root span for the API gateway spans the whole request. Inside it, an auth check takes about 0.1 seconds, a database read about 0.3 seconds, a pricing service call takes about 1.6 seconds and a payment gateway call about 2.0 seconds, the last two running one after the other and together accounting for most of the total.">
+      <text class="ttl" x="20" y="24">One request, 4.2 s, as spans on a shared time axis</text>
+      <line class="grid" x1="150" y1="40" x2="150" y2="250"/>
+      <line class="grid" x1="264" y1="40" x2="264" y2="250"/>
+      <line class="grid" x1="378" y1="40" x2="378" y2="250"/>
+      <line class="grid" x1="492" y1="40" x2="492" y2="250"/>
+      <line class="grid" x1="606" y1="40" x2="606" y2="250"/>
+
+      <text class="lbl-sm" x="20" y="66">gateway</text>
+      <rect class="m-noise" x="150" y="54" width="456" height="14"/>
+      <text class="lbl-sm" x="20" y="104">auth check</text>
+      <rect class="m-noise" x="150" y="92" width="11" height="14"/>
+      <text class="lbl-sm" x="20" y="142">order read</text>
+      <rect class="m-noise" x="163" y="130" width="33" height="14"/>
+      <text class="lbl-sm" x="20" y="180">pricing call</text>
+      <rect class="m-alarm" x="198" y="168" width="174" height="14"/>
+      <text class="lbl-sm" x="20" y="218">payment call</text>
+      <rect class="m-alarm" x="374" y="206" width="217" height="14"/>
+
+      <line class="axis" x1="150" y1="250" x2="610" y2="250"/>
+      <text class="lbl-sm" x="150" y="268" text-anchor="middle">0 s</text>
+      <text class="lbl-sm" x="264" y="268" text-anchor="middle">1 s</text>
+      <text class="lbl-sm" x="378" y="268" text-anchor="middle">2 s</text>
+      <text class="lbl-sm" x="492" y="268" text-anchor="middle">3 s</text>
+      <text class="lbl-sm" x="606" y="268" text-anchor="middle">4 s</text>
+      <text class="lbl-sm t-alarm" x="20" y="290">pricing 1.6 s, then payment 2.0 s - sequential, so they add</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>work under 0.4 s</span><span><i class="sw-alarm"></i>the two spans worth arguing about</span></div>
+    <figcaption>An illustrative trace rather than a measurement, drawn to show what the shape tells you before any number is read. The two long bars do not overlap, so the fix is not a faster pricing service - it is issuing the two calls concurrently, which removes 1.6 seconds without making anything faster. Had the same total been forty short bars, the answer would have been the opposite one. <b>A waterfall answers "one slow thing or many" by shape, which is the question a list of timings cannot settle.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: one header, copied at every hop</h2>
+
+  <h3 id="trace-context">What travels between processes</h3>
+
+  <p>A span tree can only be assembled if every process agrees on an identifier, and before 2019 they did not: the W3C Trace Context specification exists because traces collected by different vendors could not be correlated, there being no shared unique identifier. The fix is one header with a fixed grammar.</p>
+
+  <div class="code-cap">the traceparent field &middot; four dash-separated fields, all lowercase hex</div>
+  <pre><code>traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+             ^^ ^------------------------------^ ^--------------^ ^^
+          version          trace-id                  parent-id   flags
+           1 byte          16 bytes                    8 bytes    1 byte</code></pre>
+
+  <p>The trace id identifies the whole distributed trace and is 32 hex characters; the parent id, called a span id in most systems, identifies the caller's own span and is 16. All-zero values are invalid in both fields, which matters because it makes an uninitialised identifier a detectable error rather than a plausible-looking trace everything joins to. The flags byte currently carries one meaningful bit, <em>sampled</em>, which says whether this trace was recorded. A companion <code>tracestate</code> header carries vendor-specific key-value pairs and is deliberately opaque, so a vendor can extend the context without breaking anyone else's parsing.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Propagation across hops</div>
+    <div class="fig-claim">The trace id is copied unchanged and the parent id is replaced at each hop.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant G as Gateway
+  participant O as Orders
+  participant P as Pricing
+  C->>G: POST /orders - no traceparent
+  Note over G: no context arrives, so this is a root span - new trace id 4bf9..., span id 00f0...
+  G->>O: traceparent 00-4bf9...-00f0...-01
+  Note over O: same trace id, new span id a2c1..., parent is 00f0...
+  O->>P: traceparent 00-4bf9...-a2c1...-01
+  P-->>O: 200
+  O-->>G: 201
+  G-->>C: 201
+    </div>
+    <figcaption>Three processes, one trace id, and a parent id that is rewritten on every outbound call so the receiver knows who called it. Notice that nothing is sent back - the tree is assembled later from spans each process exported independently, which is why a missing span shows up as a gap rather than as an error. <b>Every hop reads the incoming context, starts a child span, and writes its own span id outwards.</b></figcaption>
+  </figure>
+
+  <h3 id="context-propagation">Propagation is what breaks, and it breaks silently</h3>
+
+  <p>OpenTelemetry names context propagation as the core concept that enables distributed tracing, and in practice it is also the entire failure surface. A trace is not degraded by one uninstrumented service - it is severed there. Every span below the break becomes a second, unrelated trace with no parent, and the waterfall you go looking for shows a request that mysteriously ends.</p>
+
+  <p>Three places lose it reliably. A hop through a queue, because the header is an HTTP concept and a message is not, so the context has to be copied into the message envelope by hand - which lesson <a href="0605-idempotency-keys-make-retries-safe.html">0605</a>'s asynchronous work makes routine. A thread or goroutine started without passing the request context down, which is why Go's convention of taking <code>ctx context.Context</code> as the first parameter exists. And any hop through a component you do not instrument, including a proxy that strips unknown headers.</p>
+
+  <h2>3. The trade-off: you cannot keep them all</h2>
+
+  <p>A span is a record per operation per request, so a service doing a thousand requests a second with eight spans each produces eight thousand records a second, and that is one service. Everybody samples, and the sampled bit in the flags byte is where the decision travels. The decision is genuinely hard: sample at the head, before you know the outcome, and the failing request is dropped with the same probability as any other; sample at the tail, after the trace completes, and you must buffer every span of every request somewhere until you decide.</p>
+
+  <p>The consequence for you as an author of a service is that a trace is not a guarantee. It is a good chance of an answer, and the way to keep it useful is to make the sampling decision at the point where the most is known - which usually means keeping every trace that contains an error or exceeds a latency threshold, and sampling the ordinary ones hard. That is a policy decision, and like every other one in this module it belongs somewhere you can change it without a deploy.</p>
+
+  <div class="callout warn">
+    A trace identifier is not an authentication token and must not be treated as one, but it is still an identifier from an untrusted party. A public endpoint that accepts an incoming <code>traceparent</code> unchecked lets a caller choose which trace their request joins, which is at best a way to poison your own data and at worst a way to inflate storage on purpose. Validate the grammar, reject the all-zero identifiers the specification already calls invalid, and consider starting a fresh trace at the public edge while recording the caller's id as an attribute.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A middle service in a chain of five does not forward <code>traceparent</code>. What do you see?</div>
+      <button class="q-opt">One trace, with the middle service's own span missing</button>
+      <button class="q-opt">One trace, whose later spans arrive with no timings</button>
+      <button class="q-opt">One trace, with the last three spans marked unsampled</button>
+      <button class="q-opt">Two traces, and the second one has no parent at all</button>
+      <div class="q-fb">Propagation is all-or-nothing per hop: downstream services see no incoming context, so each starts a root span and a whole new trace id. The first three options all describe partial degradation, and there is no mechanism for any of them - a span is either linked to a parent or it is a root.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What does the parent id inside <code>traceparent</code> identify?</div>
+      <button class="q-opt">The first process that handled this request anywhere</button>
+      <button class="q-opt">The caller's own span, so the receiver can link to it</button>
+      <button class="q-opt">The trace this request belongs to, in 16 hex bytes</button>
+      <button class="q-opt">The sampling decision the upstream caller already made</button>
+      <div class="q-fb">It is the immediate caller's span id, rewritten on every outbound call, which is what makes the spans a tree. The first describes the root span, which the parent id does not name; the third describes the trace id, which is the other field and is 16 bytes to the parent id's 8; and the fourth is the flags byte.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1104-metrics-answer-how-often-never-which-one.html">metrics answer how often, never which one</a></b> is the third question, asked over every request rather than one.</li>
+    <li><b>Behind you, <a href="1102-a-log-line-is-a-query-you-will-run-later.html">a log line is a query you will run later</a></b> is where the trace id gets onto every line, which is what joins the two signals.</li>
+    <li><b>Ahead, <a href="../index.html">Module 12, inter-service communication</a></b> builds the hops this page assumes, including the queue that drops the context.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Pick one request in your system that leaves your process and comes back. Write down every hop it passes through, including proxies and queues, and ask the agent which of those hops has no code you own - because each one is a place the trace can end without anything logging a problem.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> recommendation is short and is the actual contract: read section 3 for the <code>traceparent</code> grammar and the invalid all-zero rule, and section 4 for what <code>tracestate</code> may carry. OpenTelemetry's <a href="https://opentelemetry.io/docs/concepts/signals/traces/">Traces</a> concept page is the readable companion that defines the span fields and names context propagation as the mechanism the whole signal rests on.</p>
+
+  <div class="pager">
+    <a href="1102-a-log-line-is-a-query-you-will-run-later.html"><span class="dir">&larr; Previous</span><span class="ttl">A log line is a query you will run later</span></a>
+    <a class="nxt" href="1104-metrics-answer-how-often-never-which-one.html"><span class="dir">Next &rarr;</span><span class="ttl">Metrics answer how often, never which one</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1103 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
