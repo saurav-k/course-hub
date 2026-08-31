@@ -30,7 +30,7 @@ before the next depends on it.
 | 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05 landed, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
-| 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
+| 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability (1100-1105) | written | Failures and their one owner, config parsed at boot, then the three signals - logs, traces and metrics - by the question each answers, and graceful shutdown as a sequence against a deadline. Written before Modules 08 to 10, which stay reserved, because it depends on none of them. |
 | 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
@@ -69,6 +69,11 @@ the interpreters a handler talks to rather than of how the handler was reached. 
 ordered threat before defence throughout - injection, then XSS as the same defect with the browser as
 the interpreter, then CSRF as the one that needs no injected code at all - so lesson 0706 can close on
 the symmetry between the last two.
+
+Module 09 landed while Module 08 stays reserved. It needs neither the layered service nor the data
+module: a cache is reasoned about from the request and the store, both of which Module 01 already names, and lesson 0204 deliberately taught the protocol
+cache first so that this module could be about invalidation rather than about mechanism. Where it needs
+the relational store it links Module 08 as the owner of the truth rather than restating it.
 
 Module 11 landed ahead of Modules 08 to 10, which stay reserved, because nothing in it depends on a
 database, a cache or a queue. It reads after Module 06 and consumes Module 02's status families and
