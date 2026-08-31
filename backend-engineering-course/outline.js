@@ -293,6 +293,40 @@ window.COURSE_OUTLINE = {
           "href": "lessons/1205-a-websocket-is-a-session-and-a-session-is-state.html"
         }
       ]
+    },
+    {
+      "n": "13",
+      "title": "Scale, fleet and shipping",
+      "lessons": [
+        {
+          "title": "Concurrency is how a server waits",
+          "href": "lessons/1300-concurrency-is-how-a-server-waits.html"
+        },
+        {
+          "title": "Shared state is where concurrency is paid for",
+          "href": "lessons/1301-shared-state-is-where-concurrency-is-paid-for.html"
+        },
+        {
+          "title": "Statelessness is what makes a fleet possible",
+          "href": "lessons/1302-statelessness-is-what-makes-a-fleet-possible.html"
+        },
+        {
+          "title": "A container is a process with its own view",
+          "href": "lessons/1303-a-container-is-a-process-with-its-own-view.html"
+        },
+        {
+          "title": "Kubernetes is a control loop, not a deployer",
+          "href": "lessons/1304-kubernetes-is-a-control-loop-not-a-deployer.html"
+        },
+        {
+          "title": "Tests buy confidence at different prices",
+          "href": "lessons/1305-tests-buy-confidence-at-different-prices.html"
+        },
+        {
+          "title": "The pipeline ships the artefact you tested",
+          "href": "lessons/1306-the-pipeline-ships-the-artefact-you-tested.html"
+        }
+      ]
     }
   ],
   "extras": [
