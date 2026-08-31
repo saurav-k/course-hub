@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A session is server state behind an opaque id - Backend Engineering</title>
+<meta name="description" content="The cookie carries a name and nothing else. Everything the name refers to stays on the server, which is what makes logout real, and what makes the session store a piece of shared state your fleet has to agree on.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Auth and security &middot; Lesson 0701</div>
+  <h1>The cookie carries a name, and the server keeps everything the name refers to</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    The first of three shapes the credential can take. &middot;
+    <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">OWASP - Session Management Cheat Sheet</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A session id is a <b>pointer, not a fact</b>. It should say nothing, mean nothing, and be guessable by nobody; the server holds everything it refers to.</li>
+      <li>Because the fact lives on the server, <b>logout is a real operation</b>: delete the entry and the next request arrives as a stranger, whatever the browser still has.</li>
+      <li>The id needs <b>at least 64 bits of entropy</b>, and it must be <b>replaced at login</b>, or an attacker who plants an id in your browser is logged in as you afterwards.</li>
+      <li>Four cookie attributes carry the whole client-side defence: <code>Secure</code>, <code>HttpOnly</code>, <code>SameSite</code>, and a narrow <code>Domain</code> and <code>Path</code>.</li>
+      <li>What it costs: a lookup on every request, and a store every instance of your service has to reach - which is the first thing in this course to genuinely break statelessness.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Keeping the state is what buys revocation and what costs a lookup.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0700&lt;br/&gt;a credential is&lt;br/&gt;re-presented"] --> T["THIS PAGE&lt;br/&gt;the credential is&lt;br/&gt;a pointer"]
+  T --> A["Lesson 0702&lt;br/&gt;the credential&lt;br/&gt;carries the state"]
+  T --> B["Lesson 0706&lt;br/&gt;the browser sends&lt;br/&gt;it unasked"]
+  W["Module 07&lt;br/&gt;auth and security"] -.- T
+    </div>
+    <figcaption>Lesson 0700 said the caller re-presents something. This page makes that something a bare handle and puts the meaning on the server; lesson 0702 makes the opposite choice and pays a different bill. The branch to 0706 is here because a cookie is sent automatically, which is a property of the transport rather than of the session. <b>Sessions and tokens differ in one decision - who stores the truth - and every other difference follows from it.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the id means nothing on its own</h2>
+
+  <h3 id="opaque-handle">A handle you could print in a log and lose nothing but the account</h3>
+  <p>A session identifier is deliberately empty of content. It is not the user id, not a signed blob, not an encoded role - it is a random string that the server uses as a key into a table it owns. Everything real about the session, including who the caller is and when they logged in, sits in that table's row, where the client can neither read it nor change it.</p>
+
+  <p>That emptiness is a security property with numbers behind it. OWASP requires that session identifiers <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">have at least 64 bits of entropy to prevent brute-force session guessing attacks</a>, which at hexadecimal encoding means at least 16 characters, and it asks you to rename the framework default because <code>PHPSESSID</code> in a cookie jar announces your stack to anyone who looks. Neither rule makes sense for a value carrying meaning; both make sense for a value whose only job is to be unguessable.</p>
+
+  <h2>2. The mechanism: the cookie, its attributes, and the store</h2>
+
+  <h3 id="cookie-attributes">Four attributes, and what each one actually stops</h3>
+  <p>The transport is <code>Set-Cookie</code> going out and <code>Cookie</code> coming back, with the attributes defined in <a href="https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2">RFC 6265 &sect;4.1.2</a>. Four of them do the work. <code>Secure</code> means the cookie is only sent over HTTPS. <code>HttpOnly</code> <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie">forbids JavaScript from accessing the cookie</a> through <code>document.cookie</code>, while still attaching it to <code>fetch()</code> calls the page makes - so injected script can act as you but cannot walk away with the credential. <code>SameSite</code> governs whether the browser attaches it to requests started by other sites, which is lesson 0706's subject. <code>Domain</code> and <code>Path</code> decide how widely it travels, and OWASP asks for <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">a narrow or restricted scope for these two attributes</a>.</p>
+
+  <p>Two limits are stated in the specification itself and are easy to forget. Cookies <a href="https://www.rfc-editor.org/rfc/rfc6265#section-8.5">do not provide isolation by port</a> and do not provide isolation by scheme, so another service on the same host is inside your boundary; and <a href="https://www.rfc-editor.org/rfc/rfc6265#section-8.6">cookies do not provide integrity guarantees for sibling domains</a>, so a subdomain you do not control can set a cookie your origin will read. A staging host on the same registrable domain is a real path into production sessions.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Cookie reach by attribute</div>
+    <div class="fig-claim">Two attributes narrow who can read it and two narrow when it travels.</div>
+    <div class="mermaid">
+flowchart LR
+  C["Session cookie&lt;br/&gt;an id and nothing else"] --> S["Secure&lt;br/&gt;blocks it riding a request&lt;br/&gt;over plain HTTP"]
+  C --> H["HttpOnly&lt;br/&gt;blocks injected script&lt;br/&gt;reading the value - 0705"]
+  C --> M["SameSite&lt;br/&gt;blocks a request another&lt;br/&gt;site started - 0706"]
+  C --> D["Domain and Path&lt;br/&gt;blocks it reaching a sibling&lt;br/&gt;host you do not control"]
+    </div>
+    <figcaption>Each attribute removes one route to the cookie and no attribute removes two. Reading down, the first two decide who can obtain the value and the last two decide which requests it rides on, which is why leaving any single one off leaves a whole class of attack open rather than weakening the set evenly. <b>These are four independent switches, and defaults are off for three of them.</b></figcaption>
+  </figure>
+
+  <h3 id="session-fixation">Renewing the id is what stops fixation</h3>
+  <p>Session fixation is the attack that makes the lifecycle worth drawing. The attacker does not steal your id - they give you theirs. They obtain a valid session id from the site, get the victim's browser to adopt it, and wait for the victim to log in. If the server keeps the same id across the login and simply attaches the account to it, the attacker's copy of that id is now an authenticated session.</p>
+
+  <p>The defence is one line in the login handler and OWASP states it as a requirement: the session id <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">must be renewed or regenerated by the web application after any privilege level change</a>, authentication included. The old id is invalidated and a new one issued, so whatever the attacker planted refers to a row that no longer exists. OWASP's list of authentication failures names the same defect from the other end - <a href="https://owasp.org/Top10/2021/A07_2021-Identification_and_Authentication_Failures/">reuse session identifier after successful login</a> - and it is CWE-384.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of one session row</div>
+    <div class="fig-claim">Every exit from Active is a server-side deletion the client cannot veto.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Anonymous: first visit - id issued or none
+  Anonymous --> Active: login - OLD ID DESTROYED, new id issued
+  Active --> Active: request - id looked up, last-seen updated
+  Active --> Expired: idle timeout - no request for N minutes
+  Active --> Expired: absolute timeout - N hours since login
+  Active --> Revoked: logout, or password change, or admin action
+  Expired --> [*]: row deleted
+  Revoked --> [*]: row deleted
+    </div>
+    <figcaption>The transition into Active is the one that stops fixation, because the id the browser arrived with is discarded rather than promoted. The three exits differ only in what triggered them - an idle timer, a wall-clock limit, or a decision - and all three end the same way. <b>Because the truth is a row, ending a session is deleting it, and the cookie left in the browser becomes a pointer to nothing.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the store is shared state</h2>
+
+  <p>The lookup is the price. Every authenticated request now reads a row before it can do anything, which is a network hop if the store is Redis and a query if it is your database. That is usually affordable. The real cost is architectural: the store is state that every instance of your service must reach and agree on, and lesson 0000 called statelessness the thing that makes horizontal scale cheap. Sessions are the first mechanism in this course that genuinely takes some of it back.</p>
+
+  <p>Two escapes are common and both are worse than they look. Sticky sessions, pinning a user to one instance so the session can live in that process's memory, trade the shared store for a load balancer that cannot freely rebalance and a deploy that logs people out. Signing the session contents into the cookie itself removes the store, and removes revocation with it - which is exactly the bargain lesson 0702 is about, so it is worth understanding as a deliberate choice rather than as a way to avoid running Redis.</p>
+
+  <div class="callout warn">
+    Invalidation has to happen on both sides. OWASP is explicit that when a session ends the application <a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">must take active actions to invalidate the session on both sides, client and server</a>. A logout handler that only clears the cookie is not a logout: anyone who copied the id - from a shared machine, a proxy log, or a browser extension - still holds a working credential, and your server will keep honouring it until the timeout it never knew to shorten.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why must the session id be replaced at the moment of a successful login?</div>
+      <button class="q-opt">Because the pre-login id was issued with less entropy than needed</button>
+      <button class="q-opt">Because the cookie's Secure attribute cannot be set before login</button>
+      <button class="q-opt">Because an id planted before login would become an authenticated one</button>
+      <button class="q-opt">Because the browser refuses to overwrite an id it already stores</button>
+      <div class="q-fb">That is session fixation: the attacker supplies the id rather than stealing it, so promoting the same value to authenticated hands them the account. Entropy is a separate requirement that applies to both ids, <code>Secure</code> can be set on any response, and a browser overwrites a cookie of the same name without complaint.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does <code>HttpOnly</code> stop, precisely?</div>
+      <button class="q-opt">Page script reading the cookie value out of document.cookie</button>
+      <button class="q-opt">Page script issuing a fetch call that carries the cookie along</button>
+      <button class="q-opt">Another site causing the browser to attach the cookie to a form</button>
+      <button class="q-opt">The cookie travelling over a connection that is not encrypted</button>
+      <div class="q-fb">It closes the read, not the use: a cookie set <code>HttpOnly</code> is still attached to <code>fetch()</code> and <code>XMLHttpRequest</code> calls the page makes, so injected script can still act as you. The third option is what <code>SameSite</code> governs and the fourth is what <code>Secure</code> governs.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0702-a-token-moves-the-state-to-the-client.html">a token moves the state to the client</a></b> takes the store away and shows exactly what that costs.</li>
+    <li><b>Ahead, <a href="0705-xss-is-code-injected-into-someone-elses-browser.html">XSS is code injected into someone else's browser</a></b> is why <code>HttpOnly</code> is on this page rather than a footnote.</li>
+    <li><b>Behind you, <a href="0203-headers-carry-what-the-body-cannot.html">headers carry what the body cannot</a></b> placed <code>Cookie</code> among the fields that say who is asking.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find your framework's login handler and check whether it issues a new session id or reuses the one that arrived. Then ask the agent what your logout endpoint does on the server, and whether an id captured a minute earlier would still work after it runs.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html">OWASP's Session Management Cheat Sheet</a> is the densest single page on this subject and is written as requirements rather than advice, which makes it usable as a checklist against a real login handler. Read <a href="https://www.rfc-editor.org/rfc/rfc6265#section-8">RFC 6265 &sect;8</a> beside it for the limits the cookie mechanism itself admits to.</p>
+
+  <div class="pager">
+    <a href="0700-authentication-answers-who-authorization-answers-what.html"><span class="dir">&larr; Previous</span><span class="ttl">Authentication answers who, authorization answers what</span></a>
+    <a class="nxt" href="0702-a-token-moves-the-state-to-the-client.html"><span class="dir">Next &rarr;</span><span class="ttl">A token moves the state to the client</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0701 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
