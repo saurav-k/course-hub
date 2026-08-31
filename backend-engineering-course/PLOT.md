@@ -28,7 +28,7 @@ before the next depends on it.
 | 4 | Module 04 - Serialization and contracts (0400-0405) | written | The wire contract, JSON's six types, schema-first protobuf, boundary parsing, content negotiation, and the compatibility rules. It was written before Module 03 landed, because nothing in it depends on routing. |
 | 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
 | 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Module 03 landed and while Module 05 stays reserved, because nothing in it depends on routing or on the internal layering. |
-| 7 | Module 07 - Auth & security | reserved | Sessions, tokens, OAuth; the web's threat model (injection, XSS, CSRF). |
+| 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
 | 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
@@ -56,6 +56,14 @@ It lands after Modules 04 and 06 rather than before them, because neither of tho
 Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
 where that hand-off is made. It needs neither routing nor the layered service to be readable.
+
+Module 07 landed after Module 06, because the interface Module 06 published is the thing
+this module decides who may invoke. It needs neither routing nor the layered service: the credential
+arrives in a header or a cookie that Module 02 already named, and the three threats are properties of
+the interpreters a handler talks to rather than of how the handler was reached. Its second half is
+ordered threat before defence throughout - injection, then XSS as the same defect with the browser as
+the interpreter, then CSRF as the one that needs no injected code at all - so lesson 0706 can close on
+the symmetry between the last two.
 
 Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
 every later module consumes the vocabulary it defines: routing consumes the method and the target,
