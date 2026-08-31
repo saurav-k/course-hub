@@ -34,7 +34,7 @@ before the next depends on it.
 | 10 | Module 10 - Async work & search (1000-1006) | written | The 202 and the durable handoff, the broker's lease and at-least-once, the retry policy and the dead letter, the idempotent consumer, the transactional outbox, then the inverted index and BM25. Written while Module 08 stays reserved, because nothing in it depends on the relational chapter. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
 | 12 | Module 12 - Inter-service communication (1200-1205) | written | Three couplings and how to choose between them, gRPC and its deadline, the queue, the log, and the WebSocket. Depends only on Modules 02, 04 and 06, so it was written without waiting for the modules numbered between. |
-| 13 | Module 13 - Scale, flight & shipping | reserved | Concurrency, scaling, containerization / K8s / CI-CD, automated testing. |
+| 13 | Module 13 - Scale, fleet and shipping (1300-1306) | written | Concurrency and shared state inside one process, statelessness and the fleet, containers and the control loop, the test budget and the deployment pipeline. Written without waiting for the modules numbered before it, because it names their mechanisms and links forward to them rather than depending on them, and because it closes the course's arc. |
 
 Reference sheets and glossaries read alongside and are recorded as such; they are not positions in the
 sequence.
@@ -45,8 +45,9 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 08 and 11-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
-lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+Module 11 above is the last position still reserved from the first scaffold, mapped to its upstream
+chapter. It lands as a separate change, the way every module before it did, so the course grew a
+module at a time without a trapped mega-PR.
 
 Module 05 was written out of reading order, before Module 03 landed, because it depends on nothing routing
 defines: it consumes the parsed, trusted values Module 04 produces and says only where they travel afterwards.
@@ -69,6 +70,13 @@ Module 03 landed fifth and takes the 03xx block, for the same reason Module 02 t
 hundred-block so a later module never renumbers an earlier one. It answers the question Module 02 leaves open - the
 request has arrived and its method and target are understood, so how does it become a specific piece of code.
 It lands after Modules 04 and 06 rather than before them, because neither of those depends on routing.
+
+Module 13 landed as the closing module rather than as the next one in sequence. It names mechanisms
+the modules numbered before it own - a transaction, a cache, a graceful shutdown - and links
+forward to them rather than depending on them, so a reader reaches the whole-course view without needing a
+module that is not yet on the site. Its name is `fleet` rather than `flight`: `index.html`,
+`MISSION.md` and the roadmap row all said `fleet`, this file was the single outlier, and the rule two
+paragraphs above settles a disagreement between two files in favour of the one that ships.
 
 Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
