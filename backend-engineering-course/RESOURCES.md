@@ -301,6 +301,54 @@ TBD as lessons landing.
   [golang.org/x/sync/singleflight](https://pkg.go.dev/golang.org/x/sync/singleflight) for duplicate call
   suppression and its documented per-process scope.
 
+### Module 12 - Inter-service communication
+
+- Lesson 1200, the three couplings: [Apache Kafka - Introduction](https://kafka.apache.org/intro) for
+  the statement that events "are not deleted after consumption" and that retention is a per-topic
+  setting, [RFC 6455 &sect;1.1](https://www.rfc-editor.org/rfc/rfc6455#section-1.1) for why HTTP polling
+  was worth replacing, and [RabbitMQ - Consumer acknowledgements](https://www.rabbitmq.com/docs/confirms)
+  for the at-least-once consequence. The chain-availability arithmetic on that page is derived here from
+  a stated 99.9% per-service assumption, not quoted from a source.
+- Lesson 1201, gRPC on the wire: [gRPC over HTTP/2](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md)
+  for the one-RPC-one-stream mapping, the request header set including `te: trailers`, the
+  length-prefixed message framing, and the rule that status is sent in trailers even when it is OK;
+  [gRPC core concepts](https://grpc.io/docs/what-is-grpc/core-concepts/) for the four call shapes; and
+  [gRPC custom load balancing](https://grpc.io/docs/guides/custom-load-balancing/) for `pick_first`
+  doing no load balancing at all; and
+  [the gRPC-Web protocol](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) for the browser
+  limitation, the status moved into the response body, and the proxy-translation deployment model.
+- Lesson 1202, deadlines: [gRPC - Deadlines](https://grpc.io/docs/guides/deadlines/) for the
+  deadline-against-timeout distinction, the absence of a default, the propagation rule that deducts
+  elapsed time so clocks need not agree, and the guidance on choosing a value;
+  [gRPC core concepts](https://grpc.io/docs/what-is-grpc/core-concepts/) for the independent local
+  determinations of success and for changes before a cancellation not being rolled back; and
+  [gRPC status codes](https://grpc.io/docs/guides/status-codes/) for DEADLINE_EXCEEDED being possible
+  on a successful operation and for the UNAVAILABLE retry advice with its non-idempotent caveat. The
+  retry-amplification figure is derived here from a stated three-attempts-per-hop assumption.
+- Lesson 1203, queues: [RabbitMQ - Consumer acknowledgements and publisher confirms](https://www.rabbitmq.com/docs/confirms)
+  for automatic acknowledgement being unsafe, automatic requeue on channel or connection close, the
+  `redeliver` flag and the idempotence requirement;
+  [AMQP 0-9-1 concepts](https://www.rabbitmq.com/tutorials/amqp-concepts) for exchanges, bindings and
+  the four exchange types including fanout ignoring the routing key;
+  [RabbitMQ - Dead letter exchanges](https://www.rabbitmq.com/docs/dlx) for the four dead-lettering
+  conditions and the `x-death` header; and
+  [Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html) for the
+  dual-write problem and the relay's own at-least-once residue.
+- Lesson 1204, the log: [Apache Kafka - Introduction](https://kafka.apache.org/intro) for retention,
+  partitioning and the same-key-same-partition ordering guarantee, and
+  [Apache Kafka - Design](https://kafka.apache.org/40/design/design/) for the three delivery semantics,
+  the offset-commit ordering that selects between at-most-once and at-least-once, the idempotent
+  producer and transactions, the advice to store the consumer offset alongside its output, and the rule
+  that a partition is read by exactly one consumer in a group. Head-of-line blocking on a partition is
+  derived on the page from those rules rather than quoted.
+- Lesson 1205, WebSockets: [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455), &sect;1.1 and &sect;1.3, for the polling
+  background, the `Upgrade` handshake with `Sec-WebSocket-Key` and `Sec-WebSocket-Accept`, the 101
+  response, the independent two-way channel and the closing handshake;
+  [MDN - Writing WebSocket client applications](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_client_applications)
+  for the error event closing the connection and the absence of automatic reconnection; and
+  [MDN - Using server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
+  for the one-way constraint, the automatic restart with `retry` and `id`, and the six-connection
+  HTTP/1.1 limit against HTTP/2's negotiated streams defaulting to 100.
 ### Module 13 - Scale, fleet and shipping
 
 - Lesson 1300, concurrency: [Effective Go - Concurrency](https://go.dev/doc/effective_go) for the
