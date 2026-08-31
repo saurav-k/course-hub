@@ -1,0 +1,189 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Matching is a tree, not a list of ifs - Backend Engineering</title>
+<meta name="description" content="A router compiles its patterns once into a prefix tree keyed on host, then method, then path segments, so the cost of a match tracks the depth of the path rather than the number of routes registered.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing &middot; Lesson 0302</div>
+  <h1>A router compiles its patterns into a tree, so match cost tracks path depth rather than route count</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The structure behind the match. &middot;
+    <a href="https://cs.opensource.google/go/go/+/refs/tags/go1.24.0:src/net/http/routing_tree.go">Go - net/http routing_tree.go</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Patterns are compiled <b>once, at registration</b>, into a tree whose levels are host, then method, then consecutive path segments.</li>
+      <li>Matching walks the tree one segment at a time, so the work is set by <b>how deep the path is</b>, not by how many routes exist.</li>
+      <li>Shared prefixes are shared nodes. A hundred routes under <code>/v1/orders</code> pay for those two segments once.</li>
+      <li>Precedence is decided by <b>specificity</b>: a pattern matching a strict subset of another's requests wins, and Go panics at registration when neither is more specific.</li>
+      <li>What it costs: a literal that loses to a wildcard forces the walk to back up and try again, and the tree cannot express a pattern the segment grammar has no shape for.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The pair and the pattern are defined - this is how one is found.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0301&lt;br/&gt;the path pattern&lt;br/&gt;and its named holes"] --> T["THIS PAGE&lt;br/&gt;the structure a router&lt;br/&gt;matches a path against"]
+  T --> A["Lesson 0303&lt;br/&gt;what wraps the handler&lt;br/&gt;the tree found"]
+  T --> B["Lesson 0305&lt;br/&gt;one tree handing off&lt;br/&gt;to another tree"]
+  T --> C["Module 13&lt;br/&gt;what a hot path&lt;br/&gt;costs under load"]
+  W["Module 03&lt;br/&gt;Routing"] -.- T
+    </div>
+    <figcaption>The two pages before this one settled what a route is. This one settles how a router holds several hundred of them and still answers in constant-ish time. <b>Registration is a compile step, and matching is a walk over what it produced.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the list of ifs, and where it breaks</h2>
+
+  <p>The obvious router is a list. Keep every registered pattern in the order it was added, and for each request compare the incoming path against each one until something matches. It is correct, it is about fifteen lines, and it is what a first router always is. Its cost is the problem: the work per request is proportional to the number of routes, and it is <em>worst</em> for the routes registered last, which in a growing service is the newest feature.</p>
+
+  <p>The tree replaces one long list of whole-path comparisons with a short chain of single-segment lookups. Nothing about the answer changes. What changes is that the request stops paying for routes it was never going to match, because the first segment it consumed already eliminated every subtree that did not begin that way.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Shared prefixes, shared nodes</div>
+    <div class="fig-claim">Every route under one prefix pays for that prefix exactly once.</div>
+    <div class="mermaid">
+flowchart TB
+  R["root - after host and method"] --> V["v1"]
+  V --> O["orders"]
+  V --> U["users"]
+  O --> OL["list orders"]
+  O --> OW["hole - id"]
+  OW --> OG["show order"]
+  OW --> OI["items"]
+  OI --> OIL["list items"]
+  U --> UW["hole - id"]
+  UW --> UG["show user"]
+    </div>
+    <figcaption>Six routes drawn as the tree a router actually builds. The segment <code>v1</code> is stored once and tested once however many routes sit beneath it, and a request for <code>/health</code> leaves this whole subtree unvisited after its first lookup. <b>A tree turns a repeated prefix from a repeated cost into a single node.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: build once, walk per request</h2>
+
+  <h3 id="prefix-tree">The tree: host, then method, then segments</h3>
+  <p>Go's implementation states the shape in four lines of comment and it is the shape most routers share. The root branches on the host of the request. The next level branches on the method. The remaining levels branch on consecutive segments of the path. Interior nodes hold a map from a segment to a child, plus two special children: one for a single-segment wildcard and one for a trailing multi-segment wildcard. A leaf holds the pattern and the handler registered with it.</p>
+
+  <p>A lookup is then a loop. Take the next segment of the request path, try the literal child first, and fall back to the wildcard child when there is no literal. Reach the end of the path at a node holding a handler and you have matched; the values consumed by wildcard children are the path parameters, handed to your code by name.</p>
+
+  <h3 id="route-precedence">Precedence: the more specific pattern wins</h3>
+  <p>Two patterns can both match one request, and something has to decide. Go's rule is stated as a property rather than as a heuristic: a pattern P1 is more specific than P2 if P1 matches a strict subset of P2's requests, meaning P2 matches everything P1 does and more. So <code>/images/thumbnails/</code> beats <code>/images/</code> because every request the first matches the second matches too. When neither is a strict subset of the other, the patterns <b>conflict</b>, and registering the second one panics at startup rather than resolving the ambiguity silently.</p>
+
+  <h3 id="backtracking">Backtracking: the cost of that rule</h3>
+  <p>Specificity is a property of the pattern set, not of the walk, so the walk sometimes has to undo a step. Go's own comment gives the case: with <code>/a/b/z</code> and <code>/a/{x}/c</code> registered, the path <code>/a/b/c</code> takes the literal <code>b</code> first, finds no <code>c</code> under it, backs up, and tries the wildcard branch instead. The literal-first order is what makes the match correct; the backtrack is what it costs.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One walk that backs up</div>
+    <div class="fig-claim">The literal branch is tried first, and failing it is not failing the match.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Root: path /a/b/c
+  Root --> LiteralA: consume a
+  LiteralA --> LiteralB: literal b is present
+  LiteralB --> Dead: next segment is c, not z
+  Dead --> LiteralA: back up one level
+  LiteralA --> Wildcard: take the hole instead
+  Wildcard --> Matched: literal c is present
+  Matched --> [*]: handler for /a/{x}/c
+    </div>
+    <figcaption>The states one request passes through when the literal branch is the wrong one. Nothing is wrong here: trying the literal first is what makes the more specific pattern win when it does match, and the extra work is bounded by the depth of the path. <b>A dead end in the tree costs one level of unwinding, never a rescan of the route table.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: what the tree buys and what it forbids</h2>
+
+  <p>The arithmetic is worth doing once. A linear scan over <i>R</i> routes whose paths are <i>D</i> segments deep costs up to <i>R</i> times <i>D</i> segment comparisons per request. The tree costs one lookup per segment, plus one for the host and one for the method: <i>D</i> plus two, whatever <i>R</i> is. At four segments deep those are 4<i>R</i> against 6.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Comparisons per request</div>
+    <div class="fig-claim">The list grows with the route table and the tree does not.</div>
+    <svg class="chart" viewBox="0 0 640 280" role="img" aria-label="Line chart of segment comparisons per request against the number of registered routes at path depth four: a linear scan rises from 40 to 2000 while a tree walk stays at 6">
+      <line class="axis" x1="60" y1="230" x2="610" y2="230"/>
+      <polyline class="s-alarm thick" points="120,226 280,211 440,154 580,40"/>
+      <polyline class="s-stat thick" points="120,229 280,229 440,229 580,229"/>
+      <circle class="m-alarm" cx="120" cy="226" r="4"/>
+      <circle class="m-alarm" cx="280" cy="211" r="4"/>
+      <circle class="m-alarm" cx="440" cy="154" r="4"/>
+      <circle class="m-alarm" cx="580" cy="40" r="5"/>
+      <circle class="m-stat" cx="580" cy="229" r="5"/>
+      <text class="lbl-b" x="580" y="30" text-anchor="end">2,000</text>
+      <text class="lbl-b" x="566" y="222" text-anchor="end">6</text>
+      <text class="lbl-sm" x="120" y="250" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="280" y="250" text-anchor="middle">50</text>
+      <text class="lbl-sm" x="440" y="250" text-anchor="middle">200</text>
+      <text class="lbl-sm" x="580" y="250" text-anchor="middle">500</text>
+      <text class="lbl-sm" x="335" y="272" text-anchor="middle">registered routes, at a path depth of four segments</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>one comparison per route, worst case</span><span><i class="sw-stat"></i>one lookup per segment</span></div>
+    <figcaption>Both series are derived from the two costs above rather than measured on any machine. What matters is not the absolute numbers, which depend on how a comparison is implemented, but that one line has the route count in it and the other does not. <b>Adding the five hundredth route costs the tree nothing per request.</b></figcaption>
+  </figure>
+
+  <p>What the tree forbids is the other half of the deal. A pattern has to decompose into segments, so an arbitrary regular expression over the whole path has no node to live in; routers that offer one keep it as a separate, slower list checked after the tree. Conflicts have to be decidable at registration, which is why Go panics rather than picking. And the structure is fixed once the service is running, so a route added at runtime means rebuilding, not appending. Every one of those is a restriction, and every one of them is what makes the walk cheap.</p>
+
+  <div class="callout warn">
+    Route count is rarely the thing that is actually slow. A tree walk is a handful of map lookups next to a database round trip, and a profile will say so. The reason to know the structure is not micro-optimisation: it is that the tree explains the behaviour you will otherwise find baffling - why a route conflict is a startup panic, why <code>/images</code> redirects to <code>/images/</code>, and why the more specific of two patterns wins without either being registered first.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">In a tree router, what sets the cost of one match?</div>
+      <button class="q-opt">The number of routes in the table</button>
+      <button class="q-opt">The length of the longest pattern</button>
+      <button class="q-opt">The order the routes were added in</button>
+      <button class="q-opt">The number of segments in the path</button>
+      <div class="q-fb">The walk consumes one segment per level, so depth is the cost. Route count is the linear scan's cost and the whole reason for the tree; the longest pattern bounds the tree's height but not this request's walk; and registration order decides nothing, since precedence is decided by specificity.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Two patterns overlap and neither is more specific. What happens?</div>
+      <button class="q-opt">The one added first quietly wins it</button>
+      <button class="q-opt">Registration fails - they are a conflict</button>
+      <button class="q-opt">The request is answered with a 404</button>
+      <button class="q-opt">The longer of the two patterns wins</button>
+      <div class="q-fb">Specificity is defined as a strict subset relation, so patterns that overlap without one containing the other cannot be ordered, and Go panics when the second is registered. First-wins and longest-wins are both real rules in other routers, but they resolve the ambiguity instead of reporting it, and a 404 would be wrong because a handler does match.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0303-middleware-is-a-chain-and-order-is-the-design.html">middleware is a chain, and order is the design</a></b> picks up the handler this walk found and asks what wraps it.</li>
+    <li><b>Back at <a href="0300-a-route-is-a-pattern-and-a-method.html">a route is a pattern and a method</a></b> is where the method became the second level of this tree.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Draw your own service's routes as a tree on paper, sharing every prefix. Ask the agent which pairs of your patterns overlap, and for each pair whether one matches a strict subset of the other or whether the two genuinely conflict.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cs.opensource.google/go/go/+/refs/tags/go1.24.0:src/net/http/routing_tree.go">Go's <code>net/http/routing_tree.go</code></a> is about three hundred readable lines and its header comment states the level order and the backtracking case exactly. The precedence rule it implements is written out in the <a href="https://pkg.go.dev/net/http#ServeMux">ServeMux documentation</a>, under Precedence.</p>
+
+  <div class="pager">
+    <a href="0301-path-parameters-and-query-strings-say-different-things.html"><span class="dir">&larr; Previous</span><span class="ttl">Path parameters and query strings say different things</span></a>
+    <a class="nxt" href="0303-middleware-is-a-chain-and-order-is-the-design.html"><span class="dir">Next &rarr;</span><span class="ttl">Middleware is a chain, and order is the design</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0302 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

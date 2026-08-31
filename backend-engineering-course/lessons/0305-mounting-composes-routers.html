@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mounting composes routers - Backend Engineering</title>
+<meta name="description" content="A router is itself a handler, so one router can hold another under a prefix. The prefix is removed from the path before the inner router matches, which is what lets a router be written without knowing where it will live.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing &middot; Lesson 0305</div>
+  <h1>Prefix mounting strips the prefix before the inner router matches, which is what makes routers composable</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    One service, several independent routers. &middot;
+    <a href="https://peps.python.org/pep-3333/#environ-variables">PEP 3333 - SCRIPT_NAME and PATH_INFO</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A router is a handler like any other, so a router can be <b>registered inside another router</b> under a path prefix.</li>
+      <li>The outer router removes the prefix before handing the request on, so the inner one matches <b>the remainder</b> and nothing else.</li>
+      <li>That is what makes an inner router reusable: it is written against <code>/orders</code>, and where it is mounted is decided somewhere it never reads.</li>
+      <li>The prefix is not thrown away. WSGI keeps it in <code>SCRIPT_NAME</code>, Express keeps it in <code>req.baseUrl</code>, and both keep the whole original too.</li>
+      <li>What it costs: every URL the inner router generates must have the prefix put back, and its 404 is now the service's 404.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One router was the unit - this makes routers a unit you can nest.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0304&lt;br/&gt;the verdicts one&lt;br/&gt;router can give"] --> T["THIS PAGE&lt;br/&gt;one router holding&lt;br/&gt;another under a prefix"]
+  T --> A["Module 05&lt;br/&gt;how a service is&lt;br/&gt;split into layers"]
+  T --> B["Module 06&lt;br/&gt;versioning a surface&lt;br/&gt;without forking it"]
+  T --> C["Module 12&lt;br/&gt;when a mount becomes&lt;br/&gt;a separate service"]
+  W["Module 03&lt;br/&gt;Routing"] -.- T
+    </div>
+    <figcaption>The module closes where a service starts growing past one file of routes. Mounting is also the seam a monolith is eventually split along, which is why Module 12 comes back to it. <b>Composition is the last thing routing gives you, and it is the one that survives a re-architecture.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a router is a handler</h2>
+
+  <p>Everything in this module has treated the router as the thing that finds handlers. The useful inversion is that a router <em>is</em> one. It takes a request, it produces a response, and nothing above it can tell whether the thing it called dispatched further or answered directly. Once that is true, registering a router inside a router needs no new machinery at all.</p>
+
+  <p>PEP 3333 names this as one of the things middleware is for: routing a request to different application objects based on the target URL, after rewriting the environment accordingly. The clause that matters is the last one. Handing the request on unchanged would make the inner router match against a path it does not recognise, because it was written against <code>/orders/{id}</code> and the request says <code>/api/v2/orders/8123</code>. Rewriting is what makes the inner router's patterns true again.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two routers, one service</div>
+    <div class="fig-claim">Neither inner router contains the prefix it is reached through.</div>
+    <div class="mermaid">
+flowchart TB
+  S["service router"] --> M1["mount /api/v2"]
+  S --> M2["mount /admin"]
+  S --> H["/healthz - answered here"]
+  M1 --> R1["orders router&lt;br/&gt;patterns /orders&lt;br/&gt;and /orders/{id}"]
+  M2 --> R2["admin router&lt;br/&gt;patterns /users&lt;br/&gt;and /audit"]
+    </div>
+    <figcaption>Two routers written independently, each with its own patterns and its own middleware, joined only by where the outer router chose to hang them. Moving the whole admin surface to <code>/internal</code> is one edit at the mount, and no pattern inside the admin router changes. <b>The prefix is the outer router's fact, not the inner one's.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: strip, hand on, keep the original</h2>
+
+  <h3 id="mounting">Mounting: the outer router's registration</h3>
+  <p>A mount is an ordinary registration whose target happens to be a router, on a pattern that matches a whole subtree rather than one path. In Go a trailing slash does it, since a trailing slash acts as an anonymous multi-segment wildcard; in Express <code>app.use(path, router)</code> does it; in Flask a blueprint registered with a <code>url_prefix</code> does it. The outer router matches the prefix, and everything after it is the inner router's problem.</p>
+
+  <h3 id="prefix-stripping">Stripping: what the inner router is given</h3>
+  <p>Go's <code>StripPrefix</code> is the whole mechanism written out with nothing hidden. It returns a handler that removes the prefix from the request URL's path and calls the wrapped handler. It copies the request rather than mutating the one it was given, and if the prefix is not actually there it answers 404 instead of guessing. Express states the same behaviour from the documentation side: the mounting feature of <code>app.use()</code> rewrites <code>req.url</code> to strip the mount point.</p>
+
+  <div class="code-cap">mount.go &middot; Go, net/http, the prefix removed before the inner mux runs</div>
+<pre><code>api := http.NewServeMux()
+api.HandleFunc("GET /orders/{id}", showOrder)   // no /api/v2 anywhere
+
+root := http.NewServeMux()
+root.Handle("/api/v2/", http.StripPrefix("/api/v2", api))
+root.HandleFunc("GET /healthz", healthz)</code></pre>
+
+  <div class="code-cap">mount.py &middot; Python, WSGI, the prefix moved from PATH_INFO to SCRIPT_NAME</div>
+<pre><code>def mount(prefix, inner, fallback):
+    def app(environ, start_response):
+        path = environ["PATH_INFO"]
+        if not path.startswith(prefix):
+            return fallback(environ, start_response)
+        environ["SCRIPT_NAME"] = environ.get("SCRIPT_NAME", "") + prefix
+        environ["PATH_INFO"] = path[len(prefix):]   # the remainder
+        return inner(environ, start_response)
+    return app</code></pre>
+
+  <h3 id="mount-path">The prefix is kept, not discarded</h3>
+  <p>Stripping would be a lossy operation if the prefix vanished, so every implementation keeps it somewhere with a name. PEP 3333 splits the path into two variables for exactly this: <code>SCRIPT_NAME</code> is the initial portion corresponding to the application object, <b>so that the application knows its virtual location</b>, and <code>PATH_INFO</code> is the remainder. Express does the same with <code>req.baseUrl</code>, and keeps the untouched original in <code>req.originalUrl</code>: for a request to <code>/admin/new?sort=desc</code> mounted at <code>/admin</code>, those three read <code>/admin</code>, <code>/new</code> and <code>/admin/new?sort=desc</code>.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One request, two views</div>
+    <div class="fig-claim">The inner router matches a path the client never sent.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant O as Outer router
+  participant I as Inner router
+  participant H as Handler
+  C->>O: GET /api/v2/orders/8123
+  Note over O: prefix /api/v2 matches&lt;br/&gt;a mounted router
+  O->>I: GET /orders/8123 - base kept aside
+  Note over I: matches its own&lt;br/&gt;pattern /orders/{id}
+  I->>H: showOrder with id 8123
+  H-->>C: 200 with the order
+    </div>
+    <figcaption>The path the client sent and the path the inner router matched are different strings, and the difference is exactly the mount. The base is set aside rather than dropped, which is what lets the handler still reconstruct the URL the client actually used. <b>An inner router matches the remainder, and only the outer router ever sees the whole path.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: independence has to be paid for somewhere</h2>
+
+  <p>The first cost is URL generation. A router that does not know its prefix cannot build a correct absolute link, so every framework that supports mounting also supplies the base back for that purpose - Flask's <code>url_for</code> and Express's <code>req.baseUrl</code> exist for this. Hand-building a <code>Location</code> field or a pagination link from a pattern string is where mounting bites, because it works perfectly until the day the mount moves.</p>
+
+  <p>The second is that verdicts compose too. A request that matches the prefix has been given away, so if the inner router finds nothing, its 404 is the service's answer, and the outer router's own routes are never consulted. That is correct - the subtree belongs to the mounted router - but it means the <code>Allow</code> field of Lesson 0304 is computed from the inner table only, and a resource whose verbs are split across two routers will list half of them.</p>
+
+  <p>The third is ordering. The outer chain of Lesson 0303 wraps the mount, so it runs for every request in that subtree, and the inner chain nests inside it. That is usually what you want, and it is worth stating once so nobody re-adds request logging inside every mounted router.</p>
+
+  <div class="callout warn">
+    Two prefixes where one is a prefix of the other is the case to check by hand. Mounting <code>/api</code> and <code>/api/v2</code> on the same outer router is legal, and which one wins is decided by the specificity rule of Lesson 0302 rather than by the order you wrote them in. Go will tell you at startup when two patterns genuinely conflict; a framework that resolves ambiguity by first-registered-wins will not tell you anything at all, and the symptom is a whole subtree quietly answered by the wrong router.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A router is mounted at <code>/admin</code>. What path does it match against?</div>
+      <button class="q-opt">The full path, prefix and all of it</button>
+      <button class="q-opt">The full path, but only after a redirect</button>
+      <button class="q-opt">The remainder, with the prefix removed</button>
+      <button class="q-opt">The remainder, plus the query string too</button>
+      <div class="q-fb">The prefix is stripped before the inner router runs, which is what lets its patterns be written without it. Matching the full path would break every one of those patterns, no redirect is involved, and the query was never part of path matching at all.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does WSGI keep <code>SCRIPT_NAME</code> rather than dropping the prefix?</div>
+      <button class="q-opt">So the application knows its virtual location</button>
+      <button class="q-opt">So the router can match the prefix twice</button>
+      <button class="q-opt">So a proxy can rewrite the prefix later on</button>
+      <button class="q-opt">So the cache key includes the whole path</button>
+      <div class="q-fb">PEP 3333 gives that reason in the definition itself: an application needs its own base in order to build correct URLs. Matching it twice is exactly what stripping prevents, no proxy reads a WSGI variable, and the cache key is built by a cache from the target URI rather than from the environment.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="../index.html">the course map</a></b>, since this closes Module 03. Module 04 takes the request the router placed and asks what its body means.</li>
+    <li><b>Back at <a href="0302-matching-is-a-tree-not-a-list-of-ifs.html">matching is a tree, not a list of ifs</a></b> is the specificity rule that decides between two overlapping mounts.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one place in your service where a URL is built from a pattern string rather than from the framework's own builder. Ask the agent what that link would become if the router it lives in were mounted one level deeper tomorrow.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://peps.python.org/pep-3333/#environ-variables">PEP 3333's environment variables</a> define <code>SCRIPT_NAME</code> and <code>PATH_INFO</code> as the two halves of a mounted path, which is the clearest statement of the idea in any specification. <a href="https://pkg.go.dev/net/http#StripPrefix">Go's <code>http.StripPrefix</code></a> is the same mechanism as twenty lines of code, and <a href="https://expressjs.com/en/5x/api/request/">Express's request reference</a> documents <code>req.baseUrl</code> and <code>req.originalUrl</code> with a worked example.</p>
+
+  <div class="pager">
+    <a href="0304-404-and-405-are-routing-verdicts.html"><span class="dir">&larr; Previous</span><span class="ttl">404 and 405 are routing verdicts</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0305 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

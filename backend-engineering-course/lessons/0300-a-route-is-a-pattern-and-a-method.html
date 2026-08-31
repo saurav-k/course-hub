@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A route is a pattern and a method - Backend Engineering</title>
+<meta name="description" content="A route is the pair of an HTTP method and a path pattern. Either half alone answers a different question, and a router that keeps only one of them cannot tell a missing resource from a wrong verb.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing &middot; Lesson 0300</div>
+  <h1>A route is the pair of a method and a path pattern, and either half on its own is not a route</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    The pair, before the matching. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.1">RFC 9110 &sect;9.1 - Method overview</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A route is a <b>registered pair</b>: one method token and one path pattern. The router matches both or it has not matched.</li>
+      <li>The two halves answer different questions. The pattern asks <b>which resource</b>, the method asks <b>what is being asked of it</b>.</li>
+      <li>A pattern is a <b>shape</b>, not a string: it holds literal segments and named holes that stand for one segment each.</li>
+      <li>Real routers key on the method <b>before</b> the path, because that is one exact comparison in front of a walk.</li>
+      <li>What it costs: one resource with four verbs is four registrations, and a router that drops the method half can no longer tell a missing resource from a wrong verb.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Module 02 delivered a parsed request - this is what consumes it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Module 02&lt;br/&gt;a parsed method,&lt;br/&gt;target and headers"] --> T["THIS PAGE&lt;br/&gt;the route as a pair&lt;br/&gt;of method and pattern"]
+  T --> A["Lesson 0301&lt;br/&gt;what belongs in the path&lt;br/&gt;and what in the query"]
+  T --> B["Lesson 0302&lt;br/&gt;how a router matches&lt;br/&gt;many patterns at once"]
+  T --> C["Lesson 0304&lt;br/&gt;the verdicts the pair&lt;br/&gt;makes possible"]
+  W["Module 03&lt;br/&gt;Routing"] -.- T
+    </div>
+    <figcaption>Module 02 stopped at a request whose method and target were understood but which had reached no code. This page is the first half of the answer: the thing a request is matched against. <b>Routing begins where parsing ends, and the unit it works on is a pair.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two keys, not one string</h2>
+
+  <p>Most people picture a router as a lookup on the URL. That picture is wrong in a way that costs you later, because it throws away half of what the client said. RFC 9110 is explicit that the method token is <b>the primary source of request semantics</b>: it says what the client wants done, and the target says what it wants done to. A router that reads only the target has read the object of the sentence and thrown away the verb.</p>
+
+  <p>So the unit a router registers is a pair. <code>GET /orders/{id}</code> and <code>DELETE /orders/{id}</code> name the same resource and are two different routes, dispatched to two different functions, because reading an order and destroying one are not the same request. The pair is also what lets a router answer honestly when nothing matches, which Lesson 0304 develops: a router holding both halves can say <em>this resource exists but not for that verb</em>, and a router holding only the path cannot.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two questions, one match</div>
+    <div class="fig-claim">A match needs both answers, and either one alone leaves the request unplaced.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant R as Router
+  participant H as Handler
+  C->>R: DELETE /orders/8123
+  Note over R: question 1 - does any&lt;br/&gt;pattern match this path
+  Note over R: question 2 - is DELETE&lt;br/&gt;registered on that pattern
+  R->>H: deleteOrder with id 8123
+  H-->>R: 204 No Content
+  R-->>C: 204 No Content
+    </div>
+    <figcaption>The router asks two questions of one request and both must answer before any of your code runs. Swapping their order changes nothing about the verdict, only about how much work is done to reach it. <b>Half an answer is not a match, and a router that asks one question cannot tell you which half failed.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: registration, then lookup</h2>
+
+  <h3 id="route">A route: what registration actually stores</h3>
+  <p>Registration puts an entry into a structure the router owns. The entry holds the method token, the compiled path pattern, and a reference to the function to call. Nothing about it is textual at match time; the pattern was parsed once, when the service started, and the string it came from is not consulted again. This is why a router can reject a malformed pattern at boot rather than on the unlucky request that first reaches it.</p>
+
+  <h3 id="path-pattern">The path pattern: a shape with named holes</h3>
+  <p>A pattern is a sequence of path segments in which some segments are literal and some are named holes. Go's <code>ServeMux</code> states the rule tightly: a wildcard must be a <b>full path segment</b>, so it has to be preceded by a slash and followed by a slash or the end of the pattern, and <code>/b_{bucket}</code> is not a valid pattern at all. A hole normally matches exactly one segment, ending at the next literal slash. The value it captured is then handed to your code by name.</p>
+
+  <h3 id="method-dispatch">Method dispatch: the second key, checked first</h3>
+  <p>The method half is an exact token comparison and the path half is a walk over segments, so a router that keys on the method first throws away most of its table for the price of one string equality. Go's routing tree does exactly that: it branches on host, then on method, then on consecutive segments of the path. Two conventions ride on top of that comparison and both are worth knowing. Go treats a pattern registered for <code>GET</code> as matching <code>HEAD</code> as well; Flask adds <code>HEAD</code> whenever <code>GET</code> is present, and implements <code>OPTIONS</code> for you.</p>
+
+  <div class="code-cap">routes.go &middot; Go, net/http ServeMux, the method is part of the pattern</div>
+<pre><code>mux := http.NewServeMux()
+mux.HandleFunc("GET /orders/{id}", showOrder)
+mux.HandleFunc("DELETE /orders/{id}", deleteOrder)
+mux.HandleFunc("POST /orders", createOrder)
+
+func showOrder(w http.ResponseWriter, r *http.Request) {
+    id := r.PathValue("id") // the named hole, by name
+}</code></pre>
+
+  <div class="code-cap">routes.py &middot; Python, Flask, the method is an argument to the same decorator</div>
+<pre><code>@app.get("/orders/&lt;int:order_id&gt;")
+def show_order(order_id):
+    ...
+
+@app.delete("/orders/&lt;int:order_id&gt;")
+def delete_order(order_id):
+    ...</code></pre>
+
+  <p>The two spellings are the same object. Go writes the method inside the pattern string and Flask writes it as a decorator or a <code>methods</code> argument, but both register a pair, and both hand the captured segment to the function by name rather than by position in the URL.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The order of the keys</div>
+    <div class="fig-claim">Branching on method first discards most of the table before any walk.</div>
+    <div class="mermaid">
+flowchart TB
+  R["registered routes"] --> M1["method GET"]
+  R --> M2["method POST"]
+  R --> M3["method DELETE"]
+  M1 --> S1["segment orders"]
+  M3 --> S3["segment orders"]
+  S1 --> H1["hole id&lt;br/&gt;showOrder"]
+  S3 --> H3["hole id&lt;br/&gt;deleteOrder"]
+  M2 --> S2["segment orders&lt;br/&gt;createOrder"]
+    </div>
+    <figcaption>The shape Go's routing tree actually builds: host, then method, then the path segments one level at a time. A DELETE request never looks at any of the GET subtree, which is the whole reason the exact comparison goes in front of the walk. <b>The method is a key the router uses, not a flag your handler reads.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the pair is four registrations, and it is worth them</h2>
+
+  <p>One resource with four verbs is four entries, four functions and four tests. The tempting economy is to register the path once and branch on <code>request.method</code> inside the handler, and every framework lets you. It reads as less code and it is, but it moves a routing decision into application code, and three things follow. The router can no longer report which methods a resource supports, so the <code>Allow</code> field that Lesson 0304 owes has nowhere to come from. The middleware chain of Lesson 0303 can no longer differ by verb, so a write path and a read path get the same treatment. And a verb the branch forgot falls through to whatever the last <code>else</code> does.</p>
+
+  <p>The other economy, more common and worse, is putting the verb into the path: <code>POST /orders/8123/delete</code>. That produces a route the pair can still match, so nothing breaks on the day it ships. What it loses is everything the method token bought in Lesson 0201: a cache, a proxy and a retrying client all read the method and none of them read your path segment, so a delete disguised as a POST is invisible to every intermediary on the wire.</p>
+
+  <div class="callout warn">
+    A pattern registered with no method matches every method. Go's <code>ServeMux</code> documents it plainly, and the same is true of Django's <code>path()</code> and of Express's <code>app.use</code>. It is the shape that reaches production most quietly, because the handler under it was written for one verb and is now reachable by all of them - including the <code>DELETE</code> nobody sent while the feature was being reviewed.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does a router key on the method as well as the path?</div>
+      <button class="q-opt">Because paths alone are not unique enough</button>
+      <button class="q-opt">Because the two halves ask different questions</button>
+      <button class="q-opt">Because HTTP forbids reusing one path twice</button>
+      <button class="q-opt">Because methods are cheaper to compare first</button>
+      <div class="q-fb">The pattern names the resource and the method names the action asked of it, so both are needed to identify one route. Paths are perfectly capable of being unique, nothing in HTTP forbids reusing a path across verbs, and the cheap comparison is a consequence of the pair rather than the reason for it.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which registration is not a valid Go <code>ServeMux</code> pattern?</div>
+      <button class="q-opt">GET /files/{name...} at the end</button>
+      <button class="q-opt">/orders/{id} with no method at all</button>
+      <button class="q-opt">POST /orders with no hole in it</button>
+      <button class="q-opt">GET /file_{name} inside a segment</button>
+      <div class="q-fb">A wildcard must be a full path segment, so a hole glued to a literal prefix inside one segment is rejected. A trailing multi-segment hole is allowed at the end of a pattern, a pattern with no method is allowed and matches every method, and a pattern with no hole is the ordinary literal case.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0301-path-parameters-and-query-strings-say-different-things.html">path parameters and query strings say different things</a></b> takes the pattern half apart: which part of a URL is allowed to be a hole, and which part never should be.</li>
+    <li><b>Back at <a href="0201-methods-are-verbs-with-guarantees.html">methods are verbs with guarantees</a></b> is where the method token got the properties that make the pair worth keeping.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> List every route in one service you own, as method and pattern pairs. Ask the agent which resources are missing a verb they plainly support, and which handlers are branching on the method internally instead of registering the pair.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.1">RFC 9110 &sect;9.1</a> states that the method token is the primary source of request semantics and that the token is case-sensitive. <a href="https://pkg.go.dev/net/http#ServeMux">Go's <code>net/http.ServeMux</code> documentation</a> is the shortest complete statement of a pattern grammar in wide use: method, host and path in one string, with the wildcard rules written out.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0301-path-parameters-and-query-strings-say-different-things.html"><span class="dir">Next &rarr;</span><span class="ttl">Path parameters and query strings say different things</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0300 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -47,6 +47,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Routing",
+      "lessons": [
+        {
+          "title": "A route is a pattern and a method",
+          "href": "lessons/0300-a-route-is-a-pattern-and-a-method.html"
+        },
+        {
+          "title": "Path parameters and query strings say different things",
+          "href": "lessons/0301-path-parameters-and-query-strings-say-different-things.html"
+        },
+        {
+          "title": "Matching is a tree, not a list of ifs",
+          "href": "lessons/0302-matching-is-a-tree-not-a-list-of-ifs.html"
+        },
+        {
+          "title": "Middleware is a chain, and order is the design",
+          "href": "lessons/0303-middleware-is-a-chain-and-order-is-the-design.html"
+        },
+        {
+          "title": "404 and 405 are routing verdicts",
+          "href": "lessons/0304-404-and-405-are-routing-verdicts.html"
+        },
+        {
+          "title": "Mounting composes routers",
+          "href": "lessons/0305-mounting-composes-routers.html"
+        }
+      ]
+    },
+    {
       "n": "04",
       "title": "Serialization and contracts",
       "lessons": [
