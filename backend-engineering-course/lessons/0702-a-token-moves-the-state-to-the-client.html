@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A token moves the state to the client - Backend Engineering</title>
+<meta name="description" content="A signed token lets a server decide who is calling without asking anybody. That removes the lookup and removes revocation with it, so the design question is how long a withdrawn permission is allowed to keep working.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Auth and security &middot; Lesson 0702</div>
+  <h1>A self-contained token buys you the lookup and sells you the revocation</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The second shape of the credential, and the bill it moves. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc7519">RFC 7519 - JSON Web Token</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A JWT carries its claims <b>in the credential itself</b>, signed, so a server can decide who is calling without reading any store.</li>
+      <li>The signature is the entire security of the scheme: RFC 7519 says the contents <b>cannot be relied upon in a trust decision</b> unless they have been cryptographically secured.</li>
+      <li>Two classic breaks are about the <code>alg</code> header, not the maths: <b>setting it to <code>none</code></b>, and <b>switching RS256 to HS256</b> so the public key becomes the shared secret.</li>
+      <li>Verification is a checklist, not a call: your allowed algorithms, the signature, <code>exp</code> and <code>nbf</code>, then <code>iss</code> and <code>aud</code> - and <b>a token addressed to someone else must be rejected</b>.</li>
+      <li>What it costs: <b>you cannot take it back</b>. A revoked permission keeps working until the token expires, so token lifetime is the length of that window and you choose it deliberately.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This page is the same credential with the storage decision reversed.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0701&lt;br/&gt;the server stores&lt;br/&gt;the truth"] --> T["THIS PAGE&lt;br/&gt;the client carries&lt;br/&gt;the truth, signed"]
+  T --> A["Lesson 0703&lt;br/&gt;a third party&lt;br/&gt;issues it"]
+  T --> B["Module 13&lt;br/&gt;a stateless fleet&lt;br/&gt;that scales flat"]
+  W["Module 07&lt;br/&gt;auth and security"] -.- T
+    </div>
+    <figcaption>One decision separates this page from the last: whether the credential points at the state or contains it. Everything downstream follows - the appeal of a token is that any instance can verify it alone, which is what makes it the credential of a horizontally scaled fleet, and the cost is that no instance can be told to stop honouring it. <b>The lookup you removed was also the place where a revocation would have been noticed.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the claims travel with the request</h2>
+
+  <h3 id="three-parts">Three base64url parts, and only the third one matters</h3>
+  <p>A JWT is <a href="https://www.rfc-editor.org/rfc/rfc7519#section-3">a sequence of URL-safe parts separated by period characters</a>: a header naming the algorithm, a payload of claims, and a signature over the first two. The first two parts are encoded, not encrypted. Anyone holding the token can read every claim in it, which is worth saying out loud because engineers put things in tokens that they would not print in a log.</p>
+
+  <p>The claims themselves are a small registered set (<a href="https://www.rfc-editor.org/rfc/rfc7519#section-4.1">RFC 7519 &sect;4.1</a>): <code>iss</code> names who issued it, <code>sub</code> names who it is about, <code>aud</code> names who it is <em>for</em>, <code>exp</code> is the time on or after which it <em>MUST NOT</em> be accepted, <code>nbf</code> the time before which the same holds, <code>iat</code> when it was issued, and <code>jti</code> a unique id for it. Each is a normal JSON field with no protection of its own; the signature is what makes any of them believable, and &sect;11.1 says so directly.</p>
+
+  <h2>2. The mechanism: verification is an ordered checklist</h2>
+
+  <h3 id="alg-confusion">The two famous breaks are both in the header</h3>
+  <p>The classic JWT failures are not attacks on cryptography. RFC 8725, the JWT best-practices document, records them as deployment defects: <a href="https://www.rfc-editor.org/rfc/rfc8725#section-2.1">the algorithm can be changed to "none" by an attacker, and some libraries would trust this value</a>, and an <code>RS256</code> token can be re-signed as <code>HS256</code> so that a library validates it <em>using the RSA public key as the HMAC shared secret</em>. In the second case the attacker needs only a public key, which is public.</p>
+
+  <p>Both have the same root cause: the library asked the token which algorithm to use. The fix is stated as a requirement - libraries <a href="https://www.rfc-editor.org/rfc/rfc8725#section-3.1">MUST enable the caller to specify a supported set of algorithms and MUST NOT use any other algorithms</a>. You name the algorithms; the token does not get a vote. Two more from the same section are worth holding: the relying party <a href="https://www.rfc-editor.org/rfc/rfc8725#section-3.9">MUST validate the audience value</a> and reject a token not addressed to it, and different kinds of JWT in one system need <em>mutually exclusive</em> validation rules, so an identity token can never be spent as an access token.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Verifying, in order</div>
+    <div class="fig-claim">Every check before the last one can reject a syntactically perfect token.</div>
+    <div class="mermaid">
+flowchart TB
+  T["Token arrives"] --> A{"alg is in MY&lt;br/&gt;allowed set?"}
+  A -- "no" --> X1["reject&lt;br/&gt;closes alg=none&lt;br/&gt;and RS256 to HS256"]
+  A -- "yes" --> S{"signature verifies&lt;br/&gt;with the key for iss?"}
+  S -- "no" --> X2["reject&lt;br/&gt;forged or&lt;br/&gt;wrong issuer"]
+  S -- "yes" --> E{"exp and nbf&lt;br/&gt;bracket now?"}
+  E -- "no" --> X3["reject&lt;br/&gt;expired or&lt;br/&gt;not yet valid"]
+  E -- "yes" --> D{"aud names&lt;br/&gt;this service?"}
+  D -- "no" --> X4["reject&lt;br/&gt;addressed to&lt;br/&gt;another service"]
+  D -- "yes" --> OK["now the claims&lt;br/&gt;may be trusted"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class OK ok
+  class X1,X2,X3,X4 bad
+    </div>
+    <figcaption>The order is not arbitrary. Fixing the algorithm set first means the signature check that follows cannot be redirected onto a weaker primitive, and the audience check last means a token that is genuine, current and correctly signed is still refused when it was minted for a different service. <b>A library that decodes and returns the claims has done none of this, and its output is attacker-controlled JSON.</b></figcaption>
+  </figure>
+
+  <h3 id="revocation-window">You cannot un-issue what you did not keep</h3>
+  <p>Now the bill. A password change, a sacking, a leaked device: with a session you delete a row and the next request arrives as a stranger. With a self-contained token there is no row. RFC 7009, which defines OAuth's revocation endpoint, sets out the same fork: an access token may be self-contained, so that <a href="https://www.rfc-editor.org/rfc/rfc7009#section-3">a resource server needs no further interaction with an authorization server</a>, or it may be a handle that requires a lookup on every use. In the first case the RFC notes that immediate revocation needs some non-standardised back-channel between the two servers.</p>
+
+  <p>The practical compromise is the third option the same section names: issue short-lived access tokens refreshable at any time, <em>which allows the authorization server to impose a limit on the time revoked when access tokens are in use</em>. Access tokens live minutes, refresh tokens live longer and are checked against real state each time they are spent. RFC 7009 states the general law plainly: <a href="https://www.rfc-editor.org/rfc/rfc7009#section-3">the cost of revocation in terms of required state and communication overhead is ultimately the result of the desired security properties</a>.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Stale authority against lookups</div>
+    <div class="fig-claim">Shorter tokens shrink the window by paying more refreshes for it.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of the worst-case window during which a revoked credential still works. A server-side session is zero minutes at 600 store reads per hour. A five-minute token is five minutes at 12 refreshes per hour, a fifteen-minute token is fifteen minutes at 4 refreshes, and a sixty-minute token is sixty minutes at 1 refresh.">
+      <line class="axis" x1="80" y1="250" x2="620" y2="250"/>
+      <line class="axis" x1="80" y1="40" x2="80" y2="250"/>
+      <rect class="m-stat"  x="110" y="248" width="70" height="2"/>
+      <rect class="m-alarm" x="250" y="233" width="70" height="17"/>
+      <rect class="m-alarm" x="390" y="200" width="70" height="50"/>
+      <rect class="m-alarm" x="530" y="50"  width="70" height="200"/>
+      <text class="ttl" x="80" y="26">Worst-case minutes a revoked credential still works (derived)</text>
+      <text class="lbl-sm t-stat"  x="145" y="242" text-anchor="middle">0 min</text>
+      <text class="lbl-sm t-alarm" x="285" y="227" text-anchor="middle">5 min</text>
+      <text class="lbl-sm t-alarm" x="425" y="194" text-anchor="middle">15 min</text>
+      <text class="lbl-sm t-alarm" x="565" y="44"  text-anchor="middle">60 min</text>
+      <text class="lbl-sm" x="145" y="266" text-anchor="middle">session</text>
+      <text class="lbl-sm" x="285" y="266" text-anchor="middle">5 min JWT</text>
+      <text class="lbl-sm" x="425" y="266" text-anchor="middle">15 min JWT</text>
+      <text class="lbl-sm" x="565" y="266" text-anchor="middle">60 min JWT</text>
+      <text class="lbl-sm" x="145" y="284" text-anchor="middle">600 reads/h</text>
+      <text class="lbl-sm" x="285" y="284" text-anchor="middle">12/h</text>
+      <text class="lbl-sm" x="425" y="284" text-anchor="middle">4/h</text>
+      <text class="lbl-sm" x="565" y="284" text-anchor="middle">1/h</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>state kept, revocation immediate</span><span><i class="sw-alarm"></i>state discarded, revocation delayed</span></div>
+      <figcaption>Derived rather than measured, on one stated assumption: a client making a request every six seconds, so 600 requests an hour. The bar is the token lifetime, because that is the longest a withdrawn permission survives; the line beneath is 60 divided by the lifetime, the refresh calls that replace the per-request read. <b>The choice is not whether to hold state but how coarsely - a session checks authority 600 times an hour and a one-hour token checks it once.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off, stated as a choice</h2>
+
+  <p>Neither shape is the safe default. A session is right when revocation must be immediate and the traffic can afford a read: anything with money, admin powers, or a support team who need to lock an account while a customer is still on the phone. A token is right when verification has to work without a shared store: many services, no common database, or an edge that must not call home on every request.</p>
+
+  <p>What is never right is a long-lived self-contained token with no plan for withdrawal, because that is the session design with the one operation you will eventually need quietly missing. If you find yourself adding a deny-list of revoked token ids checked on every request, notice what you have built: a session store, reached by <code>jti</code>, with the signature now paying for nothing.</p>
+
+  <div class="callout warn">
+    A token is a bearer credential, so possession is the whole of the proof and there is nothing in the token tying it to the client that was given it. RFC 9700 therefore recommends that authorization and resource servers <a href="https://www.rfc-editor.org/rfc/rfc9700.html#section-2.2.1">use mechanisms for sender-constraining access tokens</a> to prevent misuse of stolen and leaked ones. Until you have done that, every log line, error report and browser extension that touches the token is holding a working credential.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does accepting the token's own <code>alg</code> header break verification?</div>
+      <button class="q-opt">The header is not covered by the signature, so it can be edited freely</button>
+      <button class="q-opt">The attacker picks the primitive, so none or a public key as secret works</button>
+      <button class="q-opt">The header is base64url encoded, so a decoder cannot read it reliably</button>
+      <button class="q-opt">The claim set is unsigned whenever the header names a weak algorithm</button>
+      <div class="q-fb">Letting the token choose the algorithm lets the attacker choose it: <code>none</code> removes verification, and <code>HS256</code> turns the published RSA public key into the shared secret. The header <em>is</em> covered by the signature, which is why the substitution has to change the algorithm rather than merely the value; and encoding is not the issue, since base64url decodes deterministically.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A user is banned. A 60-minute self-contained access token was issued 5 minutes ago. What happens?</div>
+      <button class="q-opt">The next request fails, because the resource server rechecks the account</button>
+      <button class="q-opt">The token fails at once, since revoking a refresh token voids its children</button>
+      <button class="q-opt">The token fails once its signature is checked against the issuer's keys</button>
+      <button class="q-opt">The token keeps working for 55 minutes unless a back-channel exists</button>
+      <div class="q-fb">Self-contained means the resource server asks nobody, so the ban is invisible to it until <code>exp</code> passes. Cascading revocation is real but it reaches tokens the authorization server can still see; and the signature stays valid, because nothing about the ban changed the key it was signed with.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0703-oauth-delegates-access-without-sharing-the-password.html">OAuth delegates access without sharing the password</a></b> is where these tokens usually come from, and who issues them.</li>
+    <li><b>Behind you, <a href="0701-a-session-is-server-state-behind-an-opaque-id.html">a session is server state behind an opaque id</a></b> is the same credential with the storage decision made the other way.</li>
+    <li><b>Behind you, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> is the same rule applied to a token: verify at the edge, and pass a trusted type inwards.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take a token your service accepts and write down every check it performs before trusting a claim. Then ask the agent what your service does when a user is deactivated, and how many minutes their existing tokens keep working.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc8725">RFC 8725</a> is the one to read: it is short, it is written as threats paired with requirements, and every item in it is a defect somebody shipped. <a href="https://www.rfc-editor.org/rfc/rfc7519">RFC 7519</a> is the reference for the claim names, and <a href="https://www.rfc-editor.org/rfc/rfc7009#section-3">RFC 7009 &sect;3</a> is two paragraphs that frame the revocation trade-off better than most articles about it.</p>
+
+  <div class="pager">
+    <a href="0701-a-session-is-server-state-behind-an-opaque-id.html"><span class="dir">&larr; Previous</span><span class="ttl">A session is server state behind an opaque id</span></a>
+    <a class="nxt" href="0703-oauth-delegates-access-without-sharing-the-password.html"><span class="dir">Next &rarr;</span><span class="ttl">OAuth delegates access without sharing the password</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0702 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
