@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A constraint is the only rule every writer obeys - Backend Engineering</title>
+<meta name="description" content="A rule written in service code binds only the callers that run that code. A rule declared in the schema binds the migration script, the second service and the console session too, because they all pass through the same gate.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Data &middot; Lesson 0800</div>
+  <h1>A constraint in the schema is the only rule every writer has to obey</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    Why the relational model is a place to put invariants, not a table format. &middot;
+    <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">PostgreSQL - Constraints</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A relation is a <b>named collection of rows with the same named columns</b>, and SQL guarantees no order among them, so a query that does not sort is asking for whatever arrives.</li>
+      <li>A validation rule in service code binds <b>only the callers that run that code</b>. The migration, the second service and the console session do not.</li>
+      <li>A constraint is declared once in the schema and checked on <b>every</b> write, because every writer passes through the same engine.</li>
+      <li><b>Check-then-write is a race</b>, and no amount of application care fixes it. A unique constraint is not a check, it is the arbitration.</li>
+      <li>What it costs: constraints refuse writes at the worst moment, foreign keys couple the order of your deletes, and every one of them is a rule your schema change now has to satisfy.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The promises made in Module 06 only hold if the store refuses bad data.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Module 06&lt;br/&gt;the API promises&lt;br/&gt;a shape"] --> T["THIS PAGE&lt;br/&gt;where the facts&lt;br/&gt;are kept and guarded"]
+  T --> A["Lessons 0801 to 0803&lt;br/&gt;transactions -&lt;br/&gt;guarding a group of writes"]
+  T --> B["Lessons 0804 and 0805&lt;br/&gt;indexes -&lt;br/&gt;finding rows again"]
+  T --> C["Lesson 0806&lt;br/&gt;the stores that&lt;br/&gt;drop these rules"]
+  W["Module 08&lt;br/&gt;Data"] -.- T
+    </div>
+    <figcaption>Everything before this module moved a request around: parsed it, routed it, negotiated a representation, answered it. None of it remembered anything. This module is about the component that does, and the first question is not how to make it fast but what it is allowed to hold. <b>Correctness of the stored facts is upstream of every other property a store can have, because a fast wrong answer is still wrong.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the store is where the writers meet</h2>
+
+  <h3 id="relation">A relation is a set of rows, not a spreadsheet</h3>
+  <p>PostgreSQL states the model in one sentence: it manages data stored in relations, and <a href="https://www.postgresql.org/docs/current/tutorial-concepts.html">relation is essentially a mathematical term for table</a>. Each table is a named collection of rows, each row of a table has the same set of named columns, and each column has a type. The part engineers forget is the next sentence: columns have a fixed order in each row, but SQL does not guarantee the order of the rows in any way.</p>
+
+  <p>That is not a limitation to work around, it is the model doing its job. A relation is a set of facts, and a set has no first element. Order is something you ask for at read time with <code>ORDER BY</code>, which is why lesson 0602 could build a cursor on a sort key at all: the sort was always the caller's request rather than a property of storage. A list endpoint with no <code>ORDER BY</code> is not returning the oldest rows first, it is returning whatever the plan happened to produce, and it will change the day an index changes.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Three writers, one gate</div>
+    <div class="fig-claim">A rule in service code binds only the callers that run that code.</div>
+    <div class="mermaid">
+flowchart LR
+  S1["Your service&lt;br/&gt;validates in code"] --> DB[("The database&lt;br/&gt;checks every write")]
+  S2["The migration script&lt;br/&gt;written last Tuesday"] --> DB
+  S3["A console session&lt;br/&gt;fixing an incident"] --> DB
+  S4["The other team's&lt;br/&gt;service, next quarter"] --> DB
+  DB --> R["The rows everyone&lt;br/&gt;else will read"]
+  classDef guard fill:var(--ok-soft),stroke:var(--ok)
+  class DB guard
+    </div>
+    <figcaption>Only the first arrow runs the validation you wrote. The other three reach the same rows without passing through a line of your code, and each of them is a real thing that happens to every service that lives longer than a year. A rule placed in the box everyone passes through is a rule with no route around it. <b>Where you put an invariant decides who is exempt from it, and application code exempts everybody who did not import it.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what the engine will refuse</h2>
+
+  <h3 id="constraints">Five kinds, and each forbids one thing</h3>
+  <p>The <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">constraint catalogue</a> is short, which is what makes it learnable. A <b>check</b> constraint holds a Boolean expression over the row. A <b>not-null</b> constraint forbids the absent value in a column. A <b>unique</b> constraint forbids two rows agreeing on a column or a group of them. A <b>primary key</b> is unique and not-null together, at most one per table, and it creates a unique B-tree index as a side effect, which is the first hint that lesson 0804 was always part of this subject. A <b>foreign key</b> says the values in a column must match the values appearing in some row of another table, and PostgreSQL names the property that maintains: referential integrity between two related tables.</p>
+
+  <div class="code-cap">schema.sql &middot; the invariants, declared once</div>
+  <pre><code>CREATE TABLE accounts (
+  id        bigint  PRIMARY KEY,
+  owner_id  bigint  NOT NULL REFERENCES owners (id),
+  currency  text    NOT NULL,
+  balance   numeric NOT NULL CHECK (balance &gt;= 0),
+  UNIQUE (owner_id, currency)
+);</code></pre>
+
+  <p>Read that as five sentences a caller cannot argue with. There is one row per identifier. Every account belongs to an owner that exists. A currency is always present. A balance is never negative. One owner holds at most one account per currency. Nothing in any service needs to be trusted for those five to be true of every row, today and after the next three teams have written against this table.</p>
+
+  <div class="callout warn">
+    A check constraint is satisfied if the expression evaluates to true <b>or to null</b>. Most expressions evaluate to null when any operand is null, so <code>CHECK (balance &gt;= 0)</code> does not prevent a null balance and never did. The documentation says exactly this, and it is the single most common way a constraint quietly means less than its author read it as. The fix is not a cleverer expression, it is the <code>NOT NULL</code> beside it, which is why the column above carries both.
+  </div>
+
+  <h3 id="race">Check-then-write is a race, and a constraint is not</h3>
+  <p>The argument for putting rules in the schema is usually made as tidiness, and that undersells it. There is a class of rule that application code cannot enforce correctly at all, no matter how carefully written, because the check and the write are two separate trips and something else can happen in between.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Check, then insert</div>
+    <div class="fig-claim">Two requests can both pass the same check and both write.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Request A
+  participant B as Request B
+  participant D as Database
+  A->>D: SELECT ... WHERE email = 'x'
+  D-->>A: no rows - looks free
+  B->>D: SELECT ... WHERE email = 'x'
+  D-->>B: no rows - looks free
+  A->>D: INSERT email 'x'
+  D-->>A: ok
+  B->>D: INSERT email 'x'
+  D-->>B: ok, unless a UNIQUE constraint exists
+    </div>
+    <figcaption>Two requests, each running correct code, each reading a true answer, and the window between the read and the write is where the duplicate is created. Widening the check does nothing, because the flaw is the gap rather than the query. With the constraint declared, the second insert is refused by the engine and the service turns that refusal into a 409. <b>An application check tells you what was true a moment ago - only the engine can decide which of two simultaneous writers wins.</b></figcaption>
+  </figure>
+
+  <p>So the service still runs its own check, and it runs it for a different reason: to produce the readable refusal that lesson 0603 asked for, before the work starts. The constraint is what makes the answer true. Handle the constraint violation as a normal outcome rather than a 500, because under concurrency it is one.</p>
+
+  <h2>3. The trade-off: what declaring the rule costs you</h2>
+
+  <p>Every constraint is checked on every write that touches it, and a foreign key check is a lookup in another table. That is real work on the write path, and it is work you cannot switch off for one endpoint that is in a hurry. A unique constraint needs its index maintained, which is lesson 0804's bill arriving early. None of this is large at ordinary sizes and all of it is real at large ones.</p>
+
+  <p>The heavier cost is coupling. A foreign key gives the child table a say in what the parent may do: a delete has to be ordered, cascaded, or refused, and the choice now lives in the schema rather than in whichever service happened to run the delete. Schema changes inherit the same property, and the shape of that is worth drawing once.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Adding a not-null column</div>
+    <div class="fig-claim">A rule the existing rows break costs three deploys, not one.</div>
+    <div class="mermaid">
+timeline
+  title Turning a new column into an invariant
+  Deploy 1 : add the column, nullable : nothing enforces it yet
+  Backfill : write a value on every existing row : in batches, off the request path
+  Deploy 2 : the service writes it on every insert : new rows already satisfy the rule
+  Deploy 3 : add NOT NULL : the engine now guarantees it
+    </div>
+    <figcaption>The rule you want is the last step, and the three before it exist because the constraint applies to rows that were written before you decided on it. Skipping a step does not fail at deploy time, it fails when the migration meets the first row that predates the rule, in a lock the whole table is waiting behind. <b>A constraint is a claim about every row that has ever been written, so adding one to a live table is a data problem before it is a schema problem.</b></figcaption>
+  </figure>
+
+  <p>The alternative is not free either, and it is worth naming plainly because the next module of this course spends a page on it. AWS states the contrast for DynamoDB: in a relational system you design for flexibility without worrying about the query plan, and normalisation matters, while in <a href="https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-general-nosql-design.html">DynamoDB you design the schema specifically for the queries you already know you will run</a>. A store that will not enforce a cross-entity rule has not removed the rule. It has moved it into every writer, which is where this page started.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does a uniqueness check in service code fail to guarantee uniqueness?</div>
+      <button class="q-opt">The query can read a replica that is behind the primary</button>
+      <button class="q-opt">Service code cannot see rows another service inserted</button>
+      <button class="q-opt">Another writer can insert between the check and the write</button>
+      <button class="q-opt">The check runs before the request body has been parsed</button>
+      <div class="q-fb">The gap between reading and writing is the whole defect, and it exists on a single healthy primary with one service deployed. Replica lag makes it worse but is not required, cross-service visibility is not the issue since both writers see the same table, and parse order is unrelated.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A column carries only <code>CHECK (balance &gt;= 0)</code>. Which value does the constraint accept?</div>
+      <button class="q-opt">A null, because the expression evaluates to null</button>
+      <button class="q-opt">A negative number, if it is written as text</button>
+      <button class="q-opt">Nothing at all until the row is committed</button>
+      <button class="q-opt">Any number, since checks run only on insert</button>
+      <div class="q-fb">A check passes when the expression is true or null, and comparing null to zero yields null, so the row is admitted. Type mismatches are rejected by the column type rather than the check, checks are evaluated as the row is written rather than at commit, and they apply to updates as well as inserts.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html">a transaction is a boundary and the log is what keeps it</a></b> extends the same idea from one row to a group of writes that must land together.</li>
+    <li><b>Ahead, <a href="0806-the-non-relational-map-is-four-shapes.html">the non-relational map is four shapes</a></b> is where these guarantees are traded away on purpose, and what you get for them.</li>
+    <li><b>Behind you, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> made the parsing argument for the edge of the service, and this page makes the arbitration argument for the edge of the store.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one table your team owns and list the rules your code enforces about it. For each, ask the agent whether a migration script or a second service could write a row that breaks it, and which of the five constraint kinds would close the hole.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>PostgreSQL's <a href="https://www.postgresql.org/docs/current/ddl-constraints.html">Constraints</a> chapter is the whole catalogue in one readable page, including the null behaviour of check constraints and the referential actions a foreign key can take. Read it beside <a href="https://www.postgresql.org/docs/current/tutorial-concepts.html">Concepts</a>, which is four paragraphs and settles the row-order question that half of all flaky list endpoints turn out to rest on.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html"><span class="dir">Next &rarr;</span><span class="ttl">A transaction is a boundary and the log keeps it</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0800 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
