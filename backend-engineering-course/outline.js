@@ -137,6 +137,40 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "07",
+      "title": "Auth and security",
+      "lessons": [
+        {
+          "title": "Authentication answers who, authorization answers what",
+          "href": "lessons/0700-authentication-answers-who-authorization-answers-what.html"
+        },
+        {
+          "title": "A session is server state behind an opaque id",
+          "href": "lessons/0701-a-session-is-server-state-behind-an-opaque-id.html"
+        },
+        {
+          "title": "A token moves the state to the client",
+          "href": "lessons/0702-a-token-moves-the-state-to-the-client.html"
+        },
+        {
+          "title": "OAuth delegates access without sharing the password",
+          "href": "lessons/0703-oauth-delegates-access-without-sharing-the-password.html"
+        },
+        {
+          "title": "Injection is data arriving where code is expected",
+          "href": "lessons/0704-injection-is-data-arriving-where-code-is-expected.html"
+        },
+        {
+          "title": "XSS is code injected into someone else's browser",
+          "href": "lessons/0705-xss-is-code-injected-into-someone-elses-browser.html"
+        },
+        {
+          "title": "CSRF is the server trusting the browser",
+          "href": "lessons/0706-csrf-is-the-server-trusting-the-browser.html"
+        }
+      ]
+    },
+    {
       "n": "10",
       "title": "Async work and search",
       "lessons": [

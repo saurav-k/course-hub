@@ -165,6 +165,67 @@ TBD as lessons landing.
   for the 400 / 409 / 422 refusals. **That draft expired in April 2026 rather than shipping**, which is
   why lesson 0605 treats the header as a convention and cites Stripe for the practice.
 
+### Module 07 - Auth and security
+
+- Lesson 0700, the two questions: [RFC 9110 &sect;11](https://www.rfc-editor.org/rfc/rfc9110#section-11)
+  for the challenge-response framework, &sect;11.5 for the protection space and the automatic
+  re-presentation of credentials inside it, [&sect;15.5.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.2)
+  and [&sect;15.5.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.4) for the exact 401 and 403
+  wording including the permission to answer 404 instead;
+  [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
+  for deny-by-default and validating permission on every request;
+  [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+  for the Argon2id parameters that make authentication deliberately slow; and the
+  [OWASP Top 10:2021](https://owasp.org/Top10/2021/A00_2021_Introduction/) factors tables for the
+  occurrence chart, with the methodology note that eight of the ten categories were ranked from data
+  and two from a practitioner survey.
+- Lesson 0701, sessions: [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+  for the 64-bit entropy floor, the requirement to regenerate the id after any privilege change, the
+  idle and absolute timeouts and the both-sides invalidation rule;
+  [RFC 6265 &sect;4.1.2](https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2) for the attributes,
+  [&sect;8.5](https://www.rfc-editor.org/rfc/rfc6265#section-8.5) for the absence of isolation by port
+  or scheme and [&sect;8.6](https://www.rfc-editor.org/rfc/rfc6265#section-8.6) for the absence of
+  integrity across sibling domains; and [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
+  for what `HttpOnly` does and does not stop.
+- Lesson 0702, self-contained tokens: [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519) &sect;3 for the
+  three-part serialisation, &sect;4.1 for the registered claims and &sect;11.1 for the statement that
+  contents cannot be relied upon unless cryptographically secured;
+  [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) &sect;2.1 for the `alg: none` and RS256-to-HS256
+  substitutions and &sect;3.1, &sect;3.9 and &sect;3.12 for the requirements that close them;
+  [RFC 7009 &sect;3](https://www.rfc-editor.org/rfc/rfc7009#section-3) for the self-contained against
+  handle fork, the short-lived-token compromise and the sentence that the cost of revocation follows
+  from the desired security properties; and
+  [RFC 9700 &sect;2.2.1](https://www.rfc-editor.org/rfc/rfc9700.html#section-2.2.1) for
+  sender-constrained tokens.
+- Lesson 0703, OAuth: [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749) &sect;1 for the five failures
+  of password sharing, &sect;1.1 for the four roles, &sect;1.4 and &sect;1.5 for access and refresh
+  tokens; [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636) &sect;1 for the code-interception attack
+  on a registered custom scheme and &sect;4.2 for `S256` being mandatory to implement;
+  [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html) &sect;2.1 for exact redirect-URI matching,
+  &sect;2.1.1 for PKCE as a requirement, &sect;2.1.2 against the implicit grant and &sect;2.4 for the
+  resource owner password credentials grant that MUST NOT be used; and
+  [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html) for the identity
+  layer and the ID token's required claims.
+- Lesson 0704, injection: [OWASP SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html)
+  for the ordered primary defences, the statement that a parameterised query makes the database always
+  distinguish between code and data, the rule that identifiers and sort order need validation or query
+  redesign rather than binding, and the warning that escaping is fragile and cannot be guaranteed; and
+  [A03:2021 - Injection](https://owasp.org/Top10/2021/A03_2021-Injection/) for the general case across
+  interpreters.
+- Lesson 0705, XSS: [OWASP Cross Site Scripting Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+  for the five output contexts and the warning about using the wrong encoding, the safe and dangerous
+  sink lists, DOMPurify for genuine user-authored HTML, and the framework escape hatches by name; and
+  [MDN's CSP guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP) for the
+  nonce-per-response requirement, why allow-list policies fail, what `strict-dynamic` costs, and the
+  statement that a policy is not an alternative to sanitising input.
+- Lesson 0706, CSRF: [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+  for the definition, the synchroniser token including the rule that it is not stored in a cookie, the
+  naive double-submit pattern being bypassable by an attacker who can write cookies on the target
+  domain, custom headers being subject to the same-origin policy, and the statement that `SameSite` is
+  defence in depth rather than a replacement; and
+  [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) for
+  the precise `Strict`, `Lax` and `None` definitions that leave a state-changing GET forgeable.
+
 ### Module 10 - Async work and search
 
 - Lesson 1000, the deferred request: [RFC 9110 &sect;15.3.3](https://www.rfc-editor.org/rfc/rfc9110#section-15.3.3)
