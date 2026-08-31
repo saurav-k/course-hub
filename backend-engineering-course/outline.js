@@ -107,6 +107,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "The layered service",
+      "lessons": [
+        {
+          "title": "A layer is a boundary you can test across",
+          "href": "lessons/0500-a-layer-is-a-boundary-you-can-test-across.html"
+        },
+        {
+          "title": "The controller translates transport into intent",
+          "href": "lessons/0501-the-controller-translates-transport-into-intent.html"
+        },
+        {
+          "title": "The service layer owns the decision",
+          "href": "lessons/0502-the-service-layer-owns-the-decision.html"
+        },
+        {
+          "title": "The repository hides the store behind a contract",
+          "href": "lessons/0503-the-repository-hides-the-store-behind-a-contract.html"
+        },
+        {
+          "title": "Request context carries what every layer needs",
+          "href": "lessons/0504-request-context-carries-what-every-layer-needs.html"
+        },
+        {
+          "title": "Dependency direction is the design",
+          "href": "lessons/0505-dependency-direction-is-the-design.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "API design",
       "lessons": [
@@ -133,6 +163,40 @@ window.COURSE_OUTLINE = {
         {
           "title": "Idempotency keys make retries safe",
           "href": "lessons/0605-idempotency-keys-make-retries-safe.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Auth and security",
+      "lessons": [
+        {
+          "title": "Authentication answers who, authorization answers what",
+          "href": "lessons/0700-authentication-answers-who-authorization-answers-what.html"
+        },
+        {
+          "title": "A session is server state behind an opaque id",
+          "href": "lessons/0701-a-session-is-server-state-behind-an-opaque-id.html"
+        },
+        {
+          "title": "A token moves the state to the client",
+          "href": "lessons/0702-a-token-moves-the-state-to-the-client.html"
+        },
+        {
+          "title": "OAuth delegates access without sharing the password",
+          "href": "lessons/0703-oauth-delegates-access-without-sharing-the-password.html"
+        },
+        {
+          "title": "Injection is data arriving where code is expected",
+          "href": "lessons/0704-injection-is-data-arriving-where-code-is-expected.html"
+        },
+        {
+          "title": "XSS is code injected into someone else's browser",
+          "href": "lessons/0705-xss-is-code-injected-into-someone-elses-browser.html"
+        },
+        {
+          "title": "CSRF is the server trusting the browser",
+          "href": "lessons/0706-csrf-is-the-server-trusting-the-browser.html"
         }
       ]
     },

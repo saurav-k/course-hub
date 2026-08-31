@@ -26,11 +26,11 @@ before the next depends on it.
 | 2 | Module 02 - HTTP is the language (0200-0205) | written | Methods, status, headers, caching headers, CORS. RFC 9110, RFC 9111 and RFC 9113 owned. |
 | 3 | Module 03 - Routing (0300-0305) | written | The route as a pair, path against query, the prefix tree, the middleware chain, the 404/405 verdicts and prefix mounting. RFC 3986 and RFC 6570 join the canon; Go's ServeMux is the named implementation the mechanism pages read from. |
 | 4 | Module 04 - Serialization and contracts (0400-0405) | written | The wire contract, JSON's six types, schema-first protobuf, boundary parsing, content negotiation, and the compatibility rules. It was written before Module 03 landed, because nothing in it depends on routing. |
-| 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
-| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Module 03 landed and while Module 05 stays reserved, because nothing in it depends on routing or on the internal layering. |
-| 7 | Module 07 - Auth & security | reserved | Sessions, tokens, OAuth; the web's threat model (injection, XSS, CSRF). |
+| 5 | Module 05 - The layered service (0500-0505) | written | Layers as testable boundaries, controller, service, repository, request context, dependency direction. Written before Module 03 landed, because it depends on nothing routing defines. |
+| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05 landed, because nothing in it depends on routing or on the internal layering. |
+| 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
-| 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Modules 05, 07 and 08 stay reserved, because it depends on none of them. |
+| 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
 | 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
@@ -45,8 +45,13 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 05 and 07-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
+Modules 08-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+
+Module 05 was written out of reading order, before Module 03 landed, because it depends on nothing routing
+defines: it consumes the parsed, trusted values Module 04 produces and says only where they travel afterwards.
+Its lesson numbers start at 0500, so the 03xx block stayed free for the module that owns it and nothing was
+renumbered when Module 03 landed ahead of it.
 
 Module 03 landed fifth and takes the 03xx block, for the same reason Module 02 took 02xx: each module owns a
 hundred-block so a later module never renumbers an earlier one. It answers the question Module 02 leaves open - the
@@ -57,9 +62,16 @@ Module 06 landed fourth, after Module 04, because the API surface is what the se
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
 where that hand-off is made. It needs neither routing nor the layered service to be readable.
 
-Module 09 landed while Modules 05, 07 and 08 stay reserved. It needs
-neither the layered service nor the data module: a cache is reasoned about from the request
-and the store, both of which Module 01 already names, and lesson 0204 deliberately taught the protocol
+Module 07 landed after Module 06, because the interface Module 06 published is the thing
+this module decides who may invoke. It needs neither routing nor the layered service: the credential
+arrives in a header or a cookie that Module 02 already named, and the three threats are properties of
+the interpreters a handler talks to rather than of how the handler was reached. Its second half is
+ordered threat before defence throughout - injection, then XSS as the same defect with the browser as
+the interpreter, then CSRF as the one that needs no injected code at all - so lesson 0706 can close on
+the symmetry between the last two.
+
+Module 09 landed while Module 08 stays reserved. It needs neither the layered service nor the data
+module: a cache is reasoned about from the request and the store, both of which Module 01 already names, and lesson 0204 deliberately taught the protocol
 cache first so that this module could be about invalidation rather than about mechanism. Where it needs
 the relational store it links Module 08 as the owner of the truth rather than restating it.
 
