@@ -251,6 +251,51 @@ TBD as lessons landing.
   defence in depth rather than a replacement; and
   [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) for
   the precise `Strict`, `Lax` and `None` definitions that leave a state-changing GET forgeable.
+
+### Module 08 - Data
+
+- Lesson 0800, the relational model and constraints: [PostgreSQL - Constraints](https://www.postgresql.org/docs/current/ddl-constraints.html)
+  for the five constraint kinds, the statement that a foreign key maintains referential integrity between two tables, and the
+  rule that a check constraint is satisfied when its expression evaluates to true **or to null**, and
+  [PostgreSQL - Concepts](https://www.postgresql.org/docs/current/tutorial-concepts.html) for relation as the mathematical term
+  for table and for the statement that SQL guarantees no order among the rows of a table.
+- Lesson 0801, transactions and the log: [PostgreSQL - Transactions](https://www.postgresql.org/docs/current/tutorial-transactions.html)
+  for the bank-transfer example, the definition of atomic, the invisibility of an open transaction's updates until commit, and
+  savepoints, and [PostgreSQL - Write-Ahead Logging](https://www.postgresql.org/docs/current/wal-intro.html) for the ordering
+  rule, roll-forward recovery and the statement that one flush of the log may suffice to commit many small concurrent transactions.
+- Lesson 0802, isolation: [PostgreSQL - Transaction Isolation](https://www.postgresql.org/docs/current/transaction-iso.html)
+  for the four phenomena, Table 13.1, the note that PostgreSQL implements three distinct levels and that its Repeatable Read
+  does not allow phantom reads, the Read Committed re-evaluation rule with the `website.hits` example, and both serialization
+  failure messages with the instruction that applications must be prepared to retry. The MVCC claim that reading never blocks
+  writing is [PostgreSQL - Introduction to MVCC](https://www.postgresql.org/docs/current/mvcc-intro.html).
+- Lesson 0803, locking: [PostgreSQL - Explicit Locking](https://www.postgresql.org/docs/current/explicit-locking.html) for the
+  four row-lock modes, the statement that row-level locks are released at transaction end, automatic deadlock detection by
+  aborting one transaction, and the advice that the best defence is acquiring locks in a consistent order.
+  [PostgreSQL - Lock Management](https://www.postgresql.org/docs/current/runtime-config-locks.html) for `deadlock_timeout`
+  defaulting to 1s and why the check is deliberately lazy.
+- Lesson 0804, indexes: [PostgreSQL - Indexes](https://www.postgresql.org/docs/current/indexes-intro.html) for the sequential
+  scan against a few levels of a search tree, the synchronisation overhead on data manipulation, and the instruction to remove
+  seldom-used indexes, and [PostgreSQL - Index Types](https://www.postgresql.org/docs/current/indexes-types.html) for what a
+  B-tree can serve, including `IS NULL`, sorted retrieval and the anchored-pattern rule, and for hash, GiST, SP-GiST, GIN and BRIN.
+- Lesson 0805, composite order and the planner: [PostgreSQL - Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html)
+  for the exact leading-column rule, the 32-column limit and the advice to use them sparingly,
+  [Index-Only Scans and Covering Indexes](https://www.postgresql.org/docs/current/indexes-index-only-scans.html) for the two
+  conditions, the visibility map and the `INCLUDE` caveats,
+  [Statistics Used by the Planner](https://www.postgresql.org/docs/current/planner-stats.html) for `pg_statistic`, the default
+  of 100 entries and the weakness of single-column statistics, and
+  [Row Estimation Examples](https://www.postgresql.org/docs/current/row-estimation-examples.html) for the worked histogram
+  arithmetic that yields 0.100697 and `rows=1007`.
+- Lesson 0806, the non-relational map: [AWS - NoSQL design for DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-general-nosql-design.html)
+  for the access-pattern-first method, the few-tables advice and the statement that queries outside the designed set are
+  expensive and slow, [AWS - DynamoDB read consistency](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html)
+  for eventually consistent being the default and strongly consistent reads being unavailable on a global secondary index,
+  [MongoDB - Data modeling](https://www.mongodb.com/docs/manual/data-modeling/) for the flexible schema and the principle that
+  data accessed together is stored together, [MongoDB - Limits](https://www.mongodb.com/docs/manual/reference/limits/) for the
+  16 MiB document ceiling and the 100-level nesting cap, [Redis - Data types](https://redis.io/docs/latest/develop/data-types/)
+  for the data structure server framing and the structures it offers, and
+  [Neo4j - Graph database concepts](https://neo4j.com/docs/getting-started/appendix/graphdb-concepts/) for nodes, labels, and
+  directed relationships carrying properties.
+
 ### Module 09 - Caching
 
 - Lesson 0900, why a cache exists: [Atikoglu et al., *Workload Analysis of a Large-Scale Key-Value Store*, SIGMETRICS 2012](https://s4plus.ustc.edu.cn/_upload/article/files/7a/5b/5c9fd1264e30b6881ecd7f7733f2/3ef2e159-9fd8-47a6-903c-cf9bfa836a28.pdf)
@@ -438,4 +483,8 @@ Claims this course would like to make and cannot source.
 
 A gap recorded here is a gap the course does not assert on a page.
 
-- -
+- A concrete B-tree fanout for a given key width and page size. Lesson 0804 derives its depth arithmetic from an assumed
+  fanout of 200 and labels the assumption on the figure rather than quoting a figure the documentation does not state.
+- Codd's 1970 paper, *A Relational Model of Data for Large Shared Data Banks*, is the origin of the model Module 08 teaches
+  and is behind a paywall that refused every fetch attempted while the module was written. Lesson 0800 therefore grounds the
+  model on the PostgreSQL documentation, which states the same properties, rather than citing a paper nobody opened.

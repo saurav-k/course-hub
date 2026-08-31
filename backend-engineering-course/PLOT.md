@@ -29,7 +29,7 @@ before the next depends on it.
 | 5 | Module 05 - The layered service (0500-0505) | written | Layers as testable boundaries, controller, service, repository, request context, dependency direction. Written before Module 03 landed, because it depends on nothing routing defines. |
 | 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05 landed, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
-| 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
+| 8 | Module 08 - Data (0800-0806) | written | The relational model as a place to put invariants, the transaction boundary and the write-ahead log, isolation levels as a menu of anomalies, lock hold time as blast radius, the B-tree and its write cost, composite order and the planner's estimate, and the four non-relational shapes. |
 | 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
@@ -45,7 +45,7 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 08, 10 and 11 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
+Modules 10 and 11 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
 
 Module 05 was written out of reading order, before Module 03 landed, because it depends on nothing routing
@@ -87,6 +87,13 @@ vocabulary of Modules 02, 04 and 06: the wire contract it puts on a connection, 
 across a service boundary, and the idempotency key every one of its three transports asks for. Nothing
 in it depends on routing, on the internal layering, or on auth. Its lessons run 1200 to 1205 in the
 hundred-block the module owns.
+
+Module 08 landed alongside Modules 03, 05 and 07 rather than behind them, because nothing in it depends on routing, on
+the internal layering, or on auth. It is the module the later ones consume rather than the other way round: Module 09
+caches what this one stores, Module 10 queues work that this one has to commit, and Module 13 scales a fleet whose
+shared state lives here. Four of its seven lessons sit on transactions and indexes, which is where a working engineer's
+model is usually thinnest, and the non-relational map is last so that every guarantee it trades away has already been
+named and priced.
 
 Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
 every later module consumes the vocabulary it defines: routing consumes the method and the target,

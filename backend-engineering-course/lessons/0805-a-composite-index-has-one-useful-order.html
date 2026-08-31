@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A composite index has one useful order - Backend Engineering</title>
+<meta name="description" content="An index over several columns is sorted by the first, then the second, so column order decides which queries it can limit. What the planner then does with it is an estimate from sampled statistics, which is why EXPLAIN is the only answer.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Data &middot; Lesson 0805</div>
+  <h1>A composite index has one useful order, and the planner picks from an estimate</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Column order is a design decision, and the plan is a guess made from a sample. &middot;
+    <a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html">PostgreSQL - Multicolumn Indexes</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An index on <code>(a, b, c)</code> is sorted by <code>a</code>, then <code>b</code> within equal <code>a</code>, then <code>c</code>. There is <b>one order</b>, and it is not symmetric.</li>
+      <li>The documented rule: <b>equality on leading columns, plus one inequality on the first column that has no equality</b>, is what limits the part of the index scanned.</li>
+      <li>Everything after that first inequality is a filter rather than a limit, which is why the <b>ranged column goes last</b>.</li>
+      <li>An <b>index-only scan</b> answers from the index alone, but only when every referenced column is in it and the visibility map says the page is all-visible.</li>
+      <li>What it costs: the planner works from a <b>sample</b>, so a wrong estimate produces a wrong plan, and the only honest way to know which plan you got is <code>EXPLAIN</code>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Having the right index and having it used are two different problems.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0804&lt;br/&gt;an index is a&lt;br/&gt;sorted copy"] --> T["THIS PAGE&lt;br/&gt;column order, covering,&lt;br/&gt;and the planner"]
+  T --> A["Lesson 0806&lt;br/&gt;stores where you&lt;br/&gt;choose the key first"]
+  T --> B["Module 09&lt;br/&gt;caching, once the&lt;br/&gt;query is as good as it gets"]
+  T --> C["Module 11&lt;br/&gt;observability - noticing&lt;br/&gt;when a plan changed"]
+  W["Module 08&lt;br/&gt;Data"] -.- T
+    </div>
+    <figcaption>The last page established that a B-tree lookup is cheap at any size. This one is about the far more common situation where the index exists, the query looks like it should use it, and the database reads the whole table anyway. Both halves of that have documented rules, and neither of them is intuition. <b>Most index problems in production are not missing indexes, they are indexes whose order does not match the question being asked.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: sorted by the first column, then the second</h2>
+
+  <h3 id="leftmost">One order, and it decides everything</h3>
+  <p>An index on several columns holds its entries sorted by the first column, then by the second among entries that agree on the first, and so on. That is the whole structure, and every rule about composite indexes is a consequence of it. PostgreSQL states the consequence exactly: <a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html">equality constraints on leading columns, plus any inequality constraints on the first column that does not have an equality constraint, will always be used to limit the portion of the index that is scanned</a>. It also states the softer version that follows: such an index can be used with any subset of its columns, but it is most efficient when there are constraints on the leading ones.</p>
+
+  <p>Work that rule against one index and it stops being abstract. Take <code>(tenant_id, status, created_at)</code>, which is the shape most multi-tenant list endpoints want.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four queries, one index</div>
+    <div class="fig-claim">The rule stops at the first column with no equality constraint.</div>
+    <div class="mermaid">
+flowchart TB
+  IX["Index on&lt;br/&gt;(tenant_id, status, created_at)"]
+  IX --> Q1["tenant = 7 AND status = 'open'&lt;br/&gt;AND created_at &gt; '2026-01-01'"]
+  IX --> Q2["tenant = 7&lt;br/&gt;AND created_at &gt; '2026-01-01'"]
+  IX --> Q3["status = 'open'&lt;br/&gt;AND created_at &gt; '2026-01-01'"]
+  Q1 --> R1["All three limit the scan&lt;br/&gt;two equalities, then one range"]
+  Q2 --> R2["Only tenant limits it&lt;br/&gt;the date only filters"]
+  Q3 --> R3["Nothing limits it&lt;br/&gt;no constraint on the first column"]
+  classDef good fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class R1 good
+  class R3 bad
+    </div>
+    <figcaption>Three questions against one structure, and the difference between them is not how much data they want but where their constraints sit in the order. The middle case is the one worth recognising: it does use the index, and it reads every row for that tenant regardless of date, discarding most of them. That is a plan that looks correct in a query log and scales with the tenant rather than with the answer. <b>A column with no equality constraint ends the useful part of the index, and everything after it is filtering rather than seeking.</b></figcaption>
+  </figure>
+
+  <p>Two design rules fall out. Put the columns you always match exactly first, and put the one you range over last, because a range can only be the last useful thing. And keep the index short: the documentation says multicolumn indexes should be used sparingly, that in most situations an index on a single column is sufficient and saves space and time, and that indexes with more than three columns are unlikely to be helpful unless the table's usage is extremely stylised. The hard ceiling is 32 columns including <code>INCLUDE</code> columns, and it exists to be far away rather than to be approached.</p>
+
+  <h2>2. The mechanism: answering without touching the table</h2>
+
+  <p>Lesson 0804 ended each lookup with a second read, from the index entry to the row itself. An <a href="https://www.postgresql.org/docs/current/indexes-index-only-scans.html">index-only scan</a> is how that second read is avoided: values are returned directly out of each index entry instead of consulting the associated heap entry. Two conditions, and the second is the one people miss.</p>
+
+  <p>The first is simple. The query must reference only columns stored in the index, so <code>SELECT x, y FROM tab WHERE x = 'key'</code> can be answered by an index on <code>(x, y)</code> and <code>SELECT x, z</code> cannot. A covering index is one built for this on purpose, with <code>CREATE INDEX tab_x_y ON tab (x) INCLUDE (y)</code>: the included column is not part of the search key, so it need not even be a type the index can order, it is merely stored.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The visibility check</div>
+    <div class="fig-claim">An index entry cannot say whether its row is visible to you.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant Q as Query
+  participant I as Index
+  participant V as Visibility map
+  participant H as Table heap
+  Q->>I: find entries matching x = 'key'
+  I-->>Q: entries carrying x and y, plus a row location
+  Q->>V: is this heap page all-visible
+  V-->>Q: yes - one bit, from a structure far smaller than the table
+  Note over Q: answer returned with no heap read
+  Q->>H: if the bit was not set, read the row to check
+  H-->>Q: visible or not, and the values either way
+    </div>
+    <figcaption>Visibility information lives in the heap rather than in index entries, so without the map every match would need a heap read anyway and the optimisation would not exist. The map records, per heap page, whether every row on it is old enough to be visible to all current and future transactions. The documentation is blunt about what this trades: visibility map accesses for heap accesses, and the map is four orders of magnitude smaller than the heap it describes. <b>An index-only scan is a bet on the table being quiet, because a recently modified page sends you to the heap regardless.</b></figcaption>
+  </figure>
+
+  <p>Which is exactly the stated caveat. There is little point in including payload columns unless the table changes slowly enough that the scan is likely not to need the heap, because if the row must be visited anyway it costs nothing more to read the column from there. The other cost is size: non-key columns duplicate table data and bloat the index, potentially slowing searches, and an index tuple that exceeds the maximum size for its type makes the insertion fail outright. Be conservative with wide columns.</p>
+
+  <h2>3. The mechanism: the plan is an estimate</h2>
+
+  <p>Having the right index does not mean it is used, because the planner chooses between access paths by cost, and cost is computed from an estimate of how many rows each condition will match. <a href="https://www.postgresql.org/docs/current/planner-stats.html">That estimate comes from statistics</a> collected by <code>ANALYZE</code> and stored in <code>pg_statistic</code>, readable through the <code>pg_stats</code> view: a list of most common values, a histogram of the rest, the count of distinct values, the fraction that are null. The documentation notes these are always approximate even when freshly collected, and by default each column keeps up to 100 entries in its lists.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One estimate from a histogram</div>
+    <div class="fig-claim">Ten equal buckets turn a boundary into a fraction of the table.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A histogram of ten equal-frequency buckets spanning values zero to 9995. The condition unique1 less than 1000 selects the whole first bucket plus a very small slice of the second, giving a selectivity of 0.100697 and an estimate of 1007 rows out of 10000.">
+      <rect class="panel" x="80" y="120" width="53" height="60"/>
+      <rect class="m-alarm" x="80" y="120" width="53" height="60"/>
+      <rect class="panel" x="133" y="120" width="53" height="60"/>
+      <rect class="panel" x="186" y="120" width="56" height="60"/>
+      <rect class="panel" x="242" y="120" width="52" height="60"/>
+      <rect class="panel" x="294" y="120" width="53" height="60"/>
+      <rect class="panel" x="347" y="120" width="49" height="60"/>
+      <rect class="panel" x="396" y="120" width="58" height="60"/>
+      <rect class="panel" x="454" y="120" width="52" height="60"/>
+      <rect class="panel" x="506" y="120" width="52" height="60"/>
+      <rect class="panel" x="558" y="120" width="52" height="60"/>
+      <line class="axis" x1="80" y1="180" x2="610" y2="180"/>
+      <line class="s-signal ref" x1="133" y1="100" x2="133" y2="196"/>
+      <text class="ttl" x="80" y="30">Estimating rows for unique1 &lt; 1000 on a 10,000-row table</text>
+      <text class="lbl-sm" x="80" y="52">Each bucket holds one tenth of the rows. The bounds are the sampled values.</text>
+      <text class="lbl-sm t-signal" x="139" y="96">the boundary, 1000</text>
+      <text class="lbl-sm" x="80" y="196">0</text>
+      <text class="lbl-sm" x="186" y="196" text-anchor="middle">1997</text>
+      <text class="lbl-sm" x="396" y="196" text-anchor="middle">5957</text>
+      <text class="lbl-sm" x="610" y="196" text-anchor="end">9995</text>
+      <text class="lbl-b" x="80" y="228">one whole bucket, plus 7 of the 1004 values in the second</text>
+      <text class="lbl-sm" x="80" y="250">selectivity = (1 + 7 / 1004) / 10 = 0.100697</text>
+      <text class="lbl-sm" x="80" y="270">10,000 rows &times; 0.100697 = 1,007 rows estimated</text>
+      <text class="lbl-sm" x="80" y="290">figures taken from the worked example in the PostgreSQL documentation</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>the selected fraction</span></div>
+    <figcaption>The documentation's own worked example, drawn. The buckets are equal in row count rather than in width, so a wide bucket is a sparse region of the value space. The arithmetic is one whole bucket plus the linear share of the second, divided by the number of buckets, and the result is quoted in the query plan as <code>rows=1007</code>. <b>The number in an EXPLAIN plan is arithmetic over a hundred sampled values, so a column whose distribution the sample missed produces a plan chosen for a table you do not have.</b></figcaption>
+  </figure>
+
+  <p>That is the whole failure mode of query planning, and knowing it makes the diagnosis routine. When a plan is wrong, ask whether the estimate is wrong first. Stale statistics after a bulk load, a correlation between two columns that single-column statistics cannot see, a value distribution that is not close to uniform inside its bucket: each produces a bad estimate, and the bad plan is the correct decision given it. The documentation calls out the correlated case specifically, saying estimates over more than one column are frequently wrong when the planner has only single-column data, and that this causes it to select bad plans.</p>
+
+  <div class="callout warn">
+    <code>EXPLAIN</code> shows you the plan the planner chose from estimates. <code>EXPLAIN ANALYZE</code> runs the query and shows the estimate beside the real row count, which is the only form that can tell you the estimate was wrong. Read them as a pair rather than as a number: the interesting quantity is the ratio between the estimated and actual rows at each node, and a factor of a hundred at the bottom of the tree is what turns into a wrong join strategy at the top. It also genuinely executes the statement, so do not reach for it on a write.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Given an index on <code>(tenant_id, status, created_at)</code>, which query limits the scan by all three columns?</div>
+      <button class="q-opt">status = 'open' and created_at above a date</button>
+      <button class="q-opt">tenant = 7 and status = 'open' and a date range</button>
+      <button class="q-opt">tenant = 7 and a range over status and the date</button>
+      <button class="q-opt">tenant above 7 and status = 'open' and a date</button>
+      <div class="q-fb">Two equalities on the leading columns then one inequality on the third is exactly the documented rule. The first has no constraint on the leading column at all, the third ends the useful part at the range over status, and the fourth ranges on the first column so nothing after it can limit anything.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why can an index-only scan still have to read the table?</div>
+      <button class="q-opt">Index entries hold only a hash of the indexed value</button>
+      <button class="q-opt">The planner verifies a sample of entries against rows</button>
+      <button class="q-opt">Row visibility is stored in the heap, not in the index</button>
+      <button class="q-opt">Included columns are stored outside the index itself</button>
+      <div class="q-fb">Visibility lives with the row, so when the visibility map says a page is not all-visible the row must be read to find out whether you may see it. B-tree entries hold the real value rather than a hash, no verification sampling exists, and INCLUDE columns are stored in the index, which is the entire point of them.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0806-the-non-relational-map-is-four-shapes.html">the non-relational map is four shapes</a></b> is what happens when you make the access pattern the schema instead of asking a planner to find one.</li>
+    <li><b>Behind you, <a href="0804-an-index-is-a-second-sorted-copy.html">an index is a second sorted copy</a></b> is where the structure this page reorders came from.</li>
+    <li><b>Behind you, <a href="0602-collections-need-pagination-not-a-limit.html">collections need pagination, not a limit</a></b> asked for a compound sort key, and this page is the index that key needs to be cheap.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take your busiest list query and run <code>EXPLAIN ANALYZE</code> on it. Compare the estimated and actual row counts at every node, then ask the agent which node's ratio is worst and whether the composite index it uses has its ranged column last.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.postgresql.org/docs/current/indexes-multicolumn.html">Multicolumn Indexes</a> is one page and carries the exact rule quoted here. Read <a href="https://www.postgresql.org/docs/current/indexes-index-only-scans.html">Index-Only Scans and Covering Indexes</a> beside it, then <a href="https://www.postgresql.org/docs/current/row-estimation-examples.html">Row Estimation Examples</a>, which walks the arithmetic drawn above and is the best short cure for treating a plan as an oracle.</p>
+
+  <div class="pager">
+    <a href="0804-an-index-is-a-second-sorted-copy.html"><span class="dir">&larr; Previous</span><span class="ttl">An index is a second sorted copy</span></a>
+    <a class="nxt" href="0806-the-non-relational-map-is-four-shapes.html"><span class="dir">Next &rarr;</span><span class="ttl">The non-relational map is four shapes</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0805 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
