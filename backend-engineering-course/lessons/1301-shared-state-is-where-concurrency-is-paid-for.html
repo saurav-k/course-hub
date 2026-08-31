@@ -1,0 +1,200 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shared state is where concurrency is paid for - Backend Engineering</title>
+<meta name="description" content="The moment two requests run at once, every value both of them can reach stops having one obvious answer. A data race is not a rare timing bug: it is a value with no defined content, and the only fix is to serialize the access.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 13 &middot; Scale, fleet and shipping &middot; Lesson 1301</div>
+  <h1>Anything two requests can reach at once must be serialized by something</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The bill for the overlap lesson 1300 bought. &middot;
+    <a href="https://go.dev/ref/mem">The Go Memory Model</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A data race is <b>a write concurrent with any other access</b> to the same location, and its result is not a wrong value but an undefined one.</li>
+      <li>The fix is stated as a requirement rather than a suggestion: programs that share data across goroutines <b>must serialize that access</b>.</li>
+      <li>Two disciplines do it. A <b>lock names the data</b> it protects. A <b>channel hands ownership</b> across, so only one holder exists at a time.</li>
+      <li>Python's interpreter lock protects the <b>object model, not your invariants</b>: a dictionary will not corrupt, and read-then-write across two lines still races.</li>
+      <li>What it costs: a race is invisible to review and to any test that does not run the path, and the tool that finds it slows the program by 2 to 20 times.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Overlapping requests is the benefit and shared memory is the bill.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1300&lt;br/&gt;many requests&lt;br/&gt;overlap in one process"] --> T["THIS PAGE&lt;br/&gt;what they may&lt;br/&gt;safely share"]
+  T --> A["Lesson 1302&lt;br/&gt;share nothing, and&lt;br/&gt;add processes instead"]
+  T --> B["Module 08&lt;br/&gt;a transaction is this&lt;br/&gt;problem, solved once"]
+  W["Module 13&lt;br/&gt;scale, fleet&lt;br/&gt;and shipping"] -.- T
+    </div>
+    <figcaption>Lesson 1300 made the process hold many requests at once, and every mechanism it described leaves the requests inside one address space. This page is the consequence: two handlers can now touch the same variable, and the language has an opinion about what happens when they do. <b>The route out of this page is either a discipline for sharing or a decision to stop sharing, and lesson 1302 takes the second.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a race has no value, not a wrong one</h2>
+
+  <h3 id="what-a-race-is">The definition is mechanical</h3>
+  <p>The Go memory model defines the term without reference to timing or luck: <a href="https://go.dev/ref/mem">a data race is "a write to a memory location happening concurrently with another read or write to that same location"</a>, unless every access involved is an atomic operation from the <code>sync/atomic</code> package. Note what is absent. There is no threshold, no notion of how likely the overlap is, and no requirement that the two accesses be to different values. One concurrent write is the whole condition.</p>
+
+  <p>The consequence is stronger than most engineers assume. Go promises that a program with no races behaves as if every goroutine were multiplexed onto a single processor, which the document calls DRF-SC: data-race-free programs execute in a sequentially consistent manner. Outside that guarantee, the language offers much less. An implementation "may always react to a data race by reporting the race and terminating the program", and for anything wider than a machine word it explicitly declines to promise a coherent result: "races on multiword data structures can lead to inconsistent values not corresponding to a single write". A struct read during a concurrent write can therefore be half of one value and half of another, which is a state your code has no branch for.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two requests, one counter</div>
+    <div class="fig-claim">Both increments succeed and the total advances by one.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Request A
+  participant M as orders_today
+  participant B as Request B
+  Note over M: value is 41
+  A->>M: read
+  M-->>A: 41
+  B->>M: read
+  M-->>B: 41
+  Note over A: computes 41 plus 1
+  Note over B: computes 41 plus 1
+  A->>M: write 42
+  B->>M: write 42
+  Note over M: value is 42, two orders placed
+    </div>
+    <figcaption>Nothing here is exotic and nothing crashed. Each request read a value that was true when it read it, added one correctly, and stored the result. The lost update is a property of the interleaving rather than of either request, which is why reviewing the handler line by line will never show it. <b>Correct code plus correct code is not correct code once they overlap on a value.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: two ways to make the access serial</h2>
+
+  <h3 id="lock-or-channel">A lock names the data, a channel moves it</h3>
+  <p>The memory model states the remedy as a requirement: "Programs that modify data being simultaneously accessed by multiple goroutines must serialize such access. To serialize access, protect the data with channel operations or other synchronization primitives such as those in the <code>sync</code> and <code>sync/atomic</code> packages." Two families, and the difference is what they make explicit.</p>
+
+  <p>A mutex leaves the data where it is and adds a rule about who may touch it. Go's <a href="https://pkg.go.dev/sync">sync package</a> gives it the smallest possible surface: the zero value is an unlocked mutex, and a mutex must not be copied after first use, which is the whole reason a struct carrying one is passed by pointer. The rule a mutex encodes is not in the type system, though. Nothing links the lock to the field it guards except a comment and the discipline of everyone who edits the file afterwards.</p>
+
+  <p>A channel takes the other route, and Go states it as a slogan: <a href="https://go.dev/doc/effective_go">"Do not communicate by sharing memory; instead, share memory by communicating."</a> The value is handed from one goroutine to the next, so at any instant exactly one of them can reach it, and the compiler's own type is what carries the handover. The same package that ships the mutex says which it prefers: "Higher-level synchronization is better done via channels and communication", with the primitives "intended for use by low-level library routines".</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Deciding how to share</div>
+    <div class="fig-claim">Most shared values in a service should not be shared at all.</div>
+    <div class="mermaid">
+flowchart TB
+  Q["A value two requests&lt;br/&gt;can both reach"] --> R{"Does either&lt;br/&gt;of them write it"}
+  R -->|"no"| I["Immutable&lt;br/&gt;no serialization needed"]
+  R -->|"yes"| S{"Must both requests&lt;br/&gt;see one shared answer"}
+  S -->|"no"| L["Give each request&lt;br/&gt;its own copy"]
+  S -->|"yes, in this process"| C["A channel or a mutex&lt;br/&gt;one owner at a time"]
+  S -->|"yes, across the fleet"| D["A database transaction&lt;br/&gt;module 08 owns this"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  class I ok
+  class L ok
+    </div>
+    <figcaption>The two green outcomes cost nothing at runtime and are where most real cases land, once somebody asks the question out loud. The two on the right are genuine synchronisation and both have a price: the mutex serialises this process, and the transaction serialises across the fleet at the cost of a round trip. <b>The cheapest way to serialize an access is to arrange that there is only one accessor.</b></figcaption>
+  </figure>
+
+  <h3 id="the-gil-is-not-a-lock">What the interpreter lock does and does not protect</h3>
+  <p>CPython's global interpreter lock is often mistaken for a general answer. The <a href="https://docs.python.org/3/glossary.html#term-global-interpreter-lock">glossary</a> is precise about its scope: it assures that only one thread executes Python bytecode at a time, which "makes the object model (including critical built-in types such as <code>dict</code>) implicitly safe against concurrent access". That sentence protects the dictionary's own internal structure. It says nothing about the invariants of your program, and a read followed by a write is two bytecode sequences with a scheduling point available between them.</p>
+
+  <div class="code-cap">the same race, in both voices &middot; neither is fixed by the runtime</div>
+  <pre><code>// Go: the field is shared, so the lock is named beside it.
+type Tally struct {
+    mu    sync.Mutex // guards today
+    today int
+}
+func (t *Tally) Add() { t.mu.Lock(); defer t.mu.Unlock(); t.today++ }
+
+# Python: the dict is safe, the read-then-write across two lines is not.
+with tally_lock:
+    tally["today"] = tally["today"] + 1
+</code></pre>
+
+  <h3 id="finding-a-race">The tool, and what it cannot see</h3>
+  <p>Go ships a race detector, enabled with <code>-race</code> on build, run or test. Its stated limit is the one to hold onto: <a href="https://go.dev/doc/articles/race_detector">"the race detector only finds races that happen at runtime, so it can't find races in code paths that are not executed"</a>. It is a runtime observer, not an analysis, so a race in a branch your tests never take is a race it never reports. The cost is documented too: memory use may grow by 5 to 10 times and execution time by 2 to 20 times, which is why it runs in CI and under load tests rather than in production.</p>
+
+  <h2>3. The trade-off: every lock is a queue you built on purpose</h2>
+
+  <p>Serialization works by making concurrency stop, and the part of a request that runs under a lock is a part the whole fleet takes in turn. A handler that holds a mutex for two milliseconds out of a two-millisecond critical path has quietly capped the process at 500 of those operations a second, no matter how many cores or goroutines are available, and adding either makes the contention worse rather than better because more waiters arrive at the same door.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A worker under contention</div>
+    <div class="fig-claim">The lock turns overlapping work back into a single file.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Working
+  Working --> Queued: reaches the critical section
+  Queued --> Queued: another holder is inside
+  Queued --> Holding: acquires the lock
+  Holding --> Working: releases the lock
+  Working --> [*]: response sent
+    </div>
+    <figcaption>Only the Holding state does the protected work, and only one worker in the process can be in it. Every other worker that wants it is in Queued, which is indistinguishable from the waits of lesson 1300 except that this one was introduced by your own design rather than by the network. <b>A critical section is a pool of exactly one, so its arithmetic is the same arithmetic as the worker pool.</b></figcaption>
+  </figure>
+
+  <p>So the design question is not which primitive to use but how much of the request needs to be inside one. A lock held across a network call is the classic version of the mistake: the critical section is now as long as somebody else's latency, and lesson 1300's arithmetic applies to the lock exactly as it applied to the worker pool. Shrink what is shared before choosing what protects it.</p>
+
+  <div class="callout warn">
+    A race that has never been observed is not a race that does not exist. The Go memory model permits an implementation to terminate the program on detecting one, and permits a multiword read to return a value that was never written, so the behaviour you have observed in production is one of several the language allows and not a guarantee you can rely on. A compiler upgrade, a different core count, or a change in scheduling is enough to move it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">By the Go memory model's definition, when does a data race occur?</div>
+      <button class="q-opt">Two goroutines read one location without holding any lock at all</button>
+      <button class="q-opt">A write happens concurrently with any other access to that location</button>
+      <button class="q-opt">Two goroutines write one location within the same scheduling quantum</button>
+      <button class="q-opt">A write happens while another goroutine is blocked on a channel send</button>
+      <div class="q-fb">One write concurrent with any read or write is the whole condition, unless every access is an atomic operation. Concurrent reads are not a race because nothing changes, no definition mentions a quantum or any window of time, and a goroutine blocked on a channel is not accessing the location at all.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does CPython's interpreter lock guarantee about a shared dictionary?</div>
+      <button class="q-opt">A read followed by a write of one key runs without interruption</button>
+      <button class="q-opt">Only one thread may hold a reference to the dictionary at a time</button>
+      <button class="q-opt">Updates from several threads are applied in their arrival order</button>
+      <button class="q-opt">The dictionary's own structure will not be corrupted by concurrency</button>
+      <div class="q-fb">The glossary claims implicit safety for the object model, which is the container's internal structure and nothing else. The read-then-write is two operations with a scheduling point between them, references are not restricted at all, and no ordering across threads is promised anywhere.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1302-statelessness-is-what-makes-a-fleet-possible.html">statelessness is what makes a fleet possible</a></b> answers this page by removing the shared value from the process entirely.</li>
+    <li><b>Behind you, <a href="1300-concurrency-is-how-a-server-waits.html">concurrency is a structure for waiting</a></b> is what created the overlap this page has to pay for.</li>
+    <li><b>Ahead, <a href="1305-tests-buy-confidence-at-different-prices.html">tests buy confidence at different prices</a></b> is where the race detector earns its place, because a race is only found on a path something actually ran.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find every package-level variable and every field on a shared handler in one service you own, and sort them into the four outcomes of the decision figure. Ask the agent which of them are written after start-up, because those are the only ones the rest of the question applies to.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://go.dev/ref/mem">The Go Memory Model</a> is short, and it is worth reading even if you never write Go, because it states plainly what most languages leave to folklore: what a race is, what the implementation is allowed to do about one, and what you get in exchange for not having any. Read it beside the <a href="https://go.dev/doc/articles/race_detector">race detector article</a>, which is the practical half.</p>
+
+  <div class="pager">
+    <a href="1300-concurrency-is-how-a-server-waits.html"><span class="dir">&larr; Previous</span><span class="ttl">Concurrency is how a server waits</span></a>
+    <a class="nxt" href="1302-statelessness-is-what-makes-a-fleet-possible.html"><span class="dir">Next &rarr;</span><span class="ttl">Statelessness is what makes a fleet possible</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1301 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

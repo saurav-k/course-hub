@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concurrency is how a server waits - Backend Engineering</title>
+<meta name="description" content="A request handler spends most of its life blocked on something else. Concurrency is the structure that overlaps those waits, and parallelism is the separate question of how many cores are running.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 13 &middot; Scale, fleet and shipping &middot; Lesson 1300</div>
+  <h1>Concurrency is a structure for waiting, and parallelism is the hardware</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The first of two pages on what happens inside one process before the fleet is drawn. &middot;
+    <a href="https://go.dev/doc/effective_go">Effective Go - Concurrency</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A request handler is <b>mostly not computing</b>. It is blocked on a database, a downstream service, or the network.</li>
+      <li>Concurrency is a <b>structure that overlaps those waits</b>. Parallelism is a count of cores. A service can need one and not the other.</li>
+      <li>The unit of cost is the <b>occupied worker</b>, not the used CPU, so the ceiling is the pool size divided by how long each request holds one.</li>
+      <li>Three shapes: a thread per request, goroutines multiplexed onto threads, and one event loop running <b>one task at a time</b>.</li>
+      <li>What it costs: an event loop has no preemption, so one function that computes instead of awaiting stops every other request in the process.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Everything before this page assumed one request at a time.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Modules 02 to 12&lt;br/&gt;one request, correctly&lt;br/&gt;handled"] --> T["THIS PAGE&lt;br/&gt;many requests&lt;br/&gt;in one process"]
+  T --> A["Lesson 1301&lt;br/&gt;what they share&lt;br/&gt;and what it costs"]
+  T --> B["Lesson 1302&lt;br/&gt;many processes&lt;br/&gt;instead of one"]
+  W["Module 13&lt;br/&gt;scale, fleet&lt;br/&gt;and shipping"] -.- T
+    </div>
+    <figcaption>Every mechanism this course has built so far was drawn for a single request: one route, one contract, one handler, one response. A real process runs hundreds at once, and the first thing that changes is not correctness but arithmetic. <b>Scale begins inside one process, and it begins with the question of what a request is doing while it is not computing.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the worker is held, not busy</h2>
+
+  <h3 id="held-not-busy">Waiting is the dominant term</h3>
+  <p>Read a typical handler honestly. It parses a body, which is microseconds. It asks the database for a row and waits. It calls a downstream service and waits. It serialises a response, which is microseconds again. Between the first and last line, the process it runs in has almost nothing to do, and yet something has been reserved for the whole duration: a thread, a coroutine, a connection, a slot in a pool. That reservation is the resource that runs out.</p>
+
+  <p>This is why CPU utilisation is such a poor guide to a service's ceiling. A machine reporting 6% CPU can be entirely unable to accept another request, because every worker it has is parked inside a socket read. The measurement that matters is how many requests are in flight at once, and that is set by two numbers: how fast they arrive, and how long each one holds a worker.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One request, timed</div>
+    <div class="fig-claim">The handler computes for a moment and is reserved for the whole call.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant H as Handler
+  participant D as Database
+  participant S as Downstream service
+  C->>H: POST /orders
+  Note over H: parse and validate - about 1 ms
+  H->>D: SELECT the account
+  Note over D: 40 ms, handler idle
+  D-->>H: one row
+  H->>S: reserve the stock
+  Note over S: 140 ms, handler idle
+  S-->>H: reserved
+  Note over H: serialise the body - about 1 ms
+  H-->>C: 201 Created
+    </div>
+    <figcaption>Two milliseconds of the handler's own work sit inside 182 milliseconds of holding a worker. The two Note blocks are the whole subject of this page: they are time during which this request cannot proceed and the process has capacity to spare. <b>Overlapping other requests onto those two gaps is the only thing concurrency does, and it is enough.</b></figcaption>
+  </figure>
+
+  <div class="math">
+    in flight = arrival rate &times; hold time
+    <span class="gloss">Read as: in a steady state, the number of requests being worked on at any instant equals how many arrive each second multiplied by how many seconds each one occupies a worker. At 500 requests a second and 200 milliseconds each, that is 500 &times; 0.2 = 100 requests in flight. If the pool has 32 workers, the pool is the binding constraint and the extra 68 are queued or refused.</span>
+  </div>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="Throughput ceiling of a 32-worker pool as the per-request hold time falls from 400 to 25 milliseconds">
+      <line class="axis" x1="70" y1="215" x2="620" y2="215"/>
+      <line class="axis" x1="70" y1="30" x2="70" y2="215"/>
+      <line class="grid" x1="70" y1="150" x2="620" y2="150"/>
+      <line class="grid" x1="70" y1="85" x2="620" y2="85"/>
+      <text class="lbl-sm" x="62" y="219" text-anchor="end">0</text>
+      <text class="lbl-sm" x="62" y="154" text-anchor="end">500</text>
+      <text class="lbl-sm" x="62" y="89" text-anchor="end">1000</text>
+      <rect class="m-stat"  x="110" y="204" width="54" height="11"/>
+      <rect class="m-alarm" x="212" y="194" width="54" height="21"/>
+      <rect class="m-stat"  x="314" y="173" width="54" height="42"/>
+      <rect class="m-stat"  x="416" y="132" width="54" height="83"/>
+      <rect class="m-stat"  x="518" y="49"  width="54" height="166"/>
+      <text class="lbl-sm" x="137" y="197" text-anchor="middle">80</text>
+      <text class="lbl-sm" x="239" y="187" text-anchor="middle">160</text>
+      <text class="lbl-sm" x="341" y="166" text-anchor="middle">320</text>
+      <text class="lbl-sm" x="443" y="125" text-anchor="middle">640</text>
+      <text class="lbl-sm" x="545" y="42"  text-anchor="middle">1280</text>
+      <text class="lbl-sm" x="137" y="233" text-anchor="middle">400 ms</text>
+      <text class="lbl-sm" x="239" y="233" text-anchor="middle">200 ms</text>
+      <text class="lbl-sm" x="341" y="233" text-anchor="middle">100 ms</text>
+      <text class="lbl-sm" x="443" y="233" text-anchor="middle">50 ms</text>
+      <text class="lbl-sm" x="545" y="233" text-anchor="middle">25 ms</text>
+      <text class="lbl-sm" x="345" y="252" text-anchor="middle">how long one request holds a worker</text>
+      <text class="ttl" x="70" y="18">requests per second the pool can accept</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>the service as it is today</span></div>
+    <figcaption>The pool is fixed at 32 workers and only the hold time moves. Every bar is 32 divided by the hold time in seconds, so 32 &divide; 0.2 = 160 and 32 &divide; 0.025 = 1280. Two assumptions are doing work: the arrivals are steady rather than bursty, and the hold time does not itself grow as the pool fills, which at true saturation it always does. <b>Cutting the wait raises the ceiling exactly as much as buying that multiple of the pool, and it is usually the cheaper of the two.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: three ways to overlap a wait</h2>
+
+  <h3 id="thread-per-request">A thread per request, and why it stops</h3>
+  <p>The oldest shape gives each connection an operating-system thread and lets it block. It is the easiest to reason about, because the code reads top to bottom and the kernel handles the interleaving. What limits it is that a thread is expensive in a way a request is not: it carries a stack sized in megabytes and a scheduler entry, so a few thousand of them is a real cost in memory and in context switching, long before the CPU is busy.</p>
+
+  <h3 id="goroutines">Goroutines, which are threads the runtime owns</h3>
+  <p>Go keeps the blocking style and moves the cost. A goroutine is, in the language's own words, <a href="https://go.dev/doc/effective_go">a function executing concurrently with other goroutines in the same address space</a>, lightweight, "costing little more than the allocation of stack space", with stacks that start small and grow on demand. The scheduling claim is the one that matters here: goroutines "are multiplexed onto multiple OS threads so if one should block, such as while waiting for I/O, others continue to run". The blocking read is still written as a blocking read, and the runtime turns it into a wait that costs one small stack rather than one thread.</p>
+
+  <h3 id="event-loop">One event loop, one task at a time</h3>
+  <p>Python's asyncio takes the other route: keep one thread and make the waiting explicit in the syntax. The documentation is unusually blunt about what that buys. <a href="https://docs.python.org/3/library/asyncio-task.html">Event loops use cooperative scheduling</a>: "an event loop runs one Task at a time. While a Task awaits for the completion of a Future, the event loop runs other Tasks, callbacks, or perform IO operations." One task at a time is concurrency without parallelism, and for a handler that waits for all but a millisecond or two of its life that is the entire win.</p>
+
+  <div class="code-cap">two voices, same shape &middot; the wait is what overlaps, not the work</div>
+  <pre><code>// Go: the call blocks, the runtime does not.
+for _, id := range ids {
+    go func(id string) { results &lt;- fetch(ctx, id) }(id)
+}
+
+# Python: the wait is spelled out, one thread throughout.
+results = await asyncio.gather(*(fetch(session, i) for i in ids))
+</code></pre>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where the process is blocked</div>
+    <div class="fig-claim">Each model moves the same wait onto a cheaper accounting unit.</div>
+    <div class="mermaid">
+flowchart TB
+  R["A handler waits&lt;br/&gt;140 ms on a downstream call"] --> A["Thread per request&lt;br/&gt;one OS thread parked&lt;br/&gt;megabytes of stack"]
+  R --> B["Goroutine&lt;br/&gt;one small stack parked&lt;br/&gt;the thread runs others"]
+  R --> C["Event loop&lt;br/&gt;one awaited future&lt;br/&gt;the thread runs others"]
+  A --> L["Ceiling set by&lt;br/&gt;thread count"]
+  B --> M["Ceiling set by&lt;br/&gt;memory and the pool&lt;br/&gt;at the far end"]
+  C --> M
+  classDef cost fill:var(--warn-soft),stroke:var(--warn)
+  class A cost
+    </div>
+    <figcaption>The wait itself is identical in all three: 140 milliseconds during which this request can do nothing. What differs is what has to stay resident to remember that a request is in progress, and therefore how many can be in progress at once. <b>None of the three makes the database faster, and all three change how many requests you can be waiting for.</b></figcaption>
+  </figure>
+
+  <h3 id="the-gil">Threads in CPython, and the one thing the GIL does not block</h3>
+  <p>CPython carries a global interpreter lock, which the language glossary defines as <a href="https://docs.python.org/3/glossary.html#term-global-interpreter-lock">the mechanism that assures "that only one thread executes Python bytecode at a time"</a>. That sentence is usually quoted as a reason threads are useless in Python, and the next sentence in the same entry is the one that is usually dropped: "the GIL is always released when doing I/O". So a thread pool in CPython is a real answer for a service that waits, and no answer at all for one that computes. Python 3.13 added a build in which the lock can be disabled, specified in <a href="https://peps.python.org/pep-0703/">PEP 703</a>, which changes the second half of that sentence and not the first.</p>
+
+  <h2>3. The trade-off: cooperative scheduling has no interrupt</h2>
+
+  <p>The event loop's guarantee is also its failure mode. Control returns to the loop only when a task awaits, so a task that computes for 300 milliseconds without awaiting holds the entire process for 300 milliseconds, and every other in-flight request pays it. The same applies to any library call that blocks the thread rather than yielding: one ordinary database driver used inside an async handler converts a concurrent server into a serial one, and nothing reports it except the latency of every other request rising together.</p>
+
+  <p>Go trades differently. Its runtime can move work between threads and preempt a long-running goroutine, so a single expensive function degrades the process rather than stopping it. In exchange, blocking code and concurrent code look identical on the page, which means a call that quietly holds a lock or a database connection is invisible in review, and lesson 1301 is about exactly what happens then.</p>
+
+  <div class="callout warn">
+    Neither model raises the ceiling of whatever you are waiting on. A service that overlaps 500 waits on a database with 20 connections has not become concurrent, it has moved the queue from its own accept backlog into the connection pool, where it is harder to see and where the timeout that fires is somebody else's. Before adding concurrency, find the smallest pool on the path and ask what it is.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A service reports 6% CPU and refuses new connections. What is the most likely binding constraint?</div>
+      <button class="q-opt">The garbage collector is pausing the process on every allocation</button>
+      <button class="q-opt">The kernel is dropping packets before they reach the listening socket</button>
+      <button class="q-opt">Every worker is parked in a wait, so the pool has no free slot</button>
+      <button class="q-opt">The network card has saturated its available outbound bandwidth</button>
+      <div class="q-fb">Low CPU with no capacity is the signature of held workers rather than busy ones: the pool size divided by the hold time is the ceiling, and neither term is CPU. A collector pause raises CPU rather than lowering it, a full accept queue is a symptom of the same exhaustion rather than its cause, and a saturated link would show as bytes moved, which 6% CPU does not suggest.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does a thread pool still help an I/O-bound service written in CPython?</div>
+      <button class="q-opt">The interpreter lock is always released while a thread does I/O</button>
+      <button class="q-opt">The interpreter runs bytecode from several threads simultaneously</button>
+      <button class="q-opt">The operating system gives each blocked thread its own CPU core</button>
+      <button class="q-opt">The interpreter converts blocking calls into awaited coroutines</button>
+      <div class="q-fb">The glossary entry says both things: only one thread executes bytecode at a time, and the lock is always released during I/O, so waiting threads do not hold it. Simultaneous bytecode is precisely what the lock prevents outside a free-threaded build, a blocked thread needs no core, and no conversion of blocking calls happens anywhere.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1301-shared-state-is-where-concurrency-is-paid-for.html">shared state is where concurrency is paid for</a></b> takes the overlap you just bought and asks what two requests are allowed to touch at once.</li>
+    <li><b>Ahead, <a href="1302-statelessness-is-what-makes-a-fleet-possible.html">statelessness is what makes a fleet possible</a></b> runs out of room inside one process and starts adding processes.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> already assumed two copies of one request could be in flight together, which is the condition this page describes.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one endpoint you own and estimate its hold time and its worker pool, then compute the ceiling from those two numbers. Ask the agent to help you find the smallest pool anywhere on that request's path, including the database connections and any HTTP client, and say which one binds first.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The concurrency section of <a href="https://go.dev/doc/effective_go">Effective Go</a> and the <a href="https://docs.python.org/3/library/asyncio-task.html">asyncio coroutines and tasks</a> page make the same argument from opposite ends: one hides the scheduling and one exposes it. Read them together and the shared claim is obvious, which is that both exist to stop a wait from costing a thread.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="1301-shared-state-is-where-concurrency-is-paid-for.html"><span class="dir">Next &rarr;</span><span class="ttl">Shared state is where concurrency is paid for</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1300 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
