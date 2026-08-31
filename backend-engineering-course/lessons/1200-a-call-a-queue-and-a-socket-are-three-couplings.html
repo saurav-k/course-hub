@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A call, a queue and a socket are three couplings - Backend Engineering</title>
+<meta name="description" content="Choosing between a synchronous call, a broker and a persistent socket is choosing what must be true at the same instant: who has to be running, who needs the answer, and who is allowed to speak first.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Inter-service communication &middot; Lesson 1200</div>
+  <h1>A call, a queue and a socket are three answers to one question: what has to be true at the same instant?</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">9 min</span>
+    The frame the rest of this module fills in. &middot;
+    <a href="https://kafka.apache.org/intro">Apache Kafka - Introduction</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The three transports of this module differ in <b>temporal coupling</b>: whether both parties have to be running at the same moment for the work to happen.</li>
+      <li>A synchronous call is <b>tightly coupled in time</b>. The callee must be up, and its unavailability becomes your unavailability, multiplied along the chain.</li>
+      <li>A broker is <b>decoupled in time</b>. Kafka states it plainly: events "are not deleted after consumption", so a consumer that is down is late rather than lost.</li>
+      <li>A persistent socket is the case where <b>the server needs to speak first</b>, which neither of the other two can do.</li>
+      <li>What it costs: decoupling in time means you cannot get an answer, and every broker delivers <b>at least once</b>, so the receiver must tolerate a repeat.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Everything so far was one service - this module is the gap between two.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Modules 02 to 11&lt;br/&gt;one service handling&lt;br/&gt;one request well"] --> T["THIS PAGE&lt;br/&gt;three couplings&lt;br/&gt;between services"]
+  T --> A["Lessons 1201 and 1202&lt;br/&gt;gRPC - the call&lt;br/&gt;and its deadline"]
+  T --> B["Lessons 1203 and 1204&lt;br/&gt;the queue and&lt;br/&gt;the log"]
+  T --> C["Lesson 1205&lt;br/&gt;the socket the&lt;br/&gt;server can speak on"]
+  W["Module 12&lt;br/&gt;inter-service communication"] -.- T
+    </div>
+    <figcaption>Every module before this one made a single service better at answering. This one is about the wire between two services, where the failure you have to design for is no longer a bug in your code but a machine you do not control being unreachable. <b>The choice of transport is a choice about what happens when the other side is not there.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: three couplings, not three technologies</h2>
+
+  <p>Engineers usually pick a transport by naming a product: gRPC because the team already writes protobuf, Kafka because it is on the platform, a WebSocket because the front end wants live updates. That is choosing by availability of the tool rather than by shape of the problem, and it is why services end up with a queue in front of work that needed an answer, and a synchronous call in front of work that nobody was waiting for.</p>
+
+  <p>There are only three questions, and the answers pick the transport for you. <b>Does the caller need the result to continue?</b> If yes, something has to wait, and waiting is a synchronous call. <b>Must both parties be running at the same moment?</b> If no, something has to hold the message in the meantime, and holding it is a broker. <b>Does the receiving side ever need to speak without being asked?</b> If yes, a connection has to stay open, and that is a socket.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Picking the transport</div>
+    <div class="fig-claim">Two questions, asked in order, decide the shape before any product is named.</div>
+    <div class="mermaid">
+flowchart TB
+  Q1{"Does the caller need&lt;br/&gt;the result to continue?"}
+  Q1 -->|"yes"| S["Synchronous call&lt;br/&gt;gRPC or HTTP&lt;br/&gt;lessons 1201, 1202"]
+  Q1 -->|"no"| Q2{"Who starts&lt;br/&gt;the conversation?"}
+  Q2 -->|"the sender"| B["Broker&lt;br/&gt;queue or log&lt;br/&gt;lessons 1203, 1204"]
+  Q2 -->|"the receiver, later,&lt;br/&gt;unprompted"| W["Persistent socket&lt;br/&gt;lesson 1205"]
+  S --> C1["Cost - their outage&lt;br/&gt;is your outage"]
+  B --> C2["Cost - no answer,&lt;br/&gt;and repeats"]
+  W --> C3["Cost - the connection&lt;br/&gt;is state you now hold"]
+  classDef cost fill:var(--warn-soft),stroke:var(--warn)
+  class C1,C2,C3 cost
+    </div>
+    <figcaption>The first question is the one teams skip, because the honest answer is usually no: a confirmation email, a search index update and an audit record are all work nobody is waiting on. The second question separates the two ways of not waiting, and they are not interchangeable. <b>Every branch ends in a cost, and a design that names only the transport has chosen the cost without saying so.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what each one does with an outage</h2>
+
+  <h3 id="temporal-coupling">A synchronous call multiplies unavailability</h3>
+  <p>When service A calls service B and waits, A is available only when B is. That is not a metaphor, it is multiplication, and it is the single most useful piece of arithmetic in this module. Give every service in a chain the same independent availability and the chain's availability is that number raised to the length of the chain.</p>
+
+  <ol class="worked">
+    <li><b>Start from one service.</b> At 99.9% available, a 30-day month of 43,200 minutes carries 0.001 &times; 43,200 = <span class="keynum">43.2</span> minutes of downtime.</li>
+    <li><b>Chain five of them.</b> 0.999<sup>5</sup> = 0.99501, so the unavailability is 0.00499 and the downtime is 0.00499 &times; 43,200 = <span class="keynum">215.6</span> minutes.</li>
+    <li><b>Read what changed.</b> Nothing got less reliable. The same five services, each meeting the same target, now fail the caller five times as often, purely because the caller waits on all of them.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="fig-cap">Downtime along a chain</div>
+    <div class="fig-claim">Eight hops at 99.9% each spend most of a working day unavailable.</div>
+    <svg class="chart" viewBox="0 0 640 230" role="img" aria-label="Bar chart of monthly downtime in minutes for a synchronous chain of 1, 2, 3, 5 and 8 services, each independently 99.9 percent available: 43, 86, 130, 216 and 344 minutes">
+      <line class="axis" x1="60" y1="170" x2="610" y2="170"/>
+      <line class="s-noise ref" x1="60" y1="152" x2="610" y2="152"/>
+      <rect class="m-stat"  x="90"  y="152" width="60" height="18"/>
+      <rect class="m-stat"  x="190" y="135" width="60" height="35"/>
+      <rect class="m-stat"  x="290" y="117" width="60" height="53"/>
+      <rect class="m-stat"  x="390" y="82"  width="60" height="88"/>
+      <rect class="m-alarm" x="490" y="30"  width="60" height="140"/>
+      <text class="lbl-sm" x="120" y="145" text-anchor="middle">43</text>
+      <text class="lbl-sm" x="220" y="128" text-anchor="middle">86</text>
+      <text class="lbl-sm" x="320" y="110" text-anchor="middle">130</text>
+      <text class="lbl-sm" x="420" y="75"  text-anchor="middle">216</text>
+      <text class="lbl-sm" x="520" y="23"  text-anchor="middle">344</text>
+      <text class="lbl-sm" x="120" y="188" text-anchor="middle">1 hop</text>
+      <text class="lbl-sm" x="220" y="188" text-anchor="middle">2 hops</text>
+      <text class="lbl-sm" x="320" y="188" text-anchor="middle">3 hops</text>
+      <text class="lbl-sm" x="420" y="188" text-anchor="middle">5 hops</text>
+      <text class="lbl-sm" x="520" y="188" text-anchor="middle">8 hops</text>
+      <text class="lbl-sm" x="335" y="212" text-anchor="middle">minutes unavailable in a 30-day month, every service at 99.9%</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>chain of synchronous calls</span><span><i class="sw-alarm"></i>the length a mature system reaches</span></div>
+    <figcaption>Each bar is the arithmetic above run at a different chain length, and the dashed line is the one-service budget the team actually agreed to. Nothing here is a failure of engineering: every service is meeting its number. <b>Waiting on a dependency spends its error budget out of yours, and the bill grows with every hop you add.</b></figcaption>
+  </figure>
+
+  <h3 id="broker-decoupling">A broker turns an outage into a backlog</h3>
+  <p>Put a broker between the two and the arithmetic stops applying, because the sender never waits on the receiver. The sender's success now depends on the broker rather than on the consumer, and the consumer's being down changes the size of a backlog rather than the outcome of a request. <a href="https://kafka.apache.org/intro">Kafka</a> states the enabling property directly: events "are not deleted after consumption", and how long they are kept is a per-topic retention setting rather than a consequence of anybody reading them.</p>
+
+  <p>That is a genuine change of failure mode, not a smaller failure. An unavailable consumer used to produce errors your caller saw; now it produces a queue that grows, and the symptom is latency followed, eventually, by whatever your broker does when it runs out of room or out of retention. You have moved the failure to a place where you have time to react, which is the whole benefit and the whole limit.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Same work, receiver down</div>
+    <div class="fig-claim">Only the caller in the first arrangement learns that anything is wrong.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Caller
+  participant K as Broker
+  participant R as Receiver
+  Note over R: process is down
+  C->>R: synchronous call
+  R--xC: connection refused
+  Note over C: the caller must now&lt;br/&gt;decide what to tell a user
+  C->>K: publish the event
+  K-->>C: accepted
+  Note over K: held, per the topic's&lt;br/&gt;retention setting
+  Note over R: process comes back
+  K->>R: delivered from where&lt;br/&gt;the consumer left off
+    </div>
+    <figcaption>The same receiver is down in both halves. In the first the caller is holding a failure it did not cause and cannot fix; in the second the caller is finished and the broker is holding a message. The receiver eventually does identical work in both cases. <b>A broker does not make the outage shorter - it makes the outage somebody else's problem, later.</b></figcaption>
+  </figure>
+
+  <h3 id="server-initiated">A socket is the only one where the server may speak first</h3>
+  <p>Both arrangements above are started by the sender. Neither can deliver something the client did not ask for, which is why a browser showing live prices used to poll: <a href="https://www.rfc-editor.org/rfc/rfc6455#section-1.1">RFC 6455 &sect;1.1</a> was written because bidirectional traffic over HTTP meant "abusing HTTP through polling", one connection per message, with the overhead that implies. A WebSocket replaces that with a single connection that either side may write to at will. Lesson 1205 is about what you take on by keeping it open.</p>
+
+  <h2>3. The trade-off: you cannot ask a queue a question</h2>
+
+  <p>The reason not to put a broker everywhere is that a message is not a call. There is no return value, no status code and no moment at which the sender learns whether the work succeeded. If the caller genuinely needs the answer - a price to display, an authorisation to proceed - a broker makes it wait for a reply on a second channel it now has to correlate, which is a synchronous call rebuilt out of two asynchronous ones and worse in every dimension.</p>
+
+  <p>The second cost is repetition. Every broker in ordinary use delivers at least once: <a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ</a> requeues any delivery that was not acknowledged before the channel closed, and tells you outright that consumers "must be prepared to handle redeliveries and otherwise be implemented with idempotence in mind". A design that moves work behind a broker has, in the same stroke, made every handler responsible for surviving a repeat. Lesson 0605 already built the mechanism for that on the HTTP surface, and lessons 1203 and 1204 are where it becomes unavoidable rather than optional.</p>
+
+  <div class="callout warn">
+    The cost that is easiest to leave out of a design document is the third system. A broker is a stateful cluster with its own disks, its own failure modes, its own upgrade path and its own on-call rota. Adding one to decouple two services replaces a dependency you understand with a dependency you have not operated yet, and for a chain of two services with a shared release cadence that trade is often a loss. Reach for a broker when the decoupling buys something you can name.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Five services, each independently 99.9% available, are called in a synchronous chain. What is the chain?</div>
+      <button class="q-opt">99.9% available, since each one meets its target</button>
+      <button class="q-opt">99.98% available, since failures rarely overlap</button>
+      <button class="q-opt">99.5% available, since the five multiply together</button>
+      <button class="q-opt">99.0% available, since the slowest hop dominates</button>
+      <div class="q-fb">0.999 to the fifth power is 0.99501, so the chain spends about 216 minutes a month down against a single service's 43. The first option ignores the waiting entirely, the second treats dependent failures as if they cancelled out, and the fourth confuses latency with availability - a slow hop is not an unavailable one.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which requirement rules out a broker and forces a synchronous call?</div>
+      <button class="q-opt">The caller must show the result to a waiting user</button>
+      <button class="q-opt">The message must survive the receiver being down</button>
+      <button class="q-opt">The work must run on a fleet of many workers</button>
+      <button class="q-opt">The event must reach several unrelated consumers</button>
+      <div class="q-fb">Needing the result in hand is the one thing a broker cannot give you, because a publish returns acceptance rather than an answer. The other three are the cases brokers are for: holding a message across an outage, spreading work over consumers, and fanning one event out to several readers.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1201-grpc-is-a-contract-on-a-connection.html">gRPC is a contract on a connection</a></b> takes the synchronous branch and shows what a call looks like when the schema of module 04 is put on a wire.</li>
+    <li><b>Ahead, <a href="1203-a-broker-turns-an-outage-into-a-backlog.html">a broker turns an outage into a backlog</a></b> builds the second branch, and <a href="1205-a-websocket-is-a-session-and-a-session-is-state.html">a WebSocket is a session</a> builds the third.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the mechanism every one of these transports will ask you for.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Draw your own service's outbound calls and mark each one with the answer to the first question: does the caller need the result to continue? Ask the agent which of the calls answering "no" would be cheaper to make asynchronous, and what each one would then have to tolerate being delivered twice.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Apache Kafka's <a href="https://kafka.apache.org/intro">Introduction</a> is four screens long and states the decoupling property this page turns on, including that events are retained by configuration rather than consumed away. Read it next to <a href="https://www.rfc-editor.org/rfc/rfc6455#section-1.1">RFC 6455 &sect;1.1</a>, which explains why HTTP polling was worth replacing, and the two together bracket the design space this module works in.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="1201-grpc-is-a-contract-on-a-connection.html"><span class="dir">Next &rarr;</span><span class="ttl">gRPC is a contract on a connection</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1200 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
