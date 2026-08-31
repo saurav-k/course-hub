@@ -72,6 +72,33 @@ TBD as lessons landing.
   for the safelisted fields, the preflight and the credentialed-request rules, over the normative
   [Fetch standard](https://fetch.spec.whatwg.org/) that specifies the browser behaviour itself.
 
+### Module 03 - Routing
+
+- Lesson 0300, the route as a pair: [RFC 9110 &sect;9.1](https://www.rfc-editor.org/rfc/rfc9110#section-9.1) for the
+  method token as the primary source of request semantics, and
+  [Go's `net/http.ServeMux`](https://pkg.go.dev/net/http#ServeMux) for a pattern grammar that states the method, the
+  host and the path in one string.
+- Lesson 0301, path against query: [RFC 3986 &sect;3.3](https://www.rfc-editor.org/rfc/rfc3986#section-3.3) and
+  [&sect;3.4](https://www.rfc-editor.org/rfc/rfc3986#section-3.4), which define both components as identifying the
+  resource and separate them by hierarchy alone; [RFC 6570 &sect;3.2.6](https://www.rfc-editor.org/rfc/rfc6570#section-3.2.6)
+  and [&sect;3.2.8](https://www.rfc-editor.org/rfc/rfc6570#section-3.2.8) for the two template operators; and
+  [RFC 9111 &sect;2](https://www.rfc-editor.org/rfc/rfc9111#section-2) for the cache key being method plus target URI.
+  The filter counts on that page are derived on the page and are not quoted from any source.
+- Lesson 0302, the routing tree: [Go's `net/http/routing_tree.go`](https://cs.opensource.google/go/go/+/refs/tags/go1.24.0:src/net/http/routing_tree.go)
+  for the level order and the backtracking case, and the Precedence section of the
+  [ServeMux documentation](https://pkg.go.dev/net/http#ServeMux) for the strict-subset rule and the conflict panic.
+  The comparison counts on that page are derived from the two costs stated there.
+- Lesson 0303, the middleware chain: [PEP 3333, middleware components](https://peps.python.org/pep-3333/#middleware-components-that-play-both-sides)
+  for the two roles that make wrapping the shape, [Express's writing-middleware guide](https://expressjs.com/en/guide/writing-middleware.html)
+  for the loading-order rule and the `next()` obligation, and Go's
+  [`http.ResponseWriter`](https://pkg.go.dev/net/http#ResponseWriter) for the header map having no effect after a write.
+- Lesson 0304, the routing verdicts: [RFC 9110 &sect;15.5.5](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.5),
+  [&sect;15.5.6](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.6),
+  [&sect;15.6.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.6.2) and
+  [&sect;10.2.1](https://www.rfc-editor.org/rfc/rfc9110#section-10.2.1) for 404, 405, 501 and the `Allow` field.
+- Lesson 0305, mounting: [PEP 3333's environment variables](https://peps.python.org/pep-3333/#environ-variables) for
+  `SCRIPT_NAME` and `PATH_INFO`, [Go's `http.StripPrefix`](https://pkg.go.dev/net/http#StripPrefix), and
+  [Express's request reference](https://expressjs.com/en/5x/api/request/) for `req.baseUrl` and `req.originalUrl`.
 ### Module 04 - Serialization and contracts
 
 - Lesson 0400, the wire contract: [RFC 8259 &sect;6](https://www.rfc-editor.org/rfc/rfc8259#section-6) for
