@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A cache moves the failure, it does not remove it - Backend Engineering</title>
+<meta name="description" content="Once the store is sized for the miss rate, every cache failure is the same event: the miss rate jumps. Stampedes, eviction, a cold start and a lost node are four ways it jumps, and each has a different mitigation.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Caching &middot; Lesson 0905</div>
+  <h1>A cache moves the failure rather than removing it, and every move lands on the store</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Where the capacity bet of lesson 0900 comes due. &middot;
+    <a href="https://redis.io/docs/latest/develop/reference/eviction/">Redis - Key eviction</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Once the store is provisioned for the miss rate, <b>every cache failure mode is the same event</b>: the miss rate jumps and the store is asked for work it was not sized for.</li>
+      <li>Four ways it jumps: a hot entry <b>expires</b> and every reader misses at once, the cache <b>evicts</b> under memory pressure, the cache is <b>empty</b> after a restart, or the cache is <b>gone</b>.</li>
+      <li>The stampede is the one with a measured fix. Leases at Facebook took the peak database rate on herd-prone keys from <b>17,000 to 1,300 queries a second</b>.</li>
+      <li><b>Eviction is not expiry</b>, and confusing them is a live trap: a Redis instance set to a <code>volatile-</code> policy with no lifetimes on its keys returns errors instead of evicting anything.</li>
+      <li>What it costs: every mitigation is another mechanism that can fail, and none of them gives you back a store that could survive a cold cache.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This page is the bill for the capacity the first page bought.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0904&lt;br/&gt;entries are removed&lt;br/&gt;on purpose"] --> T["THIS PAGE&lt;br/&gt;entries are missing&lt;br/&gt;all at once"]
+  T --> A["Module 11&lt;br/&gt;timeouts, shedding&lt;br/&gt;and degrading"]
+  T --> B["Module 13&lt;br/&gt;sizing a fleet for the&lt;br/&gt;load it can actually get"]
+  T --> C["Lesson 0900&lt;br/&gt;the hit rate the store&lt;br/&gt;was provisioned around"]
+  W["Module 09&lt;br/&gt;Caching"] -.- T
+    </div>
+    <figcaption>The arrow back to lesson 0900 is the point of this page. A store sized for 100 queries a second because the cache absorbs 9,900 has not become more robust - it has acquired a dependency that no code path declares and no test exercises. <b>A cache does not reduce the load your system must survive, it reduces the load your system usually sees.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: one event with four causes</h2>
+
+  <p>Every failure in this module reduces to a miss rate that rises faster than the store can absorb. That framing is worth holding because it collapses four scary-sounding phenomena into one measurable quantity, and because it says where the mitigation has to act: either fewer misses reach the store, or the store refuses work politely. Nothing else is available.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four ways to miss</div>
+    <div class="fig-claim">Each cause has a different mitigation and none of them is a bigger cache.</div>
+    <div class="mermaid">
+flowchart TB
+  Q["The entry is not there"] --> E["It expired&lt;br/&gt;you set the lifetime"]
+  Q --> V["It was evicted&lt;br/&gt;memory ran out"]
+  Q --> C["It was never written&lt;br/&gt;the cache restarted"]
+  Q --> G["The cache is unreachable&lt;br/&gt;the node is gone"]
+  E --> E2["Jitter the lifetimes&lt;br/&gt;collapse the duplicate fills"]
+  V --> V2["Pick the policy on purpose&lt;br/&gt;and watch evicted keys"]
+  C --> C2["Warm it, or admit&lt;br/&gt;traffic gradually"]
+  G --> G2["Spill to spare capacity&lt;br/&gt;rather than rehashing"]
+    </div>
+    <figcaption>The four causes separated, because the mitigations do not transfer. Jitter does nothing about an eviction storm, a bigger instance does nothing about a synchronised expiry, and both are useless when the node is simply missing. The diagnostic question is not "why is the cache slow" but which of these four made an entry absent. <b>Absence has four causes and one symptom, which is why the dashboard never tells you which one you have.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the four, and what each one needs</h2>
+
+  <h3 id="stampede">The stampede, and why it is not solved in your process</h3>
+  <p>A popular entry expires. Between that moment and the moment somebody stores a fresh one, every reader misses, and every one of them queries the store. The load is not the store's usual miss traffic - it is the full read rate of the hottest key in the system, arriving at once, and it lasts as long as one recomputation takes. Worse, the recomputation is now slower because the store is busy serving its duplicates, which extends the window that is generating them.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The herd</div>
+    <div class="fig-claim">The window that causes the pile-up is lengthened by the pile-up itself.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant R as 500 readers
+  participant C as Cache
+  participant D as Database
+  Note over C: the hot entry expires
+  R->>C: get feed-home
+  C-->>R: miss, 500 times
+  R->>D: 500 identical queries
+  Note over D: each one is slower&lt;br/&gt;because the others are running
+  D-->>R: 500 identical answers
+  R->>C: set feed-home, 500 times
+  Note over C,D: 499 of those queries&lt;br/&gt;bought nothing at all
+    </div>
+    <figcaption>The same query, 500 times, for one answer. The reason it is worth a figure rather than a sentence is the feedback in the middle: the recomputation window is what admits readers into the herd, and the herd is what stretches the window, so the effect grows faster than the read rate does. <b>A stampede is not a burst of traffic, it is a burst of duplicated work, and duplication is what the mitigations remove.</b></figcaption>
+  </figure>
+
+  <p>Two mitigations exist and they act in different places. <b>Collapsing duplicates</b> lets one caller do the work while the others wait on its result. Go ships this as <code>singleflight</code>, whose whole documented job is that "only one execution is in-flight for a given key at a time", with a <code>shared</code> return value telling a caller its result came from somebody else's call. Python builds the same thing out of a task registry.</p>
+
+  <div class="code-cap">fill.go &middot; one fill per key, per process</div>
+  <pre><code>var group singleflight.Group
+
+func (r *UserRepo) Feed(ctx context.Context, id string) (Feed, error) {
+	if f, ok := r.fromCache(ctx, id); ok {
+		return f, nil
+	}
+	v, err, _ := group.Do(id, func() (any, error) {
+		return r.loadAndStore(ctx, id) // exactly one of these runs
+	})
+	if err != nil {
+		return Feed{}, err
+	}
+	return v.(Feed), nil
+}</code></pre>
+
+  <div class="code-cap">fill.py &middot; the same collapse, built from one task per key</div>
+  <pre><code>_inflight: dict[str, asyncio.Task[Feed]] = {}
+
+async def feed(key: str) -> Feed:
+    cached = await read_cache(key)
+    if cached is not None:
+        return cached
+
+    task = _inflight.get(key)
+    if task is None:                        # the first caller does the work
+        task = asyncio.create_task(load_and_store(key))
+        _inflight[key] = task
+        task.add_done_callback(lambda _: _inflight.pop(key, None))
+    return await task                       # everyone else awaits it</code></pre>
+
+  <p>Both of those collapse a herd <em>inside one process</em>, which is the limit worth stating plainly: with two hundred service instances you have turned 500 duplicate queries into 200, not into one. Collapsing across the fleet needs the cache itself to arbitrate, which is what a lease does - and it is why Facebook implemented leases in memcached rather than in the web servers. Their measurement is the one number to remember from this page: on a set of keys prone to thundering herds, peak database query rate without leases was <span class="keynum">17,000</span> a second, and with leases <span class="keynum">1,300</span>.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Leases, measured</div>
+    <div class="fig-claim">Arbitrating the fill at the cache removed 92% of the peak database load.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of peak database query rate on herd-prone keys: 17,000 per second without leases, 1,300 per second with leases">
+      <line class="grid" x1="70" y1="194" x2="610" y2="194"/>
+      <line class="grid" x1="70" y1="138" x2="610" y2="138"/>
+      <line class="grid" x1="70" y1="82"  x2="610" y2="82"/>
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <rect class="m-alarm" x="160" y="60"  width="110" height="190"/>
+      <rect class="m-stat"  x="410" y="235" width="110" height="15"/>
+      <text class="lbl-sm" x="62" y="198" text-anchor="end">5,000</text>
+      <text class="lbl-sm" x="62" y="142" text-anchor="end">10,000</text>
+      <text class="lbl-sm" x="62" y="86"  text-anchor="end">15,000</text>
+      <text class="lbl-b"  x="215" y="52"  text-anchor="middle">17,000/s</text>
+      <text class="lbl-b"  x="465" y="227" text-anchor="middle">1,300/s</text>
+      <text class="lbl-sm" x="215" y="270" text-anchor="middle">without leases</text>
+      <text class="lbl-sm" x="465" y="270" text-anchor="middle">with leases</text>
+      <text class="lbl-sm" x="340" y="291" text-anchor="middle">peak database query rate, keys prone to thundering herds</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>every miss reaches the database</span><span><i class="sw-stat"></i>one fill per key, arbitrated by the cache</span></div>
+    <figcaption>One week of production traffic on the same set of keys, before and after. Note what the mechanism did not change: the read rate, the hit rate and the expiry policy are all identical between the two bars. Only the duplication was removed, and it was most of the load. <b>Peak load is what a database is provisioned for, so removing duplicates at the peak is worth more than raising the hit rate at the average.</b></figcaption>
+  </figure>
+
+  <p>The second mitigation attacks the synchronisation instead of the duplication. If a herd forms because every reader learns at the same instant that the entry is gone, then have readers refresh slightly early, independently and at random. Vattani, Chierichetti and Lowenstein prove the optimal distribution for that decision is exponential, and their algorithm is one line inside the ordinary fetch.</p>
+
+  <div class="math">
+    refresh early when &nbsp; now &minus; (&Delta; &times; &beta; &times; ln U) &ge; expiry
+    <span class="gloss">Read as: each reader pretends to be a little way in the future and refreshes if the entry would be expired by then. <i>&Delta;</i> is how long the last recomputation of this entry took, <i>&beta;</i> is a tuning factor that defaults to 1, and <i>U</i> is a uniform random number between 0 and 1 - so <i>ln U</i> is negative and the whole bracket is a positive random leap forward.</span>
+  </div>
+
+  <p>Two properties make it worth the strangeness. The leap scales with how expensive the entry was to build, so slow entries are refreshed earlier and cheap ones almost never are, with nothing to configure. And because each reader draws its own <i>U</i>, the readers spread themselves out instead of arriving together. The same reasoning applies one level up: entries written together, by a deploy or a bulk import, will expire together unless their lifetimes are jittered, and a herd on a thousand keys at once is the same event with a wider blast radius.</p>
+
+  <h3 id="eviction">Eviction is a different removal from expiry</h3>
+  <p>An entry can also vanish because the cache ran out of room, and this is a separate mechanism with separate settings. Redis compares memory use against <code>maxmemory</code> on every write and evicts according to <code>maxmemory-policy</code> until it is back under. The policy names matter more than they look: an <code>allkeys-</code> policy may evict any key at all, while a <code>volatile-</code> policy only considers keys that have a lifetime - and, in the documentation's own words, the volatile policies "behave like <code>noeviction</code> if no keys have an associated expiration". A cache configured with <code>volatile-lru</code> whose keys are all written without a TTL does not evict. It fills up and starts returning errors on every write.</p>
+
+  <p>Two more details are worth knowing before you read an eviction graph. Redis does not compute a true LRU: it samples a small number of keys at random and evicts the least recently used among them, tunable with <code>maxmemory-samples</code>, because a true LRU "costs more memory". And <code>allkeys-lfu</code> tracks frequency with a probabilistic counter that decays over time, so a key that was hot last week does not hold memory forever. Neither approximation is a problem, but both mean the entry that disappeared may not be the one your reasoning nominated.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A node, over its life</div>
+    <div class="fig-claim">The store is exposed during warming, which is a state you enter deliberately.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Cold: started, or replaced
+  Cold --> Warming: traffic admitted
+  Warming --> Warm: hit rate has stabilised
+  Warm --> Warm: the state everything was sized for
+  Warm --> Cold: restart, scale-out or failover
+  Warming --> Overloaded: the store cannot take the miss rate
+  Overloaded --> Warming: shed load, or admit traffic slowly
+    </div>
+    <figcaption>Every cache node spends most of its life in Warm, and the whole system was designed against that one state. The transition worth planning is the edge out of Warming, because which of the two it takes is decided by whether anything in front of the store limits how fast traffic is admitted. A deploy that replaces every cache node at once takes the lower edge on every node simultaneously. <b>Warming is a normal, scheduled state and it is the one the service is least able to survive.</b></figcaption>
+  </figure>
+
+  <h3 id="cold">The empty cache, and the missing one</h3>
+  <p>The remaining two causes are the crude ones. A restarted or newly scaled cache is empty, and under cache-aside every read is a miss until it refills - which is the full unmitigated read rate arriving at a store sized for a fraction of it. Facebook treats this as a first-class operational problem rather than an accident: their Cold Cluster Warmup lets an empty cluster fill itself from a warm one instead of from the databases, bringing it "back to full capacity in a few hours instead of a few days", at the price of a documented consistency race that they close with a two-second hold-off on deletes.</p>
+
+  <p>A cache node that is gone is different again, because the tempting fix makes it worse. Rehashing its keys onto the surviving nodes spreads a hot key onto a machine that already has its own load, and the paper notes that "a single key can account for 20% of a server's requests" - enough to take the next server down and start a cascade. Their answer is to spill misses into a small dedicated pool, about 1% of the servers, rather than redistributing: it reduces client-visible failures by <span class="keynum">99%</span> and converts 10% to 25% of failures into hits each day.</p>
+
+  <h2>3. The trade-off: none of this gives the store its slack back</h2>
+
+  <p>Every mitigation on this page is another moving part with its own failure mode. Leases add state to the busiest path in the system. Probabilistic refresh spends origin work you did not have to spend, on entries that had not expired yet. A spare pool is capacity you bought and do not use. Warming from a peer creates a consistency race that has to be closed by hand. These are all correct engineering, and each one is a thing that can be misconfigured at three in the morning.</p>
+
+  <p>What none of them changes is the underlying position. The store is provisioned for the load it usually sees, the cache is what makes "usually" true, and there is no arrangement of mitigations under which a store sized for 1% of the read rate survives 100% of it. So the design question this module ends on is not how to stop the cache failing. It is which of two prices you would rather pay: a store with enough headroom to survive a cold cache, which is expensive every day, or a service that sheds load and degrades visibly when the miss rate jumps, which is cheap every day and unpleasant on the day. Module 11 is where the second one is built.</p>
+
+  <div class="callout warn">
+    The measurement that tells you which position you are in is not the hit rate. It is the answer to "what is our read rate, and what is the store's safe query rate", and the gap between them is your actual exposure. Most teams have never taken it, because the experiment - stop the cache during business hours - is exactly the one nobody wants to run. Take it on a load-tested copy instead, and write the number down beside the cache's configuration, because it is the number that decides whether an incident is a slow afternoon or an outage.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does in-process duplicate suppression only partly fix a stampede?</div>
+      <button class="q-opt">It waits for the first caller, so every other caller is slowed</button>
+      <button class="q-opt">It cannot suppress a second fill once the entry has expired</button>
+      <button class="q-opt">It suppresses reads as well, so some callers get stale answers</button>
+      <button class="q-opt">It collapses per process, so a fleet still sends one query each</button>
+      <div class="q-fb">A group registry lives in one process's memory, so two hundred instances produce two hundred queries rather than one - which is why arbitration has to move into the cache for a fleet. The first option describes the intended behaviour rather than a limit; the second is false, since the whole point is that the first fill serves everyone waiting; and the third confuses it with serving stale data during a refresh, which is a different technique.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A Redis cache set to <code>volatile-lru</code> holds keys written with no TTL. What happens at <code>maxmemory</code>?</div>
+      <button class="q-opt">It evicts the keys that were least recently read</button>
+      <button class="q-opt">It evicts nothing and refuses further writes with an error</button>
+      <button class="q-opt">It evicts keys at random until it is under the limit</button>
+      <button class="q-opt">It evicts the largest keys until it is under the limit</button>
+      <div class="q-fb">A volatile policy only considers keys carrying an expiration, and the documentation states that with none it behaves like noeviction - so writes fail while memory is full of keys the policy will not touch. The first option is what allkeys-lru would do, the third is allkeys-random, and no Redis policy has ever selected by value size.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="../index.html">the course map</a></b> - Module 10 takes the same question to work that does not have to happen inside a request at all.</li>
+    <li><b>Behind you, <a href="0900-a-cache-is-a-bet-that-the-question-repeats.html">a cache is a bet that the question repeats</a></b> is where the capacity dependency this page bills you for was created.</li>
+    <li><b>Sideways, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> shows the same duplicate-suppression idea protecting a write rather than a fill.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find your hottest cached key and work out how many queries a second the store would receive during one recomputation of it if every reader missed together. Ask the agent whether your service collapses those duplicates, at what scope, and what the number becomes across your whole instance count.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Redis's <a href="https://redis.io/docs/latest/develop/reference/eviction/">key eviction</a> page is short, exact, and describes behaviour most people believe they already know - read the policy list and the approximated-LRU section before you next choose one. Then read <a href="https://cseweb.ucsd.edu/~avattani/papers/cache_stampede.pdf">Optimal Probabilistic Cache Stampede Prevention</a> (VLDB 2015) for the derivation behind the one-line refresh rule, including why the uniform distribution most implementations use is the wrong one.</p>
+
+  <div class="pager">
+    <a href="0904-invalidation-buys-a-staleness-window.html"><span class="dir">&larr; Previous</span><span class="ttl">Invalidation buys a staleness window</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0905 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
