@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The repository hides the store behind a contract - Backend Engineering</title>
+<meta name="description" content="A repository names the loads and saves the domain needs. The query language, the driver types and the schema stay on its far side, which is what lets one rule run against two stores.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; The layered service &middot; Lesson 0503</div>
+  <h1>A repository names the loads and saves the domain needs, and the query language stops at its edge</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The lower door, built properly. &middot;
+    <a href="https://docs.spring.io/spring-data/jpa/reference/repositories/core-concepts.html">Spring Data - Repository core concepts</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A repository is a contract for <b>the loads and saves the domain needs</b>, written in the domain's vocabulary and nobody else's.</li>
+      <li>It is not a mirror of the schema. <b>The number of methods follows the number of operations</b>, never the number of tables.</li>
+      <li>Everything the store speaks - SQL, driver errors, row types, connection handles - lives on the <b>far side</b> of the contract and never crosses it.</li>
+      <li>Spring Data draws the same line by extending a <b>store-agnostic</b> interface into technology-specific ones, so the generic part is what a domain depends on.</li>
+      <li>What it costs: the contract hides the query language and therefore hides the query <b>cost</b>, which is the one thing a caller most needs to see.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The lower door of the previous page, built as a real contract.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0502&lt;br/&gt;the service refused&lt;br/&gt;to import a driver"] --> T["THIS PAGE&lt;br/&gt;the contract that lets it&lt;br/&gt;load without importing one"]
+  T --> A["Lesson 0504&lt;br/&gt;the deadline this&lt;br/&gt;contract has to carry"]
+  T --> B["Module 08&lt;br/&gt;the relational model&lt;br/&gt;behind the contract"]
+  T --> C["Module 09&lt;br/&gt;a cache that sits&lt;br/&gt;behind the same contract"]
+  W["Module 05&lt;br/&gt;the layered service"] -.- T
+    </div>
+    <figcaption>The previous page said the service may not import a driver type. That is only possible if something else does, behind a contract the service is willing to depend on. This page is that contract, and two later modules put entirely different machinery behind it without the service noticing. <b>The repository exists so a decision can load what it needs without learning where things are kept.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a collection whose contents outlive the process</h2>
+
+  <p>The useful picture is not a data-access object with one method per table. It is a collection: something you can add to, take from, and look things up in, whose contents happen to survive a restart. A service asking for an order by its identifier is doing the same thing it would do with an in-memory map, and the fact that the answer travels over a socket and arrives as rows is an implementation detail it has no interest in.</p>
+
+  <p>Spring Data draws the line in its type hierarchy rather than in prose: the store-agnostic interfaces come first, and the technology-specific ones extend them to expose what a particular store can additionally do. A domain that depends on the generic part is portable. A domain that reaches for the specific part has chosen a store, which is sometimes right and is always a choice rather than an accident.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What crosses the contract</div>
+    <div class="fig-claim">Domain vocabulary crosses in both directions and nothing else does.</div>
+    <div class="mermaid">
+flowchart LR
+  S["Service&lt;br/&gt;knows Order, OrderID,&lt;br/&gt;and a named not-found outcome"] -->|"ByID(ctx, OrderID)"| I["Orders&lt;br/&gt;the interface the&lt;br/&gt;service declared"]
+  I -->|"Order, or ErrNotFound"| S
+  I --- P["Postgres implementation&lt;br/&gt;SQL text, sql.Rows,&lt;br/&gt;a constraint name"]
+  I --- M["In-memory implementation&lt;br/&gt;a map and a mutex"]
+  I --- C["Cache-through implementation&lt;br/&gt;Redis in front of Postgres"]
+  classDef hidden fill:var(--surface-2),stroke:var(--line-strong)
+  class P,M,C hidden
+    </div>
+    <figcaption>Three implementations, one contract, and the service cannot distinguish them from where it stands. Everything in the shaded row is vocabulary the service is not allowed to learn: a query string, a driver's row type, a constraint name, a cache key. The identifier and the domain object are the only things that cross. <b>A repository is a translation boundary, and the schema is the language it refuses to teach upward.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="repository">The contract the domain declares</h3>
+  <p>The methods come from the operations, not from the schema. Ask what the service actually does with orders: it loads one by identifier, it saves one, and for the cancellation screen it lists the ones a customer placed. That is three methods. A schema with an <code>orders</code> table, an <code>order_lines</code> table and an <code>order_events</code> table still yields three methods, because the service never asked for a line or an event on its own. When it does ask, the interface grows by one method with a name from the domain.</p>
+
+  <p>The identifier type matters as much as the method list. A method taking <code>OrderID</code> rather than <code>string</code> cannot be handed a customer identifier by mistake, and a method returning <code>Order</code> rather than a row means the mapping from columns to fields happened on the far side, where the schema is known.</p>
+
+  <div class="code-cap">the contract and one implementation &middot; the SQL exists only in the second block</div>
+<pre><code>// The contract: three operations, all in the domain's vocabulary.
+type Orders interface {
+    ByID(ctx context.Context, id OrderID) (Order, error)
+    ForCustomer(ctx context.Context, id CustomerID) ([]Order, error)
+    Save(ctx context.Context, o Order) error
+}
+
+// One implementation. Every store-specific word in the file is below this line.
+func (r *PostgresOrders) ByID(ctx context.Context, id OrderID) (Order, error) {
+    row := r.db.QueryRowContext(ctx,
+        `SELECT id, customer_id, state, placed_at FROM orders WHERE id = $1`, id)
+    var o Order
+    switch err := row.Scan(&amp;o.ID, &amp;o.CustomerID, &amp;o.State, &amp;o.PlacedAt); {
+    case errors.Is(err, sql.ErrNoRows):
+        return Order{}, ErrNotFound      // the driver error is translated here
+    case err != nil:
+        return Order{}, fmt.Errorf("load order %s: %w", id, err)
+    }
+    return o, nil
+}
+</code></pre>
+
+  <p>Notice what the last block does with <code>sql.ErrNoRows</code>. The driver's way of saying nothing matched is turned into the domain's named outcome at the boundary, which is the second door of the previous page being locked from this side. Go's standard library is honest about how far its own abstraction goes: <code>database/sql</code> provides a generic interface around SQL databases, which makes it generic over drivers and not over stores. Being generic over stores is this contract's job, not the library's.</p>
+
+  <h3 id="persistence-model">The persistence model against the domain model</h3>
+  <p>The two shapes are allowed to differ, and pretending otherwise is what makes repositories degenerate. A domain object holds what the rules need. A schema holds what queries and constraints need, and those are shaped by indexes, joins and history. When they diverge, the mapping is work the implementation does, and doing it there is the point rather than an inconvenience. When a framework maps the two automatically, the domain object is being defined by the schema, and any rule that would want a different shape now costs a migration.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One test, two stores</div>
+    <div class="fig-claim">The same three calls produce the same three answers on both.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant S as OrderService
+  participant M as In-memory Orders
+  participant P as Postgres Orders
+  S->>M: ByID(ctx, "ord-7")
+  M-->>S: Order in state Shipped
+  S->>P: ByID(ctx, "ord-7")
+  P-->>S: Order in state Shipped
+  S->>M: Save(ctx, cancelled order)
+  M-->>S: ErrAlreadyShipped from the rule above
+  Note over S,P: identical answers - which is what makes the double trustworthy
+    </div>
+    <figcaption>The same contract exercised against a map and against a database. Where the two agree, the in-memory implementation is a fair stand-in and the fast tests mean something. Where they disagree - on ordering, on case sensitivity, on what a concurrent write does - the double is telling a comfortable lie, and the only way to find out is to run the same suite against both. <b>A test double is trustworthy exactly as far as it has been checked against the real implementation.</b></figcaption>
+  </figure>
+
+  <h2>3. What the contract costs</h2>
+
+  <p>It hides the cost. A caller reading <code>ForCustomer(ctx, id)</code> cannot see whether that is one query with a join or one query per order, and the interface is doing its job by not saying. That is the trade this boundary makes, and it is why a repository is not a licence to stop thinking about queries: the cost has to become visible some other way, through the timings the observability module adds and through a review that reads the implementation rather than the contract.</p>
+
+  <p>It also erodes under pressure from the user interface. A screen wants a page of results, sorted, with two fields from another entity, and the honest ways to serve that are a new domain-named method or a separate read path that queries the store directly. The dishonest way is a general filter object with sort keys and field lists, which is a query language again, expressed worse and now inside the domain's own package.</p>
+
+  <div class="callout warn">
+    A repository whose method list grows one entry per screen has stopped being a domain contract. Twenty methods named after views is a query language with no optimiser, no documentation and no way to see which of them are slow. When that starts happening, the honest fix is usually to split reads from writes - let the write side keep the narrow domain contract and let the read side query the store directly for the shapes a screen needs - rather than to keep widening one interface. This course does not build that split, and Module 08 is where the query cost that forces it becomes measurable.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What decides which methods a repository interface carries?</div>
+      <button class="q-opt">The tables the schema currently holds</button>
+      <button class="q-opt">The methods the ORM already gives you</button>
+      <button class="q-opt">The loads and saves the domain needs</button>
+      <button class="q-opt">The indexes the database can serve</button>
+      <div class="q-fb">The operations come first and the storage follows, which is why three tables can sit behind three methods or behind one. Deriving the interface from tables, from an ORM's base class or from the index list all let the store dictate the domain's vocabulary, which is the coupling the contract exists to remove.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which signature leaks the store through the contract?</div>
+      <button class="q-opt">A method that takes a query string</button>
+      <button class="q-opt">A method returning a domain object</button>
+      <button class="q-opt">A save that takes a whole entity</button>
+      <button class="q-opt">A lookup taking a typed identifier</button>
+      <div class="q-fb">A query string means the caller has to know the store's language, so no other implementation can satisfy the interface and the substitution test fails immediately. The other three are the contract working as intended: domain types in, domain types out, and nothing that names a store.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0504-request-context-carries-what-every-layer-needs.html">request context carries what every layer needs</a></b> explains the <code>ctx</code> that every method on this page takes and none of them has used yet.</li>
+    <li><b>Back to <a href="0502-the-service-layer-owns-the-decision.html">the service layer owns the decision</a></b> for the rule this contract is serving.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> List the methods on your largest repository and mark each one as a domain operation or a screen. Ask the agent which of the screen methods could be served by a separate read path, and what the write-side contract would shrink to if they were.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.spring.io/spring-data/jpa/reference/repositories/core-concepts.html">Spring Data's repository core concepts</a> is the clearest published statement of the split this page argues for: a store-agnostic interface that a domain depends on, extended by technology-specific ones that expose what a particular store can do. <a href="https://pkg.go.dev/database/sql">Go's <code>database/sql</code></a> is worth reading beside it as the honest counter-example, because its generic interface is generic over drivers rather than over stores.</p>
+
+  <div class="pager">
+    <a href="0502-the-service-layer-owns-the-decision.html"><span class="dir">&larr; Previous</span><span class="ttl">The service layer owns the decision</span></a>
+    <a class="nxt" href="0504-request-context-carries-what-every-layer-needs.html"><span class="dir">Next &rarr;</span><span class="ttl">Request context carries what every layer needs</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0503 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
