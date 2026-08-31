@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isolation levels are a menu of anomalies - Backend Engineering</title>
+<meta name="description" content="An isolation level does not say how careful the database is. It names exactly which concurrency anomalies you have agreed to live with, and the default in PostgreSQL permits three of the four.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Data &middot; Lesson 0802</div>
+  <h1>An isolation level names the anomalies you have agreed to live with</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    The default is not the safe one, and nothing tells you when it bites. &middot;
+    <a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL - Transaction Isolation</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The standard defines four levels by <b>which of four phenomena each one permits</b>: dirty read, nonrepeatable read, phantom read, serialization anomaly.</li>
+      <li>PostgreSQL's default is <b>Read Committed</b>, which permits three of the four. It is the default because it is cheap, not because it is correct for your code.</li>
+      <li>Under Read Committed each <b>statement</b> gets a fresh snapshot. Under Repeatable Read the whole <b>transaction</b> gets one.</li>
+      <li>Serializable emulates running the transactions one at a time, and pays for it by <b>refusing to commit</b> some of them. Your application must retry.</li>
+      <li>What it costs: the stronger levels turn a silent wrong answer into a visible error you have to handle, which is a better failure and still a failure you now own.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The boundary from the last page is only half a promise until concurrency is settled.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0801&lt;br/&gt;a boundary - all&lt;br/&gt;of it or none"] --> T["THIS PAGE&lt;br/&gt;what a concurrent reader&lt;br/&gt;is allowed to see"]
+  T --> A["Lesson 0803&lt;br/&gt;the locking cost&lt;br/&gt;of holding the line"]
+  T --> B["Module 09&lt;br/&gt;a cache, which is one&lt;br/&gt;more stale reader"]
+  T --> C["Module 13&lt;br/&gt;scale, where every&lt;br/&gt;anomaly gets likelier"]
+  W["Module 08&lt;br/&gt;Data"] -.- T
+    </div>
+    <figcaption>Atomicity said your writes land together. It said nothing about what somebody else's transaction sees while yours is running, or what yours sees while theirs is. That gap is where the bugs that survive code review live, because every statement in them is correct on its own and the defect only exists in the interleaving. <b>Isolation is the only part of a transaction whose failures cannot be reproduced by reading the code of one transaction.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: four phenomena, and a level is a subset</h2>
+
+  <h3 id="phenomena">The four things that can go wrong</h3>
+  <p>The standard does not describe levels by how they work. It describes them by which of four named phenomena they allow, and <a href="https://www.postgresql.org/docs/current/transaction-iso.html">PostgreSQL restates all four</a> precisely. A <b>dirty read</b> is reading data written by a concurrent uncommitted transaction. A <b>nonrepeatable read</b> is re-reading a row you already read and finding it modified by a transaction that has since committed. A <b>phantom read</b> is re-running a query and finding the set of rows matching your condition has changed. A <b>serialization anomaly</b> is the general one: the result of committing a group of transactions is inconsistent with every possible order of running them one at a time.</p>
+
+  <p>The fourth is the one worth holding on to, because the first three are special cases of it that were easy to name in the 1990s. A serialization anomaly is not a corrupted row or a failed write. Every transaction did exactly what its code says, every write committed, and the state they left behind is one that no serial order could have produced.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Anomalies each level permits</div>
+    <div class="fig-claim">PostgreSQL's Repeatable Read forbids more than the standard requires.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Grouped bar chart counting how many of the four named phenomena each isolation level permits. Under the SQL standard, read uncommitted permits four, read committed three, repeatable read two and serializable none. Under PostgreSQL, read uncommitted and read committed both permit three, repeatable read permits one, and serializable permits none.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <line class="grid" x1="70" y1="200" x2="610" y2="200"/>
+      <line class="grid" x1="70" y1="150" x2="610" y2="150"/>
+      <line class="grid" x1="70" y1="100" x2="610" y2="100"/>
+      <line class="grid" x1="70" y1="50" x2="610" y2="50"/>
+      <text class="lbl-sm" x="62" y="254" text-anchor="end">0</text>
+      <text class="lbl-sm" x="62" y="204" text-anchor="end">1</text>
+      <text class="lbl-sm" x="62" y="154" text-anchor="end">2</text>
+      <text class="lbl-sm" x="62" y="104" text-anchor="end">3</text>
+      <text class="lbl-sm" x="62" y="54" text-anchor="end">4</text>
+      <rect class="m-alarm" x="100" y="50" width="30" height="200"/>
+      <rect class="m-stat" x="134" y="100" width="30" height="150"/>
+      <rect class="m-alarm" x="230" y="100" width="30" height="150"/>
+      <rect class="m-stat" x="264" y="100" width="30" height="150"/>
+      <rect class="m-alarm" x="360" y="150" width="30" height="100"/>
+      <rect class="m-stat" x="394" y="200" width="30" height="50"/>
+      <rect class="m-alarm" x="490" y="248" width="30" height="2"/>
+      <rect class="m-stat" x="524" y="248" width="30" height="2"/>
+      <text class="ttl" x="70" y="26">Phenomena permitted, out of four</text>
+      <text class="lbl-sm" x="132" y="268" text-anchor="middle">read uncommitted</text>
+      <text class="lbl-sm" x="262" y="268" text-anchor="middle">read committed</text>
+      <text class="lbl-sm" x="392" y="268" text-anchor="middle">repeatable read</text>
+      <text class="lbl-sm" x="522" y="268" text-anchor="middle">serializable</text>
+      <text class="lbl-sm t-stat" x="392" y="286" text-anchor="middle">the default is the second group, not the third</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>the SQL standard</span><span><i class="sw-stat"></i>PostgreSQL</span></div>
+    <figcaption>Counted directly from the documented table rather than measured. Two things fall out of the pairs. Read Uncommitted buys nothing here, because PostgreSQL's Read Uncommitted mode behaves like Read Committed. And Repeatable Read is stronger than the name promises, because PostgreSQL's implementation does not allow phantom reads, leaving only the serialization anomaly. <b>Only the rightmost pair reaches zero, and the default sits two groups to its left.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: whose snapshot, and when it was taken</h2>
+
+  <h3 id="mvcc">Reading never blocks writing</h3>
+  <p>All of this rests on multiversion concurrency control. <a href="https://www.postgresql.org/docs/current/mvcc-intro.html">Each statement sees a snapshot of the data as it was some time ago</a>, regardless of what the underlying rows currently hold, and the stated advantage over locking is blunt: reading never blocks writing and writing never blocks reading. A reader is never waiting for a writer, so the question is never whether you get an answer. It is always which version of the world your answer came from.</p>
+
+  <p>Under Read Committed, a query sees only data committed before <i>that query</i> began, and each command begins with a new snapshot. Under Repeatable Read, the transaction sees only data committed before <i>the transaction</i> began, so successive queries within one transaction see the same data. One word moved, and that word is the whole difference between the two levels.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two reads, one transaction</div>
+    <div class="fig-claim">A per-statement snapshot lets one transaction read two different totals.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant R as Reporting transaction
+  participant D as Database
+  participant W as Another writer
+  R->>D: BEGIN - read committed
+  R->>D: SELECT sum(balance) FROM accounts
+  D-->>R: 10,000 - snapshot taken now
+  W->>D: transfer 500 between two accounts, COMMIT
+  R->>D: SELECT count(*) FROM accounts WHERE balance = 0
+  D-->>R: a fresh snapshot - includes the transfer
+  Note over R: the report mixes two moments in time
+    </div>
+    <figcaption>Nothing here is a bug in either transaction. The writer moved money correctly and the reader ran two correct queries. The defect is that the second query took a new snapshot, so the report describes a state the database was never in, and the same run against the same data will usually be fine, which is what makes it hard to find. Repeatable Read fixes this exactly: one snapshot, taken at the first statement, held for the transaction. <b>A report built from several statements needs Repeatable Read, and asking for it is one line at BEGIN.</b></figcaption>
+  </figure>
+
+  <h3 id="read-committed-update">The surprise inside Read Committed</h3>
+  <p>Writes behave differently from reads, and the rule is stated in the documentation rather than folklore. An <code>UPDATE</code>, <code>DELETE</code> or <code>SELECT FOR UPDATE</code> finds target rows committed as of the command's start. If a concurrent transaction has already updated one of those rows, the second writer waits for the first to finish. If the first committed, the second applies its operation to the <i>updated</i> version of the row, and the search condition of the command is re-evaluated to see whether that updated version still matches.</p>
+
+  <p>PostgreSQL's own example of what that produces is the one to memorise. A two-row <code>website</code> table holds hits of 9 and 10. One session runs <code>UPDATE website SET hits = hits + 1</code> inside a transaction; another runs <code>DELETE FROM website WHERE hits = 10</code>. The delete has no effect, even though a row with 10 hits exists both before and after the update. The row that held 9 was skipped because it did not match at command start, and by the time the delete gets its lock the other row holds 11 rather than 10.</p>
+
+  <div class="callout warn">
+    The documentation names the consequence directly: an updating command can see an inconsistent snapshot, because it sees the effects of concurrent updates on the rows it is updating but not their effects on other rows. That makes Read Committed unsuitable for commands with complex search conditions, and just right for simpler cases. The trap is that "complex search condition" is not a warning your code prints. If your <code>UPDATE ... WHERE</code> depends on a column another transaction is also writing, you are in the unsuitable case, on the default level, with nothing telling you.
+  </div>
+
+  <h2>3. The mechanism: paying for correctness with retries</h2>
+
+  <p>Repeatable Read and Serializable do not make conflicts disappear. They make them loud. A Repeatable Read transaction cannot modify or lock rows changed by other transactions after it began, so the attempt fails with <code>could not serialize access due to concurrent update</code>. Serializable goes further: it monitors read-write dependencies among concurrent transactions and refuses those whose combination could not have arisen from any serial order, with <code>could not serialize access due to read/write dependencies among transactions</code>.</p>
+
+  <p>Both are the same instruction to you, stated twice in the documentation: applications using these levels must be prepared to retry transactions due to serialization failures. That sentence is the actual cost of the strong levels, and a service that does not implement it has not chosen Serializable, it has chosen an outage under load.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A conflict and the retry</div>
+    <div class="fig-claim">The strong levels turn a wrong answer into a refusal you can see.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Running: BEGIN serializable
+  Running --> Committed: no conflicting dependency was found
+  Running --> Refused: could not serialize access
+  Refused --> Waiting: back off
+  Waiting --> Running: run the whole transaction again
+  Refused --> [*]: attempts exhausted - surface it
+  Committed --> [*]
+    </div>
+    <figcaption>Compare this with the same drawing for Read Committed, which has no Refused state at all: the transaction commits, and the anomaly is in the data rather than in the control flow. That is the trade in one picture. The engine can only tell you about a conflict by declining to commit, so the cost of hearing about it is a code path you have to write and a latency tail on the contended rows. <b>A level that never refuses anything is not protecting you, it is agreeing with you.</b></figcaption>
+  </figure>
+
+  <div class="code-cap">retry.py &middot; the obligation the level creates, in the smallest honest form</div>
+  <pre><code>import psycopg
+from psycopg import errors
+
+def transfer(conn, src, dst, amount, attempts=5):
+    for attempt in range(attempts):
+        try:
+            with conn.transaction():
+                conn.execute("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                conn.execute("UPDATE accounts SET balance = balance - %s WHERE id = %s",
+                             (amount, src))
+                conn.execute("UPDATE accounts SET balance = balance + %s WHERE id = %s",
+                             (amount, dst))
+            return
+        except errors.SerializationFailure:
+            if attempt == attempts - 1:
+                raise
+            # back off, then run the whole transaction again from the start
+</code></pre>
+
+  <p>Three properties of that loop are not optional. The retry re-runs the whole transaction, including the reads, because the failure means the reads were based on a world that did not survive. It backs off, because retrying a contended transaction immediately is how a conflict becomes a storm. And it gives up, because a transaction that cannot commit in five attempts is telling you something about your write pattern that a sixth attempt will not fix.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Two SELECTs in one Read Committed transaction return different data. Why?</div>
+      <button class="q-opt">The second read was served from a lagging replica</button>
+      <button class="q-opt">The first read was taken before the transaction opened</button>
+      <button class="q-opt">Each statement takes its own snapshot at its start</button>
+      <button class="q-opt">The transaction was silently promoted to a new one</button>
+      <div class="q-fb">Read Committed takes a fresh snapshot per command, so anything committed between the two statements is visible to the second. Replica routing is a separate concern that would show the same symptom for a different reason, the snapshot is taken at the statement rather than before BEGIN, and no engine restarts your transaction without telling you.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What obligation does choosing Serializable place on the application?</div>
+      <button class="q-opt">Retrying transactions that fail with a serialization error</button>
+      <button class="q-opt">Taking explicit row locks before every read it performs</button>
+      <button class="q-opt">Ordering its statements so writes always follow reads</button>
+      <button class="q-opt">Holding transactions open until the conflicting one ends</button>
+      <div class="q-fb">The level converts anomalies into refusals to commit, and the documentation says applications must be prepared to retry. Explicit locking is what Serializable saves you from doing by hand, statement order does not decide serializability, and holding a transaction open is the opposite of the fix since it widens the conflict window.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0803-a-lock-is-held-until-commit.html">a lock is held until commit</a></b> is what the write side of these levels is doing while it waits, and why a long transaction is expensive even when it is correct.</li>
+    <li><b>Behind you, <a href="0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html">a transaction is a boundary and the log keeps it</a></b> gave you the boundary this page has been looking through.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the pattern the retry loop above depends on when the transaction has any effect outside the database.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one <code>UPDATE ... WHERE</code> in your service whose condition reads a column that other requests also write. Ask the agent to walk the Read Committed re-evaluation rule over two concurrent copies of it, and say what the second one does.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.postgresql.org/docs/current/transaction-iso.html">Transaction Isolation</a> is the page to read in full rather than skim: the table of four phenomena, the Read Committed re-evaluation rule with its website example, and the two serialization failure messages are all in it, with the exact wording that this page has quoted. <a href="https://www.postgresql.org/docs/current/mvcc-intro.html">The MVCC introduction</a> above it is one screen and explains why none of your readers are ever blocked.</p>
+
+  <div class="pager">
+    <a href="0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html"><span class="dir">&larr; Previous</span><span class="ttl">A transaction is a boundary and the log keeps it</span></a>
+    <a class="nxt" href="0803-a-lock-is-held-until-commit.html"><span class="dir">Next &rarr;</span><span class="ttl">A lock is held until commit</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0802 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
