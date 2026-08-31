@@ -45,7 +45,7 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 05 and 07-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
+Modules 05 and 08-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
 
 Module 03 landed fifth and takes the 03xx block, for the same reason Module 02 took 02xx: each module owns a
