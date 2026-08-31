@@ -201,6 +201,40 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "08",
+      "title": "Data",
+      "lessons": [
+        {
+          "title": "A constraint is the only rule every writer obeys",
+          "href": "lessons/0800-a-constraint-is-the-only-rule-every-writer-obeys.html"
+        },
+        {
+          "title": "A transaction is a boundary and the log keeps it",
+          "href": "lessons/0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html"
+        },
+        {
+          "title": "Isolation levels are a menu of anomalies",
+          "href": "lessons/0802-isolation-levels-are-a-menu-of-anomalies.html"
+        },
+        {
+          "title": "A lock is held until commit",
+          "href": "lessons/0803-a-lock-is-held-until-commit.html"
+        },
+        {
+          "title": "An index is a second sorted copy",
+          "href": "lessons/0804-an-index-is-a-second-sorted-copy.html"
+        },
+        {
+          "title": "A composite index has one useful order",
+          "href": "lessons/0805-a-composite-index-has-one-useful-order.html"
+        },
+        {
+          "title": "The non-relational map is four shapes",
+          "href": "lessons/0806-the-non-relational-map-is-four-shapes.html"
+        }
+      ]
+    },
+    {
       "n": "09",
       "title": "Caching",
       "lessons": [
@@ -287,6 +321,40 @@ window.COURSE_OUTLINE = {
         {
           "title": "A WebSocket is a session, and a session is state",
           "href": "lessons/1205-a-websocket-is-a-session-and-a-session-is-state.html"
+        }
+      ]
+    },
+    {
+      "n": "13",
+      "title": "Scale, fleet and shipping",
+      "lessons": [
+        {
+          "title": "Concurrency is how a server waits",
+          "href": "lessons/1300-concurrency-is-how-a-server-waits.html"
+        },
+        {
+          "title": "Shared state is where concurrency is paid for",
+          "href": "lessons/1301-shared-state-is-where-concurrency-is-paid-for.html"
+        },
+        {
+          "title": "Statelessness is what makes a fleet possible",
+          "href": "lessons/1302-statelessness-is-what-makes-a-fleet-possible.html"
+        },
+        {
+          "title": "A container is a process with its own view",
+          "href": "lessons/1303-a-container-is-a-process-with-its-own-view.html"
+        },
+        {
+          "title": "Kubernetes is a control loop, not a deployer",
+          "href": "lessons/1304-kubernetes-is-a-control-loop-not-a-deployer.html"
+        },
+        {
+          "title": "Tests buy confidence at different prices",
+          "href": "lessons/1305-tests-buy-confidence-at-different-prices.html"
+        },
+        {
+          "title": "The pipeline ships the artefact you tested",
+          "href": "lessons/1306-the-pipeline-ships-the-artefact-you-tested.html"
         }
       ]
     }

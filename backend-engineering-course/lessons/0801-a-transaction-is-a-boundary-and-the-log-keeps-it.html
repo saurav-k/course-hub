@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A transaction is a boundary and the log keeps it - Backend Engineering</title>
+<meta name="description" content="A transaction is a boundary you draw around several writes so that other transactions see all of them or none. Durability is not achieved by writing the data pages, it is achieved by flushing a sequential log first.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Data &middot; Lesson 0801</div>
+  <h1>A transaction is a boundary you draw, and the log is what makes it survive a crash</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Atomicity and durability, and the one ordering rule that buys both. &middot;
+    <a href="https://www.postgresql.org/docs/current/tutorial-transactions.html">PostgreSQL - Transactions</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A transaction is <b>atomic</b>: from the point of view of other transactions it either happens completely or not at all.</li>
+      <li>Its writes are <b>invisible until commit</b>, and then all of them become visible at the same instant. There is no moment where half of it is readable.</li>
+      <li>Durability is not the data pages reaching disk. It is the <b>write-ahead log</b> reaching disk first, which is one sequential flush instead of many scattered ones.</li>
+      <li>A crash is recovered by replaying the log forward over whatever the data files happen to hold, so an unflushed page costs nothing.</li>
+      <li>What it costs: a commit is a real disk flush, so <b>transaction count</b> is a hard cost the batch size divides, and every open transaction holds resources the next lesson makes you pay for.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One row was guarded by a constraint - a group of rows needs a boundary.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0800&lt;br/&gt;a constraint guards&lt;br/&gt;one row at a time"] --> T["THIS PAGE&lt;br/&gt;a boundary around&lt;br/&gt;several writes"]
+  T --> A["Lesson 0802&lt;br/&gt;what a concurrent reader&lt;br/&gt;is allowed to see"]
+  T --> B["Lesson 0803&lt;br/&gt;what the boundary&lt;br/&gt;holds while it is open"]
+  T --> C["Module 11&lt;br/&gt;graceful shutdown, which&lt;br/&gt;is this promise at exit"]
+  W["Module 08&lt;br/&gt;Data"] -.- T
+    </div>
+    <figcaption>A constraint answers the question "may this row exist". It has nothing to say about four writes that are only correct together, which is most of what a service actually does: take money from one account and add it to another, create an order and reserve its stock, mark a job done and record its output. This page is the mechanism that turns several statements into one fact. <b>The unit of correctness in a store is not the row, it is the transaction, and choosing where its edges go is a design decision nobody else can make for you.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: all of it, or none of it, and never half</h2>
+
+  <h3 id="atomicity">Atomicity is a claim about observers</h3>
+  <p>PostgreSQL introduces transactions with a bank transfer, and the example is worth keeping because the failure it names is so concrete: it would certainly not do for a system failure to result in Bob receiving a hundred dollars that was not debited from Alice. The definition follows from that. <a href="https://www.postgresql.org/docs/current/tutorial-transactions.html">A transaction is said to be atomic: from the point of view of other transactions, it either happens completely or not at all.</a></p>
+
+  <p>Read the qualifier carefully, because it is where the idea actually lives. Atomicity is not a claim that the engine writes four rows in one instruction. It plainly does not. It is a claim about what any other transaction is able to observe: the updates made so far by an open transaction are invisible to other transactions until it completes, whereupon all the updates become visible simultaneously. The half-finished state exists. It is simply not addressable from outside.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The states of a transaction</div>
+    <div class="fig-claim">Every route out is total - there is no partially committed state.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Open: BEGIN
+  Open --> Open: statements accumulate, visible only to me
+  Open --> Marked: SAVEPOINT s
+  Marked --> Open: ROLLBACK TO s - discard part, keep the rest
+  Open --> Committed: COMMIT - all of it becomes visible at once
+  Open --> Aborted: ROLLBACK, an error, or a crash
+  Committed --> [*]
+  Aborted --> [*]: as if nothing was written
+    </div>
+    <figcaption>Two exits and one loop. The loop is where a savepoint lives: it lets you discard part of the work and keep the rest, which is a decision made inside the boundary rather than a second boundary. What the drawing has no arrow for is the state teams assume in incident reviews, where three statements landed and the fourth did not. <b>An error partway through leaves the same trace as a crash and as a rollback, which is none, and that equivalence is the whole product.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: durability is an ordering rule</h2>
+
+  <h3 id="wal">Log first, data pages later</h3>
+  <p>The obvious way to make a commit durable is to write the changed pages to disk before answering. It is also the slow way: the pages a transaction touches are scattered across the files, so a commit becomes several random writes and a wait for each. Write-ahead logging replaces that with an ordering rule and one sequential write.</p>
+
+  <p><a href="https://www.postgresql.org/docs/current/wal-intro.html">WAL's central concept is that changes to data files must be written only after those changes have been logged</a>, that is, after log records describing the changes have been flushed to permanent storage. Everything else follows from that single ordering. If the rule holds, the data pages do not have to be flushed on every commit, because a crash can be recovered by replaying the log forward over whatever the files contain. PostgreSQL names that roll-forward recovery, or REDO.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What a commit waits for</div>
+    <div class="fig-claim">Only the log flush is on the caller's critical path.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant E as Engine
+  participant L as WAL on disk
+  participant D as Data files
+  C->>E: BEGIN and four UPDATEs
+  E->>E: change pages in memory, build log records
+  C->>E: COMMIT
+  E->>L: append the records and flush - one sequential write
+  L-->>E: on disk
+  E-->>C: COMMIT returned - the promise is now kept
+  E->>D: write the changed pages later, at leisure
+  Note over E,D: a crash here loses nothing - REDO replays the log
+    </div>
+    <figcaption>The reply to the client is sent after the log flush and before the data files are touched. That is the whole trick, and it is why the last arrow can be delayed, batched, or interrupted by a crash without breaking the promise made two arrows earlier. The documentation states the payoff directly: only the log file needs flushing to guarantee a commit, the log is written sequentially, and the cost of syncing it is much less than flushing the data pages. <b>Durability is bought by ordering two writes, not by making either of them faster.</b></figcaption>
+  </figure>
+
+  <h3 id="cost-of-commit">The commit is the cost, so count commits</h3>
+  <p>That flush is a genuine wait on the storage device, and it is per commit rather than per row. So the arithmetic that decides throughput on a bulk write path is not how many rows you have but how many times you said <code>COMMIT</code>.</p>
+
+  <ol class="worked">
+    <li><b>Take a commit flush as one storage round trip.</b> Call it <i>f</i> seconds - on durable network-attached storage it is often a fraction of a millisecond, and it is measured rather than assumed.</li>
+    <li><b>Write 10,000 rows one transaction at a time.</b> That is 10,000 flushes, so the floor is 10,000 &times; <i>f</i>, no matter how fast the rows themselves are.</li>
+    <li><b>Write the same rows 1,000 at a time.</b> That is 10 flushes, so the same floor is 10 &times; <i>f</i>, a thousandfold reduction in the part that waits on the device.</li>
+  </ol>
+
+  <p>This is derived arithmetic from the ordering rule rather than a benchmark, and the real system beats the pessimistic version of it: PostgreSQL notes that when the server is processing many small concurrent transactions, one flush of the log may suffice to commit many of them. That is a gift from concurrency, not a reason to leave the batch size at one, and it does nothing for a single client writing in a loop.</p>
+
+  <h2>3. The trade-off: where you draw the edges</h2>
+
+  <p>Because a transaction is a boundary you draw, the interesting failure is drawing it in the wrong place, and there are two wrong places. Too small, and a group of writes that are only correct together can be interrupted between them, which is the bank transfer with the constraint removed. Too large, and you are holding a boundary open across work that has nothing to do with the store.</p>
+
+  <p>The second is the common one in service code, and it has a specific shape: a transaction opened at the top of a request handler, an HTTP call to a payment provider in the middle of it, and a commit at the bottom. That transaction is now as long as somebody else's network, holding everything the next lesson describes for the duration. The rule that falls out is worth stating as a rule: <b>never wait on a remote system inside a transaction</b>. Do the remote call before or after, and make the whole handler safe to repeat using the idempotency key of lesson 0605, which exists precisely because the alternative is a boundary you cannot honour.</p>
+
+  <div class="callout warn">
+    A transaction is a boundary inside one database. It is not a boundary across two, and it is not a boundary across a database and a queue. Writing a row and publishing a message are two systems, so a crash between them leaves exactly the half-state this page told you does not happen, because it does not happen only within the one engine's boundary. The mechanisms that repair this - the transactional outbox, and consuming your own committed rows - belong to Module 10, and until then the honest position is to know which of your writes are inside one boundary and which merely look like it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does write-ahead logging make a commit cheaper than flushing the changed pages?</div>
+      <button class="q-opt">Log records are compressed before they are written out</button>
+      <button class="q-opt">The log is held in memory until a checkpoint runs</button>
+      <button class="q-opt">Only rows that changed are written, not whole pages</button>
+      <button class="q-opt">The log is one sequential write instead of scattered ones</button>
+      <div class="q-fb">A transaction's pages sit in different places in the files, so flushing them is several random writes, while the log is appended in one place. Compression is not the mechanism, the log must reach disk rather than stay in memory or the promise is void, and the scattered writes still happen later regardless of their granularity.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A crash happens after COMMIT returned but before the data pages were written. What is lost?</div>
+      <button class="q-opt">The last transaction, which the client must retry</button>
+      <button class="q-opt">Nothing, because the log is replayed forward on restart</button>
+      <button class="q-opt">Any row whose page was still in memory at the crash</button>
+      <button class="q-opt">Only the indexes, which are rebuilt from the tables</button>
+      <div class="q-fb">The log records were flushed before the commit was acknowledged, so recovery redoes them over whatever the files hold. The first option describes a crash before the flush, the third describes a system with no log at all, and indexes are logged like everything else rather than rebuilt.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0802-isolation-levels-are-a-menu-of-anomalies.html">isolation levels are a menu of anomalies</a></b> takes the same boundary and asks what a concurrent reader is permitted to see through it.</li>
+    <li><b>Ahead, <a href="0803-a-lock-is-held-until-commit.html">a lock is held until commit</a></b> is why the length of the boundary, not just its edges, is a design decision.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is what you reach for when the work genuinely cannot fit inside one boundary.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one request handler in your service that opens a transaction. Trace every call made while it is open and ask the agent which of them leave the process. For each one, work out what the correct shape is when the remote call succeeds and the commit then fails.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>PostgreSQL's <a href="https://www.postgresql.org/docs/current/tutorial-transactions.html">Transactions</a> tutorial is two pages and carries the bank transfer, the atomicity definition and savepoints. Follow it with <a href="https://www.postgresql.org/docs/current/wal-intro.html">Write-Ahead Logging</a>, which states the ordering rule and the recovery argument in about six paragraphs and is the clearest short account of why durability is affordable at all.</p>
+
+  <div class="pager">
+    <a href="0800-a-constraint-is-the-only-rule-every-writer-obeys.html"><span class="dir">&larr; Previous</span><span class="ttl">A constraint is the only rule every writer obeys</span></a>
+    <a class="nxt" href="0802-isolation-levels-are-a-menu-of-anomalies.html"><span class="dir">Next &rarr;</span><span class="ttl">Isolation levels are a menu of anomalies</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0801 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

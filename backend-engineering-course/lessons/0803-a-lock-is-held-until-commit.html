@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A lock is held until commit - Backend Engineering</title>
+<meta name="description" content="A row lock is taken when you write and released only at the end of the transaction, so the duration of the transaction, not the duration of the statement, is what other requests queue behind.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Data &middot; Lesson 0803</div>
+  <h1>A row lock is held until commit, so the length of a transaction is its blast radius</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Why a correct transaction can still take a service down. &middot;
+    <a href="https://www.postgresql.org/docs/current/explicit-locking.html">PostgreSQL - Explicit Locking</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Writing a row takes a lock on it, and <b>row-level locks are released at transaction end</b>, not at the end of the statement that took them.</li>
+      <li>So the cost of a write is not how long the <code>UPDATE</code> ran. It is <b>how long the transaction stayed open afterwards</b>.</li>
+      <li>Two transactions taking the same two rows in opposite orders <b>deadlock</b>. PostgreSQL detects it and resolves it by aborting one of them.</li>
+      <li>The stated best defence is not cleverness, it is <b>acquiring locks on multiple objects in a consistent order</b> everywhere in the application.</li>
+      <li>What it costs: shrinking a transaction usually means giving up a guarantee it was providing, so you have to know which guarantee you are selling.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Isolation is bought with waiting, and waiting is what a service runs out of.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0802&lt;br/&gt;which anomalies&lt;br/&gt;you allow"] --> T["THIS PAGE&lt;br/&gt;what the guarantee&lt;br/&gt;costs while it is held"]
+  T --> A["Lessons 0804, 0805&lt;br/&gt;indexes, which decide&lt;br/&gt;how many rows are touched"]
+  T --> B["Module 10&lt;br/&gt;queues - move&lt;br/&gt;the slow work out"]
+  T --> C["Module 13&lt;br/&gt;scale, where the pool&lt;br/&gt;is the thing that runs out"]
+  W["Module 08&lt;br/&gt;Data"] -.- T
+    </div>
+    <figcaption>The last page was about what a transaction is allowed to see. This one is about what it makes everyone else wait for, and the two are the same mechanism viewed from the two ends. It is the page that explains an incident shape every backend engineer eventually meets: no query is slow, no error is logged, and the service is unavailable because every connection is waiting on the same row. <b>Correctness under concurrency is paid for in queueing, and the queue is invisible in every metric except latency.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the statement ends, the lock does not</h2>
+
+  <h3 id="hold-time">Hold time is transaction time</h3>
+  <p>When a transaction updates a row it takes an exclusive lock on that row, and it keeps it. PostgreSQL states the lifetime plainly: <a href="https://www.postgresql.org/docs/current/explicit-locking.html">row-level locks are released at transaction end or during savepoint rollback</a>, just like table-level locks. Nothing releases a row lock early, there is no way to ask for one, and there should not be, because releasing it early is precisely the atomicity of lesson 0801 being withdrawn.</p>
+
+  <p>That single sentence is what makes transaction length a design property rather than a style preference. A one-millisecond <code>UPDATE</code> at the top of a handler that then spends 300 milliseconds calling a pricing service holds that row for 301 milliseconds. Every other request for the same row waits the whole time. The slow thing and the blocking thing are not the same statement, which is why the slow-query log has nothing to say about it.</p>
+
+  <p>Reads are the exception that makes this bearable. Under the multiversion model of the last lesson a plain <code>SELECT</code> takes no row lock and waits for nobody. The moment you write <code>SELECT ... FOR UPDATE</code> you have opted back in: the rows are locked as though for update, which prevents them from being locked, modified or deleted by other transactions until the current transaction ends. The weaker modes exist for the same reason a read is different from a write. <code>FOR SHARE</code> takes a shared lock, so several transactions may hold it at once but none may update the rows, and <code>FOR KEY SHARE</code> is weaker still: it blocks deletes and updates that change the key, which is what a foreign key check needs and nothing more.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Requests arriving during a hold</div>
+    <div class="fig-claim">A tenfold longer transaction queues ten times as many requests.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart on a logarithmic scale showing how many further requests arrive for the same row while one transaction holds its lock, at an arrival rate of 200 requests per second. A one millisecond hold sees 0.2 arrivals, ten milliseconds sees 2, one hundred milliseconds sees 20, and one second sees 200.">
+      <line class="axis" x1="80" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="80" y1="40" x2="80" y2="250"/>
+      <line class="grid" x1="80" y1="193" x2="610" y2="193"/>
+      <line class="grid" x1="80" y1="136" x2="610" y2="136"/>
+      <line class="grid" x1="80" y1="79" x2="610" y2="79"/>
+      <text class="lbl-sm" x="72" y="254" text-anchor="end">0.1</text>
+      <text class="lbl-sm" x="72" y="197" text-anchor="end">1</text>
+      <text class="lbl-sm" x="72" y="140" text-anchor="end">10</text>
+      <text class="lbl-sm" x="72" y="83" text-anchor="end">100</text>
+      <rect class="m-stat" x="130" y="233" width="40" height="17"/>
+      <rect class="m-alarm" x="250" y="176" width="40" height="74"/>
+      <rect class="m-alarm" x="370" y="119" width="40" height="131"/>
+      <rect class="m-alarm" x="490" y="62" width="40" height="188"/>
+      <text class="ttl" x="80" y="26">Requests arriving for the same row during one hold, log scale</text>
+      <text class="lbl-sm" x="150" y="268" text-anchor="middle">1 ms</text>
+      <text class="lbl-sm" x="270" y="268" text-anchor="middle">10 ms</text>
+      <text class="lbl-sm" x="390" y="268" text-anchor="middle">100 ms</text>
+      <text class="lbl-sm" x="510" y="268" text-anchor="middle">1 s</text>
+      <text class="lbl-sm t-alarm" x="510" y="54" text-anchor="middle">200</text>
+      <text class="lbl-sm" x="80" y="288">derived as arrival rate times hold time, at 200 requests per second</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>fewer than one waiter</span><span><i class="sw-alarm"></i>the queue grows</span></div>
+    <figcaption>Derived rather than measured: the count is the arrival rate multiplied by the hold time, which is the standing-queue relation applied to one contended row, and it assumes those requests all want that row. The line worth finding is where the product passes one, because past it each hold ends with more waiters than it started with and the queue does not drain. <b>Contention is not a property of your query, it is the product of your traffic and the time you stay in the transaction.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: how two correct transactions stop each other</h2>
+
+  <h3 id="deadlock">A cycle in the waiting</h3>
+  <p>A deadlock is not a bug in the engine and not a failure of either transaction. It is a cycle: A holds row 1 and wants row 2, B holds row 2 and wants row 1, and no amount of further waiting resolves it. PostgreSQL detects the situation automatically and resolves it by aborting one of the transactions involved, allowing the others to complete.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two transfers, opposite order</div>
+    <div class="fig-claim">Neither transaction is wrong - only the order they take rows in is.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Transfer A to B
+  participant D as Database
+  participant B as Transfer B to A
+  A->>D: UPDATE accounts WHERE id = 1 - lock taken
+  B->>D: UPDATE accounts WHERE id = 2 - lock taken
+  A->>D: UPDATE accounts WHERE id = 2 - waits for B
+  B->>D: UPDATE accounts WHERE id = 1 - waits for A
+  Note over D: after deadlock_timeout the check runs and finds a cycle
+  D-->>B: ERROR - deadlock detected, this one is aborted
+  D-->>A: proceeds and commits
+    </div>
+    <figcaption>Both handlers debit one account and credit another, and each locks the account it names first. Run them against different pairs and nothing happens for months. Run them against the same pair in opposite directions and one of them dies. The detection is deliberately lazy: the check for deadlock is relatively expensive, so the server waits <code>deadlock_timeout</code>, one second by default, before running it. <b>A deadlock costs a full second of two connections before anybody is told, which is why it shows up as a latency spike before it shows up as an error.</b></figcaption>
+  </figure>
+
+  <h3 id="ordering">The fix is an order, agreed everywhere</h3>
+  <p>The documentation's advice is a design rule rather than a tuning knob: the best defence against deadlocks is generally to avoid them by being certain that all applications using a database acquire locks on multiple objects in a consistent order. Read the scope in that sentence. All applications, not this handler, because a deadlock needs only two participants and either of them can be the one that has not read the rule.</p>
+
+  <p>In practice the order has to be something both sides can compute without talking to each other, which in a relational store means the primary key.</p>
+
+  <div class="code-cap">transfer.go &middot; the same two rows, always in the same order</div>
+  <pre><code>func transfer(ctx context.Context, tx pgx.Tx, from, to int64, amount int64) error {
+    // Lock in primary-key order, whichever direction the money moves.
+    first, second := from, to
+    if second &lt; first {
+        first, second = second, first
+    }
+    for _, id := range []int64{first, second} {
+        if _, err := tx.Exec(ctx,
+            `SELECT id FROM accounts WHERE id = $1 FOR UPDATE`, id); err != nil {
+            return err
+        }
+    }
+    // Both rows are now held. The debit and credit can run in business order.
+    return applyTransfer(ctx, tx, from, to, amount)
+}</code></pre>
+
+  <p>The lock acquisition and the business logic have been separated on purpose. The order money moves in is a domain fact and the order rows are locked in is a concurrency fact, and letting the first decide the second is exactly the defect. Retrying on deadlock is still worth having, for the same reason the retry loop in lesson 0802 is: the rule protects the code that follows it, and there is always some code that does not.</p>
+
+  <h2>3. The trade-off: what a shorter transaction gives up</h2>
+
+  <p>Every technique for reducing hold time is a technique for holding less inside the boundary, and the boundary was there for a reason. Moving the remote call out of the transaction means the call can now succeed while the commit fails, which is a state the transaction was preventing. Splitting one transaction into two means there is now an instant where half the work is visible, which is atomicity being sold back. Taking a weaker lock mode means admitting a class of concurrent write you were previously excluding.</p>
+
+  <p>None of those is wrong, and all of them are decisions rather than optimisations. The question to ask each time is which guarantee is being given up and what pays for it instead, and the answers this course has already given are the ones to reach for: an idempotency key so the repeated attempt is safe, a constraint so the invariant survives the split, an outbox row so the message and the write share one boundary.</p>
+
+  <div class="callout warn">
+    A connection pool turns a local wait into a global outage. Requests blocked on a row are not idle, they are each holding a pooled connection, so a contended row with a long hold time exhausts the pool and then every unrelated endpoint fails too, including the health check. That is the mechanism behind the incident shape where one slow write path takes down a service that mostly does reads. The lock is the cause and the pool is the amplifier, and only the second one appears in the dashboard.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">An UPDATE runs in 1 ms, then the handler calls an external API for 300 ms before committing. How long is the row locked?</div>
+      <button class="q-opt">1 ms, since the statement has already finished</button>
+      <button class="q-opt">301 ms, because the lock is released at commit</button>
+      <button class="q-opt">300 ms, since the wait begins after the write</button>
+      <button class="q-opt">Until another writer asks for the same row</button>
+      <div class="q-fb">Row locks are released at transaction end, so the hold covers the statement and everything after it inside the boundary. The first option is the assumption that causes the incident, the third drops the statement itself, and no engine hands a lock over on request because doing so would break atomicity.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does PostgreSQL name as the best defence against deadlocks?</div>
+      <button class="q-opt">Lowering deadlock_timeout so cycles are found faster</button>
+      <button class="q-opt">Using the Serializable isolation level everywhere</button>
+      <button class="q-opt">Acquiring locks on several objects in a consistent order</button>
+      <button class="q-opt">Keeping each transaction to a single write statement</button>
+      <div class="q-fb">Consistent ordering removes the cycle, which is the only structure a deadlock can have. A lower timeout finds the cycle sooner and pays for it in needless checks, a stronger isolation level changes which conflicts are reported rather than preventing cycles, and single-statement transactions are impossible for work that spans two rows.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0804-an-index-is-a-second-sorted-copy.html">an index is a second sorted copy</a></b> decides how many rows a statement has to touch, which is the other input to everything on this page.</li>
+    <li><b>Behind you, <a href="0802-isolation-levels-are-a-menu-of-anomalies.html">isolation levels are a menu of anomalies</a></b> is the guarantee these locks are buying.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is what makes moving a remote call out of the transaction survivable.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take the handler in your service with the longest-lived transaction and measure the time from BEGIN to COMMIT rather than the query time. Then ask the agent what your arrival rate on the hottest row in it would have to be before the queue stops draining.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.postgresql.org/docs/current/explicit-locking.html">Explicit Locking</a> carries the four row-lock modes, the lifetime rule and the deadlock advice in one chapter, and it is worth reading the table-level section too so you know what a migration takes while you are holding it. <a href="https://www.postgresql.org/docs/current/runtime-config-locks.html">Lock Management</a> is one screen and explains why <code>deadlock_timeout</code> defaults to a full second.</p>
+
+  <div class="pager">
+    <a href="0802-isolation-levels-are-a-menu-of-anomalies.html"><span class="dir">&larr; Previous</span><span class="ttl">Isolation levels are a menu of anomalies</span></a>
+    <a class="nxt" href="0804-an-index-is-a-second-sorted-copy.html"><span class="dir">Next &rarr;</span><span class="ttl">An index is a second sorted copy</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0803 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

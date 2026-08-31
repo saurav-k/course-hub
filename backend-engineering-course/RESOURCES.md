@@ -252,6 +252,50 @@ TBD as lessons landing.
   [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) for
   the precise `Strict`, `Lax` and `None` definitions that leave a state-changing GET forgeable.
 
+### Module 08 - Data
+
+- Lesson 0800, the relational model and constraints: [PostgreSQL - Constraints](https://www.postgresql.org/docs/current/ddl-constraints.html)
+  for the five constraint kinds, the statement that a foreign key maintains referential integrity between two tables, and the
+  rule that a check constraint is satisfied when its expression evaluates to true **or to null**, and
+  [PostgreSQL - Concepts](https://www.postgresql.org/docs/current/tutorial-concepts.html) for relation as the mathematical term
+  for table and for the statement that SQL guarantees no order among the rows of a table.
+- Lesson 0801, transactions and the log: [PostgreSQL - Transactions](https://www.postgresql.org/docs/current/tutorial-transactions.html)
+  for the bank-transfer example, the definition of atomic, the invisibility of an open transaction's updates until commit, and
+  savepoints, and [PostgreSQL - Write-Ahead Logging](https://www.postgresql.org/docs/current/wal-intro.html) for the ordering
+  rule, roll-forward recovery and the statement that one flush of the log may suffice to commit many small concurrent transactions.
+- Lesson 0802, isolation: [PostgreSQL - Transaction Isolation](https://www.postgresql.org/docs/current/transaction-iso.html)
+  for the four phenomena, Table 13.1, the note that PostgreSQL implements three distinct levels and that its Repeatable Read
+  does not allow phantom reads, the Read Committed re-evaluation rule with the `website.hits` example, and both serialization
+  failure messages with the instruction that applications must be prepared to retry. The MVCC claim that reading never blocks
+  writing is [PostgreSQL - Introduction to MVCC](https://www.postgresql.org/docs/current/mvcc-intro.html).
+- Lesson 0803, locking: [PostgreSQL - Explicit Locking](https://www.postgresql.org/docs/current/explicit-locking.html) for the
+  four row-lock modes, the statement that row-level locks are released at transaction end, automatic deadlock detection by
+  aborting one transaction, and the advice that the best defence is acquiring locks in a consistent order.
+  [PostgreSQL - Lock Management](https://www.postgresql.org/docs/current/runtime-config-locks.html) for `deadlock_timeout`
+  defaulting to 1s and why the check is deliberately lazy.
+- Lesson 0804, indexes: [PostgreSQL - Indexes](https://www.postgresql.org/docs/current/indexes-intro.html) for the sequential
+  scan against a few levels of a search tree, the synchronisation overhead on data manipulation, and the instruction to remove
+  seldom-used indexes, and [PostgreSQL - Index Types](https://www.postgresql.org/docs/current/indexes-types.html) for what a
+  B-tree can serve, including `IS NULL`, sorted retrieval and the anchored-pattern rule, and for hash, GiST, SP-GiST, GIN and BRIN.
+- Lesson 0805, composite order and the planner: [PostgreSQL - Multicolumn Indexes](https://www.postgresql.org/docs/current/indexes-multicolumn.html)
+  for the exact leading-column rule, the 32-column limit and the advice to use them sparingly,
+  [Index-Only Scans and Covering Indexes](https://www.postgresql.org/docs/current/indexes-index-only-scans.html) for the two
+  conditions, the visibility map and the `INCLUDE` caveats,
+  [Statistics Used by the Planner](https://www.postgresql.org/docs/current/planner-stats.html) for `pg_statistic`, the default
+  of 100 entries and the weakness of single-column statistics, and
+  [Row Estimation Examples](https://www.postgresql.org/docs/current/row-estimation-examples.html) for the worked histogram
+  arithmetic that yields 0.100697 and `rows=1007`.
+- Lesson 0806, the non-relational map: [AWS - NoSQL design for DynamoDB](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/bp-general-nosql-design.html)
+  for the access-pattern-first method, the few-tables advice and the statement that queries outside the designed set are
+  expensive and slow, [AWS - DynamoDB read consistency](https://docs.aws.amazon.com/amazondynamodb/latest/developerguide/HowItWorks.ReadConsistency.html)
+  for eventually consistent being the default and strongly consistent reads being unavailable on a global secondary index,
+  [MongoDB - Data modeling](https://www.mongodb.com/docs/manual/data-modeling/) for the flexible schema and the principle that
+  data accessed together is stored together, [MongoDB - Limits](https://www.mongodb.com/docs/manual/reference/limits/) for the
+  16 MiB document ceiling and the 100-level nesting cap, [Redis - Data types](https://redis.io/docs/latest/develop/data-types/)
+  for the data structure server framing and the structures it offers, and
+  [Neo4j - Graph database concepts](https://neo4j.com/docs/getting-started/appendix/graphdb-concepts/) for nodes, labels, and
+  directed relationships carrying properties.
+
 ### Module 09 - Caching
 
 - Lesson 0900, why a cache exists: [Atikoglu et al., *Workload Analysis of a Large-Scale Key-Value Store*, SIGMETRICS 2012](https://s4plus.ustc.edu.cn/_upload/article/files/7a/5b/5c9fd1264e30b6881ecd7f7733f2/3ef2e159-9fd8-47a6-903c-cf9bfa836a28.pdf)
@@ -395,6 +439,73 @@ TBD as lessons landing.
   [MDN - Using server-sent events](https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events)
   for the one-way constraint, the automatic restart with `retry` and `id`, and the six-connection
   HTTP/1.1 limit against HTTP/2's negotiated streams defaulting to 100.
+### Module 13 - Scale, fleet and shipping
+
+- Lesson 1300, concurrency: [Effective Go - Concurrency](https://go.dev/doc/effective_go) for the
+  goroutine as a function "executing concurrently with other goroutines in the same address space",
+  costing "little more than the allocation of stack space", and multiplexed onto OS threads so that
+  others continue to run when one blocks on I/O;
+  [asyncio - Coroutines and Tasks](https://docs.python.org/3/library/asyncio-task.html) for
+  cooperative scheduling and the statement that an event loop "runs one Task at a time"; and the
+  [Python glossary](https://docs.python.org/3/glossary.html#term-global-interpreter-lock) for the
+  interpreter lock, including the sentence that is usually dropped, "the GIL is always released when
+  doing I/O", and the 3.13 build option specified in [PEP 703](https://peps.python.org/pep-0703/).
+  The pool ceiling is derived on the page from arrival rate times hold time, with both assumptions
+  stated in the figcaption rather than attributed to a source.
+- Lesson 1301, shared state: [The Go Memory Model](https://go.dev/ref/mem) for the mechanical
+  definition of a data race, the DRF-SC guarantee, the permission to terminate a racy program, and
+  the requirement that concurrent access be serialized;
+  [pkg.go.dev/sync](https://pkg.go.dev/sync) for the mutex contract and the stated preference for
+  channels over the primitives; [Effective Go](https://go.dev/doc/effective_go) for the sharing
+  slogan; the [Python glossary](https://docs.python.org/3/glossary.html#term-global-interpreter-lock)
+  for the precise scope of what the interpreter lock protects, which is the object model rather than
+  a program's invariants; and [the race detector article](https://go.dev/doc/articles/race_detector)
+  for the runtime-only limit and the 5 to 10 times memory and 2 to 20 times execution cost.
+- Lesson 1302, statelessness: [Fielding, chapter 5](https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm)
+  for the stateless constraint, its three benefits and its two costs;
+  [the twelve-factor app, factor VI](https://12factor.net/processes) for share-nothing processes and
+  the statement that sticky sessions "should never be used or relied upon"; and
+  [nginx - load balancing](https://nginx.org/en/docs/http/load_balancing.html) for round-robin,
+  least-connected, ip-hash with its "except when this server is unavailable" clause, weights, and
+  the passive health checks governed by `max_fails` and `fail_timeout`.
+- Lesson 1303, containers: [namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+  for the definition and the eight kinds;
+  [cgroups(7)](https://man7.org/linux/man-pages/man7/cgroups.7.html) for hierarchical resource
+  limiting and the rule that a descendant cannot exceed an ancestor's limit;
+  [pid_namespaces(7)](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html) for the init
+  signal semantics, which is why a process with no SIGTERM handler ignores a polite stop;
+  the [OCI image specification](https://github.com/opencontainers/image-spec/blob/main/spec.md) for
+  the manifest, the index, layers as changesets and content-addressable identity;
+  [Docker - build cache](https://docs.docker.com/build/cache/) for the downstream invalidation rule;
+  and [multi-stage builds](https://docs.docker.com/build/building/multi-stage/) for leaving the
+  toolchain behind.
+- Lesson 1304, orchestration: [Kubernetes - Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
+  for the control loop, the thermostat and the statement that a controller more commonly writes to
+  the API server than acts directly;
+  [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) for the
+  ReplicaSet rollout and revision history;
+  [the Deployment API reference](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/)
+  for `maxSurge` and `maxUnavailable`, both defaulting to 25%, rounded up and down respectively;
+  [the three probes](https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/)
+  for the restart-against-remove-from-endpoints distinction;
+  [Pod lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/) for the
+  termination sequence and the 30-second default grace period; and
+  [horizontal pod autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+  for the ratio algorithm, the 15-second sync period and the 0.1 tolerance.
+- Lesson 1305, testing: [Fowler - TestPyramid](https://martinfowler.com/bliki/TestPyramid.html) for
+  the two assertions, the cost of end-to-end tests and the ice-cream cone; and
+  [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) for
+  the layer definitions and consumer-driven contract tests, which is the mechanism lesson 0600's
+  closing warning asked for and could not name. [pkg.go.dev/testing](https://pkg.go.dev/testing) for
+  `t.Run` and `t.Parallel`.
+- Lesson 1306, the pipeline: [the twelve-factor app, factor V](https://12factor.net/build-release-run)
+  for the three separated stages, the unique release identifier and the append-only ledger;
+  [Fowler - ContinuousDelivery](https://martinfowler.com/bliki/ContinuousDelivery.html) for the
+  definition, the four tests and the one-directional relation to continuous deployment; and
+  [DORA - the four keys](https://dora.dev/guides/dora-metrics-four-keys/) for the metric definitions
+  and the finding that "speed and stability are not tradeoffs". **That programme is observational
+  research across many organisations**, which is why the page states what it establishes as the two
+  moving together in practice rather than as causation in any one team.
 
 ## Wisdom
 
@@ -417,4 +528,8 @@ Claims this course would like to make and cannot source.
 
 A gap recorded here is a gap the course does not assert on a page.
 
-- -
+- A concrete B-tree fanout for a given key width and page size. Lesson 0804 derives its depth arithmetic from an assumed
+  fanout of 200 and labels the assumption on the figure rather than quoting a figure the documentation does not state.
+- Codd's 1970 paper, *A Relational Model of Data for Large Shared Data Banks*, is the origin of the model Module 08 teaches
+  and is behind a paywall that refused every fetch attempted while the module was written. Lesson 0800 therefore grounds the
+  model on the PostgreSQL documentation, which states the same properties, rather than citing a paper nobody opened.
