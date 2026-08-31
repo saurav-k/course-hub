@@ -72,6 +72,37 @@ TBD as lessons landing.
   for the safelisted fields, the preflight and the credentialed-request rules, over the normative
   [Fetch standard](https://fetch.spec.whatwg.org/) that specifies the browser behaviour itself.
 
+### Module 04 - Serialization and contracts
+
+- Lesson 0400, the wire contract: [RFC 8259 &sect;6](https://www.rfc-editor.org/rfc/rfc8259#section-6) for
+  what the number grammar deliberately leaves unsettled, [&sect;4](https://www.rfc-editor.org/rfc/rfc8259#section-4)
+  for the duplicate-name situation, and [Go encoding/json](https://pkg.go.dev/encoding/json) for the
+  documented default that unmatched object keys are ignored.
+- Lesson 0401, JSON's type system: [RFC 8259 &sect;3](https://www.rfc-editor.org/rfc/rfc8259#section-3)
+  for the six values, [&sect;6](https://www.rfc-editor.org/rfc/rfc8259#section-6) for the interoperable
+  integer range, and the [ProtoJSON mapping](https://protobuf.dev/programming-guides/json/) for the
+  worked decision to carry int64 as a decimal string.
+- Lesson 0402, schema-first: [Protocol Buffers language guide (proto3)](https://protobuf.dev/programming-guides/proto3/)
+  for field numbers, the reserved range and unknown-field retention, and
+  [Do's and Don'ts](https://protobuf.dev/programming-guides/dos-donts/) for the reuse prohibition.
+- Lesson 0403, boundary validation: [OWASP Input Validation Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Input_Validation_Cheat_Sheet.html)
+  for allow-list validation and the explicit statement that it is not the primary defence against
+  injection, [SQL Injection Prevention](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html)
+  for the mechanism at the sink, [RFC 9110 &sect;15.5.21](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.21)
+  for 422, and [encoding/json](https://pkg.go.dev/encoding/json#Decoder.DisallowUnknownFields) for the
+  strict decoder option.
+- Lesson 0404, content negotiation: [RFC 9110 &sect;12.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.1)
+  for proactive negotiation and its stated disadvantages, [&sect;12.5.1](https://www.rfc-editor.org/rfc/rfc9110#section-12.5.1)
+  for the Accept grammar and weights, [&sect;8.3](https://www.rfc-editor.org/rfc/rfc9110#section-8.3) for
+  Content-Type and the sniffing warning, [&sect;15.5.7](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.7)
+  and [&sect;15.5.16](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.16) for 406 and 415, and
+  [MDN's content negotiation guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Content_negotiation)
+  as the readable companion on the cache's role.
+- Lesson 0405, compatibility: [Updating a Message Type](https://protobuf.dev/programming-guides/proto3/#updating)
+  for the safe, unsafe and lossy edits including the truncation behaviour, and the
+  [ProtoJSON mapping](https://protobuf.dev/programming-guides/json/) for the name-keyed rules and the
+  unknown-field default that inverts the binary one.
+
 ## Wisdom
 
 Where the practitioners argue, for a reader who wants to test their understanding against people who do this.

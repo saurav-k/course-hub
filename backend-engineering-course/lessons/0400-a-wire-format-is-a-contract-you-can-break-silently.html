@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A wire format is a contract you can break silently - Backend Engineering</title>
+<meta name="description" content="Serialization is the point where two independently deployed programs have to agree about meaning, and the format checks only its own grammar - so the failure arrives as a wrong value rather than as a compiler error.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Serialization and contracts &middot; Lesson 0400</div>
+  <h1>Serialization is where two independently deployed programs agree, and the failure mode is silence</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    The one boundary no compiler crosses. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc8259#section-6">RFC 8259 &sect;6 - Numbers, and what "interoperable" means</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Serialization is <b>two functions in two programs</b> that must agree: one turns values into bytes, the other turns bytes back into values.</li>
+      <li>The two programs are <b>deployed on different days by different people</b>, so nothing compiles them together and nothing type-checks across the gap.</li>
+      <li>A format checks its <b>grammar</b>, never your <b>contract</b>. <code>{"amount": 19.99}</code> parses everywhere and still means two different things.</li>
+      <li>So the break arrives as a <b>wrong value that flows onward</b>, not as an exception at the point of the mistake.</li>
+      <li>What it costs: writing the contract down is work nobody asks for until the day the silence gets expensive.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Routing chose the handler - this module decides what the handler is handed.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Module 03&lt;br/&gt;routing picked&lt;br/&gt;the handler"] --> T["THIS PAGE&lt;br/&gt;bytes become values,&lt;br/&gt;and who agreed"]
+  T --> A["Lessons 0401 to 0403&lt;br/&gt;JSON, schemas,&lt;br/&gt;validation at the edge"]
+  T --> B["Lessons 0404 to 0405&lt;br/&gt;negotiation and&lt;br/&gt;compatibility rules"]
+  T --> C["Module 05&lt;br/&gt;the layered service&lt;br/&gt;consumes typed values"]
+  W["Module 04&lt;br/&gt;Serialization and contracts"] -.- T
+    </div>
+    <figcaption>Every earlier module got the request to a function. This module is about the argument that function receives, and the whole module rests on one observation drawn here: the two ends of that argument live in different programs. <b>Serialization is the only layer in the request path where the two parties never share a compiler.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: one agreement, two deploy schedules</h2>
+
+  <p>Inside one program, passing a value is free of doubt. The compiler or the interpreter knows the type, the field names are checked when you build, and renaming something breaks the build in the place that needs fixing. None of that survives the socket. The moment a value leaves your process it becomes a run of bytes, and the program that reads it back has its own idea of what those bytes mean, written by someone else, released last Tuesday.</p>
+
+  <p>So a wire format is not a serialisation detail. It is the interface between two teams, expressed in the one medium both can read. When people say an API has a contract, this is the layer they are pointing at, and it is worth being exact about what lives in it.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Round trip across the gap</div>
+    <div class="fig-claim">Two programs, two release dates, one set of bytes between them.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Producer, released Tuesday
+  participant N as The network
+  participant C as Consumer, released in March
+  P->>P: value in memory - Order struct
+  P->>N: serialize - bytes on the wire
+  N->>C: bytes arrive, nothing else does
+  C->>C: deserialize - the consumer's own Order type
+  C->>C: act on it, right or wrong
+    </div>
+    <figcaption>Only the bytes cross. The producer's type definition, its field comments, its units and its assumption that a quantity is never negative all stay behind on the producer's side of the line. The consumer rebuilds a value from bytes alone and from what it believes those bytes mean. <b>Everything the two ends share beyond the bytes is a belief that has to be maintained by hand.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: three layers, and only two are checked</h2>
+
+  <h3 id="wire-format">The wire format: the grammar both ends parse</h3>
+  <p>The format is the outermost layer, and the one with a specification. JSON's grammar is a few pages of ABNF in <a href="https://www.rfc-editor.org/rfc/rfc8259">RFC 8259</a>: what a value may be, where a comma goes, which escapes are legal. A parser either accepts the bytes or reports an error, and that decision is deterministic and shared. This layer is genuinely checked, and it is the only one that fails loudly.</p>
+
+  <h3 id="serialization">Serialization: the mapping from your types to that grammar</h3>
+  <p>The second layer is the mapping between the format's small type system and the far richer one your program uses. A Go struct field with a tag, a Python dataclass field, a generated protobuf accessor: each is a rule saying that this application-level concept is carried by that place in the document. Libraries do this well and it rarely goes wrong within one language, because the mapping is generated from a declaration that is compiled.</p>
+
+  <h3 id="the-contract">The contract: everything the grammar cannot say</h3>
+  <p>The third layer is the one with no enforcement anywhere. It is the set of statements that make the bytes mean something: that <code>amount</code> is minor units and not major, that <code>created</code> is UTC and not local, that <code>status</code> is one of five strings, that an absent <code>discount</code> means no discount rather than an unknown discount. Not one of those is expressible in JSON's grammar, and none of them fails when broken. The document still parses.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each layer checks</div>
+    <div class="fig-claim">The layer carrying the meaning is the one nobody validates.</div>
+    <div class="mermaid">
+flowchart TB
+  B["Bytes on the wire"] --> G["Layer 1 - the grammar&lt;br/&gt;RFC 8259 decides&lt;br/&gt;valid or not"]
+  G --> M["Layer 2 - the mapping&lt;br/&gt;struct tags and generated code&lt;br/&gt;decide which field is which"]
+  M --> K["Layer 3 - the contract&lt;br/&gt;units, time zones, ranges,&lt;br/&gt;what absence means"]
+  G --> GC["Checked by a parser&lt;br/&gt;fails loudly"]
+  M --> MC["Checked by a compiler&lt;br/&gt;on one side only"]
+  K --> KC["Checked by nothing&lt;br/&gt;fails silently"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class GC,MC ok
+  class KC bad
+    </div>
+    <figcaption>The three layers a message passes through, and who is watching each one. The mapping layer is checked, but only against the schema the local build was given, which is why a compiler on each side proves nothing about the pair. <b>Meaning lives entirely in the layer with no enforcement, so meaning is the layer you have to write down.</b></figcaption>
+  </figure>
+
+  <h2>3. The mechanism: what a silent break actually looks like</h2>
+
+  <p>The word "silent" is doing real work here, so it is worth four concrete shapes rather than an adjective. Each of these produces a valid document, a successful parse and a wrong outcome.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four breaks that parse</div>
+    <div class="fig-claim">Each of these succeeds at every level a machine checks.</div>
+    <div class="mermaid">
+flowchart LR
+  A["Unit changed&lt;br/&gt;amount in cents,&lt;br/&gt;now in pounds"] --> A2["Charges 100x too little&lt;br/&gt;no error anywhere"]
+  B["Field renamed&lt;br/&gt;userId becomes&lt;br/&gt;user_id"] --> B2["Consumer sees absence&lt;br/&gt;and reads a zero value"]
+  C["Range widened&lt;br/&gt;an id passes&lt;br/&gt;2 to the 53rd"] --> C2["Rounded on the way in&lt;br/&gt;wrong record updated"]
+  D["Meaning of null&lt;br/&gt;absent now means&lt;br/&gt;clear the field"] --> D2["Old writer wipes data&lt;br/&gt;it never meant to send"]
+    </div>
+    <figcaption>Four ways a producer change reaches a consumer as a wrong value rather than an error. Notice that three of the four are things a reviewer would wave through, because on the producer's side each is a small tidy-up with passing tests. <b>A change that is local inside one program is global across the wire, and only the contract records which is which.</b></figcaption>
+  </figure>
+
+  <h2>4. The trade-off: tolerance is what buys the silence</h2>
+
+  <p>It is tempting to conclude that parsers should be stricter, and to stop there. But the tolerance is deliberate, and it is what makes independent deployment possible at all. Go's <code>encoding/json</code> states the rule plainly: object keys with no corresponding struct field are <a href="https://pkg.go.dev/encoding/json#Unmarshal">ignored by default</a>. That is exactly what lets a producer add a field on Tuesday without coordinating a release with six consumers, and it is exactly what makes a typo in a field name invisible.</p>
+
+  <p>You cannot have both properties from one default. What you can do is choose per boundary: tolerant where a third party you do not control is the producer, strict where you own both ends and would rather find the typo now. Go exposes the strict half as <code>Decoder.DisallowUnknownFields</code>. Lesson 0403 makes that choice a design position rather than a flag.</p>
+
+  <div class="callout warn">
+    A contract that lives only in a wiki page, a Slack thread or the reviewer's memory is not a contract, because nothing re-reads it. The rest of this module is about moving each part of it somewhere that gets re-read on every build: a schema a compiler consumes, a validator at the boundary, a compatibility rule with a name. Where you genuinely cannot do that, write the assumption in the field's own documentation and say who breaks if it changes.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why is a serialization break usually silent rather than loud?</div>
+      <button class="q-opt">Parsers suppress errors to stay fast</button>
+      <button class="q-opt">HTTP has no status code for the case</button>
+      <button class="q-opt">The logs are sampled at the boundary</button>
+      <button class="q-opt">The grammar holds, only meaning moved</button>
+      <div class="q-fb">A renamed field or a changed unit leaves a document that is still valid under the format's grammar, so every mechanical check passes and the wrong value flows onward. Parsers do report grammar errors, HTTP does have 400 and 422 for a request it cannot use, and log sampling is unrelated: the point is that nothing detected an error to log.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Which of these is part of the contract rather than the format?</div>
+      <button class="q-opt">Whether a trailing comma is legal</button>
+      <button class="q-opt">Whether an absent field means unchanged</button>
+      <button class="q-opt">Whether the text must be UTF-8</button>
+      <button class="q-opt">Whether a name must be a string</button>
+      <div class="q-fb">What absence means is a decision your two programs make and no specification states, which is why it has to be written down. The other three are all settled by RFC 8259 itself: trailing commas are ungrammatical, interchanged JSON text must be UTF-8, and an object member name is always a string.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0401-json-is-text-and-text-has-no-types.html">JSON is text and text has no types</a></b> takes the most common format and shows exactly how small its type system is, which is where most of the contract comes from.</li>
+    <li><b>Then, <a href="0402-schema-first-makes-the-contract-the-source.html">schema-first makes the contract the source</a></b> moves part of this contract into a file a build consumes.</li>
+    <li><b>Behind you, <a href="0203-headers-carry-what-the-body-cannot.html">headers carry what the body cannot</a></b> is where the message says which format it is using at all.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one response body your service returns and list every statement a consumer must believe about it that is not checkable from the bytes. Ask the agent to sort your list into statements a schema could carry and statements only prose can carry, and to say which of the second kind would break a caller silently.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc8259#section-6">RFC 8259 &sect;6</a> is the shortest demonstration of this whole page. It defines the grammar of a number precisely, then spends the rest of the section on what the grammar does not settle: precision, range, and the fact that a document one implementation writes may not be a document another can read back exactly. <a href="https://www.rfc-editor.org/rfc/rfc8259#section-4">&sect;4</a> does the same for duplicate member names, where the specification says only that behaviour is unpredictable.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0401-json-is-text-and-text-has-no-types.html"><span class="dir">Next &rarr;</span><span class="ttl">JSON is text and text has no types</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0400 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

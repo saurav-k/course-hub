@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Schema-first makes the contract the source - Backend Engineering</title>
+<meta name="description" content="A .proto file is compiled into code both ends import, so the contract stops being a document a reviewer reads and becomes a build artefact - and the field number, not the name, is what travels.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Serialization and contracts &middot; Lesson 0402</div>
+  <h1>When the schema is compiled, the contract is checked by a build rather than by a reviewer</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The contract becomes a build artefact. &middot;
+    <a href="https://protobuf.dev/programming-guides/proto3/">Protocol Buffers - Language Guide (proto3)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <code>.proto</code> file is not documentation. It is <b>compiled into code both ends import</b>, so the contract is something a build consumes rather than something a reviewer remembers.</li>
+      <li>The wire identity of a field is its <b>number, not its name</b>. Names never travel, which is what makes the encoding small and renaming cheap.</li>
+      <li>Field numbers run from 1 to 536,870,911, with <b>19,000 to 19,999 reserved</b> for the implementation, and 1 to 15 costing the least space.</li>
+      <li>Proto3 <b>preserves unknown fields</b> through a parse and re-serialise, so an intermediary built against an older schema does not destroy a newer field.</li>
+      <li>What it costs: a build step, generated code in your tree, a payload no human can read in a log, and a new failure mode where the two ends compiled different revisions of the same file.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This is the first mechanism that moves contract terms out of prose.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0401&lt;br/&gt;six types, and every&lt;br/&gt;convention by hand"] --> T["THIS PAGE&lt;br/&gt;the schema compiles,&lt;br/&gt;so the build checks it"]
+  T --> A["Lesson 0403&lt;br/&gt;what a schema still&lt;br/&gt;cannot check"]
+  T --> B["Lesson 0405&lt;br/&gt;the compatibility rules&lt;br/&gt;the numbering creates"]
+  T --> C["Module 12&lt;br/&gt;gRPC, which is this&lt;br/&gt;schema plus transport"]
+  W["Module 04&lt;br/&gt;Serialization and contracts"] -.- T
+    </div>
+    <figcaption>The previous lesson ended with a list of conventions kept by hand. This page is the first place the course moves some of them into a file with a compiler attached, and the numbering choice it makes is what lesson 0405 spends its whole page on. <b>A schema is worth having only to the extent that something re-reads it without being asked.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the contract compiles</h2>
+
+  <h3 id="schema-first">One declaration, two generated implementations</h3>
+  <p>Schema-first inverts the usual order. Instead of writing a handler, deciding what JSON it emits, and describing that JSON afterwards, you write the message definition first and let a compiler produce the types on both sides. The producer's <code>Order</code> struct and the consumer's <code>Order</code> class are then not two independent guesses about the same shape. They are two outputs of one input, and if either end changes its idea of the shape the change has to be made in the shared file.</p>
+
+  <p>The property this buys is narrow and worth stating precisely: the shape, the names and the types of the fields become mechanically checked on each side, against a single declaration. That is a real reduction in the surface described in lesson 0400. It is not the whole surface, and section 4 says which part is left.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One file, two builds</div>
+    <div class="fig-claim">Both ends generate their types from the same declaration.</div>
+    <div class="mermaid">
+flowchart TB
+  S["order.proto&lt;br/&gt;message Order with&lt;br/&gt;numbered fields"] --> PC["protoc"]
+  PC --> G["order.pb.go&lt;br/&gt;generated Go types"]
+  PC --> PY["order_pb2.py&lt;br/&gt;generated Python types"]
+  G --> P["Producer service&lt;br/&gt;compiles against&lt;br/&gt;the generated type"]
+  PY --> C["Consumer service&lt;br/&gt;compiles against&lt;br/&gt;the generated type"]
+  P -. "encoded bytes" .-> C
+    </div>
+    <figcaption>The generator is the only writer of the type definitions, so a field the producer sends is a field the consumer's build knows about, in whichever language each end is written in. Note what the dotted arrow does not carry: no names, no comments, no schema, only tag-and-value pairs. <b>The two ends share a source file rather than sharing a message, which is why the agreement survives a deploy gap.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the number is the name on the wire</h2>
+
+  <h3 id="field-number">What a tag costs and why it is fixed</h3>
+  <p>In JSON, the string <code>"customer_email"</code> is written into every message, every time. In protobuf the field carries only its number, and the number is what the parser matches on. The language guide is explicit that a number cannot be changed once the message type is in use, because it is the field's identity in the wire format, and that numbers should never be reused.</p>
+
+  <p>Two practical consequences follow directly. Numbers 1 to 15 encode their tag in a single byte, so the guide recommends them for the fields set most often, and the range 19,000 to 19,999 is reserved for the implementation and unavailable to you. Renaming a field, meanwhile, changes nothing on the wire at all: the name exists only in the schema and in the generated code, so it never crossed the gap in the first place.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Name-keyed against number-keyed</div>
+    <div class="fig-claim">Only one of these two encodings carries the field's name.</div>
+    <div class="mermaid">
+flowchart LR
+  subgraph J["JSON, name-keyed"]
+    J1["customer_email : a@b.com"] --> J2["The name is in&lt;br/&gt;every message"]
+    J2 --> J3["Rename it and&lt;br/&gt;the reader loses the field"]
+  end
+  subgraph P["Protobuf, number-keyed"]
+    P1["field 3 : a@b.com"] --> P2["The name is only&lt;br/&gt;in the schema"]
+    P2 --> P3["Rename it and&lt;br/&gt;nothing on the wire moves"]
+  end
+    </div>
+    <figcaption>The same field under the two encodings. The JSON reader is matching a string it was told to expect, so the string is part of the contract; the protobuf reader is matching an integer, so the integer is. Which one is the contract term decides which edit is a breaking change, and the two answers are opposites. <b>Whatever the reader matches on is the thing you may never quietly change.</b></figcaption>
+  </figure>
+
+  <h2>3. The mechanism: unknown fields survive the trip</h2>
+
+  <h3 id="unknown-field">Why an old intermediary does not damage a new message</h3>
+  <p>Number-keyed encoding creates a second useful property. When a parser meets a tag its schema does not define, it does not have to guess or discard: the tag is a well-formed number and the value is length-delimited or otherwise self-describing enough to skip. Proto3 keeps those unknown fields and includes them again when the message is serialised, which matches proto2's long-standing behaviour.</p>
+
+  <p>That matters most for anything in the middle. A gateway, an audit logger or a queue consumer built against last quarter's schema will parse a message containing a field it has never heard of, do its job, write the message back out, and pass the new field through intact.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Passing through an old hop</div>
+    <div class="fig-claim">Retained unknown fields let one hop lag a schema safely.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Producer, schema v2
+  participant G as Gateway, schema v1
+  participant C as Consumer, schema v2
+  P->>G: fields 1, 2 and the new field 7
+  G->>G: parse - field 7 is unknown, kept aside
+  G->>G: add a trace id, re-serialize
+  G->>C: fields 1, 2, 7 and the trace id
+  C->>C: field 7 parses normally - nothing was lost
+    </div>
+    <figcaption>The gateway never learns what field 7 means and never needs to. It is the retention rule, not the gateway's code, that keeps the value intact, which is why this works for hops you do not own or cannot redeploy in step. <b>Unknown-field retention is what lets a fleet upgrade one service at a time instead of all at once.</b></figcaption>
+  </figure>
+
+  <h2>4. The trade-off: a build, an opaque payload, and one new failure</h2>
+
+  <p>The costs are real and worth naming rather than hand-waving. A build step and a generator now sit between the schema and the running code, which is a dependency in every CI pipeline that touches the service. The payload stops being readable, so a request you could once paste into a terminal now needs a tool to inspect, and the friction lands hardest during an incident. And the format is a poor fit for a public browser-facing API, which is why gRPC deployments so often terminate in a JSON gateway at the edge.</p>
+
+  <p>The failure that is genuinely new is subtler. A compiler checks each end against the schema revision that end was given. It has no way to check the two ends against each other, so two services compiled from different commits of the same <code>.proto</code> both build cleanly and can still disagree. That is why the schema wants a single distribution point, a registry or a versioned module, rather than being copied into each repository.</p>
+
+  <div class="callout warn">
+    Generated code that is committed to a repository is a snapshot of a schema at one moment, and it is the moment nobody remembers to refresh. If you check generated files in, make regenerating them part of the build and fail the build when the output differs from what is committed, so a stale copy is a red pipeline rather than a live inconsistency. The alternative, generating at build time, trades that risk for a toolchain dependency on every developer machine.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can a protobuf field be renamed without breaking a consumer?</div>
+      <button class="q-opt">The compiler emits an alias for the old name</button>
+      <button class="q-opt">The name never travels - the number is matched</button>
+      <button class="q-opt">Readers fall back to case-insensitive matching</button>
+      <button class="q-opt">Old names stay valid until they are reserved</button>
+      <div class="q-fb">Encoded messages carry a tag number and a value, so the field's name exists only in the schema and the generated code and is not part of what the reader matches. No alias is generated, protobuf does no name matching of any kind on the binary wire, and reserving a name is a guard against future reuse rather than a grace period.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does unknown-field retention in proto3 actually buy you?</div>
+      <button class="q-opt">A parse that never fails on a bad message</button>
+      <button class="q-opt">A schema that both ends must share exactly</button>
+      <button class="q-opt">A guarantee that field numbers stay unique</button>
+      <button class="q-opt">A middle hop can lag the schema and not lose data</button>
+      <div class="q-fb">Retention means a parser holds fields it does not recognise and writes them out again, so a service in the middle built on an older schema passes new fields through untouched. A malformed message still fails to parse, retention is the reason the ends do not need identical schemas, and uniqueness of numbers is enforced by the compiler in the file rather than by the wire format.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> is about the part of the contract a schema still cannot state, which is every rule about values rather than shapes.</li>
+    <li><b>Later, <a href="0405-compatibility-is-a-rule-not-a-hope.html">compatibility is a rule, not a hope</a></b> works out what the numbering choice made here permits and forbids.</li>
+    <li><b>Behind you, <a href="0401-json-is-text-and-text-has-no-types.html">JSON is text and text has no types</a></b> is the list of conventions this mechanism is trying to absorb.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Write a five-field <code>.proto</code> message for a request your service already accepts, choosing numbers deliberately. Ask the agent which of your fields belong in the 1 to 15 range given how often each is set, and which of your current JSON conventions the schema absorbed and which it left for you.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://protobuf.dev/programming-guides/proto3/">proto3 language guide</a> carries the field number range, the reserved block, the one-byte recommendation and the unknown-field rule, all in its opening sections. The <a href="https://protobuf.dev/programming-guides/dos-donts/">Do's and Don'ts</a> page is short, opinionated and written from the experience of running this at scale, and it is the better of the two to read before designing your first message.</p>
+
+  <div class="pager">
+    <a href="0401-json-is-text-and-text-has-no-types.html"><span class="dir">&larr; Previous</span><span class="ttl">JSON is text and text has no types</span></a>
+    <a class="nxt" href="0403-validation-belongs-at-the-boundary-once.html"><span class="dir">Next &rarr;</span><span class="ttl">Validation belongs at the boundary, once</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0402 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
