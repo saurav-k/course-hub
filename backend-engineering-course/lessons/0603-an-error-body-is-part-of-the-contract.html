@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>An error body is part of the contract - Backend Engineering</title>
+<meta name="description" content="A status code says which family a failure is in, which is all an intermediary needs and less than a client needs. RFC 9457 gives the specific failure a machine-readable identity, so a caller can branch on something you meant to promise.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; API design &middot; Lesson 0603</div>
+  <h1>The status code says which family the failure is in and the body says which failure it is</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Two readers, two granularities, one response. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9457.html">RFC 9457 - Problem Details for HTTP APIs</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>RFC 9457 opens by naming the gap: HTTP status codes <b>cannot always convey enough information about errors to be helpful</b>.</li>
+      <li>The status class is the <b>coarse signal every intermediary reads</b>. The body is the fine one, and only the caller reads it.</li>
+      <li>A problem document is <code>application/problem+json</code> with five optional members: <code>type</code>, <code>status</code>, <code>title</code>, <code>detail</code>, <code>instance</code>.</li>
+      <li><b><code>type</code> is the identifier a client branches on</b>, not <code>title</code>. Absent, it defaults to <code>about:blank</code>, meaning the status code is the whole story.</li>
+      <li>What it costs: a stable problem type is a promise, so your error vocabulary now has the same change rules as the rest of the API.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Every mechanism so far can refuse, and this is what a refusal owes.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0602&lt;br/&gt;an expired cursor,&lt;br/&gt;a bad page size"] --> T["THIS PAGE&lt;br/&gt;what a refusal&lt;br/&gt;has to carry"]
+  M["Module 02&lt;br/&gt;status classes&lt;br/&gt;and their meaning"] --> T
+  T --> A["Lesson 0604&lt;br/&gt;a version that&lt;br/&gt;no longer exists"]
+  T --> B["Module 11&lt;br/&gt;error handling&lt;br/&gt;inside the service"]
+    </div>
+    <figcaption>Lesson 0202 established the three families and their one job each, and lesson 0403 chose 422 for a body that parsed but did not make sense. Both stopped at the status line. This page is what goes underneath it, and it is the last part of the interface teams treat as an implementation detail. <b>An error response is a response, so its shape is under exactly the same no-take-backs rule as a successful one.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two readers with different needs</h2>
+
+  <h3 id="status-granularity">The status line is shared and therefore coarse</h3>
+  <p>A status code is read by software that knows nothing about your domain: proxies, load balancers, retry libraries, dashboards. That audience is why the code is deliberately coarse. It has to mean the same thing for every service on the web, so it can distinguish "your request was wrong" from "my server broke", and it cannot possibly distinguish "this card was declined" from "this currency is unsupported". Both of those are 4xx and both are correctly 4xx.</p>
+
+  <p>The caller's code needs the second distinction, and it needs it in a form it can switch on. Left without one, every client team invents the same workaround: match on the human-readable message. That converts your prose into an interface, and from then on rewording a sentence breaks a caller, which is the accidental promise from lesson 0600 in its purest form.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Who reads which part</div>
+    <div class="fig-claim">Three audiences read one response and only one of them reads prose.</div>
+    <div class="mermaid">
+flowchart LR
+  R["One 4xx response"] --> S["Status code&lt;br/&gt;proxies, retries,&lt;br/&gt;dashboards"]
+  R --> Y["type member&lt;br/&gt;the caller's code&lt;br/&gt;branches here"]
+  R --> D["title and detail&lt;br/&gt;a person reading&lt;br/&gt;a log or a screen"]
+  S --> S2["Needs to be&lt;br/&gt;universal"]
+  Y --> Y2["Needs to be&lt;br/&gt;stable"]
+  D --> D2["Needs to be&lt;br/&gt;editable"]
+    </div>
+    <figcaption>The three columns have incompatible requirements, which is the whole reason the parts are separate. The prose must stay editable, so it cannot be the thing a client branches on. The identifier must stay stable, so it cannot be prose. RFC 9457 says this outright: consumers use the type URI as the primary identifier, and title is advisory. <b>Give the caller something stable to switch on, or they will switch on the sentence you have to be free to change.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the five members, and the one that matters</h2>
+
+  <h3 id="problem-details">A problem document, stated</h3>
+  <p>The media type is <code>application/problem+json</code>, and the object carries five members, all optional. <code>type</code> is a URI reference identifying the problem type. <code>status</code> is the status code the origin generated, repeated in the body so the document survives being copied out of the response. <code>title</code> is a short human-readable summary of the type. <code>detail</code> is a human-readable explanation of this specific occurrence. <code>instance</code> is a URI reference identifying that occurrence.</p>
+
+  <div class="code-cap">a 422 response body &middot; application/problem+json, with one extension member</div>
+  <pre><code>{
+  "type": "https://api.example.com/problems/unsupported-currency",
+  "title": "Unsupported currency",
+  "status": 422,
+  "detail": "Orders in ZWL cannot be created from a GB merchant account.",
+  "instance": "/orders/attempt-9f2c",
+  "supported_currencies": ["GBP", "EUR", "USD"]
+}</code></pre>
+
+  <p>The last member is the part people miss. Section 3.2 allows a problem type to extend the object with members specific to that type, and that is where the machine-actionable detail belongs: the field that failed, the values that are allowed, the time to wait. A client that does not recognise an extension member ignores it, which is the same forward-compatibility rule module 04 established for every other body.</p>
+
+  <h3 id="problem-type">The type URI identifies, and does not have to resolve</h3>
+  <p>Two rules about <code>type</code> are worth stating precisely because both are commonly misread. First, when <code>type</code> is absent it defaults to <code>about:blank</code>, which means the problem has no semantics beyond the status code itself - a legitimate document rather than an incomplete one. Second, the URI is an identifier and not necessarily a location: the specification says consumers should not automatically dereference it, except when showing information to a developer. Using a URI buys you a namespace nobody else can collide with, and it buys that whether or not anything is served there.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A refusal, end to end</div>
+    <div class="fig-claim">The intermediary acts on the status and the client acts on the type.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client code
+  participant K as Retry library
+  participant S as Your service
+  C->>K: POST /orders with a ZWL amount
+  K->>S: POST /orders
+  S-->>K: 422 application/problem+json
+  K->>K: 4xx - not retryable, pass it through
+  K-->>C: the response, unchanged
+  C->>C: switch on type - unsupported-currency
+  C->>C: read supported_currencies, offer the user a choice
+    </div>
+    <figcaption>One response, two decisions, taken by two pieces of software that share no vocabulary. The retry library never opens the body and is right not to. The client never inspects the status beyond knowing it failed, because the type already told it which failure this is and the extension member told it what to do about it. <b>Both layers get a decision they can take alone, which is what splitting the granularity buys.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: an error vocabulary is a published surface</h2>
+
+  <p>Adopting problem documents does not reduce your obligations, it names them. The moment a caller branches on <code>type</code>, that URI is under the rules of lesson 0600: you cannot rename it, cannot repurpose it, and cannot split one type into two without breaking whoever matched the old one. Adding a new type is safe, in the same way adding a field is safe, and only if callers were told to treat an unrecognised type as a generic failure of its status class.</p>
+
+  <p>There is also a limit on how much to say. Section 5 of the specification is about exactly this: a problem document can leak information that helps an attacker, and generators are encouraged to keep implementation details such as a stack dump out of the HTTP interface. The rule that follows is a useful one to hold: <code>detail</code> is for a person who is allowed to know, and anything an unauthenticated caller should not learn goes into your logs behind an <code>instance</code> identifier instead of into the body.</p>
+
+  <div class="callout warn">
+    A convincing error format is not the same as a correct status code, and the second mistake is worse. A service that returns 200 with a problem document in the body has broken every retry library, cache and dashboard between it and the caller, all of which read the status line and stop. If you take one thing from this page it is that the body extends the status code and never substitutes for it: choose the code first, by the rules of lesson 0202, and let the document say which member of that family this is.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which member of a problem document should a client branch on?</div>
+      <button class="q-opt">detail, which explains this exact occurrence</button>
+      <button class="q-opt">instance, which identifies the occurrence</button>
+      <button class="q-opt">type, the URI identifying the problem kind</button>
+      <button class="q-opt">title, the short summary of the problem</button>
+      <div class="q-fb">RFC 9457 names the type URI as the primary identifier for a client. Detail is prose about one occurrence and changes freely, instance points at this single event rather than at a kind of event, and title is a human summary that the specification treats as advisory precisely so you can reword it.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does an absent <code>type</code> member mean?</div>
+      <button class="q-opt">It defaults to about:blank - the status is all</button>
+      <button class="q-opt">The document is invalid and must be rejected</button>
+      <button class="q-opt">The client must dereference instance instead</button>
+      <button class="q-opt">The server has an unregistered problem type</button>
+      <div class="q-fb">All five members are optional, and an absent type defaults to about:blank, meaning there are no semantics beyond the status code. The document stays valid, instance identifies an occurrence rather than a kind, and there is no registration requirement that an absent member could signal.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0604-versioning-is-choosing-who-pays-to-change.html">versioning is choosing who pays to change</a></b> deals with the change that no additive rule can absorb, error types included.</li>
+    <li><b>Behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is the coarse layer this page extends rather than replaces.</li>
+    <li><b>Behind you, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> is where the refusals in these examples are generated.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find the last error response your service returned to a real caller and rewrite it as a problem document, inventing the type URI. Then ask the agent which parts of your current message a client could already be matching on, and what would break if you reworded it tomorrow.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9457.html">RFC 9457</a> is short enough to read end to end in twenty minutes, and sections 3.1 and 3.2 are the whole format. Section 5 on security considerations is the half that gets skipped and is the one that decides how much your <code>detail</code> is allowed to say.</p>
+
+  <div class="pager">
+    <a href="0602-collections-need-pagination-not-a-limit.html"><span class="dir">&larr; Previous</span><span class="ttl">Collections need pagination, not a limit</span></a>
+    <a class="nxt" href="0604-versioning-is-choosing-who-pays-to-change.html"><span class="dir">Next &rarr;</span><span class="ttl">Versioning is choosing who pays to change</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0603 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
