@@ -32,7 +32,7 @@ before the next depends on it.
 | 8 | Module 08 - Data (0800-0806) | written | The relational model as a place to put invariants, the transaction boundary and the write-ahead log, isolation levels as a menu of anomalies, lock hold time as blast radius, the B-tree and its write cost, composite order and the planner's estimate, and the four non-relational shapes. |
 | 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
 | 10 | Module 10 - Async work & search (1000-1006) | written | The 202 and the durable handoff, the broker's lease and at-least-once, the retry policy and the dead letter, the idempotent consumer, the transactional outbox, then the inverted index and BM25. Written while Module 08 stays reserved, because nothing in it depends on the relational chapter. |
-| 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
+| 11 | Module 11 - Resilience & observability (1100-1105) | written | Failures and their one owner, config parsed at boot, then the three signals - logs, traces and metrics - by the question each answers, and graceful shutdown as a sequence against a deadline. Written before Modules 08 to 10, which stay reserved, because it depends on none of them. |
 | 12 | Module 12 - Inter-service communication (1200-1205) | written | Three couplings and how to choose between them, gRPC and its deadline, the queue, the log, and the WebSocket. Depends only on Modules 02, 04 and 06, so it was written without waiting for the modules numbered between. |
 | 13 | Module 13 - Scale, fleet and shipping (1300-1306) | written | Concurrency and shared state inside one process, statelessness and the fleet, containers and the control loop, the test budget and the deployment pipeline. Written without waiting for the modules numbered before it, because it names their mechanisms and links forward to them rather than depending on them, and because it closes the course's arc. |
 
@@ -107,6 +107,12 @@ caches what this one stores, Module 10 queues work that this one has to commit, 
 shared state lives here. Four of its seven lessons sit on transactions and indexes, which is where a working engineer's
 model is usually thinnest, and the non-relational map is last so that every guarantee it trades away has already been
 named and priced.
+
+Module 11 landed ahead of Modules 08 to 10, which stay reserved, because nothing in it depends on a
+database, a cache or a queue. It reads after Module 06 and consumes Module 02's status families and
+Module 06's problem document, both of which are already written. Its observability half is ordered by
+the question a debugging session asks rather than by tool: one execution (logs), one request across processes
+(traces), then the whole population (metrics).
 
 Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
 every later module consumes the vocabulary it defines: routing consumes the method and the target,

@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Metrics answer how often, never which one - Backend Engineering</title>
+<meta name="description" content="A metric is an aggregate held for every request forever, so it must stay small - which is why it can say a service is unwell and can never say which request was. Percentiles and an objective are what make the number answer a question.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Resilience and observability &middot; Lesson 1104</div>
+  <h1>A metric is an aggregate, so it can say a service is unwell and never which request was</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The third signal, and the only one you can afford to keep for every request forever. &middot;
+    <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Google SRE Book - Monitoring Distributed Systems</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A metric is <b>a number per label set per interval</b>, not a record per request, which is what makes it cheap enough to keep for years and useless for identifying anything.</li>
+      <li>Its cost is <b>cardinality</b>. Every unique combination of label values is a new time series, so a user id in a label is how a monitoring bill becomes an incident.</li>
+      <li>Latency is a distribution and <b>a mean is a bad summary of it</b>. The Google SRE book's own example: a 100 ms average at 1,000 requests a second can easily hide 1% of requests taking 5 seconds.</li>
+      <li>So durations are recorded as <b>bucketed histograms</b>, because buckets can be added across instances and precomputed quantiles cannot.</li>
+      <li>What it costs: an unread dashboard is the normal outcome. A number earns its place only once <b>a target and a consequence</b> are attached to it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This is the only signal cheap enough to keep for every request.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 1102 and 1103&lt;br/&gt;one execution,&lt;br/&gt;then one request"] --> T["THIS PAGE&lt;br/&gt;every request,&lt;br/&gt;as one number"]
+  T --> A["Lesson 1105&lt;br/&gt;shutdown, which the&lt;br/&gt;error rate will show"]
+  T --> B["Module 13&lt;br/&gt;scale, which is decided&lt;br/&gt;on these numbers"]
+  W["Module 11&lt;br/&gt;resilience and observability"] -.- T
+    </div>
+    <figcaption>The three signals of this module sort by how much they keep. A log keeps everything about one execution, a trace keeps a tree of intervals for a sampled request, and a metric keeps one number. That ordering is also the ordering of what each can answer, and it is not a coincidence: the constraint and the capability are the same fact. <b>What a signal can tell you is decided by what it was cheap enough to keep.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a number per label set, not a record per request</h2>
+
+  <p>The other two signals are records: one per execution, one per operation. A metric is not. It is a small set of numbers, updated in place, sampled at an interval, and identified by a name plus a set of label values. Ten thousand requests move a counter ten thousand times and store nothing extra, which is what makes it the only signal you can afford to keep at full resolution for a year.</p>
+
+  <p>Everything else about metrics follows from that. It can tell you a rate, a trend, a ratio and a shape. It cannot tell you which request, which customer or which value, because none of those were kept. Reaching for a metric to answer "which one" is the mistake that produces a label carrying a user identifier, and that is not a small mistake - Prometheus' naming guidance is explicit that every unique combination of key-value label pairs represents a new time series and that labels must not store high-cardinality dimensions such as user ids or email addresses.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Three instruments</div>
+    <div class="fig-claim">The instrument is chosen by what the number is allowed to do next.</div>
+    <div class="mermaid">
+flowchart TB
+  Q["What are you recording"] --> A["A thing that happened&lt;br/&gt;requests, errors, retries"]
+  Q --> B["A level right now&lt;br/&gt;queue depth, open conns"]
+  Q --> C["A measured value&lt;br/&gt;duration, payload size"]
+  A --> A2["Counter&lt;br/&gt;only rises, or resets to&lt;br/&gt;zero on restart"]
+  B --> B2["Gauge&lt;br/&gt;goes up and down&lt;br/&gt;freely"]
+  C --> C2["Histogram&lt;br/&gt;counts into buckets&lt;br/&gt;plus a sum and a count"]
+  A2 --> R["Rates and ratios&lt;br/&gt;survive a restart"]
+  B2 --> R2["Only the latest sample&lt;br/&gt;means anything"]
+  C2 --> R3["Quantiles, and they&lt;br/&gt;add across instances"]
+    </div>
+    <figcaption>A counter is monotonically increasing and may only reset to zero on restart, which is exactly what lets a query compute a rate from it without knowing when the process started. A gauge carries no history, so an average of a gauge over an interval is an average of samples rather than of the thing. A histogram exposes cumulative buckets, a sum and a count, and those three are what a quantile is computed from later. <b>Choosing the instrument is choosing which questions the stored number will still be able to answer.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the mean is where almost nothing happens</h2>
+
+  <p>The four golden signals of the SRE book are latency, traffic, errors and saturation, and the book is careful about latency in a way most dashboards are not: it says to distinguish the latency of successful requests from that of failed ones, because a fast failure otherwise flatters your numbers. Then it makes the argument that decides how the number is stored at all. If you run a service with an average latency of 100 ms at 1,000 requests a second, 1% of requests might easily take 5 seconds.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where the mean comes from</div>
+    <div class="fig-claim">One request in a hundred supplies half of a 100 ms average.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two bars of equal height showing the contribution to a 100 millisecond mean latency. The 99 percent of requests taking about 50 milliseconds each contribute 50 milliseconds of the mean. The 1 percent of requests taking 5 seconds each also contribute 50 milliseconds of the mean.">
+      <text class="ttl" x="20" y="24">Contribution to a 100 ms mean latency</text>
+      <line class="axis" x1="80" y1="240" x2="610" y2="240"/>
+      <line class="axis" x1="80" y1="50" x2="80" y2="240"/>
+      <rect class="m-stat" x="160" y="80" width="90" height="160"/>
+      <rect class="m-alarm" x="400" y="80" width="90" height="160"/>
+      <text class="lbl-sm" x="205" y="72" text-anchor="middle">50 ms of the mean</text>
+      <text class="lbl-sm" x="445" y="72" text-anchor="middle">50 ms of the mean</text>
+      <text class="lbl-sm" x="205" y="260" text-anchor="middle">99% of requests</text>
+      <text class="lbl-sm" x="205" y="278" text-anchor="middle">about 50 ms each</text>
+      <text class="lbl-sm t-alarm" x="445" y="260" text-anchor="middle">1% of requests</text>
+      <text class="lbl-sm t-alarm" x="445" y="278" text-anchor="middle">5,000 ms each</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>the 99% nobody complains about</span><span><i class="sw-alarm"></i>the 1% who leave</span></div>
+    <figcaption>Derived arithmetic on the SRE book's own example rather than a measurement. Take 99% of requests at 50.5 ms and 1% at 5,000 ms: 0.99 &times; 50.5 = <span class="keynum">50.0</span> ms and 0.01 &times; 5,000 = <span class="keynum">50.0</span> ms, which sum to the stated 100 ms mean. The two bars are equal because the arithmetic makes them equal, and that is the point - the number your dashboard shows is half made of requests it cannot see. <b>A mean over a heavy tail is a blend of two populations, and it describes neither of them.</b></figcaption>
+  </figure>
+
+  <h3 id="histogram-buckets">Buckets add up and quantiles do not</h3>
+
+  <p>The fix the SRE book recommends is to collect request counts bucketed by latency rather than actual latencies: how many requests took 0 to 10 ms, 10 to 30 ms, 30 to 100 ms, and so on. That is a histogram, and the reason it is a histogram rather than a precomputed 95th percentile is arithmetic. Prometheus' own guidance labels <code>avg(http_request_duration_seconds{quantile="0.95"})</code> as bad and says averaging quantiles yields statistically nonsensical values: the 95th percentile of ten instances is not the 95th percentile of the fleet, and no operation on the ten recovers it.</p>
+
+  <p>Bucket counts do compose. Add the <code>le="0.1"</code> counters of ten instances and you have the fleet's count of requests under 100 ms, exactly, and the quantile is estimated from the summed buckets afterwards. The price is accuracy: the estimate is interpolated inside whichever bucket the quantile falls in, so a spike at 220 ms inside a 200-to-300 ms bucket comes back as roughly 295 ms rather than 220. That is not a rounding error, it is the difference between comfortably inside an objective and about to breach one, and it is decided by bucket boundaries you chose before you had the data.</p>
+
+  <h2>3. Making the number answer something: a target and a consequence</h2>
+
+  <p>A number with no target is a number nobody looks at, which is the ordinary fate of a dashboard. The SRE workbook's construction is three steps. An indicator is a ratio of good events to total events - not a raw gauge, a ratio, so it is comparable across load. An objective is a target for that ratio over a window. And the error budget is what is left: 100% minus the objective, so a 99.9% objective over three million requests in four weeks is a budget of 3,000 failures.</p>
+
+  <p>The budget is what converts observability into a decision, because it is spendable. Below budget, ship. Out of budget, the policy says what stops. The workbook is direct about why the target is never 100%: components fail, users cannot perceive the difference through their own network anyway, and a service that must never fail can never be changed - it calls 100% an operations team's objective rather than an engineering culture's.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Spending an error budget</div>
+    <div class="fig-claim">The budget decides what happens next, which is what an alert cannot.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> InBudget: window opens with the full budget
+  InBudget --> InBudget: ordinary failures, budget draws down
+  InBudget --> Burning: failures arrive far faster than the window allows
+  Burning --> InBudget: the cause is fixed, spend returns to normal
+  Burning --> Exhausted: the budget for this window is gone
+  Exhausted --> Frozen: the agreed policy takes effect
+  Frozen --> InBudget: the window rolls over
+    </div>
+    <figcaption>Two different signals come off one budget and they are not interchangeable. Exhaustion is a fact about the window and drives policy - what stops shipping. Burn rate is a fact about the present and drives paging, because spending a month's budget in an hour is worth waking somebody for while spending it evenly over a month is not. Both are computed from the same ratio the indicator already defines. <b>An objective without an agreed consequence is a dashboard, and this state machine is the difference.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    Cardinality is the failure that arrives as a bill and stays as an outage. Three labels with ten values each is 10<sup>3</sup>, a thousand series, and is fine; adding a customer id multiplies that by your customer count, and the new series are created by your own running code faster than anyone can react to them. Two rules close most of it: no label may take a value from user input or from a request path segment, and a new label is a review question rather than a one-line change. The status code, the method, the route <em>template</em> and the outcome are labels. The order id, the tenant name and the user agent are not - those belong on the log line of lesson 1102, which was designed to carry them.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why record latency as histogram buckets rather than as a precomputed 95th percentile?</div>
+      <button class="q-opt">Buckets take less storage than a single quantile does</button>
+      <button class="q-opt">Buckets keep the exact value of every observation made</button>
+      <button class="q-opt">Bucket counts can be summed across instances, quantiles cannot</button>
+      <button class="q-opt">Buckets need no configuration, so no boundary is ever wrong</button>
+      <div class="q-fb">Averaging per-instance quantiles is statistically meaningless, while adding bucket counters is exact and the quantile is estimated afterwards. The first is false - a set of buckets costs more series than one quantile; the second is the opposite of what a bucket does, since bucketing discards the value; and the fourth is wrong in the way that matters, because bucket boundaries are chosen in advance and a badly chosen one distorts the estimate.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which of these is safe to use as a metric label?</div>
+      <button class="q-opt">The route template, such as <code>/orders/{id}</code></button>
+      <button class="q-opt">The customer identifier the request was made for</button>
+      <button class="q-opt">The full request path, such as <code>/orders/8f2c</code></button>
+      <button class="q-opt">The user agent string the client happened to send</button>
+      <div class="q-fb">A route template has as many values as you have routes, which is a number you control. The other three are unbounded sets driven by traffic - the path expands to one series per order, the customer id to one per customer, and the user agent to one per client build - and each new value is a series your own code creates at request rate. Anything unbounded belongs on a log line instead.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1105-graceful-shutdown-is-a-sequence-not-a-signal.html">graceful shutdown is a sequence, not a signal</a></b> is a failure you schedule yourself, and the error rate on this page is how you find out you did it badly.</li>
+    <li><b>Behind you, <a href="1103-a-trace-is-one-request-across-every-hop.html">a trace is one request across every hop</a></b> is where you go once a metric has told you something is wrong and cannot say which request.</li>
+    <li><b>Behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> defines the good-and-total split every availability indicator is built on.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one dashboard your team keeps and, for each panel, write the decision somebody would make differently if the line moved. Then ask the agent which panels survived, and whether the ones that did are stated as a ratio with a target rather than as a raw number.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The SRE book's <a href="https://sre.google/sre-book/monitoring-distributed-systems/">Monitoring Distributed Systems</a> is where the four golden signals and the bucketed-latency argument come from, and it is short. Follow it with the SRE workbook's <a href="https://sre.google/workbook/implementing-slos/">Implementing SLOs</a> for the indicator, objective and error-budget construction, and with Prometheus' <a href="https://prometheus.io/docs/practices/histograms/">Histograms and summaries</a> for the aggregation argument and a worked example of how badly a wrong bucket boundary distorts a quantile.</p>
+
+  <div class="pager">
+    <a href="1103-a-trace-is-one-request-across-every-hop.html"><span class="dir">&larr; Previous</span><span class="ttl">A trace is one request across every hop</span></a>
+    <a class="nxt" href="1105-graceful-shutdown-is-a-sequence-not-a-signal.html"><span class="dir">Next &rarr;</span><span class="ttl">Graceful shutdown is a sequence, not a signal</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1104 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

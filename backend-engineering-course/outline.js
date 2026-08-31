@@ -299,6 +299,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "11",
+      "title": "Resilience and observability",
+      "lessons": [
+        {
+          "title": "Errors are values with exactly one owner",
+          "href": "lessons/1100-errors-are-values-with-exactly-one-owner.html"
+        },
+        {
+          "title": "Configuration is an input, not a constant",
+          "href": "lessons/1101-configuration-is-an-input-not-a-constant.html"
+        },
+        {
+          "title": "A log line is a query you will run later",
+          "href": "lessons/1102-a-log-line-is-a-query-you-will-run-later.html"
+        },
+        {
+          "title": "A trace is one request across every hop",
+          "href": "lessons/1103-a-trace-is-one-request-across-every-hop.html"
+        },
+        {
+          "title": "Metrics answer how often, never which one",
+          "href": "lessons/1104-metrics-answer-how-often-never-which-one.html"
+        },
+        {
+          "title": "Graceful shutdown is a sequence, not a signal",
+          "href": "lessons/1105-graceful-shutdown-is-a-sequence-not-a-signal.html"
+        }
+      ]
+    },
+    {
       "n": "12",
       "title": "Inter-service communication",
       "lessons": [

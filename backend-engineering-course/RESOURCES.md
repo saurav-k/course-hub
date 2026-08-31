@@ -397,6 +397,51 @@ TBD as lessons landing.
   Information Retrieval 3(4), 2009, is named as the standard derivation; the module cites the
   implementations for every number it states.
 
+### Module 11 - Resilience and observability
+
+- Lesson 1100, error handling: [The Go Blog - Working with Errors in Go 1.13](https://go.dev/blog/go1.13-errors)
+  for the `%w` verb, `errors.Is` / `errors.As`, and the stated cost that wrapping an error makes it part of your
+  API; [the errors package](https://pkg.go.dev/errors) for the error tree and the depth-first traversal `Is` and
+  `As` perform; [PEP 3134](https://peps.python.org/pep-3134/) for implicit chaining through `__context__`, explicit
+  chaining through `raise ... from`, and the loss the PEP exists to fix; and
+  [RFC 9457 &sect;5](https://www.rfc-editor.org/rfc/rfc9457.html#section-5) for the bound on what a problem document
+  may disclose.
+- Lesson 1101, configuration: [The Twelve-Factor App, factor III](https://12factor.net/config) for the definition
+  of config as what varies between deploys, the open-source litmus test, the argument against named environment
+  groups, and the environment-variable recommendation;
+  [Kubernetes - Secrets](https://kubernetes.io/docs/concepts/configuration/secret/) for the statement that Secrets
+  are stored unencrypted in etcd by default and that anyone able to create a Pod in a namespace can read them; and
+  [OWASP - Logging Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html) for the
+  list of data that must not be recorded directly.
+- Lesson 1102, logs: [OpenTelemetry - Logs Data Model](https://opentelemetry.io/docs/specs/otel/logs/data-model/)
+  for the record's fields, the `TraceId` / `SpanId` correlation fields and the 1-to-24 `SeverityNumber` bands;
+  [RFC 5424 &sect;6.2.1](https://www.rfc-editor.org/rfc/rfc5424#section-6.2.1) for the eight syslog severities and
+  the priority arithmetic that makes 0 the most severe; [Go log/slog](https://pkg.go.dev/log/slog) for the record
+  shape, the four levels at -4, 0, 4 and 8, the `JSONHandler` and `Logger.With`; and
+  [The Twelve-Factor App, factor XI](https://12factor.net/logs) for the rule that the process owns nothing after
+  `stdout`.
+- Lesson 1103, traces: [W3C - Trace Context](https://www.w3.org/TR/trace-context/) for the `traceparent` grammar,
+  the field lengths, the invalid all-zero values, the sampled flag and the opaque `tracestate`, and for the stated
+  problem that traces from different vendors could not be correlated; and
+  [OpenTelemetry - Traces](https://opentelemetry.io/docs/concepts/signals/traces/) for the span fields, the root
+  span and context propagation as the mechanism the signal rests on.
+- Lesson 1104, metrics: [Google SRE Book - Monitoring Distributed Systems](https://sre.google/sre-book/monitoring-distributed-systems/)
+  for the four golden signals and the worked example of a 100 ms mean hiding 1% of requests at 5 seconds;
+  [Prometheus - Metric types](https://prometheus.io/docs/concepts/metric_types/) for counter, gauge, histogram and
+  summary and the `_bucket` / `_sum` / `_count` exposition;
+  [Prometheus - Histograms and summaries](https://prometheus.io/docs/practices/histograms/) for the statement that
+  averaging precomputed quantiles is nonsensical and for the bucket-boundary error example;
+  [Prometheus - Metric and label naming](https://prometheus.io/docs/practices/naming/) for the cardinality caution;
+  and [Google SRE Workbook - Implementing SLOs](https://sre.google/workbook/implementing-slos/) for the indicator,
+  objective and error-budget construction and the four reasons 100% is the wrong target.
+- Lesson 1105, graceful shutdown: [Kubernetes - Pod Lifecycle, Termination of Pods](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination)
+  for the termination flow step by step, the 30-second `terminationGracePeriodSeconds` default, the `preStop` hook
+  and its one-off 2-second extension, the TERM-then-KILL sequence, and the statement that the control plane
+  evaluates EndpointSlice removal **at the same time** as the kubelet begins shutdown; and
+  [Go net/http Server.Shutdown](https://pkg.go.dev/net/http#Server.Shutdown) for the documented order - close
+  listeners, close idle connections, wait for active ones - and the explicit exclusion of hijacked connections
+  such as WebSockets.
+
 ### Module 12 - Inter-service communication
 
 - Lesson 1200, the three couplings: [Apache Kafka - Introduction](https://kafka.apache.org/intro) for
