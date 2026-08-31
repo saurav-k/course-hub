@@ -135,6 +135,40 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0605-idempotency-keys-make-retries-safe.html"
         }
       ]
+    },
+    {
+      "n": "10",
+      "title": "Async work and search",
+      "lessons": [
+        {
+          "title": "Async work is work that outlives the response",
+          "href": "lessons/1000-async-work-is-work-that-outlives-the-response.html"
+        },
+        {
+          "title": "A queue delivers at least once",
+          "href": "lessons/1001-a-queue-delivers-at-least-once.html"
+        },
+        {
+          "title": "A failed job is a policy you wrote in advance",
+          "href": "lessons/1002-a-failed-job-is-a-policy-you-wrote-in-advance.html"
+        },
+        {
+          "title": "A consumer must be idempotent",
+          "href": "lessons/1003-a-consumer-must-be-idempotent.html"
+        },
+        {
+          "title": "Enqueue and commit are two writes",
+          "href": "lessons/1004-enqueue-and-commit-are-two-writes.html"
+        },
+        {
+          "title": "Search is an inverted index, not a scan",
+          "href": "lessons/1005-search-is-an-inverted-index-not-a-scan.html"
+        },
+        {
+          "title": "Relevance is a ranking function",
+          "href": "lessons/1006-relevance-is-a-ranking-function.html"
+        }
+      ]
     }
   ],
   "extras": [
