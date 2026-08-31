@@ -23,6 +23,8 @@ The small set this course keeps returning to. Primary only.
 - HTTP semantics, headers, methods, caching: [RFC 9110](https://www.rfc-editor.org/rfc/rfc9110) - the
   HTTP/1.1 field semantics, used throughout the Web Fundamentals module.
 - HTTP/2 and the connection model: [RFC 9113](https://www.rfc-editor.org/rfc/rfc9113).
+- HTTP caching, freshness and validation: [RFC 9111](https://www.rfc-editor.org/rfc/rfc9111) - the
+  companion to RFC 9110 that owns the cache model Module 02 teaches.
 - The browser same-origin policy and CORS: [Fetch standard](https://fetch.spec.whatwg.org/) - what the
   browser enforces and why.
 - Relational model and SQL semantics: [PostgreSQL documentation](https://www.postgresql.org/docs/current/).
@@ -48,6 +50,27 @@ the canon already owns.
 ### Module 01 - The shape of a request
 
 TBD as lessons landing.
+
+### Module 02 - HTTP is the language
+
+- Lesson 0200, the request frame: [RFC 9110 &sect;7.1, Determining the Target Resource](https://www.rfc-editor.org/rfc/rfc9110#section-7.1)
+  and [RFC 9113 &sect;8.3.1, Request Pseudo-Header Fields](https://www.rfc-editor.org/rfc/rfc9113#section-8.3.1)
+  for the same components carried under HTTP/2.
+- Lesson 0201, method properties: [RFC 9110 &sect;9.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.2)
+  for safe, idempotent and cacheable, including the note that most cache implementations support only
+  GET and HEAD, and the prohibition on a proxy retrying a non-idempotent request.
+- Lesson 0202, status codes: [RFC 9110 &sect;15](https://www.rfc-editor.org/rfc/rfc9110#section-15)
+  for the extensibility rule and the five class definitions.
+- Lesson 0203, header fields: [RFC 9110 &sect;12](https://www.rfc-editor.org/rfc/rfc9110#section-12)
+  for content negotiation and [&sect;13](https://www.rfc-editor.org/rfc/rfc9110#section-13) for
+  conditional requests and the precondition fields.
+- Lesson 0204, caching: [RFC 9111 &sect;4.2](https://www.rfc-editor.org/rfc/rfc9111#section-4.2) for
+  freshness and the ordered lifetime rules, [&sect;4.3](https://www.rfc-editor.org/rfc/rfc9111#section-4.3)
+  for validation, and [MDN's HTTP caching guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching)
+  as the readable companion.
+- Lesson 0205, CORS: [MDN's CORS guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CORS)
+  for the safelisted fields, the preflight and the credentialed-request rules, over the normative
+  [Fetch standard](https://fetch.spec.whatwg.org/) that specifies the browser behaviour itself.
 
 ## Wisdom
 
