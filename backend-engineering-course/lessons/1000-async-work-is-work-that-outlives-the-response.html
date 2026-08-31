@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Async work is work that outlives the response - Backend Engineering</title>
+<meta name="description" content="A response is a promise about a result, and some work finishes long after the caller has gone. Moving that work out of the request path means changing what you promise, and HTTP has a word for the smaller promise.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1000</div>
+  <h1>When the work outlives the response, it has to leave the request path</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">10 min</span>
+    The first module where the caller stops waiting. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.3.3">RFC 9110 &sect;15.3.3 - 202 Accepted</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A response is a promise about a <b>result</b>. When the work takes longer than the caller will wait, that promise cannot be kept, so the honest move is to promise something smaller.</li>
+      <li>RFC 9110 defines 202 as "accepted for processing, but the processing has not been completed", and states the consequence plainly: <b>"There is no facility in HTTP for re-sending a status code from an asynchronous operation."</b></li>
+      <li>The mechanism is a durable handoff: a producer writes a job, a broker stores it, a worker takes it later. <b>All three can restart without losing the job</b>, which is the whole difference from a background thread.</li>
+      <li>Put identifiers in the job, never the state. Sidekiq states it as a rule - <b>save simple identifiers and look the objects up in the worker</b> - because the job outlives the memory that created it.</li>
+      <li>What it costs: the caller no longer learns the outcome from the response, so you owe them a status resource, and every failure after the 202 is yours to detect.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Every mechanism in this module exists because the caller stopped waiting.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Modules 02 to 09&lt;br/&gt;one request, answered&lt;br/&gt;while the caller waits"] --> T["THIS PAGE&lt;br/&gt;the work that does not&lt;br/&gt;fit inside the response"]
+  T --> A["Lessons 1001 to 1004&lt;br/&gt;delivery, failure, duplicates&lt;br/&gt;and the dual write"]
+  T --> B["Lessons 1005 and 1006&lt;br/&gt;search, the index a&lt;br/&gt;background job builds"]
+  W["Module 11&lt;br/&gt;the failures this creates&lt;br/&gt;are the ones you observe"] -.- T
+    </div>
+    <figcaption>Everything before this module lived inside one request: the method, the body, the store, the cache. This page is the seam where a second execution path opens, running on its own machines on its own schedule, and the rest of the module is about what that path owes you. The search half sits here too rather than in a module of its own, because a search index is the most common thing a background job actually builds. <b>Asynchronous work is not a feature you add to a service; it is a second service you now operate.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a deadline the work does not respect</h2>
+
+  <h3 id="response-deadline">The response is a promise you may not be able to keep</h3>
+  <p>A synchronous handler makes a bet: that the work will finish before the caller, the load balancer, the proxy and the browser all stop caring. Encoding a video, rebuilding a report, sending ten thousand emails and reindexing a catalogue all lose that bet, and they lose it in a specific way - the connection is held open, a worker thread or goroutine is pinned to it, and the caller sees a timeout that tells them nothing about whether the work happened.</p>
+
+  <p>The important part is that this is not a performance problem with a performance fix. Making the encoder twice as fast moves the boundary and does not remove it. The mismatch is structural: the lifetime of the work and the lifetime of the connection are set by different things, and no amount of tuning makes one a function of the other.</p>
+
+  <h3 id="accepted">What 202 promises, and what it refuses to</h3>
+  <p>HTTP already has the smaller promise. <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.3.3">RFC 9110 &sect;15.3.3</a> defines 202 Accepted as meaning the request "has been accepted for processing, but the processing has not been completed", and adds that it "might or might not eventually be acted upon, as it might be disallowed when processing actually takes place". The specification calls the response "intentionally noncommittal" on purpose: its whole point is to let a server take a request for some other process without holding the user agent's connection open until that process is done.</p>
+
+  <p>Then comes the sentence worth memorising, because it is the entire design consequence in one line: <em>"There is no facility in HTTP for re-sending a status code from an asynchronous operation."</em> The protocol will not deliver the outcome later. That is why the same section says the 202 body ought to describe the request's current status and point to, or embed, a status monitor. A 202 with an empty body is not a smaller promise, it is no promise at all.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One call, two shapes</div>
+    <div class="fig-claim">The accepted form returns in milliseconds and owes the caller a second resource.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Service
+  participant Q as Queue
+  participant W as Worker
+  C->>S: POST /reports - synchronous
+  S->>S: build the report - 90 seconds
+  S--xC: gateway timeout at 60 seconds
+  Note over C,W: the same call, accepted rather than completed
+  C->>S: POST /reports
+  S->>Q: enqueue job with the report id
+  S-->>C: 202 - Location /reports/9f2c
+  W->>Q: take the job
+  W->>W: build the report
+  C->>S: GET /reports/9f2c
+  S-->>C: 200 - the finished report
+    </div>
+    <figcaption>The upper half fails in the worst available way: the work may well have completed on the server after the client gave up, so the caller has a timeout and the system has a report nobody will collect. The lower half is not faster - the report still takes ninety seconds - it is only honest about who is waiting for what. Note what the 202 hands back, because it is the part people leave out: an identifier the caller can ask about. <b>Moving work out of the request path replaces one response with two resources, and the second one is your job to design.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: three parties and a record that survives all of them</h2>
+
+  <h3 id="durable-handoff">A background thread is not a queue</h3>
+  <p>The cheapest-looking version of this is to answer the request and finish the work on a spare thread, in a goroutine, or on an event loop. It is the wrong mechanism, and the reason is not style. That work exists only in the memory of one process. A deploy, a crash, an out-of-memory kill or a scale-in event destroys it with no record that it was ever owed, so the system cannot tell the difference between work that finished and work that evaporated. There is nothing to retry because there is nothing to retry <em>from</em>.</p>
+
+  <p>A queue replaces that with a durable record and three separable parties. The <b>producer</b> writes a job and gets an acknowledgement that it is stored. The <b>broker</b> holds it, on disk or replicated across failure domains - Amazon SQS, for instance, <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues.html">stores a message redundantly across multiple availability zones before it acknowledges the send</a>. The <b>consumer</b> asks for work when it has capacity. Each can be restarted, redeployed and scaled without the other two knowing, because the only thing they share is a record neither of them holds in memory.</p>
+
+  <h3 id="job-payload">Put identifiers in the job, not state</h3>
+  <p>A job is serialised at one moment and executed at another, and everything module 04 said about a wire contract applies to it unchanged: it is a message between two programs that do not deploy together. Sidekiq's guidance is the sharp version - <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">"Don't save state to Sidekiq, save simple identifiers. Look up the objects once you actually need them in your perform method."</a> A serialised order object in the payload is a snapshot that is already stale when the worker opens it, and it will be a different shape after your next deploy while the old jobs are still in the queue.</p>
+
+  <div class="code-cap">enqueue.py &middot; the payload is identifiers and a version, not an object</div>
+  <pre><code>def request_report(session, account_id: int, period: str) -> str:
+    report = Report(account_id=account_id, period=period, state="pending")
+    session.add(report)
+    session.flush()          # the id exists, the transaction has not committed
+    enqueue("build_report", {"report_id": report.id, "v": 1})
+    session.commit()
+    return report.public_id</code></pre>
+
+  <p>That snippet is correct about the payload and wrong about the ordering, deliberately, because it is the mistake lesson 1004 is about: the enqueue and the commit are two separate writes and a crash between them loses one of the two. Hold the shape in mind and read the ordering as a defect to be paid for later.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of one job</div>
+    <div class="fig-claim">Only the terminal states are visible to a caller asking for status.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Enqueued: producer writes the job
+  Enqueued --> Running: a worker takes it
+  Running --> Succeeded: the effect is committed
+  Running --> Enqueued: the worker died - see lesson 1001
+  Running --> Retrying: a retriable error - see lesson 1002
+  Retrying --> Running: after the backoff
+  Retrying --> Dead: attempts exhausted
+  Succeeded --> [*]
+  Dead --> [*]
+    </div>
+    <figcaption>Five states, and the caller who holds a 202 can be told which one their job is in, which is exactly what the status resource is for. Two of the edges out of Running are the subject of the next two lessons and neither is an exception path - the worker dying mid-job and the job failing for a reason worth trying again are both ordinary weekday events at any real volume. <b>A job model with no Retrying and no Dead state is a model that has decided failures do not happen.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: you moved the failure, you did not remove it</h2>
+
+  <p>The synchronous version had one virtue that is easy to undervalue: the caller learned the outcome. A 500 arrived at the person who could do something about it, and the work either happened inside the response or visibly did not. Once you return a 202, every failure after that point is invisible to the caller and invisible to you unless you built the machinery to see it. Module 11 is where that machinery is named, and it is not optional - it is the second half of the cost of this page.</p>
+
+  <p>The rest of the bill is a queue's own operational surface. A backlog is now a thing that can grow, so the depth of the queue and the age of the oldest message become numbers somebody has to watch. Workers are a fleet with their own deploys and their own memory limits. The job payload is a published contract with old versions still in flight during a rollout. And the ordering between the enqueue and the database write is a correctness question with a real answer, which is lesson 1004.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">When to leave the request</div>
+    <div class="fig-claim">Slowness alone is not the test - who needs the answer is.</div>
+    <div class="mermaid">
+flowchart TB
+  S["A unit of work"] --> A{"Does the caller&lt;br/&gt;need the result to&lt;br/&gt;continue?"}
+  A -- "yes" --> B{"Does it finish&lt;br/&gt;inside the caller's&lt;br/&gt;deadline?"}
+  B -- "yes" --> K["Keep it synchronous"]
+  B -- "no" --> R["Redesign the work&lt;br/&gt;or the deadline - a 202&lt;br/&gt;does not help here"]
+  A -- "no" --> C{"Must it survive&lt;br/&gt;this process&lt;br/&gt;being killed?"}
+  C -- "no" --> F["Fire and forget is&lt;br/&gt;honest - say so, and&lt;br/&gt;never retry it"]
+  C -- "yes" --> Q["Enqueue it"]
+    </div>
+    <figcaption>The left branch is the one that gets skipped. A payment authorisation that a checkout page cannot proceed without is not made better by a queue - the caller still has to wait, only now they wait by polling, and you have added a broker to a problem that was really a latency budget. The right branch splits on durability rather than on speed, because that is the only thing a queue actually buys you. <b>Async is the answer to "nobody is waiting for this", not to "this is slow".</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    A 202 with no status resource is the most common way this design is shipped broken. The caller is told the request was accepted and given nothing to ask about it with, so their only recovery from a failed job is to send the request again - which is a duplicate, arriving through the front door, for a system that has not yet been made idempotent. The specification asks for a status monitor in the same paragraph that defines the status code, and it asks for a reason: 202 is the one success code that guarantees the caller will need to come back.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is finishing the work on a background thread not a substitute for a queue?</div>
+      <button class="q-opt">A thread cannot outlive the HTTP response object</button>
+      <button class="q-opt">Threads are slower than a dedicated worker fleet</button>
+      <button class="q-opt">The work exists only in memory, so a crash erases it</button>
+      <button class="q-opt">A thread cannot be scaled beyond one single machine</button>
+      <div class="q-fb">The queue's contribution is a durable record: after a crash, a deploy or a scale-in, the job is still there to be taken again. A thread can certainly outlive the response, and often does, which is what makes the pattern tempting. Speed is not the difference either - a thread on the same box may well be quicker. And a fleet of application processes does scale across machines; what it cannot do is remember what any dead member of it owed.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">RFC 9110 says a 202 response ought to point to a status monitor. Why does it have to?</div>
+      <button class="q-opt">HTTP cannot re-send a status code later</button>
+      <button class="q-opt">A 202 body must always be a valid resource</button>
+      <button class="q-opt">Proxies will not cache a 202 without one</button>
+      <button class="q-opt">The client library needs it to retry safely</button>
+      <div class="q-fb">The specification states it directly - there is no facility in HTTP for re-sending a status code from an asynchronous operation - so the outcome can only reach the caller if the caller comes back and asks. There is no rule that a 202 body be a resource, cacheability is governed by the method and the freshness headers of module 02 rather than by a monitor link, and a retry made safe is lesson 0605's stored key, which is a different mechanism entirely.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, <a href="1001-a-queue-delivers-at-least-once.html">a queue delivers at least once</a></b> takes the durable handoff apart and shows what the broker actually promises, which is less than most designs assume.</li>
+    <li><b>Ahead, <a href="1004-enqueue-and-commit-are-two-writes.html">enqueue and commit are two writes</a></b> is where the deliberately wrong ordering in the code above gets paid for.</li>
+    <li><b>Behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is where 2xx was defined as a claim about the request rather than about the work, which is what makes 202 legal.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take the slowest endpoint you own and write down what its caller would have to poll if it returned a 202 tomorrow: the URL, the states it can report, and how a caller learns that the job died. Then ask the agent which of those three you already have.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.3.3">RFC 9110 &sect;15.3.3</a> is three paragraphs and it defines the whole contract of a deferred request, including the sentence about re-sending a status code that everything on this page follows from. Read <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">Sidekiq's best practices</a> for the payload rule stated by a production job runner, and <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues.html">Amazon SQS standard queues</a> for what a broker means by storing a message before it acknowledges it.</p>
+
+  <div class="pager">
+    <a href="0605-idempotency-keys-make-retries-safe.html"><span class="dir">&larr; Previous</span><span class="ttl">Idempotency keys make retries safe</span></a>
+    <a class="nxt" href="1001-a-queue-delivers-at-least-once.html"><span class="dir">Next &rarr;</span><span class="ttl">A queue delivers at least once</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1000 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

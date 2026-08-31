@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Search is an inverted index, not a scan - Backend Engineering</title>
+<meta name="description" content="A LIKE query asks every document whether it contains a string. Full-text search answers the opposite question in advance, storing a map from each normalised word to the documents that carry it, which is what makes the lookup independent of the corpus size.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1005</div>
+  <h1>Search answers the question in advance, which is why it does not read your documents</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    The second half of the module, fed by the first. &middot;
+    <a href="https://www.postgresql.org/docs/current/textsearch-intro.html">PostgreSQL - Introduction to full text search</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><code>LIKE '%satisfy%'</code> asks every document the same question. PostgreSQL names the three consequences: <b>no linguistic support, no ranking, and "slow because there is no index support, so they must process all documents for every search"</b>.</li>
+      <li>An inverted index stores the answer to the opposite question: <b>for each word, which documents contain it.</b> The lookup then costs the length of one list rather than the size of the corpus.</li>
+      <li>Getting there means <b>normalising text into lexemes</b> - parse into tokens, fold case, strip suffixes, drop stop words - so that <code>satisfies</code> and <code>satisfy</code> become the same entry.</li>
+      <li>The query must go through the <b>same normalisation</b> as the document, which is why <code>tsquery</code> is a separate type from a string and not a convenience.</li>
+      <li>What it costs: a derived structure you cannot read the original out of, an analyser fixed at index time so a change means a reindex, and - in a separate engine - a copy that lags.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Search is the largest thing background jobs in this module actually build.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1004&lt;br/&gt;the outbox that keeps&lt;br/&gt;a second store in step"] --> T["THIS PAGE&lt;br/&gt;what that second&lt;br/&gt;store is made of"]
+  D["Module 08&lt;br/&gt;the index that makes&lt;br/&gt;a lookup cheap"] -.- T
+  T --> A["Lesson 1006&lt;br/&gt;ordering the documents&lt;br/&gt;the index returned"]
+  T --> B["Module 09&lt;br/&gt;a search result is&lt;br/&gt;a thing worth caching"]
+    </div>
+    <figcaption>The two halves of this module meet here. Everything before this page built the machinery for work that happens away from the request, and a search index is the canonical thing that machinery maintains: a document changes, a job re-derives its indexed form, and the reader queries the derived copy rather than the source. The dotted link is the honest genealogy - a full-text index is a database index whose key is a word rather than a value, and the reason it needs its own lesson is everything that has to happen to the text before it can be a key. <b>Search is not a feature of your database, it is a second data structure with its own contract.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: which way the map points</h2>
+
+  <h3 id="forward-vs-inverted">A scan asks the documents, an index has already been told</h3>
+  <p>A pattern match walks the table. For each row it takes the text and asks whether the pattern occurs in it, and because the pattern can start anywhere, no ordinary B-tree can help - the index is sorted by the whole value and the query does not know the beginning of it. So the cost is the corpus, on every query, and it grows with your success.</p>
+
+  <p>An inverted index reverses the direction of the map. Instead of document to text, it stores word to documents: for each distinct word, the list of documents that contain it. PostgreSQL's description of a GIN index is exactly this - <a href="https://www.postgresql.org/docs/current/textsearch-indexes.html">"As inverted indexes, they contain an index entry for each word (lexeme), with a compressed list of matching locations."</a> A query for one word is then a lookup of one key and a read of its list; a query for two words is two lookups and an intersection. Nothing touches a document that does not match.</p>
+
+  <p>That is the entire performance story, and it explains a property that otherwise looks strange: search gets cheaper, relative to scanning, the more documents you have and the rarer the term. A word that appears in twelve documents costs twelve entries whether the corpus holds a thousand rows or a billion.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The map, both ways round</div>
+    <div class="fig-claim">Two words is two lookups and an intersection, whatever the corpus.</div>
+    <div class="mermaid">
+flowchart LR
+  subgraph F["Forward - what a scan walks"]
+    D1["doc 1&lt;br/&gt;refund policy&lt;br/&gt;for late orders"]
+    D2["doc 2&lt;br/&gt;refund issued&lt;br/&gt;to the account"]
+    D3["doc 3&lt;br/&gt;shipping policy&lt;br/&gt;by region"]
+  end
+  subgraph I["Inverted - what the index stores"]
+    L1["refund&lt;br/&gt;1, 2"]
+    L2["polici&lt;br/&gt;1, 3"]
+    L3["ship&lt;br/&gt;3"]
+  end
+  F --> I
+  L1 --> R["refund AND policy&lt;br/&gt;intersect 1,2 with 1,3&lt;br/&gt;answer - doc 1"]
+  L2 --> R
+    </div>
+    <figcaption>The left box is what a pattern match reads on every query and the right box is what was written once, when the documents changed. The keys on the right are lexemes rather than words, which is why <code>policy</code> is stored as <code>polici</code> and why the query has to be normalised before it can find it. The bottom node is the whole query engine in miniature: a boolean search is set arithmetic over postings lists, and nothing in it is proportional to the number of documents that do not match. <b>The index is not a faster way to read your documents, it is a structure that makes reading them unnecessary.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each query reads</div>
+    <div class="fig-claim">One cost grows with the corpus and the other grows with the term.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart comparing documents examined to answer one query in a corpus of one million documents where two hundred contain the term. A pattern match examines all one million. An inverted index examines about two hundred, drawn as a line indistinguishable from the axis.">
+      <line class="axis" x1="90" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="90" y1="40" x2="90" y2="250"/>
+      <rect class="m-alarm" x="170" y="40" width="90" height="210"/>
+      <rect class="m-stat" x="400" y="249" width="90" height="1"/>
+      <text class="ttl" x="80" y="26">Documents examined per query - derived: 1,000,000 rows, 200 match</text>
+      <text class="lbl-sm" x="215" y="266" text-anchor="middle">pattern match</text>
+      <text class="lbl-sm" x="445" y="266" text-anchor="middle">inverted index</text>
+      <text class="lbl-sm t-alarm" x="215" y="34" text-anchor="middle">1,000,000</text>
+      <text class="lbl-sm t-stat" x="445" y="243" text-anchor="middle">200</text>
+      <text class="lbl-sm" x="90" y="286">the right-hand bar is one pixel tall at this scale, which is the point</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>every document, every query</span><span><i class="sw-stat"></i>only the postings list</span></div>
+    <figcaption>Derived arithmetic, not a benchmark: the left bar is the documented behaviour - a pattern match must process all documents for every search - and the right bar is the length of one postings list. The assumptions are only the corpus size and the term's frequency, and both are stated on the chart. What a real measurement would add is constant factors in the index's favour and I/O effects in nobody's, neither of which changes the shape. <b>The left bar grows with your corpus and the right bar grows with your term, which is why one of them is a scaling problem and the other is not.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: text becomes lexemes before it becomes an index</h2>
+
+  <h3 id="analysis">Tokens, lexemes, and the words thrown away</h3>
+  <p>Raw text cannot be an index key, because the reader who searches for <code>satisfy</code> expects to find a document containing <code>satisfies</code>. PostgreSQL names that as the first failing of pattern matching directly: <a href="https://www.postgresql.org/docs/current/textsearch-intro.html">"Regular expressions are not sufficient because they cannot easily handle derived words, e.g., satisfies and satisfy. You might miss documents that contain satisfies, although you probably would like to find them when searching for satisfy."</a></p>
+
+  <p>The preprocessing that fixes this has three steps and the vocabulary is worth learning exactly. Documents are parsed into <b>tokens</b> - raw fragments of the text, classified by a parser. Tokens are converted into <b>lexemes</b>, which are normalised so that different forms of the same word are made alike, typically by folding upper case to lower and removing suffixes such as <code>s</code> or <code>es</code>. Finally <b>stop words</b> are eliminated: words so common that they are useless for searching. The documentation's own summary of the difference is the sentence to keep: "tokens are raw fragments of the document text, while lexemes are words that are believed useful for indexing and searching".</p>
+
+  <p>The result is stored as a <code>tsvector</code>, the type for preprocessed documents, and a query is a <code>tsquery</code>, the type for processed queries. Two types rather than one, because a query string must be put through the same normalisation as the document was, or a search for <code>Satisfying</code> will look for a key that no document ever produced. This is the single most common way a first full-text implementation appears to work and quietly does not: the documents were indexed with one configuration and the queries built with another, and the only symptom is that some searches return nothing.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One pipeline, run twice</div>
+    <div class="fig-claim">A document and a query only meet if both took the same path.</div>
+    <div class="mermaid">
+flowchart LR
+  D["Document text&lt;br/&gt;The system satisfies&lt;br/&gt;the requirements"] --> P1["Parse into tokens"]
+  P1 --> N1["Normalise to lexemes&lt;br/&gt;fold case, strip suffixes"]
+  N1 --> S1["Drop stop words&lt;br/&gt;the, is, and"]
+  S1 --> V["tsvector&lt;br/&gt;requir, satisfi, system"]
+  Q["Query text&lt;br/&gt;satisfying"] --> P2["Parse into tokens"]
+  P2 --> N2["Normalise to lexemes&lt;br/&gt;same configuration"]
+  N2 --> T["tsquery&lt;br/&gt;satisfi"]
+  V --> M["Match on lexemes&lt;br/&gt;not on the original words"]
+  T --> M
+    </div>
+    <figcaption>The two branches are the same pipeline applied to different inputs, and the match at the bottom happens on the output, never on the text a person typed. Read the tsvector carefully: <code>satisfies</code> and <code>satisfying</code> both reduce to <code>satisfi</code>, a string that is not a word in any language, and that is what is stored and looked up. It also means the original text cannot be reconstructed from the index - stop words are gone and suffixes are gone. <b>An inverted index is a lossy derivation of your documents, so it is never the copy of record.</b></figcaption>
+  </figure>
+
+  <h3 id="gin">GIN, and what the index chooses not to store</h3>
+  <p>PostgreSQL offers two index types over a <code>tsvector</code> and states a preference: <a href="https://www.postgresql.org/docs/current/textsearch-indexes.html">"GIN indexes are the preferred text search index type."</a> GIN stores the lexemes with their compressed location lists, so a multi-word search can find the first match and then use the index to remove rows lacking the additional words. GiST is lossy - the index may produce false matches, so the actual table row has to be checked to eliminate them, and that lossiness costs fetches of records that turn out not to match.</p>
+
+  <p>GIN drops something too, and it is worth knowing which: it stores only the lexemes of <code>tsvector</code> values and not their weight labels, so a query that involves weights needs a table row recheck. Weights are the mechanism lesson 1006 uses to say that a title match counts for more than a body match, so this is not an obscure corner - it is the cost of the ranking feature you are most likely to want.</p>
+
+  <h2>3. The trade-off: a second store, derived and behind</h2>
+
+  <p>Once search moves out of the database into an engine of its own, the index becomes a separate system holding a copy of your data, and every property of a copy applies. It has to be populated, which is a background job; it has to be kept in step, which is what lesson 1004's outbox exists for; and it is behind. Elasticsearch is explicit that search is near real-time rather than real-time: <a href="https://www.elastic.co/docs/manage-data/data-store/near-real-time-search">"When a document is stored in Elasticsearch, it is indexed and fully searchable in near real-time--within 1 second"</a>, because new documents sit in a buffer until a refresh writes and opens a new segment, and by default that happens about once a second.</p>
+
+  <p>That second is a product decision more often than a technical one. A user who saves a record and immediately searches for it may not find it, so a screen that lists results straight after a write either reads from the database instead or is designed to tolerate the lag. The other standing cost is the analyser: it is applied at index time, so changing the language, the stemmer or the stop-word list changes what is stored, and every document already indexed has to be rebuilt to agree with the new queries. Plan a reindex path before you need one, because you will.</p>
+
+  <div class="callout warn">
+    A search index is not a source of truth and must not become one. It is lossy by construction - the stored form is stemmed, stop words are gone, and the field that was analysed cannot be recovered from its lexemes - so a document that exists only in the index is a document you have partially lost. Store the record in the database, derive the index from it, and make the derivation repeatable from scratch. The test is simple: if you deleted the whole index this afternoon, could a job rebuild it by evening from data you still hold?
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can a B-tree index not accelerate <code>LIKE '%satisfy%'</code>?</div>
+      <button class="q-opt">B-trees cannot store values of the text type</button>
+      <button class="q-opt">It is ordered by the value, not by any substring</button>
+      <button class="q-opt">Pattern matching bypasses the planner entirely</button>
+      <button class="q-opt">The match is case-folded before the index reads</button>
+      <div class="q-fb">A B-tree orders entries by the whole value, so it can seek to a known prefix and cannot help when the pattern may begin anywhere inside the text - which is why the documentation says such queries must process all documents. B-trees index text perfectly well when the query is anchored. The planner is fully involved and simply has nothing useful to choose. And case folding is part of full-text normalisation, not something the operator does on the way to an index.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A search for "Satisfying" returns nothing, though matching documents exist. What is the likeliest cause?</div>
+      <button class="q-opt">The GIN index has not finished being built yet</button>
+      <button class="q-opt">Stop words removed the term from every document</button>
+      <button class="q-opt">The index is lossy and dropped the rarer entries</button>
+      <button class="q-opt">Query and documents used different normalisation</button>
+      <div class="q-fb">Matching happens on lexemes, so a query normalised differently from the documents looks up a key nothing produced, and the failure is silent - an empty result rather than an error. An unbuilt index would make the query slow rather than wrong. Stop words are common function words, not content terms like this one. And GiST is the lossy index, whose lossiness produces false matches to be rechecked, never missing ones.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, <a href="1006-relevance-is-a-ranking-function.html">relevance is a ranking function</a></b> takes the set this page produced and puts it in an order, which is the half of search a reader actually judges you on.</li>
+    <li><b>Behind you, <a href="1004-enqueue-and-commit-are-two-writes.html">enqueue and commit are two writes</a></b> is how the index is kept in step with the database it is derived from.</li>
+    <li><b>Behind you, <a href="0602-collections-need-pagination-not-a-limit.html">collections need pagination</a></b> is what a result set of ten thousand documents still owes its caller.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take a search box in a product you work on and find out what it actually runs. If it is a pattern match, estimate how many rows it examines per query today and what that number is at ten times the data. Then ask the agent what the normalisation pipeline would have to be for your domain's vocabulary - product codes and surnames stem badly.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.postgresql.org/docs/current/textsearch-intro.html">PostgreSQL's introduction to full text search</a> is the clearest short statement of why pattern matching is not search, and of the token-to-lexeme vocabulary this page uses throughout. Read <a href="https://www.postgresql.org/docs/current/textsearch-indexes.html">its chapter on GIN and GiST</a> for what the inverted index stores and what it leaves out, and <a href="https://www.elastic.co/docs/manage-data/data-store/near-real-time-search">Elasticsearch's near real-time search</a> for the refresh that puts a second between a write and a searchable document.</p>
+
+  <div class="pager">
+    <a href="1004-enqueue-and-commit-are-two-writes.html"><span class="dir">&larr; Previous</span><span class="ttl">Enqueue and commit are two writes</span></a>
+    <a class="nxt" href="1006-relevance-is-a-ranking-function.html"><span class="dir">Next &rarr;</span><span class="ttl">Relevance is a ranking function</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1005 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

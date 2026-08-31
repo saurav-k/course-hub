@@ -31,7 +31,7 @@ before the next depends on it.
 | 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data (0800-0806) | written | The relational model as a place to put invariants, the transaction boundary and the write-ahead log, isolation levels as a menu of anomalies, lock hold time as blast radius, the B-tree and its write cost, composite order and the planner's estimate, and the four non-relational shapes. |
 | 9 | Module 09 - Caching (0900-0905) | written | Why a cache exists and the arithmetic of a hit rate, cache-aside against read-through, the four write patterns, key design as invalidation design, the staleness window and the stale-set race, and the four failure modes. Written while Module 08 stays reserved, because it depends on nothing that module defines. |
-| 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
+| 10 | Module 10 - Async work & search (1000-1006) | written | The 202 and the durable handoff, the broker's lease and at-least-once, the retry policy and the dead letter, the idempotent consumer, the transactional outbox, then the inverted index and BM25. Written while Module 08 stays reserved, because nothing in it depends on the relational chapter. |
 | 11 | Module 11 - Resilience & observability (1100-1105) | written | Failures and their one owner, config parsed at boot, then the three signals - logs, traces and metrics - by the question each answers, and graceful shutdown as a sequence against a deadline. Written before Modules 08 to 10, which stay reserved, because it depends on none of them. |
 | 12 | Module 12 - Inter-service communication (1200-1205) | written | Three couplings and how to choose between them, gRPC and its deadline, the queue, the log, and the WebSocket. Depends only on Modules 02, 04 and 06, so it was written without waiting for the modules numbered between. |
 | 13 | Module 13 - Scale, fleet and shipping (1300-1306) | written | Concurrency and shared state inside one process, statelessness and the fleet, containers and the control loop, the test budget and the deployment pipeline. Written without waiting for the modules numbered before it, because it names their mechanisms and links forward to them rather than depending on them, and because it closes the course's arc. |
@@ -45,13 +45,26 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 10 and 11 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
-lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+Module 11 above is the last position still reserved from the first scaffold, mapped to its upstream
+chapter. It lands as a separate change, the way every module before it did, so the course grew a
+module at a time without a trapped mega-PR.
 
 Module 05 was written out of reading order, before Module 03 landed, because it depends on nothing routing
 defines: it consumes the parsed, trusted values Module 04 produces and says only where they travel afterwards.
 Its lesson numbers start at 0500, so the 03xx block stayed free for the module that owns it and nothing was
 renumbered when Module 03 landed ahead of it.
+
+Module 10 takes the 10xx block and is written as one module rather than two, though its title names two
+subjects. The reason is the seam between them: a search index is the largest thing a background job in a
+real system actually maintains, so the queue half of the module is what feeds the search half, and lesson
+1005's second store is kept in step by lesson 1004's outbox. Splitting them would put that dependency
+across a module boundary for no gain. It reads before Module 08 because nothing in it depends on the relational chapter - the queue is reasoned about
+as a delivery contract and the index as a derived structure, both from first principles.
+
+Its numbering is worth one line for the next author. Lesson 0605 already established idempotency keys on
+the HTTP side, so lesson 1003 develops the same mechanism on the consumer side rather than restating it,
+and 1000 opens by naming that debt. A reader arriving at Module 10 without Module 06 will still follow it,
+but the cross-reference is load-bearing and should not be cut.
 
 Module 03 landed fifth and takes the 03xx block, for the same reason Module 02 took 02xx: each module owns a
 hundred-block so a later module never renumbers an earlier one. It answers the question Module 02 leaves open - the
