@@ -1,0 +1,193 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invalidation begins with the key - Backend Engineering</title>
+<meta name="description" content="You can only invalidate what you can name. Entity keys make a write trivial to invalidate, derived keys make it impossible, and immutable keys make it unnecessary - so key design is the invalidation design, decided long before the first write.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Caching &middot; Lesson 0903</div>
+  <h1>You can only invalidate what you can name, so the key design is the invalidation design</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    The first half of the hard problem. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9111#section-4.1">RFC 9111 &sect;4.1 - Calculating Cache Keys</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An invalidation is the instruction "make this <b>name</b> absent", so the question a write has to answer is <b>which names it just made wrong</b>.</li>
+      <li>That answer is fixed by how the keys were built, which happened before the write path existed. <b>Key design is invalidation design done early.</b></li>
+      <li><b>Entity keys</b> - one row, one name - make the answer trivial. <b>Derived keys</b> - a list, a page, a rendered fragment - make it unknowable from the write alone.</li>
+      <li>Two mechanisms buy back what derived keys lose: <b>a version segment in the name</b>, which retires a whole family at once, and <b>a tag attached to the entry</b>, which lets one purge reach many names.</li>
+      <li>What it costs: precise names need bookkeeping the write path has to maintain, and broad names throw away hit rate you paid for. There is no free naming scheme.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Naming is decided before any write, and it bounds what invalidation can do.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0902&lt;br/&gt;a write removes&lt;br/&gt;the entry"] --> T["THIS PAGE&lt;br/&gt;which entry,&lt;br/&gt;and how it is named"]
+  T --> A["Lesson 0904&lt;br/&gt;when the removal&lt;br/&gt;happens, and the race"]
+  T --> B["Lesson 0905&lt;br/&gt;what a badly shared&lt;br/&gt;name does under load"]
+  T --> C["Module 12&lt;br/&gt;carrying a change&lt;br/&gt;between services"]
+  W["Module 09&lt;br/&gt;Caching"] -.- T
+    </div>
+    <figcaption>Lesson 0902 wrote <code>delete user-42</code> and moved on, which quietly assumed the hardest fact in this module: that the writer knew the name. That assumption holds for one shape of key and fails for another, and which one you have was settled the day somebody chose a key format. <b>Invalidation is usually described as a timing problem and it is a naming problem first.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a key is a claim about what changes together</h2>
+
+  <h3 id="what-a-key-is">The protocol already made this decision once</h3>
+  <p>HTTP settles the question in one line, and it is worth borrowing the vocabulary. RFC 9111 defines the cache key as "the information a cache uses to choose a response", composed at minimum "from the request method and target URI". That is the <b>primary key</b>. When one URI can produce several representations, the origin names the request fields that distinguish them in <code>Vary</code>, and those fields become a <b>secondary key</b> alongside the first.</p>
+
+  <p>The interesting part is the cost the specification then has to warn about. Every distinct combination of the <code>Vary</code> fields is a separate stored entry, so a header with many possible values fragments the stored copies until each one is read once and never again. That is the whole trade-off of key design in miniature: a key that distinguishes more things is more correct and hits less often, and there is no setting at which both are maximised.</p>
+
+  <p>Your own keys are the same object without the specification. A key is a claim that everything answering to this name changes at the same moment. When the claim is true, invalidation is a delete. When it is false, some of what you removed did not need removing, or some of what needed removing was not named.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Three kinds of key</div>
+    <div class="fig-claim">Only the first kind lets a writer compute the names it invalidated.</div>
+    <div class="mermaid">
+mindmap
+  root((A cache key))
+    Entity
+      one row, one name
+      user-v1-42
+      the writer knows it
+    Derived
+      built from a question
+      feed-user-42-page-1
+      the writer cannot enumerate it
+    Immutable
+      the name carries the content
+      asset-sha256-9f2c
+      nothing is ever removed
+    </div>
+    <figcaption>Three families, distinguished by one property: whether the code performing a write can work out, from the write alone, every name it just made wrong. For an entity key that is a formatting operation. For a derived key it is a search over a space nobody indexed - the write to one product row invalidates every cached search result that product appeared in, and the writer has no way to know which those were. <b>The derived key is where invalidation stops being a delete and starts being a design.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: three ways to make a name reachable</h2>
+
+  <h3 id="carry-the-names">Carry the names with the write</h3>
+  <p>The most direct answer is to make the write state its own invalidations. Facebook's memcache does exactly this at the storage layer: "SQL statements that modify authoritative state are amended to include memcache keys that need to be invalidated once the transaction commits", and a daemon on each database reads the commit log, extracts those deletes, and broadcasts them. The keys travel with the transaction that made them wrong, which is the only place that knows both facts at once.</p>
+
+  <p>The technique is available at every scale. In a service it means the repository that writes a row also returns the list of keys that row appears in, rather than leaving each call site to remember. What it does not do is solve the derived-key problem: a list of names is only as complete as the developer who wrote it, and a cached search result nobody thought of is a name nobody added.</p>
+
+  <h3 id="version-segment">Put a version in the name</h3>
+  <p>A version segment turns bulk invalidation into a rename. The <code>v1</code> in <code>user:v1:42</code> is not decoration: change the shape of the cached value and deploy <code>v2</code>, and every old entry is instantly unreachable, ages out on its own lifetime, and never has to be found or deleted. This is the same move lesson 0204 described for static assets, where a content hash in the URL means you "never invalidate anything, you publish a new target and let the old one expire unread".</p>
+
+  <p>Push the version down a level and it becomes a per-entity bulk invalidation. Keep a counter for a tenant or a user, include it in every derived key for that tenant, and one increment retires every derived entry they own without knowing a single one of their names. The cost is one extra read to learn the counter, which is usually cached itself, and a wave of misses immediately after each increment.</p>
+
+  <h3 id="tags">Attach a tag to the entry</h3>
+  <p>The third mechanism inverts the lookup: instead of computing names from the write, the entry declares what it depends on when it is stored, and the cache maintains the reverse index. Fastly's CDN implements this as surrogate keys - the origin returns a <code>Surrogate-Key</code> header listing tags, Fastly builds "a mapping from each key to the cached content", and a purge of one tag removes every object carrying it. The relationship is many-to-many: an object may carry several tags and a tag may cover many objects. The limits are worth knowing because they bound how fine the scheme can get: an individual key may not exceed 1,024 bytes and the whole header may not exceed 16,384 bytes.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One purge, many entries</div>
+    <div class="fig-claim">A reverse index is what lets a writer invalidate names it never knew.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant O as Origin
+  participant C as Cache
+  participant W as Writer
+  O-->>C: search page 1&lt;br/&gt;tagged product-77
+  O-->>C: category page&lt;br/&gt;tagged product-77
+  O-->>C: the product page&lt;br/&gt;tagged product-77
+  Note over C: the cache holds a map&lt;br/&gt;from tag to entries
+  W->>C: purge tag product-77
+  C-->>W: accepted
+  Note over C: all three entries gone&lt;br/&gt;none of their names were sent
+    </div>
+    <figcaption>The mechanism drawn as what it is: a second index, maintained by the cache at store time, from a name the writer does know to names it does not. It is the only one of the three techniques that solves the derived-key problem outright, and the price is that the cache has to support it - most key-value caches do not, so in a Redis-backed service you build the reverse index yourself out of a set per tag, and now you own its correctness too. <b>Tagging moves the bookkeeping from the write path to the read path, where the entry that knows its own dependencies is being created anyway.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="fig-cap">The naming axis</div>
+    <div class="fig-claim">Both ends of the axis fail, in opposite directions, with no safe middle.</div>
+    <div class="mermaid">
+flowchart LR
+  A["One name per tenant&lt;br/&gt;everything they own"] --> A2["Never misses an entry&lt;br/&gt;every write clears&lt;br/&gt;their whole cache"]
+  B["One name per entity&lt;br/&gt;plus tags for the rest"] --> B2["Removes about the right&lt;br/&gt;set - and someone has&lt;br/&gt;to maintain the tags"]
+  C["One name per question&lt;br/&gt;the exact query"] --> C2["Removes nothing spare&lt;br/&gt;and cannot find most&lt;br/&gt;of what it broke"]
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  class A2 bad
+  class C2 bad
+  class B2 ok
+    </div>
+    <figcaption>The whole design space on one axis, with the cost written at each end rather than at the middle. The left end is correct and useless, because a tenant who writes once a minute never has a warm cache. The right end is efficient and wrong, because most of what a write breaks is unnameable from the write. <b>Nothing on this axis is free, so pick the point deliberately per key family rather than inheriting whichever one the first cached endpoint happened to use.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: broad names lose hits, narrow names lose entries</h2>
+
+  <p>Every scheme sits somewhere on one axis. At one end, a single name covers everything a tenant owns: invalidation is one delete and cannot miss, and every write costs that tenant their entire cache. At the other end, each entry is named by the exact question that produced it: nothing unnecessary is ever removed, and the writer cannot find most of what it broke. Real schemes sit in the middle and are made of the three mechanisms above.</p>
+
+  <p>One measurement is worth carrying from the memcache paper, because it shows how the middle behaves in production. Of every delete Facebook issued through its invalidation pipeline, "only 4% of all deletes issued result in the actual invalidation of cached data". The other 96% named entries that were not cached anywhere. That is not waste to be optimised away - it is the expected shape of broadcasting an invalidation to a cache you cannot query. It also means the volume of your invalidation traffic tells you nothing at all about how much staleness you prevented.</p>
+
+  <div class="callout warn">
+    The failure this page exists to prevent is the derived entry nobody registered. A team caches individual entities correctly, wires up delete-on-write, and is genuinely careful. Then someone adds a cached listing endpoint keyed on its query parameters, and it is now the only entry in the system with no path from a write back to its name. It will be stale for its full lifetime after every relevant write, it will never appear in an invalidation log, and it will be discovered by a customer describing something they deleted still being visible. Before caching anything derived, write down which write invalidates it and how that write will find it. If you cannot answer, the answer is a short lifetime, chosen deliberately.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is a cached search result harder to invalidate than a cached row?</div>
+      <button class="q-opt">Its stored value is far larger, so removal costs more</button>
+      <button class="q-opt">A writer cannot enumerate the names its change made wrong</button>
+      <button class="q-opt">Its lifetime has to be longer to be worth computing</button>
+      <button class="q-opt">Search results are shared, whereas a row is per user</button>
+      <div class="q-fb">The name of a derived entry is built from a question, and no write can search the space of questions its change affected. Size is irrelevant to a delete; the lifetime is a consequence of the problem rather than its cause; and sharing is a different axis entirely, since a shared entity key is still trivially nameable.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does adding a version segment to a key format actually buy?</div>
+      <button class="q-opt">Readers can detect an entry whose shape is out of date</button>
+      <button class="q-opt">Writers can find every entry that a change made wrong</button>
+      <button class="q-opt">Entries are removed sooner than their lifetime allows</button>
+      <button class="q-opt">A whole family becomes unreachable without being found</button>
+      <div class="q-fb">A version bump is a rename, so the old entries are never read again and expire quietly - no scan, no delete, no list of names. The first option describes a shape marker inside the value rather than in the key; the second is what tags do; and the third is false, since the old entries live out their full lifetimes, they are simply unreachable while they do.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0904-invalidation-buys-a-staleness-window.html">invalidation buys a staleness window</a></b> takes the names this page produced and asks when the removal actually happens.</li>
+    <li><b>Behind you, <a href="0204-caching-is-a-contract-between-two-clocks.html">caching is a contract between two clocks</a></b> is where the immutable-name technique was first used, on static assets.</li>
+    <li><b>Sideways, <a href="0404-content-negotiation-picks-the-representation.html">content negotiation picks the representation</a></b> is the mechanism that makes a secondary cache key necessary in the first place.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Write out every cache key format your service uses and label each one entity, derived or immutable. Ask the agent, for each derived one, to name the write that invalidates it and the code path that would find it - and treat every blank as a staleness window you have not chosen.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9111#section-4.1">RFC 9111 &sect;4.1</a> is two pages and is the clearest statement anywhere of what a cache key is and what a secondary key costs. Read it beside Fastly's <a href="https://www.fastly.com/documentation/guides/full-site-delivery/purging/working-with-surrogate-keys/">surrogate keys</a> documentation, which is the same idea built as a product, with the limits stated - and note how much of that page is about deciding what to tag rather than how to purge.</p>
+
+  <div class="pager">
+    <a href="0902-a-write-pattern-chooses-who-waits.html"><span class="dir">&larr; Previous</span><span class="ttl">A write pattern chooses who waits</span></a>
+    <a class="nxt" href="0904-invalidation-buys-a-staleness-window.html"><span class="dir">Next &rarr;</span><span class="ttl">Invalidation buys a staleness window</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0903 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
