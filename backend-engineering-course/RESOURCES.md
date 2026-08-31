@@ -138,6 +138,74 @@ TBD as lessons landing.
   for the 400 / 409 / 422 refusals. **That draft expired in April 2026 rather than shipping**, which is
   why lesson 0605 treats the header as a convention and cites Stripe for the practice.
 
+### Module 13 - Scale, fleet and shipping
+
+- Lesson 1300, concurrency: [Effective Go - Concurrency](https://go.dev/doc/effective_go) for the
+  goroutine as a function "executing concurrently with other goroutines in the same address space",
+  costing "little more than the allocation of stack space", and multiplexed onto OS threads so that
+  others continue to run when one blocks on I/O;
+  [asyncio - Coroutines and Tasks](https://docs.python.org/3/library/asyncio-task.html) for
+  cooperative scheduling and the statement that an event loop "runs one Task at a time"; and the
+  [Python glossary](https://docs.python.org/3/glossary.html#term-global-interpreter-lock) for the
+  interpreter lock, including the sentence that is usually dropped, "the GIL is always released when
+  doing I/O", and the 3.13 build option specified in [PEP 703](https://peps.python.org/pep-0703/).
+  The pool ceiling is derived on the page from arrival rate times hold time, with both assumptions
+  stated in the figcaption rather than attributed to a source.
+- Lesson 1301, shared state: [The Go Memory Model](https://go.dev/ref/mem) for the mechanical
+  definition of a data race, the DRF-SC guarantee, the permission to terminate a racy program, and
+  the requirement that concurrent access be serialized;
+  [pkg.go.dev/sync](https://pkg.go.dev/sync) for the mutex contract and the stated preference for
+  channels over the primitives; [Effective Go](https://go.dev/doc/effective_go) for the sharing
+  slogan; the [Python glossary](https://docs.python.org/3/glossary.html#term-global-interpreter-lock)
+  for the precise scope of what the interpreter lock protects, which is the object model rather than
+  a program's invariants; and [the race detector article](https://go.dev/doc/articles/race_detector)
+  for the runtime-only limit and the 5 to 10 times memory and 2 to 20 times execution cost.
+- Lesson 1302, statelessness: [Fielding, chapter 5](https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm)
+  for the stateless constraint, its three benefits and its two costs;
+  [the twelve-factor app, factor VI](https://12factor.net/processes) for share-nothing processes and
+  the statement that sticky sessions "should never be used or relied upon"; and
+  [nginx - load balancing](https://nginx.org/en/docs/http/load_balancing.html) for round-robin,
+  least-connected, ip-hash with its "except when this server is unavailable" clause, weights, and
+  the passive health checks governed by `max_fails` and `fail_timeout`.
+- Lesson 1303, containers: [namespaces(7)](https://man7.org/linux/man-pages/man7/namespaces.7.html)
+  for the definition and the eight kinds;
+  [cgroups(7)](https://man7.org/linux/man-pages/man7/cgroups.7.html) for hierarchical resource
+  limiting and the rule that a descendant cannot exceed an ancestor's limit;
+  [pid_namespaces(7)](https://man7.org/linux/man-pages/man7/pid_namespaces.7.html) for the init
+  signal semantics, which is why a process with no SIGTERM handler ignores a polite stop;
+  the [OCI image specification](https://github.com/opencontainers/image-spec/blob/main/spec.md) for
+  the manifest, the index, layers as changesets and content-addressable identity;
+  [Docker - build cache](https://docs.docker.com/build/cache/) for the downstream invalidation rule;
+  and [multi-stage builds](https://docs.docker.com/build/building/multi-stage/) for leaving the
+  toolchain behind.
+- Lesson 1304, orchestration: [Kubernetes - Controllers](https://kubernetes.io/docs/concepts/architecture/controller/)
+  for the control loop, the thermostat and the statement that a controller more commonly writes to
+  the API server than acts directly;
+  [Deployments](https://kubernetes.io/docs/concepts/workloads/controllers/deployment/) for the
+  ReplicaSet rollout and revision history;
+  [the Deployment API reference](https://kubernetes.io/docs/reference/kubernetes-api/workload-resources/deployment-v1/)
+  for `maxSurge` and `maxUnavailable`, both defaulting to 25%, rounded up and down respectively;
+  [the three probes](https://kubernetes.io/docs/concepts/configuration/liveness-readiness-startup-probes/)
+  for the restart-against-remove-from-endpoints distinction;
+  [Pod lifecycle](https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/) for the
+  termination sequence and the 30-second default grace period; and
+  [horizontal pod autoscaling](https://kubernetes.io/docs/tasks/run-application/horizontal-pod-autoscale/)
+  for the ratio algorithm, the 15-second sync period and the 0.1 tolerance.
+- Lesson 1305, testing: [Fowler - TestPyramid](https://martinfowler.com/bliki/TestPyramid.html) for
+  the two assertions, the cost of end-to-end tests and the ice-cream cone; and
+  [The Practical Test Pyramid](https://martinfowler.com/articles/practical-test-pyramid.html) for
+  the layer definitions and consumer-driven contract tests, which is the mechanism lesson 0600's
+  closing warning asked for and could not name. [pkg.go.dev/testing](https://pkg.go.dev/testing) for
+  `t.Run` and `t.Parallel`.
+- Lesson 1306, the pipeline: [the twelve-factor app, factor V](https://12factor.net/build-release-run)
+  for the three separated stages, the unique release identifier and the append-only ledger;
+  [Fowler - ContinuousDelivery](https://martinfowler.com/bliki/ContinuousDelivery.html) for the
+  definition, the four tests and the one-directional relation to continuous deployment; and
+  [DORA - the four keys](https://dora.dev/guides/dora-metrics-four-keys/) for the metric definitions
+  and the finding that "speed and stability are not tradeoffs". **That programme is observational
+  research across many organisations**, which is why the page states what it establishes as the two
+  moving together in practice rather than as causation in any one team.
+
 ## Wisdom
 
 Where the practitioners argue, for a reader who wants to test their understanding against people who do this.

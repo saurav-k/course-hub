@@ -34,7 +34,7 @@ before the next depends on it.
 | 10 | Module 10 - Async work & search | reserved | Queues and background jobs; then full-text search. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
 | 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
-| 13 | Module 13 - Scale, flight & shipping | reserved | Concurrency, scaling, containerization / K8s / CI-CD, automated testing. |
+| 13 | Module 13 - Scale, fleet and shipping (1300-1306) | written | Concurrency and shared state inside one process, statelessness and the fleet, containers and the control loop, the test budget and the deployment pipeline. Written before Modules 03, 05 and 07 to 12, which stay reserved, because it depends on their vocabulary rather than on their mechanisms and it closes the course's arc. |
 
 Reference sheets and glossaries read alongside and are recorded as such; they are not positions in the
 sequence.
@@ -47,6 +47,14 @@ A position reserved costs nothing; a position taken by accident is a renumbering
 
 Modules 03-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+
+Module 13 landed fifth, after Module 06, and it is the closing module rather than the next one in
+sequence. It names mechanisms modules 07 to 12 will develop - a transaction, a cache, a graceful
+shutdown - and it links forward to them rather than depending on them, so the reader arrives at the
+whole-course view without needing a module that is not yet on the site. Its name is `fleet` rather
+than `flight`: `index.html`, `MISSION.md` and the roadmap row all said `fleet`, this file was the
+single outlier, and the rule two paragraphs above settles a disagreement between the two files in
+favour of the one that ships.
 
 Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
