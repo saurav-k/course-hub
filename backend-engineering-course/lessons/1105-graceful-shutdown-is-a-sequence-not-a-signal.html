@@ -1,0 +1,219 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Graceful shutdown is a sequence, not a signal - Backend Engineering</title>
+<meta name="description" content="SIGTERM is the first step of a shutdown, not the whole of it. The rest is an ordered sequence run against a deadline, and the step teams miss is that traffic can still arrive after the signal.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Resilience and observability &middot; Lesson 1105</div>
+  <h1>SIGTERM is the first step of a shutdown, and the rest is an ordered sequence against a deadline</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    The failure you schedule yourself, several times a day. &middot;
+    <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Kubernetes - Termination of Pods</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every deploy stops a running process, so shutdown is <b>the failure mode you trigger most often</b> and the only one you fully control.</li>
+      <li>A signal is not a shutdown. It is the start of a sequence: <b>stop being advertised, stop accepting, finish what is in flight, release, exit</b>.</li>
+      <li>The step everyone misses is the first one. Kubernetes removes the pod from its EndpointSlices <b>at the same time</b> as the kubelet starts the shutdown, so requests can still arrive after SIGTERM.</li>
+      <li>The sequence runs against a clock. The default grace period is <b>30 seconds, after which SIGKILL is sent</b> to anything still running, and SIGKILL cannot be handled.</li>
+      <li>What it costs: every second you spend draining is a second the deploy is slower, and holding a connection open forever is not draining, it is refusing to leave.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The process lifecycle closes here, where lesson 1101 opened it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1101&lt;br/&gt;boot, where the process&lt;br/&gt;reads its inputs"] --> T["THIS PAGE&lt;br/&gt;exit, where it owes&lt;br/&gt;its in-flight work"]
+  T --> A["Module 13&lt;br/&gt;a fleet whose members&lt;br/&gt;are replaced constantly"]
+  W["Module 11&lt;br/&gt;resilience and observability"] -.- T
+  X["Lessons 1102 to 1104&lt;br/&gt;how you find out&lt;br/&gt;a shutdown went wrong"] -.- T
+    </div>
+    <figcaption>This module began with failures that happen to you and ends with the one you cause on purpose. It is also where the module's three signals get their first real job: a shutdown done badly shows up as a spike of 5xx on a metric, at a moment your deploy pipeline can correlate exactly. <b>An orderly exit is what makes a rolling deploy invisible to a caller, and every module after this one assumes it.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: shutting down is a handover, not a stop</h2>
+
+  <p>The instinct is that shutdown means stop. Run the deferred cleanup, close the database pool, exit zero. That produces a service which drops in-flight requests on every deploy, and because a deploy replaces instances one at a time, the damage is spread thinly enough to look like background noise rather than a bug you introduced.</p>
+
+  <p>The better model is a handover. Somewhere there are replicas that are staying, or that have just started. Your job on the way out is to make sure that everything currently in your hands either finishes or is given back cleanly, and that nothing new is put into your hands after you have started. Those are two different obligations and they run in opposite directions - one is about the future and one is about the past - which is why the order of the steps is the whole subject.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The five states of exit</div>
+    <div class="fig-claim">Only one path out of draining is orderly, and the clock decides.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Serving: readiness passes, traffic arrives
+  Serving --> Unready: signal received - readiness starts failing
+  Unready --> Draining: listeners closed, no new connections accepted
+  Draining --> Releasing: the last in-flight request has answered
+  Draining --> Killed: the grace period expired first
+  Releasing --> [*]: pool closed, buffers flushed, exit 0
+  Killed --> [*]: SIGKILL - nothing runs, nothing flushes
+    </div>
+    <figcaption>Unready comes before Draining and that ordering is the whole design: while the process is still answering in-flight work it must already be telling the world not to send more. The Killed edge is not an error path you can handle - SIGKILL cannot be caught, blocked or ignored, so any work still in Draining when the clock runs out is simply gone, along with anything buffered and not yet written. <b>The grace period is a budget, and the sequence has to fit inside it or it does not run at all.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what the orchestrator actually does</h2>
+
+  <h3 id="shutdown-race">The signal and the withdrawal happen at the same time</h3>
+
+  <p>Kubernetes documents the termination flow step by step, and one step in it is the reason naive shutdown handlers fail. When the pod is marked terminating, the kubelet begins the local shutdown; if a <code>preStop</code> hook is defined it runs first, and only then does the kubelet ask the container runtime to send TERM to process 1 in each container. Meanwhile - and the documentation says <em>at the same time</em> - the control plane evaluates whether to remove the shutting-down pod from the EndpointSlice objects that back its Services.</p>
+
+  <p>Two things are racing, and neither waits for the other. Endpoint removal has to propagate to every kube-proxy, every ingress controller and every client-side load balancer in the cluster, and each of those learns about it by watching and reacting. Your process, meanwhile, got its signal immediately. So there is a window, typically a second or two and occasionally much longer, in which a component still holds your address and will send you a request that you have already decided not to serve.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The window after the signal</div>
+    <div class="fig-claim">A request can arrive after SIGTERM, and refusing it is the visible failure.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant CP as Control plane
+  participant LB as Load balancer
+  participant K as kubelet
+  participant A as Your process
+  CP->>K: pod marked terminating
+  CP->>LB: remove endpoint from EndpointSlice
+  K->>A: preStop hook, then SIGTERM
+  Note over A: naive handler closes the listener here
+  LB->>A: a request routed before the update landed
+  A--xLB: connection refused - the caller sees a 502
+  Note over A: correct handler stays open, keeps serving, closes after the window
+    </div>
+    <figcaption>The two arrows leaving the control plane are concurrent, and the one reaching your process is faster than the one reaching every load balancer. That is why the standard remedy is a deliberate pause: keep serving for a few seconds after the signal, either in a <code>preStop</code> hook that sleeps or as the first step of your own handler, and only then close the listener. Kubernetes also exposes a <code>serving</code> condition on terminating endpoints precisely so a load balancer can drain rather than cut. <b>The first thing a shutdown handler should do is wait, which is exactly what it feels wrong to do.</b></figcaption>
+  </figure>
+
+  <h3 id="grace-period">The budget, and what the runtime gives you</h3>
+
+  <figure class="diagram">
+    <div class="fig-cap">The thirty-second budget</div>
+    <div class="fig-claim">The propagation wait and the drain are spent from one fixed allowance.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two horizontal bars against a thirty second axis. The first shows a budget that fits: five seconds of propagation wait, twenty seconds of draining in-flight requests, three seconds to release resources and two seconds of headroom. The second shows a service whose slowest request takes sixty seconds - after the five second wait the request is still running when the thirty second grace period expires and SIGKILL is sent.">
+      <text class="ttl" x="20" y="24">One grace period, spent two ways</text>
+      <line class="grid" x1="256" y1="46" x2="256" y2="214"/>
+      <line class="grid" x1="423" y1="46" x2="423" y2="214"/>
+
+      <text class="lbl-sm" x="20" y="76">fits</text>
+      <rect class="m-noise" x="90" y="62" width="83" height="22"/>
+      <rect class="m-stat" x="173" y="62" width="334" height="22"/>
+      <rect class="m-noise" x="507" y="62" width="50" height="22"/>
+      <text class="lbl-sm" x="340" y="54" text-anchor="middle">drain in-flight requests, 20 s</text>
+      <text class="lbl-sm" x="90" y="102">wait 5 s</text>
+      <text class="lbl-sm" x="507" y="102">release 3 s</text>
+
+      <text class="lbl-sm" x="20" y="176">does not</text>
+      <rect class="m-noise" x="90" y="162" width="83" height="22"/>
+      <rect class="m-alarm" x="173" y="162" width="417" height="22"/>
+      <text class="lbl-sm lbl-on" x="360" y="178" text-anchor="middle">one 60 s request, still running</text>
+      <line class="s-alarm ref thick" x1="590" y1="150" x2="590" y2="200"/>
+      <text class="lbl-sm t-alarm" x="584" y="146" text-anchor="end">SIGKILL</text>
+
+      <line class="axis" x1="90" y1="214" x2="610" y2="214"/>
+      <text class="lbl-sm" x="90" y="234" text-anchor="middle">0 s</text>
+      <text class="lbl-sm" x="256" y="234" text-anchor="middle">10 s</text>
+      <text class="lbl-sm" x="423" y="234" text-anchor="middle">20 s</text>
+      <text class="lbl-sm" x="590" y="234" text-anchor="middle">30 s</text>
+      <text class="lbl-sm" x="20" y="266">Derived from the documented 30 s default: 5 + 20 + 3 = 28, leaving 2 s of headroom.</text>
+      <text class="lbl-sm t-alarm" x="20" y="286">A 60 s request cannot be made to fit by moving any of the other numbers.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>draining, work that finishes</span><span><i class="sw-alarm"></i>draining, work that will not</span></div>
+    <figcaption>The upper bar is an allocation of the documented 30-second default and the arithmetic is the whole argument: whatever the propagation wait takes, the drain and the release come out of what is left. The lower bar is the same budget against a request that cannot finish inside it, and no rearrangement of the three segments rescues it - the request is longer than the allowance. <b>A grace period is not a target to raise until things fit; it is a constraint that tells you which of your requests is too long.</b></figcaption>
+  </figure>
+
+  <p>The clock is <code>terminationGracePeriodSeconds</code> and it defaults to 30. When it expires the container runtime sends SIGKILL to anything still running. There is one small piece of slack documented: if a <code>preStop</code> hook is still running when the grace period expires, the kubelet grants a one-off extension of 2 seconds - and no more, so a hook that sleeps longer than the grace period allows needs the grace period changed rather than the hook trusted.</p>
+
+  <p>Inside the process, the language runtime gives you the middle of the sequence. Go's <code>http.Server.Shutdown</code> is a precise description of the contract: it closes all open listeners, then closes idle connections, then waits for active connections to return to idle, and if the provided context expires first it returns the context's error. It also states what it does not do - it does not close or wait for hijacked connections such as WebSockets, and the caller must notify those separately. That exclusion is the second-most-common shutdown bug after the endpoint race.</p>
+
+  <div class="code-cap">shutdown.go &middot; the sequence, in the order the sequence has to run</div>
+  <pre><code>&lt;-ctx.Done()                                  // SIGTERM arrived
+
+readiness.Store(false)                        // 1. stop being advertised
+time.Sleep(cfg.DrainDelay)                    // 2. let the withdrawal propagate
+
+deadline, cancel := context.WithTimeout(context.Background(), cfg.ShutdownGrace)
+defer cancel()
+if err := srv.Shutdown(deadline); err != nil { // 3. finish in-flight work
+    slog.Error("drain incomplete", "err", err) // the deadline beat us
+}
+
+wsHub.CloseAll()                              // 4. hijacked conns, by hand
+consumers.StopAndWait(deadline)               // 5. in-flight jobs, not requests
+db.Close()                                    // 6. release, last of all</code></pre>
+
+  <p>Step 6 is last for a reason worth stating: closing the database pool before the in-flight requests have finished converts a graceful shutdown into a burst of 500s, and it is an easy mistake because the cleanup reads naturally at the top of the function. Resources are released in the reverse order of the dependency, which means after everything that uses them has stopped.</p>
+
+  <h2>3. The trade-off: draining costs deploy time, and the budget is fixed</h2>
+
+  <p>Every second of drain delay is a second added to every instance replacement, and a rolling deploy of forty pods pays it forty times. Worse, the delay and the drain share one budget: a 30-second grace period spent as 5 seconds of propagation wait leaves 25 for in-flight work, and if your slowest request is a 60-second report then no arrangement of those numbers is honest. The fix is not a longer grace period, it is a request that does not take 60 seconds - or a job queue, which is what lesson 0605's asynchronous work exists for.</p>
+
+  <p>The same budget question decides what to do with work that is not a request. A background consumer holding a message must decide, at the signal, whether to finish the message or return it to the queue for another instance. Finishing is right when the work is short and the redelivery is expensive; returning it is right when the work is long, and it is only safe because the consumer was made idempotent - which is the argument lesson <a href="0605-idempotency-keys-make-retries-safe.html">0605</a> already made about retries.</p>
+
+  <div class="callout warn">
+    A process that ignores SIGTERM is not merely impolite - it makes every deploy take the full grace period and then lose data. Two ordinary situations produce it without anybody deciding to. A container whose entrypoint is a shell script gets the signal delivered to the shell as process 1, which does not forward it to the application unless the script uses <code>exec</code>. And a runtime that installs no handler for the signal takes the default disposition, which is to terminate immediately with nothing flushed. Both look completely healthy until the day you need the last few seconds.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can a request arrive after your process has received SIGTERM?</div>
+      <button class="q-opt">The runtime queues signals and delivers them after a delay</button>
+      <button class="q-opt">Endpoint removal runs concurrently and takes time to spread</button>
+      <button class="q-opt">The load balancer retries the request that was interrupted</button>
+      <button class="q-opt">Connections opened before the signal are re-used for new work</button>
+      <div class="q-fb">The control plane starts removing the pod from EndpointSlices at the same moment the kubelet begins shutdown, and that removal has to reach every proxy. The first option is not how signal delivery works; the third describes a different mechanism that does not explain the first arrival; and the fourth is a real effect of keep-alive but does not account for a fresh connection reaching a terminating pod.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Go's <code>Server.Shutdown</code> documents one class of connection it will not wait for. Which?</div>
+      <button class="q-opt">Connections that are idle when Shutdown is first called</button>
+      <button class="q-opt">Connections whose request has exceeded the read timeout</button>
+      <button class="q-opt">Connections still in the TLS handshake at the time of call</button>
+      <button class="q-opt">Hijacked connections, such as an upgraded WebSocket</button>
+      <div class="q-fb">Shutdown neither closes nor waits for hijacked connections, and says the caller must notify them separately. Idle connections are closed by Shutdown, which is one of the steps it documents; a request past its read timeout is handled by the server's ordinary timeout machinery; and a connection mid-handshake has not been hijacked, so it is inside the set Shutdown manages.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Behind you, <a href="1101-configuration-is-an-input-not-a-constant.html">configuration is an input, not a constant</a></b> is where the drain delay and the shutdown deadline are parsed, and where making them config pays for itself.</li>
+    <li><b>Behind you, <a href="1104-metrics-answer-how-often-never-which-one.html">metrics answer how often, never which one</a></b> is how a bad shutdown is detected, as a spike of refusals aligned with a deploy.</li>
+    <li><b>Ahead, <a href="../index.html">Module 13, scale, fleet and shipping</a></b> is where instances are replaced constantly, which is what turns this page from a nicety into a requirement.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find your service's slowest legitimate request and compare it with your grace period minus your drain delay. Then ask the agent what happens to that request during a deploy today, and whether the answer is "it finishes", "it is dropped" or "nobody has ever measured it".</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Kubernetes' <a href="https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#pod-termination">Termination of Pods</a> is the authoritative step-by-step, including the concurrent EndpointSlice evaluation, the 30-second default and the 2-second <code>preStop</code> extension. Read it beside <a href="https://pkg.go.dev/net/http#Server.Shutdown">Go's Server.Shutdown</a>, which is four paragraphs and specifies the in-process half of the same sequence precisely enough to implement from.</p>
+
+  <div class="pager">
+    <a href="1104-metrics-answer-how-often-never-which-one.html"><span class="dir">&larr; Previous</span><span class="ttl">Metrics answer how often, never which one</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1105 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
