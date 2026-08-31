@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A WebSocket is a session, and a session is state - Backend Engineering</title>
+<meta name="description" content="A WebSocket starts as an HTTP request and then stops being HTTP. The open connection is what lets the server speak first, and it is also the state that makes one process, rather than the fleet, the owner of that reader.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Inter-service communication &middot; Lesson 1205</div>
+  <h1>A WebSocket buys the server the right to speak first, and pays for it with statelessness</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The third branch, and the one that changes how the fleet is shaped. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc6455">RFC 6455 - The WebSocket Protocol</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A WebSocket connection <b>begins as an HTTP request</b> and stops being HTTP at the <b>101 Switching Protocols</b> response.</li>
+      <li>After that it is a "two-way communication channel where each side can, independently from the other, send data at will" over one TCP connection.</li>
+      <li>The protocol exists because the alternative was "abusing HTTP through polling", with a connection per message and the overhead that implies.</li>
+      <li>The open connection lives in <b>one process's memory</b>, so a message for one reader has to reach the exact machine holding that reader's socket.</li>
+      <li>What it costs: statelessness, which is what made the fleet of module 13 possible - and the browser will not reconnect for you, while <b>server-sent events</b> will.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The last branch, and the only one that changes what a server may hold.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 1203, 1204&lt;br/&gt;brokers, where the&lt;br/&gt;sender starts"] --> T["THIS PAGE&lt;br/&gt;the socket, where&lt;br/&gt;the server starts"]
+  T --> A["Module 13&lt;br/&gt;scaling a fleet that&lt;br/&gt;now holds state"]
+  T --> B["Module 11&lt;br/&gt;graceful shutdown&lt;br/&gt;with sockets open"]
+  W["Lesson 1200&lt;br/&gt;the third coupling"] -.- T
+    </div>
+    <figcaption>Both broker pages kept the sender in charge of starting the conversation. This one gives that right to the server, and the mechanism that grants it is a connection that stays open - which is the first piece of per-reader state this course has let a service hold. <b>Everything difficult about WebSockets is a consequence of that state, not of the protocol.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a request that never ends</h2>
+
+  <p>Everything in this course so far has assumed a request arrives, is answered, and is forgotten - which is what lets any machine in a fleet serve any request. A WebSocket breaks that assumption deliberately. RFC 6455 was written because bidirectional traffic on the web had been built by abusing HTTP: polling on a timer, or holding a request open and answering it late, both of which spend a connection per message and put a floor under latency that is the polling interval.</p>
+
+  <p>What replaces it is a single connection that both ends may write to whenever they like. The consequence for your service is not that messages are faster. It is that a reader is now represented by an object in the memory of one particular process, and that process is the only one that can reach them.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The upgrade handshake</div>
+    <div class="fig-claim">One HTTP request becomes a channel neither end has to poll.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Browser
+  participant S as Server
+  C->>S: GET /live with Upgrade websocket&lt;br/&gt;Connection Upgrade&lt;br/&gt;Sec-WebSocket-Key - a 16-byte nonce
+  S-->>C: 101 Switching Protocols&lt;br/&gt;Sec-WebSocket-Accept derived&lt;br/&gt;from that nonce
+  Note over C,S: no longer HTTP&lt;br/&gt;frames both ways
+  C->>S: frame - subscribe to prices
+  S-->>C: frame - price update
+  S-->>C: frame - price update
+  Note over S: the server sent two&lt;br/&gt;messages nobody asked for
+  S-->>C: Close frame
+  C->>S: Close frame in reply
+    </div>
+    <figcaption>The handshake is an ordinary HTTP request, which is why a WebSocket reaches a server through the same port and the same routing as everything else. The server proves it understood by returning a value computed from the client's own nonce rather than an arbitrary one. After the 101 nothing in the exchange is a request or a response. <b>The two unprompted frames in the middle are the entire reason this protocol exists.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="upgrade-handshake">The handshake, and what the 101 changes</h3>
+  <p>The client sends a normal <code>GET</code> carrying <code>Upgrade: websocket</code>, <code>Connection: Upgrade</code> and <code>Sec-WebSocket-Key</code>, a randomly chosen 16-byte nonce in base64. The server answers <code>101 Switching Protocols</code> with <code>Sec-WebSocket-Accept</code>, the base64 SHA-1 of that key concatenated with the fixed string <code>258EAFA5-E914-47DA-95CA-C5AB0DC85B11</code>. The value is not a secret and not authentication; it is proof that the peer read the WebSocket handshake rather than echoing a header it did not understand.</p>
+
+  <p>From the 101 onwards the connection carries frames, not messages with headers, and closing is symmetric: either peer sends a Close control frame, the other replies with one, and the TCP connection is then closed. A connection that vanishes without that exchange is an abnormal closure, and your application will see plenty of them - phones change network, laptops sleep, intermediaries time out idle connections.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Connection lifecycle</div>
+    <div class="fig-claim">Nothing in the protocol takes the connection back after it closes.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Connecting: handshake sent
+  Connecting --> Open: 101 received
+  Connecting --> Closed: handshake refused
+  Open --> Closing: either peer sends Close
+  Open --> Closed: network gone, no Close frame
+  Closing --> Closed: Close frame echoed back
+  Closed --> Connecting: only if your code reconnects
+    </div>
+    <figcaption>Four states and one dashed responsibility. The browser fires an error event and then a close event, and it does not try again - the last transition is the only one that is not the protocol's, and if you do not write it, a reader whose train enters a tunnel silently stops receiving updates. <b>Reconnection with backoff, and a way to catch up on what was missed, is application code you owe from the first day.</b></figcaption>
+  </figure>
+
+  <h3 id="socket-affinity">The socket pins a reader to a process</h3>
+  <p>Here is the part that reshapes the architecture. A price update is produced by some service that has no idea which of your twenty web processes is holding a given reader's socket. There is no route to a connection, because a connection is not addressable - it is a file descriptor in one process. So a fleet serving WebSockets always grows a second layer: every process subscribes to a broker, and delivering to a reader means publishing an event that reaches the process that happens to own them.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Reaching one open socket</div>
+    <div class="fig-claim">Delivery to a reader is a broadcast every process but one discards.</div>
+    <div class="mermaid">
+flowchart LR
+  E["pricing service&lt;br/&gt;produces an update"] --> B["broker topic&lt;br/&gt;every process subscribes"]
+  B --> W1["web process 1&lt;br/&gt;holds 3,000 sockets"]
+  B --> W2["web process 2&lt;br/&gt;holds this reader"]
+  B --> W3["web process 3&lt;br/&gt;holds 2,800 sockets"]
+  W2 --> R["the reader's&lt;br/&gt;open connection"]
+    </div>
+    <figcaption>The producer cannot name the destination, so it names the event and lets every process decide. That is why lesson 1203's broker turns up inside a WebSocket design that seemed to have nothing to do with queues. The cost is a message delivered to every process for the benefit of one. <b>A WebSocket fleet is a broker plus a per-process routing table, and the socket itself is the smallest part of it.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: often you wanted server-sent events</h2>
+
+  <p>Before paying for all of that, check the direction of the traffic. A dashboard, a notification feed, a progress bar and a live score are one-way: the server pushes and the client only reads. That is what server-sent events are for, and the properties are the ones you would otherwise write yourself. The connection is one-way, "so you can't send events from a client to a server". Reconnection is built in: "by default, if the connection between the client and server closes, the connection is restarted", the stream can set the retry delay with a <code>retry</code> field, and an <code>id</code> field lets the browser resume with the last event it saw.</p>
+
+  <p>The historical objection to server-sent events was the connection cap: over HTTP/1.1 the limit is six per browser and domain across all tabs, which a user with three tabs open exhausts. Over HTTP/2 that disappears - the maximum number of simultaneous streams is negotiated and defaults to 100 - so on a modern stack the objection is largely spent. Reach for a WebSocket when the client genuinely needs to send too: a chat, a collaborative editor, a game.</p>
+
+  <div class="callout warn">
+    An open socket makes a deploy visible to users. A rolling restart of twenty processes disconnects every reader they hold, all of them reconnect at once, and the reconnect storm lands on a fleet that is one process short. This is where the graceful shutdown of module 11 stops being hygiene: drain by refusing new connections first, close existing ones with a Close frame and a reason, and give the client a randomised backoff so the herd arrives spread out rather than together.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does a WebSocket fleet almost always need a broker behind it?</div>
+      <button class="q-opt">Because frames must be persisted before they are sent</button>
+      <button class="q-opt">Because the protocol requires an ordered delivery log</button>
+      <button class="q-opt">Because only one process can reach a given open socket</button>
+      <button class="q-opt">Because the handshake has to be shared across processes</button>
+      <div class="q-fb">A connection is a file descriptor in one process and cannot be addressed from outside it, so the producer has to broadcast and let the owning process deliver. The first two invent guarantees the protocol never offered, and the fourth misreads the handshake, which is complete before the connection is useful and is never shared.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A live dashboard needs updates pushed but sends nothing upward. What fits?</div>
+      <button class="q-opt">A WebSocket, since only it can push to a browser</button>
+      <button class="q-opt">Server-sent events, which reconnect and resume by id</button>
+      <button class="q-opt">Long polling, which avoids the connection limit</button>
+      <button class="q-opt">A gRPC server stream, read directly by the browser</button>
+      <div class="q-fb">One-way traffic is exactly the case server-sent events were designed for, and they hand you reconnection and a resume point at no cost. A WebSocket also works but you write the reconnect yourself; long polling reintroduces the overhead RFC 6455 was written to remove; and a browser cannot make a native gRPC call at all.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, Module 13</b> is where the statelessness this page spends is set out as the property that made horizontal scale possible in the first place.</li>
+    <li><b>Behind you, <a href="1203-a-broker-turns-an-outage-into-a-backlog.html">a broker turns an outage into a backlog</a></b> is the layer this page turned out to need, arrived at from an unrelated direction.</li>
+    <li><b>Back at <a href="1200-a-call-a-queue-and-a-socket-are-three-couplings.html">a call, a queue and a socket</a></b> the three branches are laid out together, and you can now price all three.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take any live feature you have built or want to build, and write down whether the client ever sends anything on that channel. Ask the agent to sketch both designs - one on server-sent events and one on WebSockets - and to be specific about what the second one has to add for reconnection, deploys and cross-process delivery.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc6455#section-1">RFC 6455 &sect;1</a> is unusually readable for an RFC: the background section argues for the protocol before specifying it, and the handshake is a page. Read it against <a href="https://developer.mozilla.org/en-US/docs/Web/API/Server-sent_events/Using_server-sent_events">MDN on server-sent events</a>, which carries the reconnection behaviour and the HTTP/1.1 connection limit, and decide between them before writing either.</p>
+
+  <div class="pager">
+    <a href="1204-a-log-is-not-a-queue.html"><span class="dir">&larr; Previous</span><span class="ttl">A log is not a queue</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1205 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

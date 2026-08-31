@@ -1,0 +1,207 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A log is not a queue - Backend Engineering</title>
+<meta name="description" content="Kafka keeps events after they are read and lets each consumer group hold its own position, so replay and independent readers are free - and ordering, parallelism and poison messages all become properties of the partition.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Inter-service communication &middot; Lesson 1204</div>
+  <h1>A log is not a queue: reading does not consume, and the reader holds the position</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    The second asynchronous shape, and why it is a different tool. &middot;
+    <a href="https://kafka.apache.org/40/design/design/">Apache Kafka - Design</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A queue forgets a message when it is acknowledged. A log does not: events "are not deleted after consumption", and <b>retention is a per-topic setting</b>.</li>
+      <li>The broker therefore tracks no per-message state. Each consumer group holds an <b>offset</b>, which is a position it can move backwards as easily as forwards.</li>
+      <li>A topic is <b>partitioned</b>, and order is guaranteed only inside a partition: same key, same partition, same order as written.</li>
+      <li>Within a group, each partition is read by <b>exactly one consumer</b>, so the partition count is the ceiling on how far you can parallelise.</li>
+      <li>What it costs: with no per-message acknowledgement, a message that always fails <b>blocks its partition</b>, and there is no dead-letter queue unless you build one.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Keeping the message after it is read changes what the reader may do.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1203&lt;br/&gt;a queue, where an ack&lt;br/&gt;deletes the message"] --> T["THIS PAGE&lt;br/&gt;a log, where reading&lt;br/&gt;moves a pointer"]
+  T --> A["Lesson 1205&lt;br/&gt;the third branch,&lt;br/&gt;the open socket"]
+  T --> B["Module 08&lt;br/&gt;the log as a source&lt;br/&gt;of derived state"]
+  W["Lesson 1200&lt;br/&gt;the asynchronous branch"] -.- T
+    </div>
+    <figcaption>The previous page's broker held work until somebody did it, and the ack was the end of the message's life. This page keeps the same decoupling in time and changes one thing: the message survives being read. Everything that follows - replay, several unrelated readers, ordering by key - is that one change spending itself. <b>A queue is a work list and a log is a record, and confusing the two is the most expensive mistake in this module.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the reader holds the bookmark</h2>
+
+  <p>In lesson 1203 the broker knew, per message, whether it had been delivered and whether it had been acknowledged. That per-message state is what a queue is. Kafka has none of it. A topic is an append-only sequence of events, and the documentation is blunt about what reading does to them: "events are not deleted after consumption. Instead, you define for how long Kafka should retain your events through a per-topic configuration setting, after which old events will be discarded."</p>
+
+  <p>What a consumer holds instead is an offset: the position it has reached. Two consequences follow immediately and neither has an equivalent in a queue. Several unrelated consumer groups can read the same topic without knowing about each other, because each has its own offset and none of them removes anything - no fanout exchange, no extra queues, no producer change. And a consumer group can move its offset backwards and read history again, which turns a bug in a downstream service into a rerun rather than into lost data.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One partition, two readers</div>
+    <div class="fig-claim">Both groups read every event, and neither one removes anything.</div>
+    <svg class="chart" viewBox="0 0 640 230" role="img" aria-label="A single Kafka partition drawn as ten numbered cells, with the payments consumer group positioned at offset 7 and the analytics group at offset 3, and new events appended at the right-hand end">
+      <text class="ttl" x="70" y="30">one partition of topic orders</text>
+      <rect class="panel" x="70"  y="55" width="45" height="40"/>
+      <rect class="panel" x="115" y="55" width="45" height="40"/>
+      <rect class="panel" x="160" y="55" width="45" height="40"/>
+      <rect class="panel" x="205" y="55" width="45" height="40"/>
+      <rect class="panel" x="250" y="55" width="45" height="40"/>
+      <rect class="panel" x="295" y="55" width="45" height="40"/>
+      <rect class="panel" x="340" y="55" width="45" height="40"/>
+      <rect class="panel" x="385" y="55" width="45" height="40"/>
+      <rect class="panel" x="430" y="55" width="45" height="40"/>
+      <rect class="panel" x="475" y="55" width="45" height="40"/>
+      <text class="lbl-sm" x="92"  y="80" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="137" y="80" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="182" y="80" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="227" y="80" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="272" y="80" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="317" y="80" text-anchor="middle">5</text>
+      <text class="lbl-sm" x="362" y="80" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="407" y="80" text-anchor="middle">7</text>
+      <text class="lbl-sm" x="452" y="80" text-anchor="middle">8</text>
+      <text class="lbl-sm" x="497" y="80" text-anchor="middle">9</text>
+      <line class="s-ink" x1="520" y1="75" x2="600" y2="75"/>
+      <text class="lbl-sm" x="560" y="45" text-anchor="middle">appended here</text>
+      <polygon class="m-stat" points="407,110 397,128 417,128"/>
+      <polygon class="m-plum" points="227,110 217,128 237,128"/>
+      <text class="lbl-sm t-stat" x="407" y="148" text-anchor="middle">payments group, offset 7</text>
+      <text class="lbl-sm t-plum" x="227" y="172" text-anchor="middle">analytics group, offset 3</text>
+      <text class="lbl-sm" x="335" y="205" text-anchor="middle">events 0 to 2 are still on disk, and stay until retention expires</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>payments, caught up</span><span><i class="sw-plum"></i>analytics, four events behind</span></div>
+    <figcaption>The events do not move and are not removed by being read - only the two triangles move. Analytics being behind is not an error state anywhere in the system, and moving either triangle back to zero replays the whole retained history into that group alone. <b>Because the position belongs to the reader, "who has read this" stops being something the broker has to remember.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="partition-order">Partitions, and the only ordering you get</h3>
+  <p>A topic is not one sequence. "Topics are partitioned, meaning a topic is spread over a number of buckets located on different Kafka brokers", and that spreading is what makes throughput scale past one machine. The price is that there is no total order across a topic, and the guarantee is stated at partition scope: "events with the same event key are written to the same partition, and Kafka guarantees that any consumer of a given topic-partition will always read that partition's events in exactly the same order as they were written."</p>
+
+  <p>So ordering is something you buy with the key. Key by customer identifier and every event for one customer is ordered relative to the others, while two different customers have no defined order at all - which is almost always exactly what a domain needs, and is far cheaper than a global sequence.</p>
+
+  <h3 id="consumer-group">Consumer groups, and the parallelism ceiling</h3>
+  <p>A consumer group is a set of processes that share the partitions of a topic between them. Each partition is consumed by "exactly one consumer within each subscribing consumer group at any given time", which is what preserves the per-partition order while several machines work. It also fixes your ceiling: a topic with six partitions supports at most six useful consumers in a group, and the seventh sits idle.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Keys, partitions, consumers</div>
+    <div class="fig-claim">A seventh consumer on six partitions does nothing at all.</div>
+    <div class="mermaid">
+flowchart LR
+  K["events keyed by&lt;br/&gt;customer id"] --> H["hash of the key&lt;br/&gt;picks the partition"]
+  H --> P0["partition 0&lt;br/&gt;ordered"]
+  H --> P1["partition 1&lt;br/&gt;ordered"]
+  H --> P2["partition 2&lt;br/&gt;ordered"]
+  P0 --> C0["consumer A"]
+  P1 --> C1["consumer B"]
+  P2 --> C2["consumer C"]
+  C3["consumer D&lt;br/&gt;no partition, idle"] -.- P2
+  classDef idle fill:var(--warn-soft),stroke:var(--warn)
+  class C3 idle
+    </div>
+    <figcaption>The key decides the partition, the partition decides the order, and the group assignment decides who reads it. Adding a fourth consumer to a three-partition topic buys nothing, because a partition cannot be shared inside a group without giving up the ordering that made partitions worth having. <b>Choose the partition count for the parallelism you will need, because it is also the parallelism you can never exceed.</b></figcaption>
+  </figure>
+
+  <h3 id="delivery-semantics">Where the offset is committed decides the guarantee</h3>
+  <p>Kafka names three delivery semantics: at most once, where "messages may be lost but are never redelivered"; at least once, where "messages are never lost but may be redelivered"; and exactly once, where "each message is processed once and only once". Which of the first two you get is not a setting on the broker. It is decided by the order of two lines in your consumer.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two orders, two guarantees</div>
+    <div class="fig-claim">Swapping two lines in the consumer swaps loss for duplication.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant K as Log
+  participant C as Consumer
+  K->>C: record at offset 42
+  C->>K: commit offset 43
+  Note over C: crash before the work&lt;br/&gt;- record 42 never processed
+  Note over K,C: at most once
+  K->>C: record at offset 42
+  Note over C: does the work
+  C->>K: commit offset 43
+  Note over C: crash before the commit&lt;br/&gt;- record 42 processed twice
+  Note over K,C: at least once
+    </div>
+    <figcaption>Read, commit, process gives at-most-once, because the crash window sits after the position moved and before the work happened. Read, process, commit gives at-least-once, because the window sits after the work and before the position moved. There is no ordering of those three steps that closes both windows. <b>You are not choosing whether to have a crash window, only which side of the work it falls on.</b></figcaption>
+  </figure>
+
+  <p>Exactly-once is available but it is narrower than the name suggests. The idempotent producer assigns each producer an identity and a sequence number so a resend does not become a second log entry, and transactions let a producer write atomically across several partitions. Both keep the log itself clean. What they do not do is reach into your database: for a consumer writing to an external system, Kafka's own advice is to have "the consumer store its offset alongside its output in the same location", so the position and the effect commit together. Exactly-once is a property of a closed loop, not a checkbox on the transport.</p>
+
+  <h2>3. The trade-off: no ack means no escape hatch</h2>
+
+  <p>The absence of per-message state is the source of everything good on this page and of the one thing that hurts. A queue can reject a single message and move on, sending it to a dead letter exchange while the rest of the queue drains. A log cannot: the consumer's position is a single number, so the only way past record 42 is to commit past it, and committing past it means accepting whatever happened. A record that always throws will be retried forever, and while it is, every record behind it in that partition waits.</p>
+
+  <p>That is head-of-line blocking, and it is not a bug to be configured away - it is what a strictly ordered position implies. The working answer is to build the escape yourself: catch the failure, publish the record to a separate errors topic with the exception attached, commit past it, and treat that topic as the dead letter queue Kafka does not have. The ordering guarantee you bought is exactly what you are spending to do it, so do it deliberately, per topic, and never by default.</p>
+
+  <div class="callout warn">
+    Retention is a promise about disk, not about correctness, and a replay is only possible inside it. A topic with seven days of retention cannot rebuild a downstream store from a bug introduced eight days ago, and nobody discovers that until the day they need it. If a topic is a source of truth that something is derived from, its retention is a data-loss boundary and should be chosen and reviewed as one - compaction, or a longer retention, or an archive to object storage.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A topic has six partitions. You add a tenth consumer to one group. What changes?</div>
+      <button class="q-opt">Throughput rises, since partitions split across consumers</button>
+      <button class="q-opt">Ordering weakens, since two consumers share a partition</button>
+      <button class="q-opt">Rebalancing halves the load carried by each consumer</button>
+      <button class="q-opt">Nothing, since four consumers now have no partition</button>
+      <div class="q-fb">A partition is read by exactly one consumer in a group, so six partitions support six working consumers and the rest idle. The first and third assume a partition can be split, which is precisely what the ordering guarantee forbids, and the second describes the consequence that assumption would have if it were true.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your consumer commits the offset before processing the record. What have you chosen?</div>
+      <button class="q-opt">At most once - a crash loses the record entirely</button>
+      <button class="q-opt">At least once - a crash reprocesses the record</button>
+      <button class="q-opt">Exactly once - the commit and work are atomic</button>
+      <button class="q-opt">Neither - the broker replays uncommitted records</button>
+      <div class="q-fb">Committing first moves the position past a record that has not been handled, so a crash in between loses it - messages may be lost but are never redelivered. The second describes the opposite ordering, the third requires the offset and the output to commit in one place, and the fourth describes a queue's acknowledgement model rather than a log's.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1205-a-websocket-is-a-session-and-a-session-is-state.html">a WebSocket is a session</a></b> is the last branch of lesson 1200, and the only one where the server speaks first.</li>
+    <li><b>Behind you, <a href="1203-a-broker-turns-an-outage-into-a-backlog.html">a broker turns an outage into a backlog</a></b> is the queue this page is deliberately not, and its dead-letter escape is the thing a log gives up.</li>
+    <li><b>Behind you, <a href="0405-compatibility-is-a-rule-not-a-hope.html">compatibility is a rule, not a hope</a></b> matters more here than anywhere: a retained log holds messages written by every version you have ever deployed.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one topic in your system and answer three questions about it: what is the key, how many partitions, and what is the retention. Then ask the agent what happens to that topic when one record cannot be processed, and whether anything today would tell you which partition had stopped moving.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Kafka's <a href="https://kafka.apache.org/intro">Introduction</a> is the shortest correct statement of retention, partitioning and the ordering guarantee. Then read the <a href="https://kafka.apache.org/40/design/design/">Design</a> chapter, whose Message Delivery Semantics section is where the three guarantees, the offset-commit choice and the advice about storing the offset with the output all come from - it is a design argument rather than a manual, and it repays a slow read.</p>
+
+  <div class="pager">
+    <a href="1203-a-broker-turns-an-outage-into-a-backlog.html"><span class="dir">&larr; Previous</span><span class="ttl">A broker turns an outage into a backlog</span></a>
+    <a class="nxt" href="1205-a-websocket-is-a-session-and-a-session-is-state.html"><span class="dir">Next &rarr;</span><span class="ttl">A WebSocket is a session, and a session is state</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1204 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
