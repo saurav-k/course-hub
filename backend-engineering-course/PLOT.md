@@ -26,12 +26,12 @@ before the next depends on it.
 | 2 | Module 02 - HTTP is the language (0200-0205) | written | Methods, status, headers, caching headers, CORS. RFC 9110, RFC 9111 and RFC 9113 owned. |
 | 3 | Module 03 - Routing (0300-0305) | written | The route as a pair, path against query, the prefix tree, the middleware chain, the 404/405 verdicts and prefix mounting. RFC 3986 and RFC 6570 join the canon; Go's ServeMux is the named implementation the mechanism pages read from. |
 | 4 | Module 04 - Serialization and contracts (0400-0405) | written | The wire contract, JSON's six types, schema-first protobuf, boundary parsing, content negotiation, and the compatibility rules. It was written before Module 03 landed, because nothing in it depends on routing. |
-| 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
-| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Module 03 landed and while Module 05 stays reserved, because nothing in it depends on routing or on the internal layering. |
+| 5 | Module 05 - The layered service (0500-0505) | written | Layers as testable boundaries, controller, service, repository, request context, dependency direction. Written before Module 03 landed, because it depends on nothing routing defines. |
+| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05 landed, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
 | 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
-| 10 | Module 10 - Async work & search (1000-1006) | written | The 202 and the durable handoff, the broker's lease and at-least-once, the retry policy and the dead letter, the idempotent consumer, the transactional outbox, then the inverted index and BM25. Written while Modules 05, 08 and 09 stay reserved, because nothing in it depends on the layered service, the relational chapter or the cache. |
+| 10 | Module 10 - Async work & search (1000-1006) | written | The 202 and the durable handoff, the broker's lease and at-least-once, the retry policy and the dead letter, the idempotent consumer, the transactional outbox, then the inverted index and BM25. Written while Modules 08 and 09 stay reserved, because nothing in it depends on the relational chapter or the cache. |
 | 11 | Module 11 - Resilience & observability | reserved | Error handling, config, logging, graceful shutdown. |
 | 12 | Module 12 - Inter-service communication | reserved | gRPC, message brokers / Kafka, WebSockets. |
 | 13 | Module 13 - Scale, flight & shipping | reserved | Concurrency, scaling, containerization / K8s / CI-CD, automated testing. |
@@ -45,6 +45,7 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
+<<<<<<< HEAD
 Modules 05, 08, 09 and 11-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
 
@@ -52,14 +53,23 @@ Module 10 takes the 10xx block and is written as one module rather than two, tho
 subjects. The reason is the seam between them: a search index is the largest thing a background job in a
 real system actually maintains, so the queue half of the module is what feeds the search half, and lesson
 1005's second store is kept in step by lesson 1004's outbox. Splitting them would put that dependency
-across a module boundary for no gain. It reads before Modules 05, 08 and 09 because nothing in it depends
-on the internal layering, on the relational chapter or on the cache - the queue is reasoned about
+across a module boundary for no gain. It reads before Modules 08 and 09 because nothing in it depends
+on the relational chapter or on the cache - the queue is reasoned about
 as a delivery contract and the index as a derived structure, both from first principles.
 
 Its numbering is worth one line for the next author. Lesson 0605 already established idempotency keys on
 the HTTP side, so lesson 1003 develops the same mechanism on the consumer side rather than restating it,
 and 1000 opens by naming that debt. A reader arriving at Module 10 without Module 06 will still follow it,
 but the cross-reference is load-bearing and should not be cut.
+=======
+Modules 08-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
+lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+
+Module 05 was written out of reading order, before Module 03 landed, because it depends on nothing routing
+defines: it consumes the parsed, trusted values Module 04 produces and says only where they travel afterwards.
+Its lesson numbers start at 0500, so the 03xx block stayed free for the module that owns it and nothing was
+renumbered when Module 03 landed ahead of it.
+>>>>>>> origin/main
 
 Module 03 landed fifth and takes the 03xx block, for the same reason Module 02 took 02xx: each module owns a
 hundred-block so a later module never renumbers an earlier one. It answers the question Module 02 leaves open - the
