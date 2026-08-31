@@ -1,0 +1,221 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Relevance is a ranking function - Backend Engineering</title>
+<meta name="description" content="Matching returns a set and ranking returns an order, and only the second is what a reader judges. BM25 is a readable function of three things: how rare the term is, how often it occurs, and how long the document is.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1006</div>
+  <h1>Matching gives you a set and ranking gives you an order, and only one of them is what a reader sees</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    The module closes on the part of search you can actually read. &middot;
+    <a href="https://lucene.apache.org/core/9_11_1/core/org/apache/lucene/search/similarities/BM25Similarity.html">Lucene - BM25Similarity</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Lesson 1005's index answers a boolean question. <b>Which of ten thousand matches goes first is a different question</b>, and it has no objectively right answer - only a model.</li>
+      <li>BM25 is that model, and it is legible: a term's contribution rises with <b>how rare the term is</b>, rises with <b>how often it occurs</b>, and falls with <b>how long the document is</b>.</li>
+      <li>The rise with frequency <b>saturates</b>. Lucene's <code>k1</code> "controls non-linear term frequency normalization (saturation)" and defaults to <b>1.2</b>, which puts a hard ceiling on what repetition can buy.</li>
+      <li><code>b</code> "controls to what degree document length normalizes tf values" and defaults to <b>0.75</b> - three quarters of the way towards full length normalisation.</li>
+      <li>PostgreSQL's <code>ts_rank</code> is a different model, not a weaker one: it ranks on the frequency of matching lexemes within the document you hand it, and <b>ranking "requires consulting the tsvector of each matching document"</b>, which is where its cost lives.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The module ends on the only search decision a user can see.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1005&lt;br/&gt;the index that returns&lt;br/&gt;the matching set"] --> T["THIS PAGE&lt;br/&gt;putting that set&lt;br/&gt;in an order"]
+  T --> A["Module 09&lt;br/&gt;a ranked page is&lt;br/&gt;expensive and cacheable"]
+  T --> B["Module 11&lt;br/&gt;relevance is measured&lt;br/&gt;or it is guessed"]
+  W["Lesson 0602&lt;br/&gt;pagination, which only&lt;br/&gt;means something once&lt;br/&gt;there is an order"] -.- T
+    </div>
+    <figcaption>Everything up to here has been about correctness: the job ran once, the index holds what the document said. Ranking is the first thing in this module with no correct answer at all, only a defensible one, and it is the part a user forms an opinion about within two seconds of the results loading. The dotted link is a dependency people notice late - a cursor over a result set is meaningless unless the order is stable, and a ranking function that changes when the corpus changes is not. <b>The last mile of search is a modelling problem wearing an engineering problem's clothes.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two questions, asked in order</h2>
+
+  <h3 id="set-then-order">The set is objective and the order is not</h3>
+  <p>Ask whether a document contains the lexeme <code>refund</code> and there is a fact of the matter. The index knows it, the answer does not change with taste, and two implementations that disagree have a bug. Ask which of four hundred documents containing <code>refund</code> should be first and there is no fact at all - there is a claim about what a person wanted, inferred from the words they typed and from statistics about the corpus.</p>
+
+  <p>That is why the two are separate stages rather than one clever query. The match narrows a million documents to four hundred using structure alone, which is cheap and exact. The rank then scores those four hundred, which is expensive and approximate, and the expense is bounded by the match having already thrown away everything else. Getting the stages the wrong way round - scoring first, filtering after - is how a search implementation becomes slow in a way that no index will rescue.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two stages, two costs</div>
+    <div class="fig-claim">The cheap exact stage is what makes the expensive inexact one affordable.</div>
+    <div class="mermaid">
+flowchart LR
+  Q["Query - refund policy"] --> N["Normalise to lexemes&lt;br/&gt;refund, polici"]
+  N --> M["Match on the index&lt;br/&gt;set arithmetic&lt;br/&gt;1,000,000 to 400"]
+  M --> S["Score the 400&lt;br/&gt;one function call&lt;br/&gt;per document"]
+  S --> O["Sort and take 10"]
+  O --> U["The page a person reads"]
+  M -.- C["Exact - a bug here&lt;br/&gt;is a wrong answer"]
+  S -.- J["A judgement - a change&lt;br/&gt;here is an opinion"]
+    </div>
+    <figcaption>Four boxes, and the two dotted annotations are the reason to keep them apart in your head as well as in the code. A defect in the matching stage is a defect: the document was there and you did not return it. A change in the scoring stage is a product decision that somebody has to be accountable for, because it will move results for every query in the system at once. Note the sort at the end - the score exists only to produce an order, so a score nobody compares is a number nobody needs. <b>Search fails in two completely different ways, and only one of them is a bug.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: three intuitions, one expression</h2>
+
+  <h3 id="saturation">Repetition helps, and then it stops helping</h3>
+  <p>Start with the intuition that carries the most weight in practice. A document that mentions <code>refund</code> five times is more likely to be about refunds than one that mentions it once. A document that mentions it fifty times is not ten times better than the one that mentions it five - it is probably the same kind of document, or it is a page trying to be found. So the contribution of term frequency must rise and then flatten, and the flattening is not a patch bolted on, it is the shape of the curve.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Term frequency saturation</div>
+    <div class="fig-claim">The tenth occurrence of a word adds almost nothing to the score.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Line chart of the score contribution of a single term as its frequency in a document rises from one to ten. The BM25 curve rises steeply from one to about 1.7 by the fourth occurrence and then flattens towards a ceiling of 2.2. A linear count rises off the top of the chart within two occurrences.">
+      <line class="axis" x1="80" y1="250" x2="612" y2="250"/>
+      <line class="axis" x1="80" y1="34" x2="80" y2="250"/>
+      <line class="s-ink ref" x1="80" y1="58" x2="612" y2="58"/>
+      <polyline class="s-noise" points="90,163 163,40" fill="none"/>
+      <polyline class="s-stat thick" points="90,163 142,130 194,113 246,102 298,95 350,90 402,86 454,83 506,80 558,78" fill="none"/>
+      <text class="ttl" x="80" y="22">Contribution of one term as it repeats - derived: k1 = 1.2, length ignored</text>
+      <text class="lbl-sm" x="86" y="54">2.2 - the ceiling, which is k1 plus 1</text>
+      <text class="lbl-sm" x="74" y="254" text-anchor="end">0</text>
+      <text class="lbl-sm" x="90" y="266" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="194" y="266" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="298" y="266" text-anchor="middle">5</text>
+      <text class="lbl-sm" x="402" y="266" text-anchor="middle">7</text>
+      <text class="lbl-sm" x="506" y="266" text-anchor="middle">9</text>
+      <text class="lbl-sm t-stat" x="210" y="76">five eighths of the ceiling by the second occurrence</text>
+      <text class="lbl-sm" x="80" y="286">occurrences of the term in the document</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>BM25 term contribution</span><span><i class="sw-noise"></i>a plain count of occurrences</span></div>
+    <figcaption>Derived by evaluating the saturating factor at Lucene's default <code>k1</code> of 1.2, with length normalisation switched off so the curve shows one effect at a time. The dashed line is the asymptote: no matter how many times a word appears, its contribution cannot pass <code>k1</code> plus one. The straight line leaves the top of the chart before the third occurrence, which is what a naive count does to a ranking - one keyword-stuffed page outranks every genuinely useful one. <b>Choosing k1 is choosing how quickly a document stops being rewarded for repeating itself.</b></figcaption>
+  </figure>
+
+  <p>Two more intuitions complete the picture. A term that appears in almost every document tells you almost nothing about which one to read, so a term's weight should rise as it gets rarer across the corpus - that is the inverse document frequency. And a long document contains any given word more easily than a short one, by sheer length rather than by being about it, so the frequency should be judged against the document's length relative to the average. Put the three together and the standard expression follows.</p>
+
+  <div class="math">
+    score(D, Q) = &sum;<sub>q in Q</sub> IDF(q) &times; ( f(q,D) &times; (k1 + 1) ) &divide; ( f(q,D) + k1 &times; (1 &minus; b + b &times; dl &divide; avgdl) )
+    <span class="gloss">Read as: <i>D</i> is one candidate document and <i>Q</i> is the query, and the score is a sum over each query term <i>q</i>. <i>f(q,D)</i> is how many times <i>q</i> occurs in <i>D</i>. <i>IDF(q)</i> is how rare <i>q</i> is across the whole corpus, so a word in every document contributes little. <i>dl</i> is the length of <i>D</i> in words and <i>avgdl</i> is the average length across the corpus, so <i>dl &divide; avgdl</i> is above one for a long document. <i>k1</i> sets how fast the frequency term saturates and <i>b</i> sets how much the length ratio is allowed to matter.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Length normalisation</div>
+    <div class="fig-claim">All three settings agree at average length and diverge either side.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Line chart of one term's score contribution against document length relative to the corpus average, for three settings of b. All three lines meet at the average length. With b set to zero the line is flat. With b at 0.75 the line falls from about 1.87 for a quarter-length document to about 0.96 for a document four times the average. With b at 1 the same fall is steeper.">
+      <line class="axis" x1="80" y1="250" x2="612" y2="250"/>
+      <line class="axis" x1="80" y1="34" x2="80" y2="250"/>
+      <line class="s-ink ref" x1="186" y1="34" x2="186" y2="250"/>
+      <polyline class="s-noise" points="80,121 610,121" fill="none"/>
+      <polyline class="s-plum" points="80,48 115,76 186,121 327,179 468,216 610,242" fill="none"/>
+      <polyline class="s-stat thick" points="80,70 115,89 186,121 327,167 468,200 610,224" fill="none"/>
+      <text class="ttl" x="80" y="22">One term occurring 3 times, as the document lengthens - derived: k1 = 1.2</text>
+      <text class="lbl-sm" x="192" y="46">average length</text>
+      <text class="lbl-sm" x="80" y="266">0.25</text>
+      <text class="lbl-sm" x="186" y="266" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="327" y="266" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="468" y="266" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="610" y="266" text-anchor="end">4</text>
+      <text class="lbl-sm" x="80" y="286">document length as a multiple of the corpus average</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>b = 0.75, the default</span><span><i class="sw-plum"></i>b = 1, fully normalised</span><span><i class="sw-noise"></i>b = 0, length ignored</span></div>
+    <figcaption>Derived by evaluating the same factor at three values of <code>b</code>, holding the term frequency at three occurrences. Every line passes through the same point at the average length, because the length term reduces to one there whatever <code>b</code> is - so <code>b</code> is not a knob that makes documents score higher or lower in general, it is a knob that decides how much being unusually short or unusually long is allowed to matter. A short page mentioning a term three times gains about twice as much as a long one under the default. <b>Length normalisation is what stops a long document winning by containing everything.</b></figcaption>
+  </figure>
+
+  <h3 id="k1-and-b">The two constants, and what a default means</h3>
+  <p>Both are stated in the same place, in the same words, by Lucene and by Elasticsearch. <a href="https://lucene.apache.org/core/9_11_1/core/org/apache/lucene/search/similarities/BM25Similarity.html">Lucene's <code>BM25Similarity</code></a> documents <code>k1</code> as "Controls non-linear term frequency normalization (saturation)" and <code>b</code> as "Controls to what degree document length normalizes tf values", with defaults of 1.2 and 0.75, and <a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity">Elasticsearch repeats both descriptions and both defaults</a> for its own default similarity. Reading <code>b</code> against the formula makes it concrete: at <code>b</code> = 0 the length ratio disappears entirely and only raw frequency counts, at <code>b</code> = 1 the frequency is fully divided by relative length, and 0.75 sits three quarters of the way along.</p>
+
+  <p>Neither number is a law. They are the values that worked well across the TREC collections where BM25 was developed - Lucene names the origin, Robertson and colleagues' Okapi work at TREC-3 - and they are a starting point for a corpus that resembles those. A corpus of product titles, where every document is eight words long, is not that corpus, and length normalisation is doing something quite different there than it does over news articles.</p>
+
+  <h3 id="ts-rank">PostgreSQL ranks too, and it ranks differently</h3>
+  <p>If your search lives in the database, the ranking functions are <code>ts_rank</code> and <code>ts_rank_cd</code>. The first <a href="https://www.postgresql.org/docs/current/textsearch-controls.html">"ranks vectors based on the frequency of their matching lexemes"</a>; the second computes a cover density ranking, which is similar except that the proximity of matching lexemes to each other is taken into account - useful when a two-word query should prefer documents where the words appear together.</p>
+
+  <p>Two differences from BM25 matter when you choose. First, the arguments are a document vector and a query, so there is no corpus-wide term statistic in the call at all: a rare word and a common one are not separated the way an IDF factor separates them, and if you need that distinction you build it yourself. Second, length normalisation is an explicit option rather than a fitted constant - a bit mask where 0 ignores document length, 1 divides by one plus the logarithm of the length, and 2 divides by the length, among others. What you do get for free is weights: four labels with a default of <code>{0.1, 0.2, 0.4, 1.0}</code>, which is how a title match is made to count for more than a body match.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each model is told</div>
+    <div class="fig-claim">One reads the corpus, the other reads only the document in hand.</div>
+    <div class="mermaid">
+flowchart LR
+  subgraph B["BM25"]
+    B1["term frequency&lt;br/&gt;in this document"] --> BS["score"]
+    B2["inverse document&lt;br/&gt;frequency - corpus wide"] --> BS
+    B3["this length against&lt;br/&gt;the corpus average"] --> BS
+  end
+  subgraph P["ts_rank"]
+    P1["frequency of matching&lt;br/&gt;lexemes in this vector"] --> PS["score"]
+    P2["weight labels&lt;br/&gt;A, B, C, D"] --> PS
+    P3["a normalisation flag&lt;br/&gt;you choose per query"] --> PS
+  end
+    </div>
+    <figcaption>Read the middle row of each box, because that is where the two models genuinely differ. BM25 takes a corpus-wide statistic, so a query term that is rare across your data automatically counts for more than a common one, with nobody configuring it. <code>ts_rank</code> is handed a vector and a query, so what it gives you instead is an explicit per-field weight you set yourself - a title label counting four times a body label under the defaults. Neither list is a subset of the other. <b>Choosing a ranker is choosing which of rarity and field importance you get for free.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: ranking costs, and it cannot be measured by looking</h2>
+
+  <p>The cost is stated bluntly in the documentation and applies to every implementation, not only PostgreSQL's: "Ranking can be expensive since it requires consulting the <code>tsvector</code> of each matching document, which can be I/O bound and therefore slow. Unfortunately, it is almost impossible to avoid since practical queries often result in large numbers of matches." Matching is set arithmetic over compact lists; ranking has to open every match. That is the argument for narrowing hard before scoring, and for treating a ranked result page as an expensive object that module 09 would happily cache.</p>
+
+  <p>The harder cost is that you cannot tell whether your ranking is good by reading it. Every change to <code>k1</code>, to <code>b</code>, to a field weight, to the stemmer, moves results for every query at once, and the engineer making the change is not a representative user searching for a representative thing. Relevance is measured with judged queries - a set of searches with known good answers, scored before and after - and a team that changes ranking without one is tuning by anecdote. That measurement is a small piece of work and it is the difference between a search that improves and one that oscillates.</p>
+
+  <div class="callout warn">
+    BM25 knows nothing about meaning. Every term in it is a count, so a document that says "reimbursement" is invisible to a search for "refund" no matter how well it answers the question, and the model cannot tell you it missed - it returns the documents it can see, ranked confidently. Synonym expansion, controlled vocabularies and vector retrieval all exist to attack that gap, and all of them add a second failure surface. Know which gap you have before you buy a mechanism: a ranking that puts the wrong matched document first is a scoring problem, and one that never matched the right document at all is a vocabulary problem, and they have no fix in common.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What does raising <code>k1</code> from 1.2 to 3.0 do to the ranking?</div>
+      <button class="q-opt">Repeating a term keeps helping for longer</button>
+      <button class="q-opt">Rare terms are weighted more heavily than before</button>
+      <button class="q-opt">Long documents are penalised more than before</button>
+      <button class="q-opt">Matching returns a larger set of documents</button>
+      <div class="q-fb"><code>k1</code> controls how quickly the term-frequency contribution saturates, so a larger value pushes the ceiling up and flattens the curve later - repetition buys more before it stops paying. Rarity is the IDF factor and is untouched by <code>k1</code>. Length is <code>b</code>'s department. And nothing in the scoring function changes which documents matched, because the set was fixed before any score was computed.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is ranking expensive in a way that matching is not?</div>
+      <button class="q-opt">Sorting the result set dominates the query cost</button>
+      <button class="q-opt">The score has to be recomputed on every index write</button>
+      <button class="q-opt">Each matching document's own vector must be read</button>
+      <button class="q-opt">Rare terms force a second pass over the whole index</button>
+      <div class="q-fb">Matching is arithmetic over compact postings lists, while ranking consults the vector of each matching document, which the documentation names as potentially I/O bound and almost impossible to avoid. Sorting a few hundred scores is trivial by comparison. Scores are computed per query rather than stored, since they depend on the query. And rarity is a statistic the index already holds, needing no extra pass.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, Module 11</b> is where the judged-query set belongs beside your other measurements, because a relevance change with no measurement is an outage you cannot see.</li>
+    <li><b>Behind you, <a href="1005-search-is-an-inverted-index-not-a-scan.html">search is an inverted index</a></b> produced the set this page orders, and its analyser decides which terms exist to be counted at all.</li>
+    <li><b>Behind you, <a href="0602-collections-need-pagination-not-a-limit.html">collections need pagination</a></b> is what a ranked result set of four hundred documents still owes its caller, and a cursor over it needs the order to be stable.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Write ten searches a real user of your product would type, and the document that should come first for each. Run them and count how many are right. That number is your baseline, and until you have it, every ranking change you make is unfalsifiable. Then ask the agent which of the ten failures are scoring problems and which are vocabulary problems.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://lucene.apache.org/core/9_11_1/core/org/apache/lucene/search/similarities/BM25Similarity.html">Lucene's <code>BM25Similarity</code></a> is the shortest authoritative statement of what <code>k1</code> and <code>b</code> control and what they default to, and it names the Okapi TREC-3 work the function comes from. <a href="https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity">Elasticsearch's similarity settings</a> confirm both defaults for the engine most readers will meet it in, and <a href="https://www.postgresql.org/docs/current/textsearch-controls.html">PostgreSQL's ranking controls</a> give the alternative model, its weights, its normalisation flags and its cost warning. For the derivation itself, Robertson and Zaragoza's <em>The Probabilistic Relevance Framework: BM25 and Beyond</em> (Foundations and Trends in Information Retrieval, 2009) is the standard treatment.</p>
+
+  <div class="pager">
+    <a href="1005-search-is-an-inverted-index-not-a-scan.html"><span class="dir">&larr; Previous</span><span class="ttl">Search is an inverted index, not a scan</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1006 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

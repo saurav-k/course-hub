@@ -346,6 +346,57 @@ TBD as lessons landing.
   [golang.org/x/sync/singleflight](https://pkg.go.dev/golang.org/x/sync/singleflight) for duplicate call
   suppression and its documented per-process scope.
 
+### Module 10 - Async work and search
+
+- Lesson 1000, the deferred request: [RFC 9110 &sect;15.3.3](https://www.rfc-editor.org/rfc/rfc9110#section-15.3.3)
+  for 202 Accepted, its deliberate noncommittal framing, the status-monitor recommendation and the
+  sentence the whole module rests on - there is no facility in HTTP for re-sending a status code from an
+  asynchronous operation. [Sidekiq - Best Practices](https://github.com/sidekiq/sidekiq/wiki/Best-Practices)
+  for the rule that a job payload carries identifiers rather than state, and
+  [Amazon SQS - standard queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues.html)
+  for redundant storage before the send is acknowledged.
+- Lesson 1001, delivery semantics: [Amazon SQS - visibility timeout](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html)
+  for the lease, the 30-second default, the 12-hour ceiling measured from first receipt, the heartbeat
+  advice and the in-flight quota; [RabbitMQ - Consumer Acknowledgements and Publisher Confirms](https://www.rabbitmq.com/docs/confirms)
+  for automatic against manual acknowledgement and the requeue on channel or connection close;
+  [Celery - Tasks](https://docs.celeryq.dev/en/stable/userguide/tasks.html) for `acks_late` stated as the
+  explicit choice between the two guarantees; and
+  [Sidekiq - Best Practices](https://github.com/sidekiq/sidekiq/wiki/Best-Practices) for the flat refusal
+  of an exactly-once guarantee.
+- Lesson 1002, retries: [AWS Architecture Blog - Exponential Backoff And Jitter](https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/)
+  for the clustering that backoff alone leaves behind and the reported halving of the call count at 100
+  contending clients, with the four strategies read from its published
+  [simulator](https://github.com/aws-samples/aws-arch-backoff-simulator) rather than from the post's
+  images; [Google SRE Book - Addressing Cascading Failures](https://sre.google/sre-book/addressing-cascading-failures/)
+  for retry amplification as a product across layers and the server-wide retry budget; and
+  [Amazon SQS - dead-letter queues](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html)
+  for `maxReceiveCount` and the standard-queue retention clock that does not reset on the move.
+- Lesson 1003, idempotent consumers: [Amazon SQS - exactly-once processing](https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/FIFO-queues-exactly-once-processing.html)
+  for the five-minute deduplication interval and the fact that it covers the `SendMessage` action rather
+  than delivery, read beside the visibility-timeout page's statement that there is still no absolute
+  guarantee against a second delivery. [Sidekiq - Best Practices](https://github.com/sidekiq/sidekiq/wiki/Best-Practices)
+  and [Celery - Tasks](https://docs.celeryq.dev/en/stable/userguide/tasks.html) for idempotence stated as
+  the job author's obligation.
+- Lesson 1004, the dual write: [microservices.io - Transactional outbox](https://microservices.io/patterns/data/transactional-outbox.html)
+  for the problem, the solution and - unusually for a pattern page - the residual weakness, which is that
+  the message relay might publish a message more than once.
+- Lesson 1005, the inverted index: [PostgreSQL - Introduction to Full Text Search](https://www.postgresql.org/docs/current/textsearch-intro.html)
+  for the three failings of pattern matching, the token-to-lexeme vocabulary and the `tsvector` /
+  `tsquery` pair; [PostgreSQL - GiST and GIN Index Types](https://www.postgresql.org/docs/current/textsearch-indexes.html)
+  for the inverted index as an entry per lexeme with a compressed location list, GIN as the preferred
+  type and GiST's lossiness; and [Elasticsearch - Near real-time search](https://www.elastic.co/docs/manage-data/data-store/near-real-time-search)
+  for the refresh that puts about a second between a write and a searchable document.
+- Lesson 1006, relevance: [Lucene - `BM25Similarity`](https://lucene.apache.org/core/9_11_1/core/org/apache/lucene/search/similarities/BM25Similarity.html)
+  for what `k1` and `b` control, their 1.2 and 0.75 defaults and the Okapi at TREC-3 origin;
+  [Elasticsearch - Similarity settings](https://www.elastic.co/docs/reference/elasticsearch/index-settings/similarity)
+  for the same two descriptions and defaults on the engine most readers meet BM25 in; and
+  [PostgreSQL - Controlling Text Search](https://www.postgresql.org/docs/current/textsearch-controls.html)
+  for `ts_rank`, `ts_rank_cd`, the `{0.1, 0.2, 0.4, 1.0}` weights, the normalisation bit flags and the
+  statement that ranking requires consulting the `tsvector` of each matching document. Robertson and
+  Zaragoza, *The Probabilistic Relevance Framework: BM25 and Beyond*, Foundations and Trends in
+  Information Retrieval 3(4), 2009, is named as the standard derivation; the module cites the
+  implementations for every number it states.
+
 ### Module 12 - Inter-service communication
 
 - Lesson 1200, the three couplings: [Apache Kafka - Introduction](https://kafka.apache.org/intro) for
