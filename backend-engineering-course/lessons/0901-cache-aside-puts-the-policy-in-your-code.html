@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Cache-aside puts the policy in your code - Backend Engineering</title>
+<meta name="description" content="Who fills the cache on a miss decides where the caching policy lives. Cache-aside leaves the application holding it and keeps the cache optional; read-through moves it behind the cache and makes the cache required.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Caching &middot; Lesson 0901</div>
+  <h1>Cache-aside puts the fill policy in your code, and that is what keeps the cache optional</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The read path, and who is responsible for a miss. &middot;
+    <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside">Azure Architecture Center - Cache-Aside pattern</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A read pattern answers exactly one question: <b>who goes to the database when the cache has nothing</b>.</li>
+      <li><b>Cache-aside</b> answers "the application", so the cache is a thing your code consults and can skip. It is also called lazy loading or a look-aside cache.</li>
+      <li><b>Read-through</b> answers "the cache", so the loader lives behind it and every read goes through it whether it hits or not.</li>
+      <li>The consequence is a dependency, not a style: <b>cache-aside degrades to a slow service and read-through degrades to no service</b>.</li>
+      <li>What it costs: cache-aside puts the same six lines at every call site, only fills on demand so a cold cache is a cold start, and leaves an entry stale until something removes it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The read path is decided before the write path, and constrains it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0900&lt;br/&gt;a second copy is&lt;br/&gt;worth having"] --> T["THIS PAGE&lt;br/&gt;who fills it&lt;br/&gt;on a miss"]
+  T --> A["Lesson 0902&lt;br/&gt;who writes to it&lt;br/&gt;and in what order"]
+  T --> B["Lesson 0904&lt;br/&gt;what removes an&lt;br/&gt;entry, and when"]
+  T --> C["Module 11&lt;br/&gt;degrading when a&lt;br/&gt;dependency is down"]
+  W["Module 09&lt;br/&gt;Caching"] -.- T
+    </div>
+    <figcaption>Two patterns, and picking one is picking whether the cache sits beside the read path or inside it. Everything later in this module - the write patterns, the invalidation, the failure modes - inherits that choice, because it decides who is holding the key when something has to be removed. <b>The fill policy is the first design decision a cache forces and the hardest one to move later.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the cache is a party, not a layer</h2>
+
+  <h3 id="three-parties">Three parties and one open question</h3>
+  <p>Draw a read and there are three participants: the application that wants an answer, the cache that might have one, and the store that certainly does. The application always talks to somebody. The store always ends up consulted when nothing is stored. The only genuinely open question is who makes that second call, and the two available answers give the two patterns their names.</p>
+
+  <p>Facebook's memcache is the reference implementation of the first answer, and the paper names the shape precisely: memcache is used as a <b>demand-filled look-aside cache</b>. Demand-filled means nothing is put in until somebody asks for it and finds it missing. Look-aside means the web server, not the cache, is the one that goes to the database and puts the answer back (<a href="https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf">Nishtala et al., NSDI 2013</a>, &sect;2). AWS documents the same pattern under a third name, lazy loading, and Microsoft under a fourth, cache-aside. Four names, one mechanism.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A miss, in full</div>
+    <div class="fig-claim">The application makes both calls, so a dead cache still returns an answer.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Application
+  participant C as Cache
+  participant D as Database
+  A->>C: get user-99
+  C-->>A: miss
+  A->>D: SELECT for id 99
+  D-->>A: the row
+  A->>C: set user-99 with a TTL
+  Note over A,C: the set is best effort&lt;br/&gt;a failure here is a future miss
+  A->>C: get user-99
+  C--xA: cache unreachable
+  A->>D: SELECT for id 99
+  Note over A,D: the same answer, slower&lt;br/&gt;rather than no answer
+    </div>
+    <figcaption>The same read twice: once as an ordinary miss, once with the cache refusing to answer at all. The two paths are identical from the third message onwards, which is the whole property being bought. AWS states the benefit as node failures not being fatal - a new empty node means increased latency while it refills, not an error. <b>Under cache-aside the cache is an optimisation the application is free to ignore, and that has to be true in the code as well as on the diagram.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: six lines, and where they go</h2>
+
+  <h3 id="cache-aside-code">Cache-aside, written out in both voices</h3>
+  <p>The pattern is short enough to write in full, and worth writing in full once because the interesting part is the error handling rather than the happy path. Every call to the cache is wrapped so that a failure is treated as a miss, never as an error to return.</p>
+
+  <div class="code-cap">users.go &middot; the read path, with the cache as an optional dependency</div>
+  <pre><code>func (r *UserRepo) Get(ctx context.Context, id int64) (User, error) {
+	key := fmt.Sprintf("user:v1:%d", id)
+
+	if raw, err := r.cache.Get(ctx, key); err == nil {
+		var cached User
+		if json.Unmarshal(raw, &amp;cached) == nil {
+			return cached, nil // hit
+		}
+	} // any cache error, and any unreadable entry, is simply a miss
+
+	user, err := r.db.LoadUser(ctx, id)
+	if err != nil {
+		return User{}, err // a store error IS an error
+	}
+
+	if raw, err := json.Marshal(user); err == nil {
+		_ = r.cache.Set(ctx, key, raw, 5*time.Minute)
+	}
+	return user, nil
+}</code></pre>
+
+  <div class="code-cap">users.py &middot; the same path, and the same rule about which errors count</div>
+  <pre><code>async def get_user(user_id: int) -> User:
+    key = f"user:v1:{user_id}"
+
+    try:
+        raw = await cache.get(key)
+    except CacheError:
+        raw = None                      # unreachable cache reads as a miss
+    if raw is not None:
+        return User.model_validate_json(raw)
+
+    user = await db.load_user(user_id)  # a store error propagates
+
+    try:
+        await cache.set(key, user.model_dump_json(), ex=300)
+    except CacheError:
+        pass                            # a failed set is one future miss
+    return user</code></pre>
+
+  <p>Three things in those twenty lines are the pattern rather than the language. The key is built from a stated shape, <code>user:v1:&lt;id&gt;</code>, which lesson 0903 will show is the whole basis of invalidation. The entry carries a lifetime, because without one nothing ever removes a wrong answer. And no error from the cache reaches the caller, because the moment one does, the optional dependency has become a required one and the property the figure above just proved is gone.</p>
+
+  <h3 id="read-through">Read-through, and what moves</h3>
+  <p>Read-through changes one thing: the loader is registered with the cache, and the application only ever calls the cache. On a miss the cache itself invokes the loader, stores the result, and returns it, so the application never learns whether it hit. Microsoft's guidance is explicit that this is a capability of the caching product rather than of the pattern - "for caches that don't provide this functionality, the applications that use the cache must maintain the data", which is precisely why cache-aside exists as a named pattern at all.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Who calls the store</div>
+    <div class="fig-claim">Moving the loader behind the cache also moves the cache onto the critical path.</div>
+    <div class="mermaid">
+flowchart TB
+  subgraph CA["Cache-aside"]
+    A1["Application"] --> C1["Cache"]
+    A1 --> D1["Store"]
+  end
+  subgraph RT["Read-through"]
+    A2["Application"] --> C2["Cache"]
+    C2 --> D2["Store"]
+  end
+  CA --- N1["Cache down&lt;br/&gt;= slower reads"]
+  RT --- N2["Cache down&lt;br/&gt;= no reads"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class N1 ok
+  class N2 bad
+    </div>
+    <figcaption>The two shapes differ by one arrow, and that arrow is the availability argument. Read-through buys real things - the fill policy is written once instead of at every call site, and no caller can forget the TTL - but it buys them by making the cache a component the read cannot route around. <b>Read-through is the better abstraction and the worse dependency, and which matters more is a property of your uptime target rather than of your taste.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: what demand-filling costs</h2>
+
+  <p>Filling only on demand has two costs and they arrive at different times. The everyday one is the miss penalty of lesson 0900: three trips instead of one, paid by whichever unlucky reader asked first. The occasional one is that a cache which has never been asked is empty, so a restart, a scale-out or a failover starts every entry at a miss. AWS names this cost on the other side of the ledger too: with lazy loading "only requested data is cached", so a demand-filled cache never wastes memory on the answers nobody wants.</p>
+
+  <p>The second cost is staleness, and it is the one this module spends three more pages on. A demand-filled entry is written once and then never touched again by the read path, so nothing about a later change to the underlying row reaches it. AWS states it plainly: with lazy loading alone, "data in the cache can become stale... because there are no updates to the cache when data is changed in the database." That is not a bug in the pattern. It is the pattern's boundary, and the two ways past it are a lifetime on every entry and a write path that removes entries, which are lessons 0902 and 0904.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of an entry</div>
+    <div class="fig-claim">Nothing on the read path ever moves an entry out of Fresh.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Absent
+  Absent --> Fresh: a read missed and filled it
+  Fresh --> Fresh: every later read is a hit
+  Fresh --> Stale: the row changed underneath it
+  Stale --> Stale: reads still hit, and are wrong
+  Stale --> Absent: TTL expired, or a write removed it
+  Fresh --> Absent: TTL expired, or evicted for memory
+    </div>
+    <figcaption>One entry under cache-aside, with every transition labelled by what causes it. The self-loop on Stale is the one to look at: reads keep succeeding, the hit rate stays high, the dashboard stays green, and the answers are wrong. Nothing in the read path can leave that state, because the read path has no way to know the row changed. <b>Cache-aside is a complete read design and an empty correctness design, and the rest of this module is the missing half.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    The failure worth rehearsing is the one where a cache-aside cache stops being optional by accident. It happens when the cache client is given the same timeout and retry policy as the database client: a cache that is slow rather than dead now adds its full timeout to every read, and a read path that was meant to degrade to "slower" degrades to "timed out" instead. Give the cache a timeout far shorter than the store's, treat exceeding it as a miss, and measure how the service behaves with the cache stopped - once, deliberately, before it happens on its own.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does a read-through cache change, compared with cache-aside?</div>
+      <button class="q-opt">Entries are written to the store as well as to the cache</button>
+      <button class="q-opt">Entries no longer need a lifetime, since fills are managed</button>
+      <button class="q-opt">Entries are loaded before any reader asks for them</button>
+      <button class="q-opt">The cache, not the application, is what calls the store</button>
+      <div class="q-fb">Read-through relocates the loader behind the cache, which is why the cache becomes an unavoidable hop. The first option describes write-through, a write pattern and the subject of lesson 0902; the second is wrong because a managed fill says nothing about when the answer stops being true; and the third describes priming or refresh-ahead, which is a different mechanism again.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Under cache-aside, what should a service do when the cache returns an error?</div>
+      <button class="q-opt">Return a 503, since a dependency of the read failed</button>
+      <button class="q-opt">Treat it as a miss and read from the store instead</button>
+      <button class="q-opt">Retry the cache until it answers or the deadline</button>
+      <button class="q-opt">Serve the last value this process saw for that key</button>
+      <div class="q-fb">A cache error and a cache miss have the same correct response, which is what makes the cache optional at all. Returning a 503 converts an optimisation into a required dependency; retrying spends the caller's deadline on the component that was supposed to be saving time; and serving a per-process last value is an unbounded in-memory cache nobody designed, with no lifetime and no invalidation.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0902-a-write-pattern-chooses-who-waits.html">a write pattern chooses who waits</a></b> takes the other half of the traffic and asks the same ownership question of it.</li>
+    <li><b>Behind you, <a href="0900-a-cache-is-a-bet-that-the-question-repeats.html">a cache is a bet that the question repeats</a></b> is where the three-trip miss penalty this page inherits was counted.</li>
+    <li><b>Ahead, <a href="0904-invalidation-buys-a-staleness-window.html">invalidation buys a staleness window</a></b> is the exit from the Stale self-loop in the last figure.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one cache read in your service and check what it does with a cache error rather than a cache miss. Ask the agent to write the failing test: cache client raising on every call, and the endpoint still returning the right answer with the right status.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Microsoft's <a href="https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside">Cache-Aside pattern</a> is the most careful short statement of the pattern, and its "problems and considerations" list is the part to read twice - lifetime, eviction, priming and consistency are four decisions the three-line version hides. Read it beside AWS's <a href="https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html">caching strategies</a>, which gives the same pattern as lazy loading with its advantages and disadvantages listed rather than argued.</p>
+
+  <div class="pager">
+    <a href="0900-a-cache-is-a-bet-that-the-question-repeats.html"><span class="dir">&larr; Previous</span><span class="ttl">A cache is a bet that the question repeats</span></a>
+    <a class="nxt" href="0902-a-write-pattern-chooses-who-waits.html"><span class="dir">Next &rarr;</span><span class="ttl">A write pattern chooses who waits</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0901 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
