@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A deadline is the caller's only defence - Backend Engineering</title>
+<meta name="description" content="A synchronous call has no natural end. A deadline is the caller's bound on waiting, it has to travel down the chain, and when it expires the two ends disagree about whether the work happened.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Inter-service communication &middot; Lesson 1202</div>
+  <h1>A deadline is the caller's only defence, and it is worth nothing unless it travels</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The failure model of the synchronous branch. &middot;
+    <a href="https://grpc.io/docs/guides/deadlines/">gRPC - Deadlines</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <b>deadline is a point in time</b> and a timeout is a duration. gRPC sets neither by default, so an unbounded client "can end up waiting for a response effectively forever".</li>
+      <li>An unbounded wait is not a slow request, it is a <b>held resource</b>, and enough of them is your service falling over because somebody else's did.</li>
+      <li>A deadline must <b>propagate</b> down the chain. gRPC sends it as a remaining timeout with the elapsed time already deducted, so no two machines have to agree on the clock.</li>
+      <li>When it expires the two ends disagree: client and server "make independent and local determinations of the success of the call, and their conclusions may not match".</li>
+      <li>What it costs: a retry after a deadline is a second attempt at work that may already have happened, and retries at every hop <b>multiply</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The call from the last page is only safe once something bounds it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1201&lt;br/&gt;one call is&lt;br/&gt;one HTTP/2 stream"] --> T["THIS PAGE&lt;br/&gt;the bound on&lt;br/&gt;how long it waits"]
+  T --> A["Lessons 1203, 1204&lt;br/&gt;the branch that does&lt;br/&gt;not wait at all"]
+  T --> B["Module 11&lt;br/&gt;retries, backoff&lt;br/&gt;and shedding"]
+  W["Lesson 1200&lt;br/&gt;the synchronous branch"] -.- T
+    </div>
+    <figcaption>Lesson 1201 built a stub that looks like a local function. This page is the difference between that stub and a local function, and it is the whole difference: a function returns, and a call may simply never do so. <b>Every synchronous call in a distributed system is a promise to stop waiting at some stated moment, and the only question is whether anybody stated it.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: waiting is a resource you are spending</h2>
+
+  <p>The instinct is to treat a slow dependency as a latency problem. It is not. While a request waits it is holding a goroutine or a thread, an open connection, a slot in a pool and whatever memory the half-finished work occupies. A dependency that has stopped answering does not make your service slow, it makes your service accumulate held requests until the pool is empty, at which point requests that need nothing from that dependency also start failing. The blast radius of one unavailable service becomes every service that waits on it.</p>
+
+  <p>The bound on that is a deadline, and gRPC is explicit that you do not get one for free: "by default, gRPC does not set a deadline which means it is possible for a client to end up waiting for a response effectively forever". The same is true of most HTTP clients. A default that is infinite is a default that only shows up in an incident.</p>
+
+  <p>The vocabulary is worth getting right because the two words are used interchangeably and mean different things. A deadline is an absolute point in time past which the caller is unwilling to wait. A timeout is a duration, converted to a deadline by adding it to now. The distinction matters the moment a call becomes a chain.</p>
+
+  <h2>2. The mechanism: the budget travels, the clock does not</h2>
+
+  <h3 id="deadline-propagation">Propagation</h3>
+  <p>A gateway that gives itself 500 milliseconds and then calls a service that gives itself 500 milliseconds has not set a bound at all - it has set two, and the inner one can outlive the outer. What is needed is one budget, spent as the request travels, so that a service asked to do work nobody is waiting for any more can stop instead of finishing.</p>
+
+  <p>gRPC does this by propagating the original deadline to outgoing calls, and it sends it as a timeout rather than as a timestamp, "converting the deadline to a timeout from which the already elapsed time is already deducted". That detail is the interesting one: two machines never have to agree on what time it is, only on how long is left, so clock skew cannot corrupt the budget.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One budget down a chain</div>
+    <div class="fig-claim">The fourth hop is refused before it starts, because nothing is left to spend.</div>
+    <div class="mermaid">
+flowchart LR
+  G["Gateway&lt;br/&gt;deadline 500ms&lt;br/&gt;spends 30ms"] --> A["Service A&lt;br/&gt;470ms left&lt;br/&gt;spends 90ms"]
+  A --> B["Service B&lt;br/&gt;380ms left&lt;br/&gt;spends 170ms"]
+  B --> C["Service C&lt;br/&gt;210ms left&lt;br/&gt;needs 260ms"]
+  C --> X["DEADLINE_EXCEEDED&lt;br/&gt;raised here, not&lt;br/&gt;waited out"]
+  classDef gone fill:var(--warn-soft),stroke:var(--warn)
+  class X gone
+    </div>
+    <figcaption>One budget, set once at the edge, arriving at each hop as whatever is left of it. Service C can see that it cannot finish inside the remaining time and fail immediately rather than doing 260 milliseconds of work for a caller that will have given up. Without propagation, C does the work, returns it, and everything upstream throws it away. <b>Propagation is what turns a deadline from the caller's private timer into a signal the whole chain can act on.</b></figcaption>
+  </figure>
+
+  <h3 id="termination-asymmetry">The two ends disagree</h3>
+  <p>Cancellation is available to both sides and takes effect immediately, and the gRPC documentation attaches a sentence to it that is easy to read past: "changes made before a cancellation are not rolled back". A cancelled call is not an undone call. The server may be most of the way through a database write when the client walks away.</p>
+
+  <p>This generalises into the property that makes the whole synchronous branch hard. Client and server "make independent and local determinations of the success of the call, and their conclusions may not match". The status list says the same thing about the specific case: DEADLINE_EXCEEDED "may be returned even if the operation has completed successfully". You have met this before under a different name - lesson 0605 called it the ambiguous failure, and the resolution is the same one.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Deadline reached, work done</div>
+    <div class="fig-claim">Both sides record the truth, and the two records contradict each other.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  participant D as Database
+  C->>S: Charge - deadline 200ms
+  S->>D: write the charge
+  Note over C: 200ms elapses
+  C--xS: gives up, DEADLINE_EXCEEDED
+  D-->>S: committed
+  S-->>C: reply, nobody listening
+  Note over S: server log reads&lt;br/&gt;one successful charge
+  Note over C: client log reads&lt;br/&gt;one failed charge
+    </div>
+    <figcaption>Nothing here is broken. The client waited exactly as long as it said it would, the server did exactly the work it was asked to do, and the database committed. The two conclusions differ because they were reached from different places at different moments. <b>A deadline does not stop the work - it only stops the waiting, which is why the retry that follows needs an idempotency key rather than optimism.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: retries make failures bigger before they make them smaller</h2>
+
+  <p>A deadline turns a hang into an error, and the obvious response to an error is to try again. Some of those retries are correct: gRPC says UNAVAILABLE "is most likely a transient condition, which can be corrected by retrying with a backoff", and immediately adds that "it is not always safe to retry non-idempotent operations". Both halves of that sentence are load-bearing.</p>
+
+  <p>The half that gets left out of designs is what happens when every layer retries. Retries compose multiplicatively, and the deepest service is where the product lands.</p>
+
+  <ol class="worked">
+    <li><b>Set the policy.</b> Each hop makes up to three attempts, which is one try plus two retries, and the chain is three hops deep.</li>
+    <li><b>Count what the deepest service sees.</b> One user request becomes 3 calls at the first hop, 3 &times; 3 = 9 at the second and 3 &times; 3 &times; 3 = <span class="keynum">27</span> at the third.</li>
+    <li><b>Read the failure mode.</b> The retries fire precisely when a service is already struggling, so the policy meant to survive a wobble delivers 27 times the load into it. That is the assumption to check: retries help against an isolated failure and harm against an overloaded one.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="fig-cap">Retry amplification</div>
+    <div class="fig-claim">One user request reaches the third service twenty-seven times.</div>
+    <svg class="chart" viewBox="0 0 640 220" role="img" aria-label="Bar chart of calls arriving at each hop when every hop makes up to three attempts: one user request, then 3, then 9, then 27 calls at the third hop">
+      <line class="axis" x1="70" y1="170" x2="610" y2="170"/>
+      <rect class="m-stat"  x="100" y="165" width="70" height="5"/>
+      <rect class="m-stat"  x="230" y="155" width="70" height="15"/>
+      <rect class="m-stat"  x="360" y="125" width="70" height="45"/>
+      <rect class="m-alarm" x="490" y="35"  width="70" height="135"/>
+      <text class="lbl-sm" x="135" y="158" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="265" y="148" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="395" y="118" text-anchor="middle">9</text>
+      <text class="lbl-sm" x="525" y="28"  text-anchor="middle">27</text>
+      <text class="lbl-sm" x="135" y="188" text-anchor="middle">user</text>
+      <text class="lbl-sm" x="265" y="188" text-anchor="middle">hop 1</text>
+      <text class="lbl-sm" x="395" y="188" text-anchor="middle">hop 2</text>
+      <text class="lbl-sm" x="525" y="188" text-anchor="middle">hop 3</text>
+      <text class="lbl-sm" x="340" y="210" text-anchor="middle">calls arriving, when every hop independently allows three attempts</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>calls at each hop</span><span><i class="sw-alarm"></i>the service already in trouble</span></div>
+    <figcaption>The arithmetic above, drawn. The shape is exponential in the depth of the chain, so the fix is not a smaller retry count but a policy owned in one place: a budget the whole request shares, retries only at the edge or only at the hop nearest the failure, and a circuit that opens rather than a counter that resets. <b>Three attempts is a reasonable policy exactly once per request, and unreasonable once per hop.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    A deadline that is never reached teaches you nothing, and one set to a round number nobody measured is usually either. The gRPC guidance is to start from "an educated guess based on what you know about your system - network latency, server processing time - validated by some load testing", and then to watch how often it fires. A deadline that never expires is not protecting anything, and one that expires under normal load is generating the ambiguous failures of the section above for no reason.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does gRPC propagate a deadline as a remaining timeout rather than as a timestamp?</div>
+      <button class="q-opt">A timestamp would be larger than the header limit allows</button>
+      <button class="q-opt">Downstream services are free to extend the timeout given</button>
+      <button class="q-opt">The two machines never have to agree on the wall clock</button>
+      <button class="q-opt">A timeout can be compressed and a timestamp cannot</button>
+      <div class="q-fb">Sending what is left rather than when to stop means clock skew between the two hosts cannot corrupt the budget, and the elapsed time is deducted before the value is sent. The second option describes the opposite of the design, and the first and fourth invent constraints the protocol does not have.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your client sees DEADLINE_EXCEEDED on a charge. What do you know about the charge?</div>
+      <button class="q-opt">Nothing - it may have committed after you stopped waiting</button>
+      <button class="q-opt">It failed, because the server returned an error status</button>
+      <button class="q-opt">It failed, because a cancelled call is rolled back</button>
+      <button class="q-opt">It succeeded, because the work outlives the deadline</button>
+      <div class="q-fb">The status is a statement about the waiting, not about the work, and it "may be returned even if the operation has completed successfully". The second reads the client's own local conclusion as the server's; the third assumes a rollback the documentation explicitly denies; and the fourth is as wrong as the second in the other direction.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1203-a-broker-turns-an-outage-into-a-backlog.html">a broker turns an outage into a backlog</a></b> is the branch where none of this arithmetic applies, because nobody is waiting.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the answer to the ambiguous outcome this page reproduces at the RPC layer.</li>
+    <li><b>Behind you, <a href="1200-a-call-a-queue-and-a-socket-are-three-couplings.html">a call, a queue and a socket</a></b> is where the multiplication of unavailability along a chain was first drawn.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one outbound call in your service and read what deadline it actually uses, including the client library's default. Ask the agent to work out what your service does when that dependency stops answering entirely - how many in-flight requests it can hold, and what fails first when it cannot hold any more.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://grpc.io/docs/guides/deadlines/">gRPC Deadlines</a> is two pages and carries the default, the propagation rule and the guidance on picking a value. Read it with <a href="https://grpc.io/docs/what-is-grpc/core-concepts/">core concepts</a> open at the RPC termination and cancellation paragraphs, and with <a href="https://grpc.io/docs/guides/status-codes/">the status code list</a>, which is where the retry advice and its caveat are stated.</p>
+
+  <div class="pager">
+    <a href="1201-grpc-is-a-contract-on-a-connection.html"><span class="dir">&larr; Previous</span><span class="ttl">gRPC is a contract on a connection</span></a>
+    <a class="nxt" href="1203-a-broker-turns-an-outage-into-a-backlog.html"><span class="dir">Next &rarr;</span><span class="ttl">A broker turns an outage into a backlog</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1202 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

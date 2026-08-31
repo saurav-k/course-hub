@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>gRPC is a contract on a connection - Backend Engineering</title>
+<meta name="description" content="gRPC is not a message format. It is a generated stub plus one mapping: one call becomes one HTTP/2 stream, messages are length-prefixed inside it, and the outcome arrives in trailers rather than in the HTTP status.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Inter-service communication &middot; Lesson 1201</div>
+  <h1>gRPC is not a message format - it is a generated stub and one mapping onto HTTP/2</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    What the schema of lesson 0402 becomes once it is put on a wire. &middot;
+    <a href="https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md">gRPC over HTTP/2 - the protocol mapping</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Protobuf gave you the <b>types</b>. A <code>service</code> block in the same file gives you the <b>methods</b>, and the compiler emits a stub whose body is a network call.</li>
+      <li>One RPC is <b>one HTTP/2 stream</b>. That is the whole mapping, and everything else about gRPC follows from it.</li>
+      <li>Messages inside the stream are <b>length-prefixed</b>: one flag byte, four length bytes, then the payload. That framing is what makes streaming a call shape rather than a workaround.</li>
+      <li>The outcome arrives in <b>trailers</b>, as <code>grpc-status</code>. The HTTP status is 200 even when the call failed.</li>
+      <li>What it costs: every hop must speak HTTP/2 and pass trailers through, so an intermediary that does neither breaks the call in a way the HTTP status will not show.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The schema stops being a file both ends read and becomes a function you call.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0402&lt;br/&gt;a .proto file is&lt;br/&gt;the source of the types"] --> T["THIS PAGE&lt;br/&gt;the same file is the&lt;br/&gt;source of the methods"]
+  T --> A["Lesson 1202&lt;br/&gt;the deadline that&lt;br/&gt;bounds the call"]
+  T --> B["Module 13&lt;br/&gt;the fleet this&lt;br/&gt;call is balanced across"]
+  W["Lesson 1200&lt;br/&gt;the synchronous branch"] -.- T
+    </div>
+    <figcaption>Module 04 stopped at the bytes: a schema that both ends compile, so neither can read a field the other did not write. This page takes the same file one step further, to the point where the schema also names the operations and the generated code stops being a struct and starts being a client. <b>gRPC is the schema-first argument applied to the call rather than to the payload.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: the stub is the product</h2>
+
+  <p>A <code>.proto</code> file that declares <code>service Payments { rpc Charge(ChargeRequest) returns (ChargeReply); }</code> compiles into two artefacts. On the server it is an interface with one method left for you to implement. On the client it is a concrete class with that method already written, whose body opens a stream, writes a serialised <code>ChargeRequest</code>, waits, and returns a <code>ChargeReply</code>. Neither side ever writes a URL, a status code or a JSON key.</p>
+
+  <p>That is the whole appeal and it is worth being precise about what it does and does not remove. It removes the hand-written client, which is where drift between two services usually starts, and it removes the question of what a field is called on the wire, which lesson 0405 showed is a question JSON answers badly. It does not remove the network, and the largest mistake teams make with gRPC is treating a stub that looks like a local function as if it were one. Lesson 1202 is entirely about that mistake.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four call shapes</div>
+    <div class="fig-claim">Streaming is a declared method shape, not a pattern built on top of unary calls.</div>
+    <div class="mermaid">
+flowchart LR
+  U1["Unary&lt;br/&gt;one request"] --> U2["one response"]
+  S1["Server streaming&lt;br/&gt;one request"] --> S2["a sequence&lt;br/&gt;of responses"]
+  C1["Client streaming&lt;br/&gt;a sequence&lt;br/&gt;of requests"] --> C2["one response"]
+  B1["Bidirectional&lt;br/&gt;two independent&lt;br/&gt;streams"] --> B2["read and write&lt;br/&gt;in any order"]
+    </div>
+    <figcaption>The gRPC documentation defines all four in the service definition itself, so the shape is part of the contract and the generated stub differs accordingly. The fourth is the one worth noticing: the two streams "operate independently", so a server may answer the third message before the first without anything being out of order. <b>Choosing a shape is a design decision made in the .proto file, not a client-side technique.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: one call, one stream</h2>
+
+  <h3 id="stream-mapping">The mapping onto HTTP/2</h3>
+  <p>gRPC maps one RPC onto one HTTP/2 stream, and uses the stream identifier as the identity of the call. The request opens with a HEADERS frame carrying <code>:method POST</code>, a path of the form <code>/Service-Name/method-name</code>, <code>content-type: application/grpc</code>, an optional <code>grpc-timeout</code>, and <code>te: trailers</code>. That last one is not decoration: the specification says it is there so that incompatible proxies can be detected.</p>
+
+  <p>Because HTTP/2 multiplexes many streams over one TCP connection, a client that makes a thousand concurrent calls opens one connection rather than a thousand, and none of the calls blocks another. This is the property that makes the streaming shapes practical, and it is inherited from the transport rather than invented by gRPC.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Message framing in a stream</div>
+    <div class="fig-claim">A length prefix is why one stream can carry a sequence rather than one blob.</div>
+    <svg class="chart" viewBox="0 0 640 200" role="img" aria-label="Byte layout of one gRPC message inside an HTTP/2 data stream: a one-byte compressed flag, a four-byte big-endian length, then the payload, repeated for each further message">
+      <text class="ttl" x="60" y="30">one HTTP/2 stream, one RPC</text>
+      <rect class="panel" x="60"  y="50" width="50"  height="46"/>
+      <rect class="m-stat" x="110" y="50" width="100" height="46"/>
+      <rect class="panel" x="210" y="50" width="220" height="46"/>
+      <rect class="panel" x="470" y="50" width="20"  height="46"/>
+      <rect class="m-stat" x="490" y="50" width="30"  height="46"/>
+      <rect class="panel" x="520" y="50" width="90"  height="46"/>
+      <line class="tick" x1="430" y1="50" x2="430" y2="96"/>
+      <line class="tick" x1="470" y1="50" x2="470" y2="96"/>
+      <text class="lbl-sm" x="450" y="78" text-anchor="middle">...</text>
+      <text class="lbl-sm" x="85"  y="120" text-anchor="middle">1 byte</text>
+      <text class="lbl-sm" x="160" y="120" text-anchor="middle">4 bytes</text>
+      <text class="lbl-sm" x="320" y="120" text-anchor="middle">the message</text>
+      <text class="lbl-sm" x="85"  y="140" text-anchor="middle">flag</text>
+      <text class="lbl-sm" x="160" y="140" text-anchor="middle">length, big-endian</text>
+      <text class="lbl-sm" x="320" y="140" text-anchor="middle">serialised protobuf</text>
+      <text class="lbl-sm" x="540" y="120" text-anchor="middle">the next message</text>
+      <text class="lbl-sm" x="335" y="176" text-anchor="middle">the reader knows where each message ends before it starts reading it</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>the four bytes that make streaming possible</span></div>
+    <figcaption>Protobuf is not self-delimiting, so a reader handed a stream of concatenated messages cannot tell where one ends. The four-byte length prefix supplies exactly that, and the flag byte says whether the payload was compressed under the connection's <code>grpc-encoding</code>. <b>Streaming is not a feature bolted onto the RPC - it is what a length prefix buys you for four bytes a message.</b></figcaption>
+  </figure>
+
+  <h3 id="trailers-status">The outcome is in the trailers</h3>
+  <p>The part that surprises people reading a packet capture for the first time: the HTTP response status is 200 on a failed call. The gRPC outcome lives in HTTP trailers, as <code>grpc-status</code> with a decimal code and <code>grpc-message</code> with a percent-encoded description, and the specification requires that status be sent in trailers even when it is OK.</p>
+
+  <p>Trailers are the right place because a server streaming a thousand rows does not know at header time whether the thousandth will fail. Header fields have to be sent before the body, and the outcome is not known until after it, so any protocol that streams has to carry the outcome behind the data or lie about it early.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A failing call, frame by frame</div>
+    <div class="fig-claim">Reading only the HTTP status reports success on a call that failed.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client stub
+  participant S as Server
+  C->>S: HEADERS - POST /Payments/Charge&lt;br/&gt;content-type application/grpc&lt;br/&gt;te trailers
+  C->>S: DATA - flag, length, ChargeRequest
+  S-->>C: HEADERS - :status 200
+  S-->>C: DATA - flag, length, partial reply
+  S-->>C: TRAILERS - grpc-status 8&lt;br/&gt;grpc-message RESOURCE_EXHAUSTED
+  Note over C: the stub raises&lt;br/&gt;the failure the trailer named
+    </div>
+    <figcaption>The response header goes out early and optimistically, because the server has not finished. The refusal arrives at the end, in the trailer, and the stub is what turns it into an error your code can catch. An intermediary that logs the HTTP status, or a client library that stops at it, records this call as a success. <b>For gRPC the HTTP status says the transport worked, and only the trailer says the call did.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the mapping is also the constraint</h2>
+
+  <p>Everything gRPC gives you comes from that mapping, and so does everything it demands. The path must carry HTTP/2 end to end, and every hop must forward trailers unchanged. Terminate the connection at a proxy that speaks HTTP/1.1 to the backend and the call cannot complete, because there is nowhere to put the status. This is the single most common gRPC deployment failure, and its symptom is a request that looks fine in the load balancer's access log.</p>
+
+  <p>The second constraint is the connection itself. A gRPC channel is long-lived by design, and gRPC's default load-balancing policy, <code>pick_first</code>, "does no load balancing but just tries each address it gets from the name resolver and uses the first one it can connect to". A client left on that default sends every call to one backend for the life of the process, which is invisible while traffic is low and becomes an unbalanced fleet exactly when it is not. Choosing <code>round_robin</code> or a look-aside balancer is a decision the client has to make, not something the network arranges for it.</p>
+
+  <div class="callout warn">
+    A browser cannot make a gRPC call. The mapping needs control over HTTP/2 framing and access to trailers, and the browser fetch API gives a page neither, which is why the browser story is gRPC-Web: a second, different mapping with a proxy that translates. If the caller you are designing for is a web front end, the schema still helps, but the transport on that hop is not the one this page describes.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A gRPC call fails with RESOURCE_EXHAUSTED. What HTTP status does a proxy see?</div>
+      <button class="q-opt">429, mapped from the gRPC code by the server</button>
+      <button class="q-opt">503, since the backend refused to do the work</button>
+      <button class="q-opt">500, since the call ended in a server error</button>
+      <button class="q-opt">200, since the status rides in a trailer</button>
+      <div class="q-fb">The mapping sends 200 in the response headers and puts the outcome in <code>grpc-status</code>, which the specification requires even when the outcome is OK. The other three are what a reader expects an HTTP-shaped protocol to do, and expecting them is exactly how a failing call gets logged as a success.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does each gRPC message carry a four-byte length before its payload?</div>
+      <button class="q-opt">To let the receiver reject an oversized message early</button>
+      <button class="q-opt">Because protobuf does not mark where a message ends</button>
+      <button class="q-opt">Because HTTP/2 requires a length on every DATA frame</button>
+      <button class="q-opt">To let a proxy route the call without parsing it</button>
+      <div class="q-fb">A serialised protobuf message is not self-delimiting, so a stream of them is unreadable without a framing marker - which is what makes the streaming call shapes possible at all. The first is a real side benefit rather than the reason; HTTP/2 frames carry their own lengths and do not align with message boundaries; and no proxy reads gRPC payloads.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1202-a-deadline-is-the-callers-only-defence.html">a deadline is the caller's only defence</a></b> is what stops the stub in this page from waiting forever on a server that will never answer.</li>
+    <li><b>Behind you, <a href="0402-schema-first-makes-the-contract-the-source.html">schema-first makes the contract the source</a></b> built the <code>.proto</code> file this page adds a <code>service</code> block to.</li>
+    <li><b>Also behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is the scheme gRPC deliberately does not use, which is why its own code list has to be learned separately.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one internal HTTP endpoint your team owns and write the <code>service</code> block that would replace it, choosing one of the four call shapes deliberately. Ask the agent what would break in your current deployment path - proxies, load balancers, ingress - if that call had to carry trailers from client to server.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-HTTP2.md">gRPC over HTTP/2</a> is the normative mapping and is short enough to read in one sitting: request headers, the length-prefixed framing, and the trailer rules are all on one page. Read it beside <a href="https://grpc.io/docs/what-is-grpc/core-concepts/">gRPC core concepts</a>, which defines the four call shapes and is where the streaming vocabulary comes from.</p>
+
+  <div class="pager">
+    <a href="1200-a-call-a-queue-and-a-socket-are-three-couplings.html"><span class="dir">&larr; Previous</span><span class="ttl">A call, a queue and a socket are three couplings</span></a>
+    <a class="nxt" href="1202-a-deadline-is-the-callers-only-defence.html"><span class="dir">Next &rarr;</span><span class="ttl">A deadline is the caller's only defence</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1201 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
