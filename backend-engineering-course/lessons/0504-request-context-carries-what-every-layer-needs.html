@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Request context carries what every layer needs - Backend Engineering</title>
+<meta name="description" content="A deadline, a cancellation signal, the caller's identity and a trace id are facts about one request. Threading them explicitly through every layer beats a global whose lifetime is the process.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; The layered service &middot; Lesson 0504</div>
+  <h1>Per-request facts belong to the request, so they are threaded through the layers rather than parked in a global</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The one argument every layer takes. &middot;
+    <a href="https://pkg.go.dev/context">Go - the context package</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Four things belong to one request and not to the process: a <b>deadline</b>, a <b>cancellation signal</b>, the caller's <b>identity</b>, and a <b>trace id</b>.</li>
+      <li>A global has the lifetime of the process, so parking a per-request fact in one is a <b>lifetime mismatch</b>, and concurrency turns it into a wrong answer rather than a crash.</li>
+      <li>Go states the shape: a context carries deadlines, cancellation signals and request-scoped values <b>across API boundaries</b>, and it is the first parameter of every call that needs it.</li>
+      <li>A deadline is an <b>instant, not a duration</b>, so every hop inherits what is left rather than restarting the clock.</li>
+      <li>What it costs: a value in a context is <b>invisible in the signature</b>, so the mechanism that carries a trace id will happily carry a required argument nobody can see.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One argument crosses every boundary the module has just built.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0501 to 0503&lt;br/&gt;three layers, each with&lt;br/&gt;a contract of its own"] --> T["THIS PAGE&lt;br/&gt;the per-request facts&lt;br/&gt;that cross all three"]
+  T --> A["Lesson 0505&lt;br/&gt;why this is threaded&lt;br/&gt;rather than injected"]
+  T --> B["Module 11&lt;br/&gt;timeouts, logs and&lt;br/&gt;graceful shutdown"]
+  T --> C["Module 12&lt;br/&gt;the trace continuing&lt;br/&gt;into the next service"]
+  W["Module 05&lt;br/&gt;the layered service"] -.- T
+    </div>
+    <figcaption>Three boundaries exist now, and each one was defined by what it refuses to let across. This page is about the small set of facts that have to cross all three anyway, and about why they travel as an argument rather than as ambient state. The whole of resilience and observability later depends on this being right. <b>The deadline is the only thing every layer needs and no layer owns.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: match the lifetime to the fact</h2>
+
+  <p>A process-level global lives as long as the process. A request lives for milliseconds, and a hundred of them are alive at once. Putting a per-request fact in a process-level place is a mismatch of lifetimes, and the symptom is not a crash: it is one request reading another request's user identity, on a busy afternoon, in a log line nobody thought to doubt.</p>
+
+  <p>So the fact travels with the work. Go's context package names the four things worth carrying and states the rule directly: a context carries deadlines, cancellation signals and other request-scoped values across API boundaries and between processes. Python's <code>contextvars</code> reaches the same destination from the other side, by giving each concurrent flow its own copy rather than one shared slot. Its documentation is explicit that stateful context managers should use context variables instead of <code>threading.local()</code>, so that state does not bleed into other code in concurrent use, and an asyncio task copies the current context and runs its coroutine in the copy.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A deadline reaching the driver</div>
+    <div class="fig-claim">One cancellation ends work in four places at once.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant H as Controller
+  participant S as Service
+  participant R as Repository
+  participant D as Database
+  C->>H: POST /orders/ord-7/cancel
+  H->>H: derive a context with a 2s deadline
+  H->>S: Cancel(ctx, id, reason)
+  S->>R: ByID(ctx, id)
+  R->>D: QueryContext(ctx, SELECT ...)
+  C--xH: client disconnects at 1.4s
+  H->>S: context cancelled
+  S->>R: cancellation observed
+  R->>D: the driver cancels the running query
+  D-->>R: query terminated - the connection is returned
+    </div>
+    <figcaption>The same context object is held by four layers, so one cancellation unwinds all of them without any layer knowing about the others. The last step is the one that pays for the whole mechanism: without it the client is gone and the database is still working, which is how a service under load fills its connection pool with queries nobody is waiting for. <b>Cancellation is only useful if it reaches the thing that is actually slow.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="request-context">What a context is</h3>
+  <p>An immutable value with a cancellation signal attached. You never modify one. You derive a new one from it - with a deadline, with a cancel function, with a value - and pass the derived one down. Because it is immutable and derived rather than mutated, the same context can be handed to work running concurrently: Go's documentation states that contexts are safe for simultaneous use by multiple goroutines. That property is what lets a handler fan out to three calls and cancel all of them from one place.</p>
+
+  <p>Go also states the two conventions that make it readable: the context is the first parameter, named <code>ctx</code>, and it is not stored inside a struct type. Both are worth following outside Go. First-parameter means a reader can see at a glance which functions are request-scoped. Not-in-a-struct means the context cannot outlive the request that created it by being captured in something that lives longer.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A context's three ends</div>
+    <div class="fig-claim">Every derived context finishes once, and the reason is readable.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Active: derived from the parent context
+  Active --> Cancelled: cancel called or the client disconnected
+  Active --> DeadlineExceeded: the instant passed
+  Active --> Done: the work finished first
+  Cancelled --> [*]
+  DeadlineExceeded --> [*]
+  Done --> [*]
+    </div>
+    <figcaption>A context is in exactly one of these states and moves out of Active exactly once. The two failure ends are distinguishable on purpose: a cancelled request means nobody is waiting any more, while an exceeded deadline means the work was too slow, and those call for different responses from the layer that notices. Deriving a context from a parent means the parent's ending is inherited by every child. <b>A layer that treats every ending as an error loses the difference between nobody waiting and too slow.</b></figcaption>
+  </figure>
+
+  <h3 id="deadline-propagation">A deadline is an instant</h3>
+  <p>This is the detail that decides whether propagation works. A deadline is a point in time, not a number of seconds, so a call three layers down inherits what remains rather than starting a fresh two seconds of its own. Three hops each granting themselves the same duration is a budget silently multiplied by three, and it is why a client's timeout and a server's timeout so often disagree about who gave up first.</p>
+
+  <div class="code-cap">the deadline in two voices &middot; both derive a bounded scope and both propagate downward</div>
+<pre><code>// Go: a deadline is a time, and the derived context carries what is left of it.
+ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+defer cancel()                       // release the timer whatever happens
+err := h.orders.Cancel(ctx, id, reason)
+
+# Python: the timeout cancels the running task and surfaces as TimeoutError.
+async with asyncio.timeout(2.0):
+    await orders.cancel(order_id=order_id, reason=reason)
+</code></pre>
+
+  <h3 id="trace-context">The identity that survives the network</h3>
+  <p>The trace id is the one per-request fact that has to mean the same thing in a service you did not write, which is why it is standardised rather than invented per team. The W3C Trace Context recommendation defines a <code>traceparent</code> field with four parts: a version, a 32-character trace id, a 16-character parent span id, and a two-character flags field whose only defined bit says whether the caller sampled the trace. All-zero values for the trace id and the parent id are invalid, and a vendor must ignore a <code>traceparent</code> whose trace id is invalid. A companion <code>tracestate</code> field carries vendor-specific name and value pairs alongside it.</p>
+
+  <div class="code-cap">one header field &middot; version, trace id, parent span id, flags</div>
+<pre><code>traceparent: 00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01
+             ^   ^                                ^                ^
+             |   32 hex, the whole trace          16 hex, caller   sampled
+             version                              span
+</code></pre>
+
+  <figure class="diagram">
+    <div class="fig-cap">Context or parameter</div>
+    <div class="fig-claim">A value the function needs to work belongs in the signature.</div>
+    <div class="mermaid">
+flowchart TB
+  Q["A value arrived with the request. Where does it go?"] --> A["Does the function's&lt;br/&gt;decision depend on it?"]
+  A -->|"yes"| P["A named parameter&lt;br/&gt;order id, reason,&lt;br/&gt;the page size"]
+  A -->|"no"| B["Does it have to cross&lt;br/&gt;an API or a process?"]
+  B -->|"yes"| C["The context&lt;br/&gt;deadline, cancellation,&lt;br/&gt;trace id, caller identity"]
+  B -->|"no"| L["A local variable&lt;br/&gt;in the layer that&lt;br/&gt;actually uses it"]
+  classDef good fill:var(--ok-soft),stroke:var(--ok)
+  class P,C,L good
+    </div>
+    <figcaption>Two questions decide it, and the first one is the one that matters. A value the rule reads is an input to the rule, and hiding an input in a context makes a function whose real signature is not the one written down. The context is for facts about the request rather than arguments to the work. <b>If removing it changes the answer, it is a parameter.</b></figcaption>
+  </figure>
+
+  <h2>3. What threading costs</h2>
+
+  <p>Every function that needs the request now has an extra parameter, and so does every function between it and the edge, including ones that use nothing from it. That is real noise and it is the honest price: the alternative is ambient state, which removes the parameter by making the dependency invisible instead of absent.</p>
+
+  <p>The subtler cost is the value bag. A context can hold anything, and anything held there is missing from the signature, so a required argument can enter through the back door and no compiler will object. Go's documentation draws the line explicitly: use context values only for request-scoped data that transits processes and APIs, not for passing optional parameters to functions. A trace id qualifies. A page size does not.</p>
+
+  <div class="callout warn">
+    Two failures ship together and both look tidy. Storing a context in a struct field lets it outlive the request, so a background worker built from that struct is holding a cancellation signal that fired minutes ago, or one that will never fire. Reaching for an ambient variable instead of a parameter - a context variable, a thread local, a framework's request-scoped singleton - passes review because the call sites get shorter, and it converts a compile error into a runtime one that only appears when the code is called from somewhere with no request in flight. The rule that avoids both is the boring one: pass it explicitly, to each function that needs it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why is a request deadline carried as an instant rather than a duration?</div>
+      <button class="q-opt">A duration is cheaper to serialise</button>
+      <button class="q-opt">Each hop inherits the time left</button>
+      <button class="q-opt">An instant is easier for a client</button>
+      <button class="q-opt">A duration cannot be cancelled</button>
+      <div class="q-fb">An instant is subtractive: three layers deep, what remains is what remains. A duration restarts at every hop, so a two-second budget becomes six seconds across three layers. Serialisation cost is irrelevant at this size, clients find durations easier if anything, and cancellation is a separate signal from either representation.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">What does Go's documentation say a context's values are for?</div>
+      <button class="q-opt">Optional parameters a call may omit</button>
+      <button class="q-opt">Any state a handler wants shared</button>
+      <button class="q-opt">Configuration read once at start-up</button>
+      <button class="q-opt">Request-scoped data crossing APIs</button>
+      <div class="q-fb">The documentation says to use context values only for request-scoped data that transits processes and APIs, and names optional parameters as the thing not to use them for. Shared handler state and start-up configuration both have the process's lifetime rather than the request's, so neither belongs in a value that dies with the request.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0505-dependency-direction-is-the-design.html">dependency direction is the design</a></b> closes the module by asking why this is threaded through calls while a repository is injected at start-up.</li>
+    <li><b>Back to <a href="0503-the-repository-hides-the-store-behind-a-contract.html">the repository hides the store behind a contract</a></b>, where every method took a <code>ctx</code> that this page has now spent.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one outbound call in your service and follow the deadline backwards to whoever set it. Ask the agent what happens when the client's timeout is shorter than yours, and which of the two of you is holding a database connection for work nobody will read.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://pkg.go.dev/context">Go's <code>context</code> package documentation</a> is short and every sentence in it is a rule, including the two conventions this page borrows and the restriction on what values are for. <a href="https://www.w3.org/TR/trace-context/">W3C Trace Context</a> defines the <code>traceparent</code> and <code>tracestate</code> fields exactly, and its rules about invalid values are the reason a trace can survive a hop through a service written by somebody else.</p>
+
+  <div class="pager">
+    <a href="0503-the-repository-hides-the-store-behind-a-contract.html"><span class="dir">&larr; Previous</span><span class="ttl">The repository hides the store behind a contract</span></a>
+    <a class="nxt" href="0505-dependency-direction-is-the-design.html"><span class="dir">Next &rarr;</span><span class="ttl">Dependency direction is the design</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0504 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

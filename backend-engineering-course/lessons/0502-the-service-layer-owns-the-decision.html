@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The service layer owns the decision - Backend Engineering</title>
+<meta name="description" content="Business rules belong where neither the transport nor the store can reach them. That placement is what makes a rule portable across transports and reachable by a test that needs neither.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; The layered service &middot; Lesson 0502</div>
+  <h1>A rule that neither the transport nor the store can reach is a rule you can move and a rule you can test</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Where the decision goes, and why there. &middot;
+    <a href="https://docs.nestjs.com/providers">NestJS - Providers</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The service layer is where the <b>decision</b> lives: the rule that says whether the thing being asked for is allowed and what it means.</li>
+      <li>It is defined by what it <b>cannot</b> reach. No request type above it, no driver type below it, and no global anything.</li>
+      <li>That placement buys two properties at once: the rule is <b>portable</b> across transports and <b>reachable</b> by a test that starts nowhere near a socket.</li>
+      <li>A service <b>names every outcome it can produce</b>, which is what gives the controller a table to map and the caller something to decide on.</li>
+      <li>What it costs: a decision spanning two writes needs a transaction, and a transaction is a store concept the layer has just refused to import.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The middle layer is the one both neighbours are kept out of.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0501&lt;br/&gt;the controller hands&lt;br/&gt;over an intent"] --> T["THIS PAGE&lt;br/&gt;the layer that decides,&lt;br/&gt;and what it may import"]
+  T --> A["Lesson 0503&lt;br/&gt;the store contract&lt;br/&gt;the decision calls"]
+  T --> B["Module 08&lt;br/&gt;transactions, when one&lt;br/&gt;decision spans two writes"]
+  T --> C["Module 12&lt;br/&gt;a second transport&lt;br/&gt;calling the same rule"]
+  W["Module 05&lt;br/&gt;the layered service"] -.- T
+    </div>
+    <figcaption>The controller has produced an intent with no HTTP in it. This page is about the code that receives that intent and decides, and about the two neighbours it is deliberately kept away from. Everything the module says afterwards is about serving this layer without contaminating it. <b>The service layer is defined by what it cannot reach, not by what it contains.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a rule needs a room with two locked doors</h2>
+
+  <p>Take one rule: an order that has shipped cannot be cancelled. It is a statement about orders. It is true when the request arrived over HTTP, true when it arrived from a queue consumer replaying a message, and true in a batch job with no network at all. Nothing about it refers to a status code or to a table.</p>
+
+  <p>So the rule has a natural home, and the home is a room with two locked doors: nothing above it may pass a transport type in, and nothing below it may pass a storage type up. Both locks matter, and the second one is the one people forget. A service that receives a database row and reads its columns has a rule that cannot run without a database, which means it cannot run in a test without one either. NestJS treats a service as a provider, an ordinary class the container hands its collaborators to, and that framing is the whole point: the class is ordinary, and everything it needs arrives as an argument rather than being fetched.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A lifecycle the service owns</div>
+    <div class="fig-claim">Every arrow here is a rule, and no arrow mentions a transport.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Draft
+  Draft --> Placed: place
+  Placed --> Shipped: ship
+  Placed --> Cancelled: cancel
+  Shipped --> Refunded: refund
+  Shipped --> Cancelled: refused - already shipped
+  Cancelled --> [*]
+  Refunded --> [*]
+    </div>
+    <figcaption>The states an order can be in and the transitions that are permitted between them. The crossed transition from Shipped to Cancelled is the rule this page keeps returning to, and the diagram is the reason it belongs here: a state machine about orders is not a statement about requests or rows. Draw this for your own domain and you have drawn the service layer. <b>If a transition can be named without naming a protocol or a table, it belongs in the service layer.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="service-layer">What the service layer is</h3>
+  <p>A service is a plain object holding the collaborators it was given, exposing one method per operation the application supports. Each method takes the values the intent carried, loads what it needs through a contract it declared, applies the rule, and reports a named outcome. Spring's dependency injection reference states the shape from the container's side: an object defines its dependencies through constructor arguments and the container supplies them, which is the inverse of the object going and finding them itself. That inversion is exactly the second lock. A collaborator that arrives as an argument can be replaced. One that is imported cannot.</p>
+
+  <p>The practical test is an import list. A service that imports its own domain types, the interfaces it declared, and a clock is inside the room. A service that imports a driver's result type, a framework's request type, or a module-level connection has already lost the property, whatever the directory says.</p>
+
+  <div class="code-cap">the decision in two voices &middot; both take collaborators as arguments and name the outcome</div>
+<pre><code>// Go: the rule is four lines, and none of them is about HTTP or SQL.
+func (s *OrderService) Cancel(ctx context.Context, id OrderID, reason string) error {
+    order, err := s.orders.ByID(ctx, id)      // s.orders is an interface
+    if err != nil {
+        return err
+    }
+    if order.State == Shipped {
+        return ErrAlreadyShipped              // a named outcome, not a status
+    }
+    order.State, order.CancelledAt = Cancelled, s.clock.Now()
+    return s.orders.Save(ctx, order)
+}
+
+# Python: the same rule, with the collaborators arriving in __init__.
+class OrderService:
+    def __init__(self, orders: Orders, clock: Clock) -&gt; None:
+        self._orders, self._clock = orders, clock
+
+    async def cancel(self, order_id: OrderID, reason: str) -&gt; None:
+        order = await self._orders.by_id(order_id)
+        if order.state is State.SHIPPED:
+            raise AlreadyShipped(order_id)
+        await self._orders.save(replace(order, state=State.CANCELLED))
+</code></pre>
+
+  <h3 id="domain-error">Naming every outcome</h3>
+  <p>The method above returns <code>ErrAlreadyShipped</code> rather than a 409 or a boolean. That is a deliberate third thing, and it is what makes the two locked doors useful rather than merely tidy. A named outcome is a value in the service's own vocabulary, so the controller can map it to a status, a queue consumer can map it to a dead-letter decision, and a test can assert on it without parsing a message. A boolean loses the reason. A status code puts HTTP back in the room. A raw string forces every caller to match on prose that somebody will reword.</p>
+
+  <p>The set of named outcomes is part of the contract, and it should be enumerable: a reader should be able to open the package and see every way the operation can end. That is what lets the mapping table on the previous page be complete rather than a default with exceptions.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What may cross inward</div>
+    <div class="fig-claim">Two doors, and the lower one is the one usually left open.</div>
+    <div class="mermaid">
+flowchart TB
+  H["Controller&lt;br/&gt;http.Request, header maps,&lt;br/&gt;framework context"] -->|"passes intent values only"| S
+  S["Service layer&lt;br/&gt;domain types, declared interfaces,&lt;br/&gt;a clock it was handed"]
+  R["Repository implementation&lt;br/&gt;sql.Rows, driver errors,&lt;br/&gt;a query builder"] -->|"passes domain types only"| S
+  H -.->|"blocked"| X1["a request object&lt;br/&gt;reaching the rule"]
+  R -.->|"blocked"| X2["a driver error&lt;br/&gt;reaching the rule"]
+  classDef blocked fill:var(--warn-soft),stroke:var(--warn)
+  class X1,X2 blocked
+    </div>
+    <figcaption>Both neighbours hand values across and neither hands its own types across. The upper door is the one teams guard, because a request object in a service is visibly wrong. The lower one is the leak that survives review: a driver error carrying a constraint name is domain knowledge in a foreign vocabulary, and matching on it puts the store back inside the rule. <b>A layer with one locked door is portable in one direction and testable in neither.</b></figcaption>
+  </figure>
+
+  <h2>3. What the placement costs</h2>
+
+  <p>Two costs, and the second is genuinely unresolved at this layer. The first is dilution: once a service layer exists, methods that do nothing but forward a call to the repository accumulate in it, and a file of thirty pass-through methods is indirection with no decision in it. The cure is to notice that a pass-through has no rule and let the controller call the repository contract directly, rather than to keep the method for symmetry.</p>
+
+  <p>The second is the transaction. A decision that reads, decides and writes is fine. A decision that must write to two places atomically needs a transaction, and a transaction is a concept the service layer has just refused to import. Every solution to this is a compromise: a unit-of-work object passed in as another collaborator, a transaction started by the controller and threaded down, or a repository method coarse enough to contain both writes. Module 08 owns the mechanism and this course states the trade-off rather than pretending the boundary is free.</p>
+
+  <div class="callout warn">
+    The tempting shortcut is to let the service catch the store's own errors and reinterpret them - matching on a unique-constraint violation to mean "this order already exists". It works, and it quietly moves a rule into the store's vocabulary, where it is expressed as a constraint name that a migration can rename with nothing failing until production. If a condition is a rule, check it as a rule. If you rely on the constraint for correctness under concurrency, which is often right, then the translation belongs in the repository implementation, on the other side of the door, and the service sees a named outcome like every other.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which import inside a service is the strongest sign the boundary failed?</div>
+      <button class="q-opt">A domain type from the same package</button>
+      <button class="q-opt">An interface the service declared</button>
+      <button class="q-opt">A clock the constructor was given</button>
+      <button class="q-opt">A driver's row-scanning result type</button>
+      <div class="q-fb">A driver type means the rule cannot run without that driver, so it is neither portable nor testable without a database. The other three are exactly what the room is meant to contain: its own vocabulary, the contracts it declared, and a collaborator handed to it rather than fetched.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why should a service name every outcome it can produce?</div>
+      <button class="q-opt">So the store can choose a status code</button>
+      <button class="q-opt">So every caller has one table to map</button>
+      <button class="q-opt">So the repository interface stays smaller</button>
+      <button class="q-opt">So the controller is no longer needed</button>
+      <div class="q-fb">Named outcomes are what let an HTTP controller, a queue consumer and a test each interpret the same result in their own terms. The first option puts HTTP back below the boundary, the third confuses outcomes with the store contract, and the fourth removes the layer that does the mapping rather than serving it.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0503-the-repository-hides-the-store-behind-a-contract.html">the repository hides the store behind a contract</a></b> builds the lower door properly, so the service can load without importing a driver.</li>
+    <li><b>Back to <a href="0501-the-controller-translates-transport-into-intent.html">the controller translates transport into intent</a></b> for the table that turns these named outcomes into statuses.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Draw the state machine for one entity in your own system, on paper, without opening the code. Then ask the agent to find where each of those transitions is actually enforced. Transitions enforced in three places, or in a database trigger, are the ones this page is about.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.nestjs.com/providers">NestJS on providers</a> is the clearest short statement that a service is an ordinary class whose collaborators are supplied rather than found, and <a href="https://docs.spring.io/spring-framework/reference/core/beans/dependencies/factory-collaborators.html">Spring's dependency injection reference</a> gives the same idea with the argument for constructor injection in full, including why it yields components that are never handed back half-initialised.</p>
+
+  <div class="pager">
+    <a href="0501-the-controller-translates-transport-into-intent.html"><span class="dir">&larr; Previous</span><span class="ttl">The controller translates transport into intent</span></a>
+    <a class="nxt" href="0503-the-repository-hides-the-store-behind-a-contract.html"><span class="dir">Next &rarr;</span><span class="ttl">The repository hides the store behind a contract</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0502 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -130,6 +130,32 @@ TBD as lessons landing.
   [ProtoJSON mapping](https://protobuf.dev/programming-guides/json/) for the name-keyed rules and the
   unknown-field default that inverts the binary one.
 
+### Module 05 - The layered service
+
+- Lesson 0500, the seam: [The Go specification, Interface types](https://go.dev/ref/spec#Interface_types) for an
+  interface as a type set, and [Implementing an interface](https://go.dev/ref/spec#Implementing_an_interface) for the
+  rule that implementation is membership rather than a declaration, which is what lets a consumer own the contract.
+- Lesson 0501, mapping an outcome onto a status: [RFC 9110 &sect;15](https://www.rfc-editor.org/rfc/rfc9110#section-15),
+  and in particular [400](https://www.rfc-editor.org/rfc/rfc9110#name-400-bad-request) against
+  [422](https://www.rfc-editor.org/rfc/rfc9110#name-422-unprocessable-content) for the syntax-against-semantics split,
+  [409](https://www.rfc-editor.org/rfc/rfc9110#name-409-conflict) for a conflict with current state, and
+  [500](https://www.rfc-editor.org/rfc/rfc9110#name-500-internal-server-error) for an unexpected condition.
+  [NestJS on controllers](https://docs.nestjs.com/controllers) for the framework statement of the responsibility.
+- Lesson 0502, the service layer: [NestJS on providers](https://docs.nestjs.com/providers) for a service as an ordinary
+  class whose collaborators are supplied, and
+  [Spring's dependency injection reference](https://docs.spring.io/spring-framework/reference/core/beans/dependencies/factory-collaborators.html)
+  for the constructor-injection argument, including components never handed back half-initialised.
+- Lesson 0503, the repository: [Spring Data repository core concepts](https://docs.spring.io/spring-data/jpa/reference/repositories/core-concepts.html)
+  for the store-agnostic interface extended by technology-specific ones, and [Go's database/sql](https://pkg.go.dev/database/sql)
+  as the counter-example whose generic interface is generic over drivers rather than over stores.
+- Lesson 0504, request context: [Go's context package](https://pkg.go.dev/context) for what a context carries, the
+  first-parameter and never-in-a-struct conventions, and the restriction of values to request-scoped data that transits
+  processes and APIs. [W3C Trace Context](https://www.w3.org/TR/trace-context/) for the four fields of `traceparent`,
+  the invalid all-zero values, and `tracestate`. [Python contextvars](https://docs.python.org/3/library/contextvars.html)
+  and [asyncio tasks](https://docs.python.org/3/library/asyncio-task.html) for the copied-context and timeout behaviour.
+- Lesson 0505, dependency direction: the Spring and NestJS references above for the inversion itself, and the Go
+  specification for what changes when interface satisfaction needs no declaration.
+
 ### Module 06 - API design
 
 - Lesson 0600, the promise: [Stripe - API upgrades](https://docs.stripe.com/upgrades) for the published
@@ -164,6 +190,67 @@ TBD as lessons landing.
   [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header)
   for the 400 / 409 / 422 refusals. **That draft expired in April 2026 rather than shipping**, which is
   why lesson 0605 treats the header as a convention and cites Stripe for the practice.
+
+### Module 07 - Auth and security
+
+- Lesson 0700, the two questions: [RFC 9110 &sect;11](https://www.rfc-editor.org/rfc/rfc9110#section-11)
+  for the challenge-response framework, &sect;11.5 for the protection space and the automatic
+  re-presentation of credentials inside it, [&sect;15.5.2](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.2)
+  and [&sect;15.5.4](https://www.rfc-editor.org/rfc/rfc9110#section-15.5.4) for the exact 401 and 403
+  wording including the permission to answer 404 instead;
+  [OWASP Authorization Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html)
+  for deny-by-default and validating permission on every request;
+  [OWASP Password Storage Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html)
+  for the Argon2id parameters that make authentication deliberately slow; and the
+  [OWASP Top 10:2021](https://owasp.org/Top10/2021/A00_2021_Introduction/) factors tables for the
+  occurrence chart, with the methodology note that eight of the ten categories were ranked from data
+  and two from a practitioner survey.
+- Lesson 0701, sessions: [OWASP Session Management Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Session_Management_Cheat_Sheet.html)
+  for the 64-bit entropy floor, the requirement to regenerate the id after any privilege change, the
+  idle and absolute timeouts and the both-sides invalidation rule;
+  [RFC 6265 &sect;4.1.2](https://www.rfc-editor.org/rfc/rfc6265#section-4.1.2) for the attributes,
+  [&sect;8.5](https://www.rfc-editor.org/rfc/rfc6265#section-8.5) for the absence of isolation by port
+  or scheme and [&sect;8.6](https://www.rfc-editor.org/rfc/rfc6265#section-8.6) for the absence of
+  integrity across sibling domains; and [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie)
+  for what `HttpOnly` does and does not stop.
+- Lesson 0702, self-contained tokens: [RFC 7519](https://www.rfc-editor.org/rfc/rfc7519) &sect;3 for the
+  three-part serialisation, &sect;4.1 for the registered claims and &sect;11.1 for the statement that
+  contents cannot be relied upon unless cryptographically secured;
+  [RFC 8725](https://www.rfc-editor.org/rfc/rfc8725) &sect;2.1 for the `alg: none` and RS256-to-HS256
+  substitutions and &sect;3.1, &sect;3.9 and &sect;3.12 for the requirements that close them;
+  [RFC 7009 &sect;3](https://www.rfc-editor.org/rfc/rfc7009#section-3) for the self-contained against
+  handle fork, the short-lived-token compromise and the sentence that the cost of revocation follows
+  from the desired security properties; and
+  [RFC 9700 &sect;2.2.1](https://www.rfc-editor.org/rfc/rfc9700.html#section-2.2.1) for
+  sender-constrained tokens.
+- Lesson 0703, OAuth: [RFC 6749](https://www.rfc-editor.org/rfc/rfc6749) &sect;1 for the five failures
+  of password sharing, &sect;1.1 for the four roles, &sect;1.4 and &sect;1.5 for access and refresh
+  tokens; [RFC 7636](https://www.rfc-editor.org/rfc/rfc7636) &sect;1 for the code-interception attack
+  on a registered custom scheme and &sect;4.2 for `S256` being mandatory to implement;
+  [RFC 9700](https://www.rfc-editor.org/rfc/rfc9700.html) &sect;2.1 for exact redirect-URI matching,
+  &sect;2.1.1 for PKCE as a requirement, &sect;2.1.2 against the implicit grant and &sect;2.4 for the
+  resource owner password credentials grant that MUST NOT be used; and
+  [OpenID Connect Core 1.0](https://openid.net/specs/openid-connect-core-1_0.html) for the identity
+  layer and the ID token's required claims.
+- Lesson 0704, injection: [OWASP SQL Injection Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html)
+  for the ordered primary defences, the statement that a parameterised query makes the database always
+  distinguish between code and data, the rule that identifiers and sort order need validation or query
+  redesign rather than binding, and the warning that escaping is fragile and cannot be guaranteed; and
+  [A03:2021 - Injection](https://owasp.org/Top10/2021/A03_2021-Injection/) for the general case across
+  interpreters.
+- Lesson 0705, XSS: [OWASP Cross Site Scripting Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+  for the five output contexts and the warning about using the wrong encoding, the safe and dangerous
+  sink lists, DOMPurify for genuine user-authored HTML, and the framework escape hatches by name; and
+  [MDN's CSP guide](https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/CSP) for the
+  nonce-per-response requirement, why allow-list policies fail, what `strict-dynamic` costs, and the
+  statement that a policy is not an alternative to sanitising input.
+- Lesson 0706, CSRF: [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+  for the definition, the synchroniser token including the rule that it is not stored in a cookie, the
+  naive double-submit pattern being bypassable by an attacker who can write cookies on the target
+  domain, custom headers being subject to the same-origin policy, and the statement that `SameSite` is
+  defence in depth rather than a replacement; and
+  [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) for
+  the precise `Strict`, `Lax` and `None` definitions that leave a state-changing GET forgeable.
 
 ### Module 12 - Inter-service communication
 
