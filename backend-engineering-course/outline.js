@@ -135,6 +135,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0605-idempotency-keys-make-retries-safe.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Caching",
+      "lessons": [
+        {
+          "title": "A cache is a bet that the question repeats",
+          "href": "lessons/0900-a-cache-is-a-bet-that-the-question-repeats.html"
+        },
+        {
+          "title": "Cache-aside puts the policy in your code",
+          "href": "lessons/0901-cache-aside-puts-the-policy-in-your-code.html"
+        },
+        {
+          "title": "A write pattern chooses who waits",
+          "href": "lessons/0902-a-write-pattern-chooses-who-waits.html"
+        },
+        {
+          "title": "Invalidation begins with the key",
+          "href": "lessons/0903-invalidation-begins-with-the-key.html"
+        },
+        {
+          "title": "Invalidation buys a staleness window",
+          "href": "lessons/0904-invalidation-buys-a-staleness-window.html"
+        },
+        {
+          "title": "A cache moves the failure, it does not remove it",
+          "href": "lessons/0905-a-cache-moves-the-failure-it-does-not-remove-it.html"
+        }
+      ]
     }
   ],
   "extras": [
