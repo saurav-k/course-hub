@@ -1,0 +1,163 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Headers carry what the body cannot - Backend Engineering</title>
+<meta name="description" content="Header fields are the negotiation surface of HTTP: content, conditionals, caching and credentials are all settled there, before and around a body that says nothing about itself.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; HTTP is the language &middot; Lesson 0203</div>
+  <h1>Headers are the negotiation surface, and a body that has to describe itself has already failed</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Four families of field, one job each. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-12">RFC 9110 &sect;12 - Content Negotiation</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Fields are <b>independent statements about the message</b>, readable before a byte of body is parsed, which is what makes them a negotiation surface.</li>
+      <li>Four families do nearly all the work: <b>representation metadata, content negotiation, conditionals, and credentials</b>.</li>
+      <li><b>Content negotiation</b> is the client stating preferences and the server choosing, then naming its choice back so caches can key on it.</li>
+      <li>A <b>conditional request</b> attaches a precondition to a validator, which is how you get a cheap re-check and a defined outcome under concurrency.</li>
+      <li>What it costs: every field is optional and unenforced, so a client that omits one gets a default somebody else chose.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The third part of the frame is the one two later mechanisms are built on.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0200 to 0202&lt;br/&gt;method, target,&lt;br/&gt;status class"] --> T["THIS PAGE&lt;br/&gt;the field families&lt;br/&gt;and what each settles"]
+  T --> A["Lesson 0204&lt;br/&gt;caching, built on&lt;br/&gt;validators and directives"]
+  T --> B["Lesson 0205&lt;br/&gt;CORS, built on&lt;br/&gt;Origin and its replies"]
+  T --> C["Module 07&lt;br/&gt;auth, built on&lt;br/&gt;the credential fields"]
+  W["Module 02&lt;br/&gt;HTTP is the language"] -.- T
+    </div>
+    <figcaption>Both remaining lessons of this module are field mechanisms, and so is the whole of the auth module. This page is the one that pays for all three, which is why it names families rather than listing fields. <b>Every negotiation HTTP performs happens in the header section, never in the body.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: metadata that arrives first</h2>
+
+  <p>A body is opaque. It is a sequence of bytes, and nothing inside it tells a recipient what it is, how it was encoded, how long it should be kept or who sent it. Every one of those questions has to be answered outside the body, before or around it, by something a recipient can read cheaply and act on without parsing. That is the header section, and it is why the design has held for three decades: the frame stayed fixed while the vocabulary of fields grew without limit.</p>
+
+  <p>The practical consequence is that a proxy, a cache or a load balancer can make a complete decision about a message it never reads. That is the whole basis of the machinery in the next two lessons, and it is also the reason a field is worth spending design attention on: it is the only part of your response that intermediaries act on.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four families of field</div>
+    <div class="fig-claim">Each family answers a different question, and none overlaps another.</div>
+    <div class="mermaid">
+flowchart LR
+  H["The header section"] --> R["Representation metadata&lt;br/&gt;Content-Type, Content-Length,&lt;br/&gt;Content-Encoding, Content-Language"]
+  H --> N["Negotiation&lt;br/&gt;Accept, Accept-Language,&lt;br/&gt;Accept-Encoding, and Vary back"]
+  H --> C["Conditionals&lt;br/&gt;ETag and Last-Modified,&lt;br/&gt;If-None-Match, If-Match"]
+  H --> A["Credentials and context&lt;br/&gt;Authorization, Cookie,&lt;br/&gt;Host, User-Agent, Origin"]
+  R --> Q1["What is this"]
+  N --> Q2["Which version would you like"]
+  C --> Q3["Is my copy still current"]
+  A --> Q4["Who is asking, and from where"]
+    </div>
+    <figcaption>The families and the question each one settles. Nearly every field an application ever sets belongs to one of these four, and the ones that belong to none are usually the ones a framework added for its own bookkeeping. <b>Knowing the family is enough to predict what an intermediary will do with a field it has never seen.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="representation-metadata">Representation metadata: what this actually is</h3>
+  <p>A resource can have several representations - the same order as JSON, as HTML, in English or in German, gzipped or not - and the representation metadata fields describe the one in this message rather than the resource behind it. That distinction is the reason the same URI can legitimately answer with different bytes to different callers, and the reason the fields have to travel with each message instead of being configuration.</p>
+
+  <h3 id="content-negotiation">Content negotiation: preferences in, a choice back</h3>
+  <p>The client sends its preferences in the <code>Accept</code> family and the server picks. Nothing obliges the server to honour a preference, which is the part that surprises people: negotiation is advisory in one direction and authoritative in the other. The server then states what it chose, and where the choice depended on a request field it says so in <code>Vary</code>. That last part is not politeness. A shared cache uses <code>Vary</code> to know that one stored response cannot answer for a client that asked differently, and a missing <code>Vary</code> is how a German page gets served to an English reader.</p>
+
+  <h3 id="conditional-request">Conditional requests: a precondition on a validator</h3>
+  <p>A validator is a compact token for the state of a representation: an <code>ETag</code>, which the server generates and only the server interprets, or a <code>Last-Modified</code> timestamp. A conditional request carries that validator back in a precondition field and asks the server to act only if it still matches. Sent as <code>If-None-Match</code>, it is the cheap freshness re-check that lesson 0204 is built on. Sent as <code>If-Match</code> on a write, it is optimistic concurrency control: the update applies only if nobody else changed the resource since you read it, which is the missing piece the previous lesson's warning pointed at.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A conditional write</div>
+    <div class="fig-claim">If-Match turns a lost update into a status the client can handle.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Client A
+  participant B as Client B
+  participant S as Server
+  A->>S: GET /doc
+  S-->>A: 200 with ETag "v1"
+  B->>S: GET /doc
+  S-->>B: 200 with ETag "v1"
+  B->>S: PUT /doc with If-Match "v1"
+  S->>S: validator matches - apply, now "v2"
+  S-->>B: 200 with ETag "v2"
+  A->>S: PUT /doc with If-Match "v1"
+  S-->>A: 412 Precondition Failed - re-read and retry
+    </div>
+    <figcaption>Two clients editing the same resource, with the second write arriving against a stale validator. Without the precondition both writes succeed and the first client's change disappears with nothing to detect it. <b>A precondition converts a silent lost update into a status code the client is forced to handle.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: unenforced by design</h2>
+
+  <p>Every field is optional, and a recipient may ignore any field it does not understand. That is what made thirty years of extension possible, and it is also the cost: nothing tells you that the field you relied on was dropped by a proxy, rewritten by a CDN, or never sent by a client library whose defaults you did not read. A design that depends on a field arriving needs to state what happens when it does not, and the honest answer is usually a default the server chooses and documents.</p>
+
+  <div class="callout warn">
+    Header fields are the easiest place to leak information without noticing. A field naming your framework and version, an internal hostname in a debug field, or a stack trace in a custom error field all travel to every client and through every intermediary, and none of them are visible in the response body a developer looks at. Module 07 owns the threat model; the exposure starts here.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does a server send <code>Vary</code> on a negotiated response?</div>
+      <button class="q-opt">To list which fields the client may now send</button>
+      <button class="q-opt">To tell the client the choice was advisory</button>
+      <button class="q-opt">To tell caches which request fields decided it</button>
+      <button class="q-opt">To make the response cacheable for other users</button>
+      <div class="q-fb">Vary names the request fields the selection depended on, so a shared cache does not answer a differently-phrased request from this stored copy. The first option describes an Allow-style field, the second is true of negotiation but is not what Vary says, and the fourth inverts it: Vary constrains reuse rather than enabling it.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which field makes a PUT safe against a concurrent update?</div>
+      <button class="q-opt">If-Match, carrying the validator you read</button>
+      <button class="q-opt">If-None-Match, carrying the tag you hold</button>
+      <button class="q-opt">Cache-Control, carrying a no-cache rule</button>
+      <button class="q-opt">Content-Length, carrying the body's size</button>
+      <div class="q-fb">If-Match applies the write only while the validator still matches, so a stale write gets 412 instead of overwriting. If-None-Match is the read-side precondition used for revalidation, Cache-Control governs storage rather than concurrency, and Content-Length is representation metadata.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0204-caching-is-a-contract-between-two-clocks.html">caching is a contract between two clocks</a></b> takes the validator and the directive fields and builds the freshness mechanism out of them.</li>
+    <li><b>Then, <a href="0205-cors-is-the-browser-enforcing-the-servers-own-policy.html">CORS is the browser enforcing the server's policy</a></b> is a whole security mechanism built from one request field and its replies.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take a real response from your own service and sort every field it sends into the four families. Ask the agent to name which family each leftover field belongs to, and whether the leftovers are ones you meant to send at all.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-12">RFC 9110 &sect;12</a> defines content negotiation and <a href="https://www.rfc-editor.org/rfc/rfc9110#section-13">&sect;13</a> defines conditional requests and each precondition field, including the exact evaluation order a server must use when several are present. The precondition ordering rules are the part a summary always omits.</p>
+
+  <div class="pager">
+    <a href="0202-status-codes-are-three-families-with-one-job-each.html"><span class="dir">&larr; Previous</span><span class="ttl">Status codes are three families with one job each</span></a>
+    <a class="nxt" href="0204-caching-is-a-contract-between-two-clocks.html"><span class="dir">Next &rarr;</span><span class="ttl">Caching is a contract between two clocks</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0203 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

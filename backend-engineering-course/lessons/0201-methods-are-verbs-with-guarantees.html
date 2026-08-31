@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Methods are verbs with guarantees - Backend Engineering</title>
+<meta name="description" content="A method is not a spelling choice: safe, idempotent and cacheable are promises the whole network reads, and every retry, proxy and cache behaves on them.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; HTTP is the language &middot; Lesson 0201</div>
+  <h1>Methods differ by the guarantees they carry, not by how they are spelled</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">7 min</span>
+    Three properties the whole network reads. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.2">RFC 9110 &sect;9.2 - Common Method Properties</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A method carries three declared properties: <b>safe</b>, <b>idempotent</b> and <b>cacheable</b>. They are the whole reason the choice matters.</li>
+      <li><b>Safe</b> means read-only in intent. <b>Idempotent</b> means the effect of many identical requests equals the effect of one. Every safe method is idempotent.</li>
+      <li>These are promises to <b>intermediaries</b>: a proxy may retry an idempotent request and must not retry a non-idempotent one.</li>
+      <li>PUT and DELETE are <b>idempotent but not safe</b>; POST is neither. That single row is why POST retries are dangerous.</li>
+      <li>What it costs: the guarantees are a contract your handler must actually honour, and nothing checks that it does.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The method part of the frame decides how the network may treat a request.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0200&lt;br/&gt;method, target,&lt;br/&gt;headers, body"] --> T["THIS PAGE&lt;br/&gt;what a method&lt;br/&gt;promises"]
+  T --> A["Lesson 0202&lt;br/&gt;how the server answers"]
+  T --> B["Lesson 0204&lt;br/&gt;which responses a&lt;br/&gt;cache may store"]
+  T --> C["Module 11&lt;br/&gt;retries, timeouts&lt;br/&gt;and backoff"]
+  W["Module 02&lt;br/&gt;HTTP is the language"] -.- T
+    </div>
+    <figcaption>The frame named the method. This page says what picking one commits you to, and it is a dependency for two later mechanisms: caching decides what to store from it, and every retry policy in the course rests on it. <b>Choosing a method is choosing which of the network's automatic behaviours may apply to your request.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a method is a public promise</h2>
+
+  <p>The reason a method is not just a label is that other software acts on it without asking you. A browser will re-issue a GET when a connection drops. A reverse proxy will hold a GET response and hand it to the next caller. A load balancer will send an idempotent request to a second backend when the first times out. None of them read your handler. They read the method and act on the property the specification attaches to it.</p>
+
+  <p>So the method is a promise you make to strangers about your own handler. If <code>GET /orders/42</code> charges a card, nothing in the protocol stops you, and everything in the network will punish you: a prefetch, a crawler, or a retried timeout will charge the card again. The guarantee was never enforced. It was assumed, by everyone.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The three properties</div>
+    <div class="fig-claim">Safe implies idempotent, and cacheable is a separate axis entirely.</div>
+    <div class="mermaid">
+flowchart TB
+  M["A request method"] --> S["Safe&lt;br/&gt;read-only in intent"]
+  M --> I["Idempotent&lt;br/&gt;many equals one"]
+  M --> C["Cacheable&lt;br/&gt;the response may be stored"]
+  S --> SI["Every safe method&lt;br/&gt;is idempotent"]
+  SI --> I
+  I --> R["A proxy may retry it"]
+  C --> K["A cache may reuse it&lt;br/&gt;for a later request"]
+  N["GET and HEAD&lt;br/&gt;carry all three"] -.- M
+    </div>
+    <figcaption>Two of the three properties are nested and the third is independent. Safety is about effect on the server, idempotence about repetition, and cacheability about whether the answer may be handed to somebody else later. <b>A method can be idempotent without being cacheable, which is exactly the case for PUT and DELETE.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: what each word actually claims</h2>
+
+  <h3 id="safe-method">Safe</h3>
+  <p>RFC 9110 defines a method as safe when its semantics are essentially read-only: the client does not request and does not expect any state change on the origin server. It does not say nothing happens - a log line is written, a counter moves - only that the client did not ask for it and cannot be held to it. GET, HEAD, OPTIONS and TRACE are safe. That is what makes prefetching, crawling and link previews possible at all.</p>
+
+  <h3 id="idempotent-method">Idempotent</h3>
+  <p>A method is idempotent when the intended effect of several identical requests is the same as the effect of one. RFC 9110 names PUT, DELETE and the safe methods. Note what is being compared: the effect on the server, not the response the client gets back. Deleting the same resource twice is idempotent even though the second call may answer 404, because the server's state after two calls equals its state after one. The specification is explicit that a proxy must not automatically retry a non-idempotent request.</p>
+
+  <h3 id="cacheable-method">Cacheable</h3>
+  <p>Cacheable means a response to this method may be stored and reused for a later request. RFC 9110 defines caching semantics for GET, HEAD and POST, and notes plainly that the overwhelming majority of cache implementations support only GET and HEAD. Treat POST responses as uncacheable in practice and say so in your design rather than relying on a corner of the specification that deployed caches largely do not implement.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Retry across a timeout</div>
+    <div class="fig-claim">A retried POST can commit twice when only the response was lost.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant P as Proxy or client retry
+  participant S as Server
+  C->>P: POST /payments
+  P->>S: forward the request
+  S->>S: charge the card - state has changed
+  S--xP: response lost - the connection dropped
+  P->>S: retry, because the client saw only a timeout
+  S->>S: charge the card a second time
+  S-->>C: 201 Created, for the second charge
+  Note over P,S: idempotence is what would have made this retry free
+    </div>
+    <figcaption>The failure that makes idempotence a design property rather than a specification detail. The server did the work both times, because a lost response is indistinguishable from a lost request at the client. <b>A timeout tells you nothing about whether the work happened, so only an idempotent operation is safe to retry blindly.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the guarantee is yours to keep</h2>
+
+  <p>Nothing verifies these properties. The specification defines them and your handler either honours them or quietly does not, and the cost lands on somebody else's retry. Two consequences follow, and both are design work rather than protocol work.</p>
+
+  <p>There is also a reading habit worth forming here. When a page of vendor documentation says an endpoint is "idempotent", ask which of the three properties it means, because the word is used loosely in product writing to mean "harmless" and the specification uses it to mean one precise thing about repeated identical requests. The three properties are independent claims and a source that blurs them is a source to check.</p>
+
+  <p>The first is that a non-idempotent operation you want to retry has to be made idempotent by hand, usually with a client-supplied key that the server records and de-duplicates against. That is an extra table, an extra index and a retention policy, and it is the price of a safe retry. The second is that choosing PUT over POST for a create is a real trade-off and not a style preference: PUT gives you idempotence because the client names the resource, which means the client must be able to generate the identifier.</p>
+
+  <div class="callout warn">
+    Idempotent is not the same as concurrency-safe. Two identical PUT requests arriving at once are idempotent by the specification and can still interleave into a lost update, because idempotence constrains repetition and says nothing about ordering. Conditional requests, which lesson 0203 covers, are what turn that into a defined outcome.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which pair is idempotent but not safe?</div>
+      <button class="q-opt">PUT and DELETE, which both change state</button>
+      <button class="q-opt">GET and HEAD, which both read a state</button>
+      <button class="q-opt">POST and PATCH, which both send bodies</button>
+      <button class="q-opt">OPTIONS and TRACE, which both diagnose</button>
+      <div class="q-fb">PUT and DELETE change state, so they are not safe, and repeating either leaves the same state, so they are idempotent. GET and HEAD are safe as well as idempotent; POST is neither; and OPTIONS and TRACE are safe, which makes them idempotent too.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A DELETE is repeated and the second call answers 404. Is it idempotent?</div>
+      <button class="q-opt">No, because the two responses now differ</button>
+      <button class="q-opt">No, because a 404 means it failed once</button>
+      <button class="q-opt">Yes, the server state is what is compared</button>
+      <button class="q-opt">Yes, but only when the body is empty</button>
+      <div class="q-fb">Idempotence compares the effect on the server, and the resource is gone after one call and after two. The first two options compare the responses instead of the state, and the fourth invents a body condition the definition does not have.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is the other half of this exchange: the method asks, and the status class says how it went.</li>
+    <li><b>Later, <a href="0204-caching-is-a-contract-between-two-clocks.html">caching is a contract between two clocks</a></b> builds on cacheability, which is the property this page left least developed.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take the three most-called endpoints in your own service and write down, for each, whether it is safe and whether it is idempotent. Ask the agent to challenge each answer by naming a concrete way a retry could double the effect.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.2">RFC 9110 &sect;9.2</a> defines safe, idempotent and cacheable in three short subsections, and <a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.3">&sect;9.3</a> gives each method its own definition. The table of which method carries which property is worth reading once from the source rather than from a summary.</p>
+
+  <div class="pager">
+    <a href="0200-a-request-is-a-method-a-target-and-headers.html"><span class="dir">&larr; Previous</span><span class="ttl">A request is a method, a target and headers</span></a>
+    <a class="nxt" href="0202-status-codes-are-three-families-with-one-job-each.html"><span class="dir">Next &rarr;</span><span class="ttl">Status codes are three families with one job each</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0201 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

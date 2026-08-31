@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caching is a contract between two clocks - Backend Engineering</title>
+<meta name="description" content="A cache hit is a freshness contract: the origin sets a lifetime, the cache tracks an age, and a validator is what makes the re-check cheap when the two no longer agree.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; HTTP is the language &middot; Lesson 0204</div>
+  <h1>A cache hit is a freshness contract between the clock that set a lifetime and the clock that counts age</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">7 min</span>
+    Freshness, then validation. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9111">RFC 9111 - HTTP Caching</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A response is <b>fresh while its age has not exceeded its freshness lifetime</b>, and stale once it has. That single comparison is the whole hit rule.</li>
+      <li>The origin sets the lifetime with <b>max-age</b> or <b>Expires</b>; the cache tracks the age from the moment the origin generated the response.</li>
+      <li>Stale is <b>not unusable</b>. It means the cache must ask again, and a <b>validator</b> makes that question cheap.</li>
+      <li>A successful validation <b>freshens the stored response</b>, so a 304 costs headers instead of a body and restarts the clock.</li>
+      <li>What it costs: you are choosing, in advance, how wrong a reader is allowed to be, and no cache can undo a lifetime you already published.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Two field families from the last lesson become one mechanism here.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0203&lt;br/&gt;validators and&lt;br/&gt;directive fields"] --> T["THIS PAGE&lt;br/&gt;freshness, age&lt;br/&gt;and revalidation"]
+  T --> A["Lesson 0205&lt;br/&gt;the last field&lt;br/&gt;mechanism of this module"]
+  T --> B["Module 09&lt;br/&gt;caches you run&lt;br/&gt;yourself, and invalidation"]
+  T --> C["Module 13&lt;br/&gt;what a fleet&lt;br/&gt;can stop serving"]
+  W["Module 02&lt;br/&gt;HTTP is the language"] -.- T
+    </div>
+    <figcaption>The protocol's own cache is the first cache a service gets, and it is free. Module 09 comes back to caches you operate; this page is about the one every browser and CDN already implements on your behalf. <b>Learning the protocol cache first means the later module is about invalidation rather than about mechanism.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two clocks, one comparison</h2>
+
+  <p>Caching feels complicated because it is usually taught as a list of directives. It is not a list. There are two numbers and one comparison. The origin server declares a <b>freshness lifetime</b>, which is how long it believes the representation will not change in a way that matters. The cache tracks an <b>age</b>, the time since the origin generated or last validated the response. RFC 9111 writes the rule in one line: the response is fresh when the freshness lifetime is greater than the current age.</p>
+
+  <p>Everything else is detail hanging off that comparison. <code>max-age</code> sets the lifetime directly. <code>Expires</code> sets it as a date the cache subtracts <code>Date</code> from. <code>s-maxage</code> overrides both, for shared caches only, and is checked first. When none of them is present the cache may guess, using a heuristic, which is the situation you never want to be in because the guess is not yours.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One stored response over time</div>
+    <div class="fig-claim">Freshness ends at the lifetime, and a validator restarts the clock.</div>
+    <svg class="chart" viewBox="0 0 640 210" role="img" aria-label="Timeline of one stored response: fresh until age reaches its freshness lifetime, then a conditional revalidation that returns 304 and restarts the clock">
+      <line class="axis" x1="60" y1="150" x2="610" y2="150"/>
+      <line class="s-stat thick" x1="60" y1="118" x2="330" y2="118"/>
+      <line class="s-noise ref" x1="330" y1="118" x2="450" y2="118"/>
+      <line class="s-stat thick" x1="450" y1="118" x2="610" y2="118"/>
+      <line class="tick" x1="330" y1="108" x2="330" y2="158"/>
+      <line class="tick" x1="450" y1="108" x2="450" y2="158"/>
+      <circle class="m-stat" cx="130" cy="118" r="5"/>
+      <circle class="m-stat" cx="250" cy="118" r="5"/>
+      <circle class="m-alarm" cx="390" cy="118" r="5"/>
+      <circle class="m-stat" cx="530" cy="118" r="5"/>
+      <text class="lbl-sm" x="60" y="96">age 0</text>
+      <text class="lbl-sm" x="330" y="96" text-anchor="middle">age = max-age</text>
+      <text class="lbl-sm" x="450" y="96" text-anchor="middle">304 - age reset</text>
+      <text class="lbl-sm" x="130" y="176" text-anchor="middle">hit</text>
+      <text class="lbl-sm" x="250" y="176" text-anchor="middle">hit</text>
+      <text class="lbl-sm" x="390" y="176" text-anchor="middle">stale - revalidate</text>
+      <text class="lbl-sm" x="530" y="176" text-anchor="middle">hit again</text>
+      <text class="lbl-sm" x="335" y="200" text-anchor="middle">time since the origin generated the response</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>served from the cache</span><span><i class="sw-alarm"></i>a request that reaches the origin</span></div>
+    <figcaption>One stored response, drawn against the only axis that matters. Three of the four requests never leave the cache, and the fourth costs a header exchange rather than a body. The lifetime is whatever the origin published, and the gap in the middle is the entire cost of a cache under this policy. <b>A validator turns the end of a lifetime into a cheap question rather than a full refetch.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="freshness-lifetime">Freshness lifetime: the origin's clock</h3>
+  <p>The lifetime is a claim about the future made by the server that generated the representation. RFC 9111 evaluates the rules in order and uses the first match: <code>s-maxage</code> if the cache is shared, then <code>max-age</code>, then <code>Expires</code> minus <code>Date</code>, then a heuristic. Two things follow. The order is why a CDN and a browser can be given different lifetimes for one response. And using <code>Expires</code> minus <code>Date</code> rather than the cache's own wall clock is deliberate: it takes the calculation off the client's clock and onto the server's, which is the only clock both parties saw.</p>
+
+  <h3 id="response-age">Age: the cache's clock</h3>
+  <p>Age is the time that has passed since the response was generated by, or successfully validated with, the origin. It is not the time since this particular cache stored it. A shared cache reports the value it holds in the <code>Age</code> field, so a response with <code>max-age=600</code> and <code>Age: 550</code> arrives at a browser with fifty seconds of life left in it. A response can therefore be stale on arrival, which is correct behaviour and is regularly reported as a bug.</p>
+
+  <h3 id="validator">Validation: the cheap re-check</h3>
+  <p>When a stored response cannot be served, the cache does not have to refetch it. It sends a conditional request carrying the validator from the stored copy - the <code>ETag</code> in <code>If-None-Match</code>, or the <code>Last-Modified</code> date in <code>If-Modified-Since</code>. If the representation is unchanged the origin answers 304 with no body, and the cache freshens the stored response and serves it. The saving is the body, which on most responses is nearly all of the bytes.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Hit, stale, revalidate</div>
+    <div class="fig-claim">A stale entry is a question to ask, not an entry to discard.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Stored: stored with a lifetime
+  Stored --> Fresh: age under the lifetime
+  Fresh --> Fresh: served, no origin call
+  Fresh --> Stale: age reaches the lifetime
+  Stale --> Validating: conditional request
+  Validating --> Fresh: 304 - freshen it
+  Validating --> Stored: 200 - replace it
+  Stale --> [*]: evicted, nobody asked
+    </div>
+    <figcaption>The states one stored response moves through, and the two ways validation can end. The path back from Validating to Fresh is the one that pays for the whole mechanism, because it costs a round trip of headers and no body at all. <b>Stale means "ask again", and only eviction means the copy is gone.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: you are pricing staleness in advance</h2>
+
+  <p>A lifetime is a promise you cannot withdraw. Once a response leaves with <code>max-age=86400</code>, every cache that stored it is entitled to serve it for a day, and there is no mechanism in HTTP for reaching out and taking it back. That is why the standard pattern for assets is a long lifetime plus a content hash in the URL: you never invalidate anything, you publish a new target and let the old one expire unread.</p>
+
+  <p>The other half of the trade-off is which directive means what, and two of them are routinely confused. <code>no-store</code> means the response must not be stored at all. <code>no-cache</code> means it may be stored and must be revalidated before every reuse. For a page whose content changes but whose bytes usually do not, <code>no-cache</code> with a strong <code>ETag</code> is almost always what was wanted, and <code>no-store</code> is what was typed.</p>
+
+  <p>The directive that decides the blast radius is a different one again. <code>private</code> and <code>public</code> do not describe the content, they name which caches may store the response, and there are two kinds on the path: the private cache belonging to one reader, and the shared cache in front of the origin serving everyone.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two kinds of cache</div>
+    <div class="fig-claim">The private directive is what stops a shared cache keeping one reader's page.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant P as Private cache
+  participant S as Shared cache
+  participant O as Origin
+  Note over P: reader A asks&lt;br/&gt;for /account
+  P->>S: not stored - forward
+  S->>O: not stored - forward
+  O-->>S: 200, with&lt;br/&gt;Cache-Control private
+  Note over S: may not store&lt;br/&gt;this response
+  S-->>P: passed through
+  Note over P: stored, and only&lt;br/&gt;reader A sees it
+    </div>
+    <figcaption>The same response meets both kinds of cache on its way back, and only one of them is allowed to keep it. The shared cache is the one with every other reader behind it, so it is the hop where a missing directive stops being a performance question. <b>A response is private or public with respect to caches, not with respect to content.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    A private response in a shared cache is the failure worth being afraid of, because it is silent and it affects the wrong person. Any response that varies by user must carry <code>private</code>, or be excluded from storage, or key correctly through <code>Vary</code>. The symptom is one reader seeing another reader's page, and it is discovered by a user rather than by a monitor.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A response arrives with <code>max-age=600</code> and <code>Age: 620</code>. What is it?</div>
+      <button class="q-opt">Fresh, since the browser only stored it now</button>
+      <button class="q-opt">Stale, since its age passed the lifetime</button>
+      <button class="q-opt">Invalid, since an age may not exceed it</button>
+      <button class="q-opt">Fresh, since Age counts only shared hops</button>
+      <div class="q-fb">Age is measured from the origin generating the response, not from local storage, so 620 against 600 is already stale and must be revalidated. The first and fourth options both restart the clock at the wrong point, and the third invents a constraint the specification does not have.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">You want a page stored but re-checked on every use. Which directive?</div>
+      <button class="q-opt">no-store, so nothing is ever kept stale</button>
+      <button class="q-opt">max-age=0, so it is stale immediately</button>
+      <button class="q-opt">private, so only one client may keep it</button>
+      <button class="q-opt">no-cache, so reuse requires a revalidation</button>
+      <div class="q-fb">no-cache permits storage and forbids reuse without revalidation, which is exactly the ask. no-store forbids storage, so there is nothing to revalidate against; private is about which caches may store rather than when; and max-age=0 is close but leaves stale reuse open in cases no-cache closes.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0205-cors-is-the-browser-enforcing-the-servers-own-policy.html">CORS is the browser enforcing the server's policy</a></b> closes this module, and its preflight has a cache of its own that works on exactly this model.</li>
+    <li><b>Back at <a href="0203-headers-carry-what-the-body-cannot.html">headers carry what the body cannot</a></b> is where the validator fields came from.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Fetch one asset and one HTML page from your own site and read their <code>Cache-Control</code>, <code>ETag</code> and <code>Age</code> fields. Ask the agent whether the lifetime on each is the one you would choose, and what would break if it were ten times longer.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9111#section-4.2">RFC 9111 &sect;4.2</a> is freshness, including the ordered rules for calculating a lifetime, and <a href="https://www.rfc-editor.org/rfc/rfc9111#section-4.3">&sect;4.3</a> is validation. <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Guides/Caching">MDN's HTTP caching guide</a> is the readable companion and works the same rules with real field values.</p>
+
+  <div class="pager">
+    <a href="0203-headers-carry-what-the-body-cannot.html"><span class="dir">&larr; Previous</span><span class="ttl">Headers carry what the body cannot</span></a>
+    <a class="nxt" href="0205-cors-is-the-browser-enforcing-the-servers-own-policy.html"><span class="dir">Next &rarr;</span><span class="ttl">CORS is the browser enforcing the server's own policy</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0204 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
