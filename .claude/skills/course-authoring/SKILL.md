@@ -32,16 +32,21 @@ The last row is the branch for a foreign project: no `assets/hub.css` beside you
 
 ## The closed vocabulary
 
-Every visual element on a page comes from [`references/widgets.md`](references/widgets.md), copied character for character.
+**The closed set is a set of class names. It is not a set of pictures.**
 
-There is one design system and one copy of it, `assets/hub.css` plus `assets/hub.js`, and it only styles and animates the class names it already knows.
+Every widget on a page - the quiz, the callout, the practice block, the lab kit - comes from [`references/widgets.md`](references/widgets.md), copied character for character, because there is one design system and one copy of it, `assets/hub.css` plus `assets/hub.js`, and it only styles and animates the class names it already knows.
 A hand-rolled `<div class="tip-box">` is invisible styling on the day it ships and dead weight forever after, and a hand-rolled quiz shape does not bind to the click handler at all.
 
-When a lesson genuinely needs a shape the catalogue does not have, add the shape to `assets/hub.css`, document it in `references/widgets.md`, and use it, all in the one pull request.
+**A figure is the other case, and it reads the opposite way.**
+Compose the drawing the idea needs, out of the class names the vocabulary declares.
+A figure nobody has drawn before is the expected outcome of a page with a new idea in it, not an exception you have to justify, and the six constraints that must hold are in [`references/widgets.md`](references/widgets.md) under "Compose the figure the idea needs".
+Reaching for Mermaid because the drawing in your head is not in the file is the mistake this wording exists to stop: it produced a hub where 98% of lesson pages carry a flowchart and 90% open with one.
+
+When a lesson genuinely needs a *shape* the vocabulary does not have, add the shape to `assets/hub.css`, document it in `references/widgets.md`, and use it, all in the one pull request.
 Adding to the vocabulary is welcome; using a word that is not in it is not.
 Before you touch any selector, grep **every** `*.css` in the repository for it: three courses still carry an `assets/course-extras.css` layered after the hub sheet, and they restyle shared elements.
 
-## The seven ways a page breaks silently
+## The eight ways a page breaks silently
 
 Every one of these ships green, renders wrong, and reaches no console.
 `AGENTS.md` carries the full mechanism; this is what an author has to hold.
@@ -52,7 +57,8 @@ Every one of these ships green, renders wrong, and reaches no console.
 4. **Check a page in both render states.** Defects of kind 1 are wrong on first paint; defects of kind 2 are wrong only after a repaint. Toggling mode or palette is what moves a page from one state to the other, and one state alone catches neither reliably.
 5. **Counting SVGs proves nothing.** A Mermaid error box is itself an `<svg>`. Look at the figures, and match `.error-icon` when you check by machine.
 6. **A figure's label and claim are direct children of `figure.diagram`, before the drawing.** The stylesheet selects `figure.diagram > .fig-cap`, so one nested inside a wrapper `div` takes no styling and renders as unstyled body text at figure width. It validates against every other check, it reaches no console, and it reads as a paragraph that lost its formatting.
-7. **A colour inside a hand-authored figure is a class, never a hex.** `check_pages.py` fails the build on a literal `fill="#..."` in a `<figure>`, and the reason is worth knowing rather than working around. The reference site this figure anatomy comes from hard-codes 5,634 colours across 234 drawings, patches 65% of them back for dark mode with attribute selectors in two sheets that disagree, and leaves eight labels on its first chapter below 3:1, one of them at 1.16:1. That is the failure the closed class set exists to prevent.
+7. **A colour inside a hand-authored figure is a class or a `var(--token)`, never a value.** `check_pages.py` fails the build on any of the four spellings that carry one - `fill="#hex"`, `style="fill:#hex"`, a function like `rgb()` or `hsl()`, a named colour like `red`, and a Mermaid `classDef`, which writes `fill:#hex` and so slipped past the attribute-only rule for a year. The reason is worth knowing rather than working around. The reference site this figure anatomy comes from hard-codes 5,634 colours across 234 drawings, patches 53% of them back for dark mode with attribute selectors in two sheets that disagree, and leaves eight labels on its first chapter below 3:1, one of them at 1.16:1. That is the failure the closed class set exists to prevent.
+8. **A hand-drawn figure can be self-contradictory and still pass every gate.** The `d-*` vocabulary makes fill mean something - kept, dropped, absent, ghosted, under discussion - so a box drawn `d-ghost` with a live `d-flow` into it says "removed" and "busy" at once, and nothing in this repository can tell. SVG text does not wrap either: a label longer than the `viewBox` is clipped at the frame edge, silently. Both are yours to catch, by opening the page and looking at the drawing. `references/widgets.md`, "What the checks catch, and what rests on your judgement", is the full division.
 
 ## The teaching bar
 
