@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Errors are values with exactly one owner - Backend Engineering</title>
+<meta name="description" content="Error handling is a routing problem: every failure has exactly one layer that can act on it, and every layer that is not that one may only add context or pass it on unchanged.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Resilience and observability &middot; Lesson 1100</div>
+  <h1>A failure has exactly one owner, and every other layer may only add context</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">9 min</span>
+    Error handling as routing rather than formatting. &middot;
+    <a href="https://go.dev/blog/go1.13-errors">The Go Blog - Working with Errors in Go 1.13</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An error is a <b>value travelling towards the one layer that can act on it</b>, and handling it means deciding whether this layer is that one.</li>
+      <li>Two questions classify every failure: <b>can the caller do anything about it</b>, and <b>can this layer do anything about it</b>. Nothing else about a failure matters at the moment it is raised.</li>
+      <li>A layer that is not the owner has exactly two honest moves: <b>add context and pass it on</b>, or translate it into a failure its own callers understand.</li>
+      <li>Wrapping is not free. Go's own guidance is that <b>wrapping an error makes that error part of your API</b>, so it commits you to it.</li>
+      <li>What it costs: the discipline buys nothing on the happy path and only pays back at 3am, which is why it is the first thing dropped under a deadline.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Everything this module measures starts as a failure somebody has to own.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Modules 02 to 10&lt;br/&gt;the happy path,&lt;br/&gt;built layer by layer"] --> T["THIS PAGE&lt;br/&gt;what happens when&lt;br/&gt;a layer cannot proceed"]
+  T --> A["Lesson 1101&lt;br/&gt;configuration, the input&lt;br/&gt;that fails at boot"]
+  T --> B["Lessons 1102 to 1104&lt;br/&gt;logs, traces and metrics&lt;br/&gt;that make failures visible"]
+  T --> C["Lesson 1105&lt;br/&gt;shutdown, the failure&lt;br/&gt;you schedule yourself"]
+  W["Module 11&lt;br/&gt;resilience and observability"] -.- T
+    </div>
+    <figcaption>Every module before this one built a path that works. This module is about the path that does not, and this page is its first step: a failure is a value with a destination, and every later page in the module is a way of watching that value travel. <b>You cannot observe a system whose failures were swallowed before they reached anywhere worth watching.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: an error is a value with a destination</h2>
+
+  <p>The instinct most services are built on is that an error is an interruption: something went wrong, so stop what you were doing and report it. That framing produces the two failure modes every codebase has - the same failure reported five times as it climbs the stack, and the same failure reported nowhere because a middle layer decided it was not serious. Both come from treating error handling as a formatting question.</p>
+
+  <p>The more useful framing is that an error is an ordinary value moving towards a destination, exactly as a response is. Somewhere in the process there is one layer that can do something other than give up: retry the call, fall back to a default, ask the user for a different input, refuse the request with a status. That layer is the owner. Every layer between the failure and the owner is a courier, and a courier's only jobs are to keep the value intact and to write on the envelope where it has been.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Who can act on this</div>
+    <div class="fig-claim">Two questions place every failure, and only one of the four answers is yours.</div>
+    <div class="mermaid">
+flowchart TB
+  E["A call fails here"] --> Q1{"Can this layer&lt;br/&gt;do something other&lt;br/&gt;than give up"}
+  Q1 -->|yes| H["This layer owns it&lt;br/&gt;retry, fall back, refuse"]
+  Q1 -->|no| Q2{"Would the caller&lt;br/&gt;act differently if it&lt;br/&gt;knew which failure"}
+  Q2 -->|yes| W["Wrap and pass on&lt;br/&gt;the identity survives"]
+  Q2 -->|no| O["Translate and pass on&lt;br/&gt;the identity is hidden"]
+  Q2 -->|"the failure is&lt;br/&gt;nobody's to act on"| B["Report at the boundary&lt;br/&gt;500 and a log line"]
+  classDef own fill:var(--ok-soft),stroke:var(--ok)
+  class H own
+    </div>
+    <figcaption>The classification runs on two questions and nothing else - not on the exception type, not on how bad it sounds. A timeout on an optional enrichment call is owned where the fallback lives. A malformed database URL is owned by nobody at request time, because no code path fixes it, which is why lesson 1101 moves that class of failure to boot. <b>Deciding who owns a failure is a design decision, and it is made once per call site rather than once per exception class.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: wrap, translate, or hand it on unchanged</h2>
+
+  <h3 id="error-wrapping">Wrapping keeps the identity and commits you to it</h3>
+
+  <p>Both of this course's implementation languages have the same two operations, spelled differently. Go's <code>fmt.Errorf</code> gained the <code>%w</code> verb in 1.13: the returned error carries an <code>Unwrap</code> method returning the original, and <code>errors.Is</code> and <code>errors.As</code> walk that chain rather than comparing the outermost value. Where an error wraps several children the chain is a tree, and both functions do a depth-first traversal of it.</p>
+
+  <p>Python has carried the same idea since <a href="https://peps.python.org/pep-3134/">PEP 3134</a>, which exists because of a specific loss: before it, an exception raised while handling another exception propagated outward and the original was simply gone. Implicit chaining now records the one being handled in <code>__context__</code>, and <code>raise NewError(...) from original</code> sets <code>__cause__</code> when the translation is deliberate.</p>
+
+  <div class="code-cap">wrapping, in both voices &middot; the identity of the failure survives the trip</div>
+  <pre><code>// Go: %w keeps the sentinel reachable through errors.Is
+if err := q.Row(ctx, id).Scan(&amp;u); err != nil {
+    return fmt.Errorf("load user %s: %w", id, err)   // sql.ErrNoRows still matches
+}
+
+# Python: "from" records the cause, so the traceback keeps both frames
+try:
+    row = cursor.fetchone()
+except DatabaseError as exc:
+    raise UserLookupFailed(user_id) from exc</code></pre>
+
+  <p>The cost is stated plainly in Go's own release note and is easy to skip past: wrapping an error makes that error part of your API, and if you do not want to commit to supporting it as part of your API in future, you should not wrap it. A caller that writes <code>errors.Is(err, sql.ErrNoRows)</code> is now depending on your repository using that particular driver. This is lesson <a href="0600-an-api-is-a-promise-with-a-cost-of-breaking.html">0600</a>'s asymmetry arriving inside the process: the promise was cheap to make and is expensive to take back.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One failure, four layers</div>
+    <div class="fig-claim">Context accumulates on the way up and the conversion happens once.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant H as Handler
+  participant S as Service
+  participant R as Repository
+  participant D as Database
+  H->>S: PlaceOrder(ctx, order)
+  S->>R: SaveOrder(ctx, order)
+  R->>D: INSERT ...
+  D--xR: unique violation on orders_ref_key
+  R--xS: save order 8f2: duplicate key (wrapped)
+  Note over S: recognises the sentinel and owns it - this is a resubmit
+  S--xH: ErrOrderAlreadyExists (translated, cause kept)
+  H--xH: one conversion - 409 plus a problem document
+    </div>
+    <figcaption>The driver's error is wrapped once by the repository, recognised by the service, and translated into a domain failure the handler already knows how to answer. Three layers touched it and only one decided anything. The identity survived the trip because each hop wrapped rather than replaced. <b>Context is added on the way up, and the conversion to an HTTP answer happens exactly once, at the boundary.</b></figcaption>
+  </figure>
+
+  <h3 id="swallowed-error">Swallowing is the only move that is always wrong</h3>
+
+  <p>There is a third thing a layer can do, and it is the one that produces the incidents. Catching an error, logging it, and returning a zero value looks like handling: something was written down and the program kept going. What actually happened is that a failure was converted into a success with wrong data, and every layer above it now reasons about a value that does not correspond to anything. The log line is not a mitigation, because nobody reads a log line about a request that returned 200.</p>
+
+  <p>The same defect wears a second costume: catching a broad exception class at a layer that owns none of the failures inside it. <code>except Exception</code> around a block that does both a network call and an arithmetic step will absorb a typo in your own code and report it as a downstream outage, and you will spend the incident looking at the wrong service.</p>
+
+  <h2>3. The boundary: one failure becomes one answer, once</h2>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of a failure</div>
+    <div class="fig-claim">Only one path out of a raised failure reaches the caller intact.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Raised: a call cannot proceed
+  Raised --> Wrapped: a courier adds context
+  Wrapped --> Wrapped: another courier, another line
+  Wrapped --> Owned: a layer can act on it
+  Owned --> Retried: the action is another attempt
+  Retried --> Raised: the attempt fails again
+  Owned --> Answered: status plus problem document
+  Wrapped --> Swallowed: caught, logged, zero returned
+  Swallowed --> [*]: the caller is told 200
+  Answered --> [*]
+    </div>
+    <figcaption>Every transition except one preserves the fact that something failed. The swallowed edge is the only one that terminates without telling the caller, and it is drawn from the wrapped state on purpose - it is available at every hop, which is why it is the defect that spreads. <b>A failure that reaches a caller as a success cannot be recovered by anything later in this module.</b></figcaption>
+  </figure>
+
+  <p>The handler is the last layer that can still say something to the caller, so it is where the internal vocabulary of errors becomes the external vocabulary of status codes and problem documents that lesson <a href="0603-an-error-body-is-part-of-the-contract.html">0603</a> defined. Doing that conversion in exactly one place is what keeps the two vocabularies from leaking into each other: a repository that returns an HTTP 404 has made itself unusable from a background job, and a handler that inspects a driver error has made itself dependent on the storage engine.</p>
+
+  <p>The conversion is a small total function over a closed set. Each domain failure maps to one status and one problem type; everything not in the set maps to 500 with a generated identifier, and that identifier is the only part of the internal failure the caller ever sees. RFC 9457's <a href="https://www.rfc-editor.org/rfc/rfc9457.html#section-5">security considerations</a> are explicit that a problem detail must not disclose implementation internals, so the mapping is a privacy boundary as much as a translation.</p>
+
+  <div class="callout warn">
+    The unmapped case is the one that decides how your service behaves in an incident, and it is almost never designed. If the default arm of that mapping logs at error level and returns 500, then a single malformed input from one client becomes a page for your on-call engineer, because your alert counts 5xx. A failure the caller caused belongs in the 4xx family however surprising it was, and lesson <a href="0202-status-codes-are-three-families-with-one-job-each.html">0202</a> is why: the first digit is what every layer outside your process reads.
+  </div>
+
+  <h2>4. The trade-off: every promise about a failure is a promise</h2>
+
+  <p>Rich, precisely typed errors are pleasant to hold and expensive to keep. A caller that branches on six distinct failure types is a caller you can break in six ways, and each new type you expose is a decision you make once and live with, exactly as a response field is. The opposite extreme is just as costly in the other direction: a service that returns one opaque failure forces every caller to retry blindly or give up, and the retries land on you.</p>
+
+  <p>The workable position is to expose the failures a caller can act on differently and hide the rest behind one. A caller can act on <em>this order already exists</em>, <em>this payment was declined</em> and <em>you are over your rate limit</em>. It cannot act on <em>connection pool exhausted</em>, and telling it so buys nothing and commits you to a pool.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Go's own guidance says that wrapping an error with <code>%w</code> has a specific cost. Which one?</div>
+      <button class="q-opt">It copies the stack trace, so it allocates on every hop</button>
+      <button class="q-opt">It hides the original, so <code>errors.Is</code> stops matching it</button>
+      <button class="q-opt">It makes that error part of your API, which commits you</button>
+      <button class="q-opt">It forbids the caller from adding context of its own later</button>
+      <div class="q-fb">Wrapping publishes the inner error to callers, so they may depend on it and you must keep it working. The first option describes an implementation detail Go's wrapping does not have; the second inverts the mechanism, since making <code>errors.Is</code> match through the chain is the whole point; and the fourth is wrong because wrapping composes freely up the stack.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A service layer catches a database error, logs it, and returns an empty list. What has it done?</div>
+      <button class="q-opt">Turned a failure into a success carrying wrong data</button>
+      <button class="q-opt">Deferred the decision to the handler at the boundary</button>
+      <button class="q-opt">Translated the failure into its own domain vocabulary</button>
+      <button class="q-opt">Kept the identity of the failure for a caller to match</button>
+      <div class="q-fb">Every layer above now reasons about an empty collection that means "we do not know" rather than "there is nothing", and the caller was told 200. It did not defer, because it returned; it did not translate, because nothing failure-shaped was returned; and it did not keep the identity, because the value it returned carries none. The log line does not fix this - nobody reads logs for a request that succeeded.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1101-configuration-is-an-input-not-a-constant.html">configuration is an input, not a constant</a></b> takes the class of failure nobody can own at request time and moves it to a moment where somebody can.</li>
+    <li><b>Behind you, <a href="0603-an-error-body-is-part-of-the-contract.html">an error body is part of the contract</a></b> is the external vocabulary this page's boundary converts into.</li>
+    <li><b>Behind you, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> made the same one-conversion argument on the way in.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one handler in your own service and list every distinct failure a caller could receive from it. Then ask the agent which of those a caller could act on differently, and which exist only because an internal error escaped its layer.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The Go blog's <a href="https://go.dev/blog/go1.13-errors">Working with Errors in Go 1.13</a> is the shortest statement of wrapping as an API commitment rather than a formatting convenience, and the <a href="https://pkg.go.dev/errors">errors package documentation</a> defines the tree that <code>Is</code> and <code>As</code> traverse. Read <a href="https://peps.python.org/pep-3134/">PEP 3134</a> beside it: it is the same design argued from the opposite direction, starting from an exception that was being lost.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="1101-configuration-is-an-input-not-a-constant.html"><span class="dir">Next &rarr;</span><span class="ttl">Configuration is an input, not a constant</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1100 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Configuration is an input, not a constant - Backend Engineering</title>
+<meta name="description" content="Configuration is untrusted input that arrives once, so it is parsed and validated once at startup into a typed value the rest of the process may assume - and a process that cannot build that value should refuse to start.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 11 &middot; Resilience and observability &middot; Lesson 1101</div>
+  <h1>Configuration is untrusted input with a longer fuse, so parse it once at boot</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">9 min</span>
+    The same boundary rule as lesson 0403, applied to the deploy. &middot;
+    <a href="https://12factor.net/config">The Twelve-Factor App &middot; III. Config</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Config is <b>everything that varies between deploys</b> of the same build, and that definition is what separates it from a constant you can simply write down.</li>
+      <li>It arrives as strings from outside the process, so it is <b>untrusted input</b> and takes exactly the boundary treatment lesson 0403 gave a request body.</li>
+      <li>The whole win is <b>when the failure surfaces</b>. A value parsed at boot fails a deploy; the same value parsed on first use fails a customer, days later.</li>
+      <li>The twelve-factor litmus test for whether the split is clean: <b>the codebase could be made open source at any moment</b> without compromising any credentials.</li>
+      <li>What it costs: a strict boot check turns a partially working deploy into no deploy at all, and that is the trade you are actually making.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Config is the one input that arrives before the first request does.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1100&lt;br/&gt;a failure has&lt;br/&gt;exactly one owner"] --> T["THIS PAGE&lt;br/&gt;the failures nobody&lt;br/&gt;can own at request time"]
+  T --> A["Lessons 1102 to 1104&lt;br/&gt;what the running process&lt;br/&gt;is asked to report"]
+  T --> B["Lesson 1105&lt;br/&gt;shutdown, the other&lt;br/&gt;end of the lifecycle"]
+  W["Module 11&lt;br/&gt;resilience and observability"] -.- T
+  X["Lesson 0403&lt;br/&gt;validation at the boundary"] -.- T
+    </div>
+    <figcaption>Lesson 1100 left one class of failure unplaced: the kind no request-time code path can recover from, because the process was started wrong. This page is where that class goes. It is also the second time this course draws a boundary and parses across it, the first being a request body in lesson 0403. <b>Startup is a boundary with exactly one caller, and the deploy is what it refuses.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: what makes a value config</h2>
+
+  <p>The dividing line is not "is it in a file" or "is it a string". The twelve-factor definition is operational: config is everything likely to vary between deploys - staging, production, one developer's laptop - of the same code. A retry ceiling that is 3 everywhere is not config, it is a constant, and putting it in an environment variable buys an operator a knob nobody will ever be qualified to turn. A database URL is config even when there is only one of them today, because there will be two the first time somebody stands up a staging environment.</p>
+
+  <p>The second half of the definition is the credentials, and twelve-factor gives it a test you can actually run: could this codebase be made open source at any moment without compromising anything. That test is sharper than a rule about file names, because it catches the cases a rule misses - a default password in a fixture, a bucket name that identifies a customer, an internal hostname in a comment.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Constant, config, or secret</div>
+    <div class="fig-claim">Two questions sort every value, and the answers decide where it lives.</div>
+    <div class="mermaid">
+flowchart TB
+  V["A value the program needs"] --> Q1{"Does it differ&lt;br/&gt;between deploys of&lt;br/&gt;the same build"}
+  Q1 -->|no| K["Constant&lt;br/&gt;write it in the code&lt;br/&gt;and review changes to it"]
+  Q1 -->|yes| Q2{"Would publishing it&lt;br/&gt;compromise anything"}
+  Q2 -->|no| C["Config&lt;br/&gt;environment, injected&lt;br/&gt;by the deploy"]
+  Q2 -->|yes| S["Secret&lt;br/&gt;same injection path,&lt;br/&gt;different storage and audit"]
+  classDef warn fill:var(--warn-soft),stroke:var(--warn)
+  class S warn
+    </div>
+    <figcaption>A secret is not a third kind of thing - it reaches the process the same way config does. What differs is where it rests, who may read it, and whether it may appear in a log line or a crash dump. Kubernetes makes the distinction explicit and then warns that Secrets are stored unencrypted in etcd by default, so the separate type is a place to hang encryption and RBAC rather than a guarantee on its own. <b>A value being called a secret changes nothing about it until something enforces the difference.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: one parse, one typed value, at boot</h2>
+
+  <h3 id="config-boundary">The environment is a string map, and your program is not</h3>
+
+  <p>Twelve-factor's recommendation is environment variables, and the reason given is worth separating from the habit: they are a language- and OS-agnostic standard, they can be changed between deploys without touching code, and they are granular rather than grouped. The last one is the argument against config <em>environments</em>. Named groups like development, test and production stop scaling the moment somebody needs <code>joes-staging</code>, and twelve-factor calls the result a combinatorial explosion of config that makes deploys brittle.</p>
+
+  <p>What arrives, though, is a flat map of strings. <code>DB_MAX_CONNS</code> is the text <code>"25"</code> and might be the text <code>"twenty-five"</code>, and <code>FEATURE_X</code> being present but empty is a different thing from being absent. This is precisely the situation lesson <a href="0403-validation-belongs-at-the-boundary-once.html">0403</a> described at the request boundary: untrusted text that must become a trusted value exactly once, so that no code deeper in the process ever re-checks it.</p>
+
+  <div class="code-cap">config.py &middot; one parse, one typed value, one refusal</div>
+  <pre><code>@dataclass(frozen=True)
+class Config:
+    database_url: str
+    max_conns: int
+    shutdown_grace: timedelta
+
+def load(env: Mapping[str, str]) -&gt; Config:
+    problems: list[str] = []
+    def need(key: str) -&gt; str:
+        value = env.get(key, "").strip()
+        if not value:
+            problems.append(f"{key} is required and was empty or unset")
+        return value
+
+    url, conns = need("DATABASE_URL"), need("DB_MAX_CONNS")
+    ...
+    if problems:                       # every problem, not the first
+        raise ConfigError(problems)    # the process does not start
+    return Config(url, int(conns), timedelta(seconds=int(grace)))</code></pre>
+
+  <p>Two details in that shape do the work. The value is frozen, so nothing downstream can rewrite it and no test can leave it modified. And the errors accumulate rather than raising on the first one: an operator who has three variables wrong should learn all three from one failed deploy, not discover them over three attempts. That is the same argument lesson 0603 made about a problem document listing every invalid field.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">When the mistake surfaces</div>
+    <div class="fig-claim">The same typo either halts a rollout or wakes an engineer.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  state "Parsed at boot" as A
+  state "Read where it is used" as B
+  [*] --> A: DB_MAX_CONNS=twenty-five
+  A --> Refused: parse fails, exit non-zero
+  Refused --> [*]: the rollout halts, no traffic served
+  [*] --> B: same value, same deploy
+  B --> Healthy: readiness passes, traffic arrives
+  Healthy --> Crash: first request that opens the pool
+  Crash --> Restarted: the orchestrator restarts it
+  Restarted --> Healthy: and the loop repeats under load
+    </div>
+    <figcaption>Both paths carry an identical mistake and only the moment of reading differs. The lower path is worse in three ways a diagram makes obvious: it passes the deploy gate, it takes traffic, and it fails on a code path a rollout check never exercises. The restart loop is the part that turns a typo into an outage, because the process looks healthy each time it comes back. <b>Reading config lazily converts a deploy-time refusal into a production incident with a delay you do not control.</b></figcaption>
+  </figure>
+
+  <h3 id="config-precedence">Precedence, stated once and in one direction</h3>
+
+  <p>Most services end up with more than one source: a built-in default, a file baked into the image, the environment, and sometimes a flag. That is fine as long as the order is stated in one place and runs one way. The failure is a service where a file overrides the environment in one subsystem and the environment overrides the file in another, because then the answer to "what is this setting actually" is a code-reading exercise during an incident. Print the resolved values at boot, with the secrets redacted, and the question never has to be asked.</p>
+
+  <h2>3. The trade-off: strictness buys certainty and costs availability</h2>
+
+  <p>Refusing to start is a real cost and it is worth naming rather than assuming away. A process that exits because an optional feature flag is misspelled has turned a cosmetic mistake into an outage, and a rollout that fails closed at 3am when nobody meant to touch config is not obviously better than one that limps. The discipline is to be strict about what the service cannot function without and permissive about the rest, and to write down which is which - a required value has no default, and an optional value has a default that is safe rather than convenient.</p>
+
+  <p>The second cost is that config parsed once cannot change while the process runs. That is usually the right trade, because a value that changes underneath running code has all the problems of shared mutable state plus a network. Where genuinely dynamic behaviour is needed, the honest answer is a separate mechanism with its own consistency story - a feature flag service, or a value re-read on an explicit signal - and not a config file the process happens to stat again.</p>
+
+  <div class="callout warn">
+    Config is the most common way a secret reaches a log. A startup line that dumps the parsed configuration, a stack trace that includes a connection string, an error message that quotes the value it could not parse - all three are ordinary code and all three publish credentials to wherever lesson 1102 sends the stream. OWASP's <a href="https://cheatsheetseries.owasp.org/cheatsheets/Logging_Cheat_Sheet.html">logging guidance</a> names database connection strings, access tokens, passwords and encryption keys as data that should not be recorded directly in logs. Redact at the type, so a secret value's own string representation is already the mask, rather than remembering at every call site.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What is the twelve-factor litmus test for whether config is properly separated from code?</div>
+      <button class="q-opt">No value in the repository is read more than once</button>
+      <button class="q-opt">The codebase could be open sourced without leaking secrets</button>
+      <button class="q-opt">Every setting has a documented default and a valid range</button>
+      <button class="q-opt">The build artefact is identical across all environments</button>
+      <div class="q-fb">The test is about credentials in the repository, and it is sharp because it catches fixtures and comments as well as config files. The first option is not a test anybody can apply; the third is good practice this page recommends but is not the litmus test; and the fourth is a different twelve-factor concern, build and release separation, which a clean config split enables rather than defines.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does twelve-factor argue against grouping config into named environments?</div>
+      <button class="q-opt">Named groups cannot express per-deploy credentials safely</button>
+      <button class="q-opt">The names are not portable between orchestrators or clouds</button>
+      <button class="q-opt">Groups are read lazily, so a typo escapes the boot check</button>
+      <button class="q-opt">Custom names multiply, and deploys get brittle to manage</button>
+      <div class="q-fb">The stated objection is a combinatorial explosion once somebody needs a group like <code>joes-staging</code>. The first option is not the argument, since a group can hold credentials as badly or as well as anything else; the second is a portability claim twelve-factor does not make; and the third confuses grouping with the separate question of when a value is parsed, which this page treats on its own.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1102-a-log-line-is-a-query-you-will-run-later.html">a log line is a query you will run later</a></b> is where the running process reports what it did, and where a leaked config value ends up.</li>
+    <li><b>Behind you, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> is the same parse-do-not-check argument on the request path.</li>
+    <li><b>Ahead, <a href="1105-graceful-shutdown-is-a-sequence-not-a-signal.html">graceful shutdown is a sequence</a></b> spends one of the values this page parses, the shutdown deadline.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> List every environment variable your service reads and mark each as required or optional. Then ask the agent which of the required ones are read after startup rather than at it, because each of those is a deploy that can pass and then fail under traffic.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://12factor.net/config">Factor III of the Twelve-Factor App</a> is two screens long and states the definition, the litmus test and the argument against environment groups. Read Kubernetes' <a href="https://kubernetes.io/docs/concepts/configuration/secret/">Secrets</a> page next, specifically its own warning that Secrets are stored unencrypted in etcd by default and that anyone able to create a Pod in a namespace can read the Secrets in it: it is the clearest statement that naming a value a secret is the start of the work rather than the end.</p>
+
+  <div class="pager">
+    <a href="1100-errors-are-values-with-exactly-one-owner.html"><span class="dir">&larr; Previous</span><span class="ttl">Errors are values with exactly one owner</span></a>
+    <a class="nxt" href="1102-a-log-line-is-a-query-you-will-run-later.html"><span class="dir">Next &rarr;</span><span class="ttl">A log line is a query you will run later</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1101 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
