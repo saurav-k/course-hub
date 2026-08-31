@@ -25,7 +25,7 @@ before the next depends on it.
 | 1 | Module 01 - The shape of a request (0000) | written | On-ramp: reason one request end to end before any mechanism is named. The whole map in one page. |
 | 2 | Module 02 - HTTP is the language (0200-0205) | written | Methods, status, headers, caching headers, CORS. RFC 9110, RFC 9111 and RFC 9113 owned. |
 | 3 | Module 03 - Routing | reserved | How a request becomes a handler: path, method, middleware chain. |
-| 4 | Module 04 - Serialization & contracts | reserved | JSON, protobuf; validations and transformations at the boundary. |
+| 4 | Module 04 - Serialization and contracts (0400-0405) | written | The wire contract, JSON's six types, schema-first protobuf, boundary parsing, content negotiation, and the compatibility rules. Written before Module 03, which stays reserved, because nothing in it depends on routing. |
 | 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
 | 6 | Module 06 - API design | reserved | REST shaping; collections, errors, pagination, versioning. |
 | 7 | Module 07 - Auth & security | reserved | Sessions, tokens, OAuth; the web's threat model (injection, XSS, CSRF). |

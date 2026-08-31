@@ -45,6 +45,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0205-cors-is-the-browser-enforcing-the-servers-own-policy.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Serialization and contracts",
+      "lessons": [
+        {
+          "title": "A wire format is a contract you can break silently",
+          "href": "lessons/0400-a-wire-format-is-a-contract-you-can-break-silently.html"
+        },
+        {
+          "title": "JSON is text and text has no types",
+          "href": "lessons/0401-json-is-text-and-text-has-no-types.html"
+        },
+        {
+          "title": "Schema-first makes the contract the source",
+          "href": "lessons/0402-schema-first-makes-the-contract-the-source.html"
+        },
+        {
+          "title": "Validation belongs at the boundary, once",
+          "href": "lessons/0403-validation-belongs-at-the-boundary-once.html"
+        },
+        {
+          "title": "Content negotiation picks the representation",
+          "href": "lessons/0404-content-negotiation-picks-the-representation.html"
+        },
+        {
+          "title": "Compatibility is a rule, not a hope",
+          "href": "lessons/0405-compatibility-is-a-rule-not-a-hope.html"
+        }
+      ]
     }
   ],
   "extras": [

@@ -338,6 +338,7 @@ Pick the kind by what the reader is confused about:
 
 `timeline` shrinks rather than wraps, so keep it to about six columns and split a longer one into two figures.
 `quadrantChart` centres a label under its point and neither clips nor wraps it, so keep point labels under about 26 characters and away from the axes.
+A `flowchart` grows along its stated direction and *unboundedly* across it, so a `TB` graph with several independent roots, or one whose subgraphs sit side by side, lays out wider than the reading column and is clipped at the column edge. Nothing reports it: `validate_site.py` and `check_pages.py` both pass, no console message appears, and the figure looks complete until you notice a node missing at the right. Turn the direction so the many-node axis runs down the page, or cut the row to three or four nodes, and measure the rendered `svg` against its `figure` rather than trusting the source.
 
 A `mindmap` and a `timeline` take their branch colours from Mermaid's own twelve-step scale rather than from the theme it is handed.
 `hub.js` supplies that scale from the `--branch-0..7` tokens and `hub.css` pins the mindmap root disc, so both follow the palette.
