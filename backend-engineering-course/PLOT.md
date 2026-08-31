@@ -27,7 +27,7 @@ before the next depends on it.
 | 3 | Module 03 - Routing (0300-0305) | written | The route as a pair, path against query, the prefix tree, the middleware chain, the 404/405 verdicts and prefix mounting. RFC 3986 and RFC 6570 join the canon; Go's ServeMux is the named implementation the mechanism pages read from. |
 | 4 | Module 04 - Serialization and contracts (0400-0405) | written | The wire contract, JSON's six types, schema-first protobuf, boundary parsing, content negotiation, and the compatibility rules. It was written before Module 03 landed, because nothing in it depends on routing. |
 | 5 | Module 05 - The layered service (0500-0505) | written | Layers as testable boundaries, controller, service, repository, request context, dependency direction. Written before Module 03 landed, because it depends on nothing routing defines. |
-| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Module 03 landed, because nothing in it depends on routing or on the internal layering. |
+| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05 landed, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth and security (0700-0706) | written | The two questions and their two lifetimes, sessions, self-contained tokens, OAuth with PKCE, then the threat model: injection, XSS and CSRF, each taught attack first. |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
 | 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
@@ -45,18 +45,18 @@ Everything the course intends but nobody has written: reserve the position now, 
 `reserved` and one line on when the position was claimed and by what plan.
 A position reserved costs nothing; a position taken by accident is a renumbering.
 
-Modules 05 and 08-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
+Modules 08-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+
+Module 05 was written out of reading order, before Module 03 landed, because it depends on nothing routing
+defines: it consumes the parsed, trusted values Module 04 produces and says only where they travel afterwards.
+Its lesson numbers start at 0500, so the 03xx block stayed free for the module that owns it and nothing was
+renumbered when Module 03 landed ahead of it.
 
 Module 03 landed fifth and takes the 03xx block, for the same reason Module 02 took 02xx: each module owns a
 hundred-block so a later module never renumbers an earlier one. It answers the question Module 02 leaves open - the
 request has arrived and its method and target are understood, so how does it become a specific piece of code.
 It lands after Modules 04 and 06 rather than before them, because neither of those depends on routing.
-
-Module 05 landed alongside Modules 04 and 06, out of reading order, because it depends on nothing Module 03
-defines: it consumes the parsed, trusted values Module 04 produces and says only where they travel afterwards.
-Its lesson numbers start at 0500, so the 03xx block stayed free for the module that owns it and nothing was
-renumbered when Module 03 landed after it.
 
 Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
 a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
