@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A queue delivers at least once - Backend Engineering</title>
+<meta name="description" content="A broker cannot know whether a consumer finished, so it waits for an acknowledgement and redelivers when none arrives. Every queue you will use in production is at-least-once, and the acknowledgement is where you choose which failure you can afford.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1001</div>
+  <h1>A broker cannot see whether you finished, so it redelivers until you say so</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The promise a queue actually makes, which is smaller than the one people assume. &middot;
+    <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">Amazon SQS - visibility timeout</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A queue is not a data structure with a <code>pop</code>. It is a <b>lease</b>: the broker hands a message out, starts a clock, and takes it back if no acknowledgement arrives.</li>
+      <li>SQS calls that clock the visibility timeout - <b>30 seconds by default, 12 hours at most</b>, measured from first receipt. RabbitMQ has no clock and instead requeues everything unacknowledged when the channel or connection closes.</li>
+      <li>The acknowledgement can go <b>before</b> the work or <b>after</b> it, and that single choice is the whole delivery guarantee: at-most-once loses work, at-least-once repeats it.</li>
+      <li>Every broker you will actually run is at-least-once. SQS standard queues say <b>"more than one copy of a message might be delivered"</b>; Sidekiq says it <b>"makes no exactly-once guarantee at all"</b>.</li>
+      <li>What it costs: a timeout you must set from real processing times, a heartbeat if the work is long, and a consumer that has to survive being handed the same message twice.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The next three lessons all follow from the guarantee named here.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1000&lt;br/&gt;the durable handoff&lt;br/&gt;and the 202"] --> T["THIS PAGE&lt;br/&gt;what the broker&lt;br/&gt;actually promises"]
+  T --> A["Lesson 1002&lt;br/&gt;the redelivery is&lt;br/&gt;bounded by a policy"]
+  T --> B["Lesson 1003&lt;br/&gt;the duplicate is the&lt;br/&gt;consumer's problem"]
+  W["Lesson 0605&lt;br/&gt;the same ambiguity&lt;br/&gt;on the HTTP side"] -.- T
+    </div>
+    <figcaption>Lesson 1000 established that a job survives its producer. This page is where that survival is paid for, because a broker that guarantees a message is not lost must be willing to send it again, and it has no way to know whether the previous send was wasted. The dotted link is not decoration: this is the ambiguous-failure problem of lesson 0605 with the parties swapped, and the answer has the same shape. <b>Durability and exactly-once are in tension, and every broker resolves it the same way.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a lease, not a hand-off</h2>
+
+  <h3 id="lease">The broker gives you a loan of the message</h3>
+  <p>Picture the alternative first, because it is what most people assume is happening. If the broker deleted the message the moment it handed it over, a consumer that died one instruction later would take the work with it, and the queue's durability would end at the moment of delivery. That is not what any of them do.</p>
+
+  <p>Instead the message stays in the queue and becomes temporarily invisible to other consumers. Amazon's description is exact: <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">"When you receive a message from an Amazon SQS queue, it remains in the queue but becomes temporarily invisible to other consumers."</a> The consumer is expected to process it and delete it inside that window. If it does not - because of an application error, a crash or a connectivity problem - the message becomes visible again and can be retrieved by the same or a different consumer.</p>
+
+  <p>So the primitive is a lease with an expiry, and deleting the message is the acknowledgement. RabbitMQ reaches the same place by a different route: it has no per-message clock and instead ties the lease to the connection, so <a href="https://www.rabbitmq.com/docs/confirms">any delivery that was not acknowledged is automatically requeued when the channel or connection it arrived on is closed</a>. Different trigger, identical contract - unacknowledged means undone.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The lease and its clock</div>
+    <div class="fig-claim">A slow consumer and a dead consumer look the same to the broker.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant B as Broker
+  participant W1 as Worker A
+  participant W2 as Worker B
+  B->>W1: deliver message - lease starts, 30s
+  W1->>W1: processing - takes 45 seconds
+  Note over B,W2: 30 seconds pass with no delete
+  B->>W2: the same message, now visible again
+  W2->>W2: processing the duplicate
+  W1->>B: DeleteMessage - too late, work already done twice
+  W2->>B: DeleteMessage
+    </div>
+    <figcaption>Nothing here failed. Worker A is healthy, the network is fine, and the message was processed twice because a number was set to thirty and the work takes forty-five. The broker has no channel through which a busy consumer could say "still going" unless the consumer opens one, which is what a heartbeat is: SQS exposes <code>ChangeMessageVisibility</code> for exactly this, and Amazon's stated best practice is to extend the timeout periodically rather than to guess a large one up front. <b>The visibility timeout is not a tuning parameter, it is an assertion about how long your slowest job takes.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: where the acknowledgement sits</h2>
+
+  <h3 id="ack-ordering">Two orderings, two guarantees, no third option</h3>
+  <p>Everything about the delivery guarantee comes from one decision: does the consumer acknowledge before it does the work, or after? Celery states both plainly. Its default is to <a href="https://docs.celeryq.dev/en/stable/userguide/tasks.html">acknowledge the message in advance, just before it is executed, "so that a task invocation that already started is never executed again"</a>. Set <code>acks_late</code> and the message is acknowledged after the task has run instead - and the documentation immediately names the consequence: "This means the task may be executed multiple times should the worker crash in the middle of execution. Make sure your tasks are idempotent."</p>
+
+  <p>Read those two sentences beside each other and the trade is complete. Acknowledge first and a crash during processing loses the work permanently, because the broker has already forgotten it - that is <b>at-most-once</b>. Acknowledge last and a crash during processing leaves the message unacknowledged, so it comes back and the completed part of the work happens again - that is <b>at-least-once</b>. There is no ordering that gives neither, because the acknowledgement and the work are two separate operations and something can always die between them.</p>
+
+  <h3 id="exactly-once">Why exactly-once is not on the menu</h3>
+  <p>The wish is for the broker and the consumer to agree, atomically, that a message was both processed and acknowledged. They are two processes with a network between them, so that agreement requires a message, and that message can be lost - which is the same knot lesson 0605 tied on the HTTP side. Every broker resolves it by choosing at-least-once and telling you so, in writing. SQS standard queues: <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues.html">"Standard queues ensure at-least-once message delivery, but due to the highly distributed architecture, more than one copy of a message might be delivered, and messages may occasionally arrive out of order."</a> Sidekiq: <a href="https://github.com/sidekiq/sidekiq/wiki/Best-Practices">"Sidekiq will execute your job at least once, not exactly once"</a>, and, flatly, "Sidekiq makes no exactly-once guarantee at all."</p>
+
+  <p>Even the strong variants keep the caveat rather than removing it. SQS FIFO queues sequence messages within a group and suppress duplicate sends, but the visibility-timeout documentation still says that because of the at-least-once model there is <em>no absolute guarantee</em> that a message will not be delivered more than once during the timeout period. Where a system does advertise exactly-once, read the boundary carefully: it will be exactly-once <em>processing</em> inside one system's own transactional scope, not exactly-once delivery to arbitrary code with arbitrary side effects.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One message, four outcomes</div>
+    <div class="fig-claim">Every path out of In flight is either a duplicate or a loss.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Visible: producer sends
+  Visible --> InFlight: a consumer receives it
+  InFlight --> Deleted: acknowledged after success
+  InFlight --> Visible: lease expires - redelivery
+  InFlight --> Deleted: acknowledged before the work - loss on crash
+  Visible --> Dead: receive count exceeded - lesson 1002
+  Deleted --> [*]
+  Dead --> [*]
+    </div>
+    <figcaption>The two edges into Deleted are the same broker operation issued at two different moments, and the whole guarantee lives in which moment you pick. Notice that the diagram has no edge for "the consumer finished but the acknowledgement was lost" - it does not need one, because that case is indistinguishable from the lease expiring, and the broker takes the same action. <b>The broker never learns what happened; it only learns whether you told it in time.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: which failure can you afford</h2>
+
+  <p>Stated as a choice it sounds balanced, and it is not. At-most-once loses work silently: a job that vanished leaves no trace anywhere, and the only evidence is a customer noticing that their export never arrived. At-least-once duplicates work loudly: two emails, two charges, two rows - visible, embarrassing, and fixable in advance by making the consumer idempotent, which is lesson 1003. One of these failure modes can be designed out by the consumer and the other cannot be detected by anyone, which is why the entire industry has settled on at-least-once as the default and left the duplicate to you.</p>
+
+  <p>The operational bill is small but sharp. The visibility timeout has to come from the real distribution of your processing times rather than from a round number, and Amazon's stated advice is to start short and extend it programmatically. That extension has a hard ceiling: the visibility timeout has a maximum of 12 hours from when a message is first received, and extending it does not reset that limit, so a job that genuinely needs longer is a job that has to be broken into steps. And in-flight messages are a bounded resource - standard queues cap them at approximately 120,000, after which receives return <code>OverLimit</code> under short polling or simply return nothing under long polling.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The heartbeat, and its wall</div>
+    <div class="fig-claim">Extending the lease buys time up to a ceiling that does not move.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant W as Worker
+  participant B as Broker
+  B->>W: deliver - lease 120s from first receipt
+  loop every 60 seconds while working
+    W->>B: ChangeMessageVisibility - another 120s
+    B-->>W: lease extended
+  end
+  W->>B: DeleteMessage - work committed
+  Note over W,B: the 12 hour ceiling runs from first receipt
+  W->>B: ChangeMessageVisibility at hour 12
+  B--xW: refused - the message is visible again
+    </div>
+    <figcaption>The loop is the correct shape for work of unpredictable length: a short lease that the worker keeps renewing, so a dead worker releases the message in about one heartbeat rather than in one worst case. The note is the part that catches people building long imports, because the ceiling is measured from first receipt and renewing does not reset it. <b>A heartbeat converts an unknown duration into a known detection time, which is the only thing the broker can actually use.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    Do not read at-least-once as "occasionally, under exotic failure". The ordinary source of a duplicate is not a crash - it is a job that ran slightly longer than its lease, which is a configuration mismatch that happens under exactly the conditions that make jobs slow: a busy database, a big input, a cold cache. That is a correlated event, so duplicates arrive in bursts on your worst day rather than one at a time on a quiet one. Test the duplicate path, do not merely allow for it.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A worker acknowledges the message before running the job. What has it chosen?</div>
+      <button class="q-opt">At-least-once, since the lease still exists</button>
+      <button class="q-opt">At-most-once, since a crash loses the work</button>
+      <button class="q-opt">Exactly-once, since only one copy is sent</button>
+      <button class="q-opt">Ordered delivery, since the lease is short</button>
+      <div class="q-fb">Acknowledging first tells the broker to forget the message, so a crash during processing destroys work that nothing will replay - the definition of at-most-once. The lease is precisely what the acknowledgement ends, so it cannot still be protecting anything. Exactly-once is not on offer from any of these brokers. And ordering is a property of the queue type, unrelated to when a consumer acknowledges.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A job usually takes 20 seconds but sometimes 50, on a queue with a 30 second timeout. What happens?</div>
+      <button class="q-opt">The slow jobs fail with a lease-expired error</button>
+      <button class="q-opt">The broker extends the lease automatically</button>
+      <button class="q-opt">The slow jobs are moved straight to the dead letter</button>
+      <button class="q-opt">The slow jobs are delivered again and run twice</button>
+      <div class="q-fb">Once the timeout passes the message becomes visible again and another consumer can take it, while the first worker carries on unaware - so the work is done twice and neither run is told. No error reaches the slow worker, because the broker has no channel to interrupt it. Nothing extends the lease unless the consumer asks, which is what <code>ChangeMessageVisibility</code> is for. And the dead-letter move is driven by a receive count, so it takes several redeliveries rather than one.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, <a href="1002-a-failed-job-is-a-policy-you-wrote-in-advance.html">a failed job is a policy you wrote in advance</a></b> bounds the redelivery this page describes, so a poisonous message stops circulating.</li>
+    <li><b>Ahead, <a href="1003-a-consumer-must-be-idempotent.html">a consumer must be idempotent</a></b> is what you owe the system once you have accepted at-least-once, which you have.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> solved the identical ambiguity between a client and a server, and the shape of the answer transfers directly.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find the visibility timeout, or the equivalent lease, on a queue your team runs, then find the 99th-percentile duration of the jobs on it. If you cannot get both numbers in ten minutes, that is the finding. Ask the agent what the ratio implies about how often you are already processing duplicates.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-visibility-timeout.html">Amazon SQS visibility timeout</a> is the clearest written account of the lease, including the 12-hour ceiling and the heartbeat advice. Read <a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ's consumer acknowledgements</a> for the connection-scoped version of the same contract and the <code>redelivered</code> flag, and <a href="https://docs.celeryq.dev/en/stable/userguide/tasks.html">Celery's task documentation</a> for <code>acks_late</code> stated as the explicit choice between the two guarantees.</p>
+
+  <div class="pager">
+    <a href="1000-async-work-is-work-that-outlives-the-response.html"><span class="dir">&larr; Previous</span><span class="ttl">Async work is work that outlives the response</span></a>
+    <a class="nxt" href="1002-a-failed-job-is-a-policy-you-wrote-in-advance.html"><span class="dir">Next &rarr;</span><span class="ttl">A failed job is a policy you wrote in advance</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1001 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

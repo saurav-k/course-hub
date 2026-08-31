@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A failed job is a policy you wrote in advance - Backend Engineering</title>
+<meta name="description" content="Retrying is not a reaction to a failure, it is a policy chosen before one. Which errors are worth repeating, how far apart the attempts are, how many there are, and where the job goes when they run out.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1002</div>
+  <h1>Retrying is a policy you choose before the failure, not a reaction to it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Four decisions, all of which have a default you did not pick. &middot;
+    <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">AWS - Exponential Backoff And Jitter</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A retry policy answers four questions: <b>which errors, how far apart, how many, and where the job goes when they run out.</b> Every queue has an answer to all four whether you wrote one or not.</li>
+      <li><b>Classify the error first.</b> A timeout is worth repeating and a malformed payload never will be, so retrying it burns capacity to reach the same failure at a later hour.</li>
+      <li>Capped exponential backoff spreads attempts out in time but leaves them <b>clustered</b>, because every client waits the same amount. Jitter is what removes the cluster, and AWS measured the call count falling <b>by more than half</b> with 100 contending clients.</li>
+      <li>A bound is what a dead-letter queue is for. SQS moves a message there once its receive count passes <code>maxReceiveCount</code>, and for a standard queue <b>the retention clock keeps running from the original enqueue</b> - so a short DLQ retention deletes the evidence.</li>
+      <li>What it costs: retries add load exactly when the system is failing, and stacked layers multiply, so the honest policy caps attempts and retries at one layer.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Redelivery without a bound is a loop, and this page closes it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1001&lt;br/&gt;the broker redelivers&lt;br/&gt;until acknowledged"] --> T["THIS PAGE&lt;br/&gt;how often, how many&lt;br/&gt;and where it ends"]
+  T --> A["Lesson 1003&lt;br/&gt;every retry is a&lt;br/&gt;duplicate to survive"]
+  T --> B["Module 11&lt;br/&gt;the dead letter is&lt;br/&gt;something you alarm on"]
+  W["Module 06&lt;br/&gt;retriable and terminal&lt;br/&gt;are the 5xx and 4xx families"] -.- T
+    </div>
+    <figcaption>Lesson 1001 left a message that comes back forever if nothing acknowledges it, which is a livelock rather than a retry: one bad payload can occupy a worker on a permanent cycle and starve the queue behind it. This page adds the two bounds that make redelivery a policy - a delay between attempts and a count that ends them - and names the place a job goes when it has used both up. <b>Retry and give up are one decision, and a design that has only the first has not finished.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: classify the failure before you repeat it</h2>
+
+  <h3 id="retriable">Retriable means the input was fine and the world was not</h3>
+  <p>Two failures wear the same exception type in most codebases and deserve opposite treatment. A connection reset, a lock timeout, a 503 from a dependency and a throttled write are all statements about the world at that instant: the same job, run again in ten seconds, has a genuine chance of succeeding. A missing required field, a foreign key that does not exist, a payload the deserialiser cannot read and a permission the caller does not have are statements about the job itself. Repeating those thirty times reaches the same failure thirty times and costs a worker slot each time.</p>
+
+  <p>Module 06 already drew this line for you in a different vocabulary. The 4xx and 5xx families exist precisely to say whether the request or the server was at fault, and a consumer can lean on the same split: treat a terminal classification as an immediate move to the dead letter, and a retriable one as a wait and another attempt. What you must not do is default everything to retriable because the classification is work. That default is how a queue fills with jobs that cannot succeed, all of them being retried at the same interval, in front of the jobs that could.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The four decisions</div>
+    <div class="fig-claim">Only one branch of this diagram ever reaches a second attempt.</div>
+    <div class="mermaid">
+flowchart TB
+  F["The job raised an error"] --> C{"Retriable&lt;br/&gt;or terminal?"}
+  C -- "terminal" --> D["Dead letter now&lt;br/&gt;no attempts wasted"]
+  C -- "retriable" --> N{"Attempts left&lt;br/&gt;under the cap?"}
+  N -- "no" --> D
+  N -- "yes" --> B["Wait - capped exponential&lt;br/&gt;backoff with jitter"]
+  B --> R["Redeliver"]
+  R --> F
+  D --> A["Alarm, and a human&lt;br/&gt;decides to fix or redrive"]
+    </div>
+    <figcaption>Read the two diamonds as the two bounds. The upper one stops work that could never succeed, and it is the one most systems omit - without it, a malformed payload takes the full retry budget before anybody hears about it. The lower one stops work that could have succeeded but has not, and it is what turns an unbounded loop into a bounded cost. The box at the bottom is the reason a dead-letter queue is worth having at all: it is not a bin, it is a queue somebody reads. <b>A dead letter with no alarm on it is a silent failure with extra storage.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: backoff, jitter, and a receive count</h2>
+
+  <h3 id="backoff">Backoff spreads attempts out, jitter spreads clients apart</h3>
+  <p>Capped exponential backoff means each attempt waits twice as long as the last, up to a ceiling. It helps, and on its own it does not solve the problem it appears to solve. AWS's analysis puts the failure precisely: with backoff alone <a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">"there are still clusters of calls. Instead of reducing the number of clients competing in every round, we've just introduced times when no client is competing."</a> Every client computes the same delay from the same attempt number, so they all sleep together and all wake together. The retry storm is not slowed down, it is scheduled.</p>
+
+  <p>Jitter is the correction, and it is a small one. The published simulator gives four strategies, and reading them beside each other is the fastest way to understand what each buys.</p>
+
+  <div class="code-cap">backoff.py &middot; the four strategies, as published in the AWS backoff simulator</div>
+  <pre><code>def expo(base, cap, n):
+    return min(cap, base * 2 ** n)              # capped exponential
+
+def no_jitter(base, cap, n):
+    return expo(base, cap, n)                   # every client waits the same
+
+def full_jitter(base, cap, n):
+    return random.uniform(0, expo(base, cap, n))
+
+def equal_jitter(base, cap, n):
+    v = expo(base, cap, n)
+    return v / 2 + random.uniform(0, v / 2)     # keeps a floor under the wait
+
+def decorrelated(base, cap, prev):
+    return min(cap, random.uniform(base, prev * 3))   # grows from the last wait</code></pre>
+
+  <p>AWS ran these against a contended optimistic-concurrency workload with a base of 5ms and a cap of 2,000ms. Their reported result for full jitter, with 100 contending clients, is that it "reduced our call count by more than half" and significantly improved time to completion against un-jittered backoff. Of the four, no-jitter is described as the clear loser on both work and time, equal jitter does slightly more work than full jitter and takes much longer, and the choice between full and decorrelated is close. Full jitter is the sensible default: it is one line, and the line is <code>random.uniform(0, delay)</code>.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Backoff schedule and jitter</div>
+    <div class="fig-claim">The cap ends the growth and jitter turns each wait into a range.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Chart of retry delay against attempt number for capped exponential backoff with a five millisecond base and a two second cap. The delay doubles from five milliseconds to 1280 milliseconds over nine attempts and then flattens at the two second cap. Under full jitter each attempt draws uniformly from zero up to that delay, shown as a band.">
+      <line class="axis" x1="80" y1="250" x2="612" y2="250"/>
+      <line class="axis" x1="80" y1="34" x2="80" y2="250"/>
+      <line class="grid" x1="80" y1="40" x2="612" y2="40"/>
+      <rect class="f-stat" x="93" y="249" width="14" height="1"/>
+      <rect class="f-stat" x="148" y="249" width="14" height="1"/>
+      <rect class="f-stat" x="203" y="248" width="14" height="2"/>
+      <rect class="f-stat" x="258" y="246" width="14" height="4"/>
+      <rect class="f-stat" x="313" y="242" width="14" height="8"/>
+      <rect class="f-stat" x="368" y="233" width="14" height="17"/>
+      <rect class="f-stat" x="423" y="216" width="14" height="34"/>
+      <rect class="f-stat" x="478" y="183" width="14" height="67"/>
+      <rect class="f-stat" x="533" y="116" width="14" height="134"/>
+      <rect class="f-stat" x="588" y="40" width="14" height="210"/>
+      <rect class="m-alarm" x="89" y="248" width="22" height="3"/>
+      <rect class="m-alarm" x="144" y="248" width="22" height="3"/>
+      <rect class="m-alarm" x="199" y="247" width="22" height="3"/>
+      <rect class="m-alarm" x="254" y="245" width="22" height="3"/>
+      <rect class="m-alarm" x="309" y="241" width="22" height="3"/>
+      <rect class="m-alarm" x="364" y="232" width="22" height="3"/>
+      <rect class="m-alarm" x="419" y="215" width="22" height="3"/>
+      <rect class="m-alarm" x="474" y="182" width="22" height="3"/>
+      <rect class="m-alarm" x="529" y="115" width="22" height="3"/>
+      <rect class="m-alarm" x="584" y="39" width="22" height="3"/>
+      <text class="ttl" x="80" y="22">Retry delay by attempt - derived from base 5 ms, cap 2,000 ms</text>
+      <text class="lbl-sm" x="86" y="36">2,000 ms - the cap</text>
+      <text class="lbl-sm" x="74" y="254" text-anchor="end">0</text>
+      <text class="lbl-sm" x="100" y="266" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="210" y="266" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="320" y="266" text-anchor="middle">5</text>
+      <text class="lbl-sm" x="430" y="266" text-anchor="middle">7</text>
+      <text class="lbl-sm" x="540" y="266" text-anchor="middle">9</text>
+      <text class="lbl-sm" x="80" y="286">attempt number - the tenth wait is 2,048 ms before the cap trims it</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>the wait with no jitter</span><span><i class="sw-stat"></i>the range full jitter draws from</span></div>
+    <figcaption>Derived from the two formulas above at the base and cap the published simulation used, not measured on any system. The bars are what a client actually waits under full jitter - a uniform draw from zero up to the deterministic value - and the marks are where every un-jittered client lands together. Read the left-hand third carefully: for the first four attempts the whole schedule is under a tenth of a second, so a job that fails fast has exhausted several attempts before a human could have noticed anything. <b>Backoff sets the ceiling on the wait and jitter sets the width, and only the width relieves contention.</b></figcaption>
+  </figure>
+
+  <h3 id="dead-letter">The count, and where the job goes when it is spent</h3>
+  <p>The bound on attempts is usually a property of the queue rather than of your code. In SQS it is the redrive policy's <code>maxReceiveCount</code>, described as <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">"the number of times a consumer can receive a message from a source queue before it is moved to a dead-letter queue"</a>. Note what is being counted: receives, not application-level failures. A worker that dies before it can fail properly still burns one, which is correct - it is a message that has now been attempted.</p>
+
+  <p>Two details of the dead letter are worth holding, because both bite after the incident rather than during it. First, for standard queues the expiry of a message is always based on its original enqueue timestamp, and moving it to the DLQ does not reset that clock - so a message that spent a day in the source queue and lands in a DLQ with a four-day retention is deleted three days later. Amazon's stated best practice follows directly: always set the DLQ's retention period longer than the source queue's. Second, a DLQ is a diagnostic surface. The whole point is that you can read the messages, find why processing failed, and redrive them once the cause is fixed.</p>
+
+  <h2>3. The trade-off: a retry is load, arriving at the worst moment</h2>
+
+  <p>Every retry is an extra unit of work sent to a system that has just demonstrated it cannot keep up. Google's SRE chapter on cascading failures draws the arithmetic: a backend rejecting requests at 100 QPS sees those retried, so "the volume of retries grows: 100 QPS of retries in the first second leads to 200 QPS, then to 300 QPS, and so on". The failure feeds itself.</p>
+
+  <p>The multiplication across layers is worse and easier to miss, because each layer's policy looks reasonable in isolation. The same chapter states it as a rule: <a href="https://sre.google/sre-book/addressing-cascading-failures/">"avoid amplifying retries by issuing retries at multiple levels: a single request at the highest layer may produce a number of attempts as large as the product of the number of attempts at each layer to the lowest layer."</a></p>
+
+  <figure class="diagram">
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of requests arriving at the deepest layer when each of several stacked layers retries three times. One request at the top becomes three after one retrying layer, nine after two, and twenty-seven after three.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-ink" x="110" y="242" width="60" height="8"/>
+      <rect class="m-ink" x="220" y="227" width="60" height="23"/>
+      <rect class="m-ink" x="330" y="180" width="60" height="70"/>
+      <rect class="m-alarm" x="440" y="40" width="60" height="210"/>
+      <text class="ttl" x="70" y="26">Calls reaching the deepest layer, per user request - derived: 3 attempts at each layer</text>
+      <text class="lbl-sm" x="140" y="266" text-anchor="middle">no retries</text>
+      <text class="lbl-sm" x="250" y="266" text-anchor="middle">1 layer</text>
+      <text class="lbl-sm" x="360" y="266" text-anchor="middle">2 layers</text>
+      <text class="lbl-sm" x="470" y="266" text-anchor="middle">3 layers</text>
+      <text class="lbl-sm" x="140" y="236" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="250" y="221" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="360" y="174" text-anchor="middle">9</text>
+      <text class="lbl-sm t-alarm" x="470" y="34" text-anchor="middle">27</text>
+      <text class="lbl-sm" x="90" y="286">Client, gateway and service each retry 3 times - the product, not the sum</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>a stack nobody thought was aggressive</span></div>
+    <figcaption>Derived arithmetic rather than a measurement: three attempts at each of three layers is 3<i>&sup3;</i>, and the assumption is only that every layer retries every failure. Each layer's own policy is modest and defensible, and no engineer on any of the three teams wrote down a twenty-seven. That is the whole hazard - the number is a product of decisions taken in different rooms, so it is nobody's number until an incident makes it everybody's. <b>Retry at one layer, and let every other layer pass the failure through.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    A retry policy is a promise that the work is safe to repeat, and nothing in the queue verifies it. If the consumer is not idempotent, then increasing <code>maxReceiveCount</code> from 3 to 10 does not improve reliability - it raises the number of duplicate charges, duplicate emails and duplicate rows a single bad afternoon can produce. Retries and idempotence ship together or neither ships. That is lesson 1003, and it is not optional reading after this one.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Capped exponential backoff without jitter still causes a retry storm. Why?</div>
+      <button class="q-opt">Clients compute the same delay and wake together</button>
+      <button class="q-opt">The cap is reached after only a few attempts</button>
+      <button class="q-opt">Doubling grows too slowly to relieve the load</button>
+      <button class="q-opt">Clients reset the attempt counter on a timeout</button>
+      <div class="q-fb">The delay is a pure function of the attempt number, so a hundred clients that failed together sleep for the same interval and arrive together - AWS's own description is that backoff introduces times when nobody is competing rather than reducing how many compete. The cap does bound the wait, but the clustering is present from the first retry. Doubling is aggressive, not slow. And resetting a counter would change the schedule, not the synchronisation.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A message reaches an SQS dead-letter queue. When is it deleted from there?</div>
+      <button class="q-opt">After the dead letter's own retention, from arrival</button>
+      <button class="q-opt">Never, since a dead letter has no retention</button>
+      <button class="q-opt">By the original enqueue time, on a standard queue</button>
+      <button class="q-opt">When the source queue's redrive policy is removed</button>
+      <div class="q-fb">For standard queues the expiration is always based on the original enqueue timestamp, and the move does not reset it, which is why Amazon advises a longer retention on the dead letter than on the source. Arrival-based expiry is what people assume and is the FIFO behaviour, not the standard one. Dead letters are ordinary queues and do expire. And changing a redrive policy governs future moves rather than messages already sitting there.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, <a href="1003-a-consumer-must-be-idempotent.html">a consumer must be idempotent</a></b> is the precondition this page assumed: every attempt counted here is a chance to do the work twice.</li>
+    <li><b>Behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is where retriable and terminal were first split, on the same reasoning.</li>
+    <li><b>Behind you, <a href="1001-a-queue-delivers-at-least-once.html">a queue delivers at least once</a></b> is where the unbounded redelivery this page bounds came from.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one consumer and write down its four answers: which errors it retries, the delay schedule, the attempt cap, and the destination when the cap is hit. Then count the retrying layers between a user action and that consumer, and multiply their caps. Ask the agent whether the product is a number your dependency could survive.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/">Exponential Backoff And Jitter</a> is short and its simulator is published, so the four strategies can be read as code rather than as advice. Read <a href="https://sre.google/sre-book/addressing-cascading-failures/">Addressing Cascading Failures</a> for the amplification rule and the server-wide retry budget, and <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html">Amazon SQS dead-letter queues</a> for <code>maxReceiveCount</code> and the retention trap.</p>
+
+  <div class="pager">
+    <a href="1001-a-queue-delivers-at-least-once.html"><span class="dir">&larr; Previous</span><span class="ttl">A queue delivers at least once</span></a>
+    <a class="nxt" href="1003-a-consumer-must-be-idempotent.html"><span class="dir">Next &rarr;</span><span class="ttl">A consumer must be idempotent</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1002 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
