@@ -251,6 +251,56 @@ TBD as lessons landing.
   defence in depth rather than a replacement; and
   [MDN Set-Cookie](https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie) for
   the precise `Strict`, `Lax` and `None` definitions that leave a state-changing GET forgeable.
+### Module 09 - Caching
+
+- Lesson 0900, why a cache exists: [Atikoglu et al., *Workload Analysis of a Large-Scale Key-Value Store*, SIGMETRICS 2012](https://s4plus.ustc.edu.cn/_upload/article/files/7a/5b/5c9fd1264e30b6881ecd7f7733f2/3ef2e159-9fd8-47a6-903c-cf9bfa836a28.pdf)
+  for the 284-billion-request trace, the per-pool GET hit rates in Table 2 (98.7%, 98.2%, 93.7%, 92.9%,
+  81.4%), the 30:1 GET/SET ratio, and the key-popularity tail behind the ETC miss rate;
+  [Redis benchmark](https://redis.io/docs/latest/operate/oss_and_stack/management/optimization/benchmarks/)
+  for the measured sub-millisecond loopback latency the page anchors its planning figure on; and
+  [AWS - Caching strategies](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html)
+  for the three-trip cache miss penalty. **The 20 ms origin cost in the worked arithmetic is a stated
+  assumption, not a measurement**, and the page says so.
+- Lesson 0901, read patterns: [Azure Architecture Center - Cache-Aside pattern](https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside)
+  for the pattern, the read-through comparison and the problems-and-considerations list;
+  [AWS - Caching strategies](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html)
+  for lazy loading with its advantages and disadvantages stated; and &sect;2 of
+  [Nishtala et al., *Scaling Memcache at Facebook*, NSDI 2013](https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf)
+  ([paper home](https://research.facebook.com/publications/scaling-memcache-at-facebook/)) for the
+  demand-filled look-aside shape.
+- Lesson 0902, write patterns: [AWS - Caching strategies](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html)
+  for write-through, its two-trip cost and the missing-data and cache-churn disadvantages;
+  [*Scaling Memcache at Facebook*](https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf) &sect;2
+  for deleting rather than updating because deletes are idempotent;
+  [Azure - Cache-Aside](https://learn.microsoft.com/en-us/azure/architecture/patterns/cache-aside) for the
+  ordering rule and the refill window it leaves open; and
+  [Redis - Key eviction](https://redis.io/docs/latest/develop/reference/eviction/) for `allkeys-lru`
+  evicting any key, which is what makes an unflushed write-back entry losable.
+- Lesson 0903, keys: [RFC 9111 &sect;4.1](https://www.rfc-editor.org/rfc/rfc9111#section-4.1) for the primary
+  and secondary cache key and the fragmentation `Vary` costs;
+  [Fastly - Working with surrogate keys](https://www.fastly.com/documentation/guides/full-site-delivery/purging/working-with-surrogate-keys/)
+  for tag-based purge, the many-to-many mapping and the 1,024-byte key and 16,384-byte header limits; and
+  [*Scaling Memcache at Facebook*](https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf) &sect;4.1
+  for SQL statements amended with the keys to invalidate, and the measured 4% of deletes that removed anything.
+- Lesson 0904, invalidation: [*Scaling Memcache at Facebook*](https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf)
+  &sect;3.2.1 for the stale-set definition and the 64-bit lease token, and &sect;4.1 for the commit-log
+  invalidation pipeline, the 18x batching improvement and the read-after-write local invalidation;
+  [AWS - Caching strategies](https://docs.aws.amazon.com/AmazonElastiCache/latest/dg/Strategies.html) for
+  a TTL keeping data from getting too stale without guaranteeing freshness; and
+  [Redis EXPIRE](https://redis.io/docs/latest/commands/expire/) for passive and active expiry and the
+  synthesized DEL on the replication link. **The `p` and `d` figures in the staleness arithmetic are
+  illustrative**, and the page labels them as such.
+- Lesson 0905, failure modes: [*Scaling Memcache at Facebook*](https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf)
+  &sect;3.2.1 for the 17K/s to 1.3K/s peak database rate under leases, &sect;3.3 for Gutter at about 1% of
+  servers reducing client-visible failures by 99%, and &sect;4.3 for Cold Cluster Warmup and its two-second
+  hold-off; [Redis - Key eviction](https://redis.io/docs/latest/develop/reference/eviction/) for `maxmemory`,
+  the policy list, the volatile policies behaving like `noeviction` with no expirations set, approximated
+  LRU with `maxmemory-samples`, and LFU's Morris counters;
+  [Vattani, Chierichetti and Lowenstein, *Optimal Probabilistic Cache Stampede Prevention*, VLDB 2015](https://cseweb.ucsd.edu/~avattani/papers/cache_stampede.pdf)
+  for the XFetch rule and the proof that the exponential distribution is the right one; and
+  [golang.org/x/sync/singleflight](https://pkg.go.dev/golang.org/x/sync/singleflight) for duplicate call
+  suppression and its documented per-process scope.
+
 ### Module 13 - Scale, fleet and shipping
 
 - Lesson 1300, concurrency: [Effective Go - Concurrency](https://go.dev/doc/effective_go) for the
