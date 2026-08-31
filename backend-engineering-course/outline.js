@@ -75,6 +75,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0405-compatibility-is-a-rule-not-a-hope.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "API design",
+      "lessons": [
+        {
+          "title": "An API is a promise with a cost of breaking",
+          "href": "lessons/0600-an-api-is-a-promise-with-a-cost-of-breaking.html"
+        },
+        {
+          "title": "Resources are nouns and the method is the verb",
+          "href": "lessons/0601-resources-are-nouns-and-the-method-is-the-verb.html"
+        },
+        {
+          "title": "Collections need pagination, not a limit",
+          "href": "lessons/0602-collections-need-pagination-not-a-limit.html"
+        },
+        {
+          "title": "An error body is part of the contract",
+          "href": "lessons/0603-an-error-body-is-part-of-the-contract.html"
+        },
+        {
+          "title": "Versioning is choosing who pays to change",
+          "href": "lessons/0604-versioning-is-choosing-who-pays-to-change.html"
+        },
+        {
+          "title": "Idempotency keys make retries safe",
+          "href": "lessons/0605-idempotency-keys-make-retries-safe.html"
+        }
+      ]
     }
   ],
   "extras": [

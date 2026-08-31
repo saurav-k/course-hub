@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Collections need pagination, not a limit - Backend Engineering</title>
+<meta name="description" content="Offset pagination counts rows and a cursor anchors on a value, so a write between two page requests skips or repeats items under one scheme and not the other. The choice is about correctness before it is about size.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; API design &middot; Lesson 0602</div>
+  <h1>A cursor is stable under concurrent writes and an offset is not, so the choice is correctness</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Why the page number is the bug, not the page size. &middot;
+    <a href="https://www.postgresql.org/docs/current/queries-limit.html">PostgreSQL - LIMIT and OFFSET</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An unbounded collection endpoint is an outage you wrote yourself, but a bare <code>limit</code> is <b>truncation, not pagination</b>: it gives the caller no way to continue.</li>
+      <li><b>Offset counts rows</b>, so one insert or delete before the reader's position shifts every later row and the next page repeats or skips items.</li>
+      <li><b>A cursor anchors on values in the last row seen</b>, so a write elsewhere in the collection moves nothing the cursor depends on.</li>
+      <li>Offset also gets slower with depth: PostgreSQL states that rows skipped by <code>OFFSET</code> are still computed inside the server.</li>
+      <li>What it costs: a cursor cannot jump to page 57, usually cannot give a total count, and must be treated by the caller as opaque.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The collection noun from the last page owes the caller a way to continue.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0601&lt;br/&gt;the collection is&lt;br/&gt;a resource"] --> T["THIS PAGE&lt;br/&gt;how a caller reads&lt;br/&gt;one that is too big"]
+  T --> A["Lesson 0603&lt;br/&gt;what a refusal&lt;br/&gt;has to say"]
+  T --> B["Module 08&lt;br/&gt;indexes, which decide&lt;br/&gt;what a cursor costs"]
+  T --> C["Module 09&lt;br/&gt;caching a page&lt;br/&gt;that keeps moving"]
+    </div>
+    <figcaption>Lesson 0601 gave the collection a URI and a GET. That is enough right up to the moment the collection is larger than one response, which for anything real is immediately. This page is the missing half of the collection contract, and the reason it is a design decision rather than a query parameter. <b>Deciding how a caller walks a collection is deciding whether they can trust what they read.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two ways to say where you got to</h2>
+
+  <h3 id="offset-pagination">Offset remembers a count</h3>
+  <p>Offset pagination says "skip the first 100 and give me 50". The position is a number of rows, and a number of rows only means something if the rows have not moved. Between the first request and the second the collection is live: other users create orders, cancel them, and change the field you sorted on. Nothing in the request told the database which items you already saw, so the second page is computed against a collection that is no longer the one the first page came from.</p>
+
+  <h3 id="cursor-pagination">A cursor remembers a place</h3>
+  <p>Cursor pagination, also called keyset pagination, says "give me the 50 that come after this row". The position is the sort key of the last item the caller actually received, so the query is a comparison rather than a count: everything ordered after that value, limited to 50. An insert somewhere else in the collection changes no value the comparison reads, and the caller's place is exactly as valid as it was.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One insert, two schemes</div>
+    <div class="fig-claim">The same concurrent write repeats an item under offset and none under a cursor.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Service
+  participant W as Another writer
+  C->>S: GET /orders?limit=50
+  S-->>C: rows 1 to 50, newest first
+  W->>S: creates one order, now the newest
+  C->>S: GET /orders?limit=50&offset=50
+  S-->>C: old row 50 arrives again - one item read twice
+  C->>S: GET /orders?limit=50&after=cursor-of-row-50
+  S-->>C: rows 51 to 100 - the new order sits before the cursor
+    </div>
+    <figcaption>One write from an unrelated client, landing between two requests from this one. Under offset the whole list shifted down by one, so position 51 now holds what position 50 held, and the caller receives a duplicate. Had the writer deleted instead of created, the shift would run the other way and an item would never be delivered at all. <b>Under offset a concurrent write silently corrupts the caller's read - and a delete does it invisibly, because a missing item leaves no trace.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the comparison, and what it needs</h2>
+
+  <h3 id="keyset">A cursor is a value, not a page number</h3>
+  <p>The query behind a cursor is a comparison on the sort key, and the sort key has to be unique or the comparison has a tie it cannot break. In practice that means a compound key: the column you actually sort by, plus the primary key as a tiebreaker. Ask for everything whose sort pair is ordered after the last pair delivered, ordered the same way, limited to the page size. The cursor the caller sends back is that pair, encoded.</p>
+
+  <p>Two rules keep it honest, and both come straight from published guidance. Google's <a href="https://google.aip.dev/158">AIP-158</a> requires page tokens to be opaque and explicitly not user-parseable, and requires that every other parameter of the request match the call that produced the token, with an error rather than a silent reinterpretation when it does not. Both exist for the same reason: the token encodes an internal position, and a caller who parses or edits it has started depending on something you never promised, which is lesson 0600 arriving on schedule.</p>
+
+  <h3 id="offset-cost">The second cost: depth</h3>
+  <p>Correctness is the main argument, and there is a second one worth stating with numbers because it is often the one that gets noticed first. PostgreSQL documents that the rows skipped by an <code>OFFSET</code> clause still have to be computed inside the server, so a deep page is not cheaper than a shallow one - it is the shallow one plus everything before it.</p>
+
+  <ol class="worked">
+    <li><b>Fix the page size.</b> 50 items per page, so page <i>k</i> asks for <code>LIMIT 50 OFFSET 50(k-1)</code>.</li>
+    <li><b>Count what the server produces.</b> It must generate the skipped rows and then 50 more, which is 50<i>k</i> rows for page <i>k</i>.</li>
+    <li><b>Put page 100 beside page 1.</b> 50 &times; 100 = 5,000 rows produced to return 50, against 50 for the first page - a hundredfold difference for the same response.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="fig-cap">Rows produced per page</div>
+    <div class="fig-claim">Offset work grows with depth and cursor work does not.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of rows the database must produce to return one page of fifty items. Under offset pagination the count rises linearly from fifty rows at page one to five thousand at page one hundred, while a keyset cursor stays at fifty rows on every page.">
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="250"/>
+      <rect class="m-alarm" x="100" y="248" width="60" height="2"/>
+      <rect class="m-alarm" x="210" y="200" width="60" height="50"/>
+      <rect class="m-alarm" x="320" y="150" width="60" height="100"/>
+      <rect class="m-alarm" x="430" y="100" width="60" height="150"/>
+      <rect class="m-alarm" x="540" y="50" width="60" height="200"/>
+      <line class="s-stat thick" x1="70" y1="248" x2="610" y2="248"/>
+      <text class="ttl" x="70" y="26">Rows produced to return one page of 50 (derived: 50k for page k)</text>
+      <text class="lbl-sm" x="130" y="266" text-anchor="middle">page 1</text>
+      <text class="lbl-sm" x="240" y="266" text-anchor="middle">page 25</text>
+      <text class="lbl-sm" x="350" y="266" text-anchor="middle">page 50</text>
+      <text class="lbl-sm" x="460" y="266" text-anchor="middle">page 75</text>
+      <text class="lbl-sm" x="570" y="266" text-anchor="middle">page 100</text>
+      <text class="lbl-sm t-alarm" x="540" y="42">5,000 rows</text>
+      <text class="lbl-sm t-stat" x="90" y="284">keyset cursor: 50 rows on every page, at any depth</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>offset pagination</span><span><i class="sw-stat"></i>keyset cursor</span></div>
+    <figcaption>Derived arithmetic rather than a benchmark: the bars are 50<i>k</i> for page <i>k</i>, which is what the documented behaviour implies, and a real system adds index and sort effects on top. The keyset line sits flat against the axis because the comparison lands on an index entry and reads forward from there, so its work is the page size and nothing else. <b>Offset makes the last page of a collection the most expensive one to serve, which is the opposite of what a caller crawling to the end expects.</b></figcaption>
+  </figure>
+
+  <h2>3. The mechanism: telling the caller how to continue</h2>
+
+  <p>Whichever scheme you pick, the next page has to be reachable without the caller reconstructing a URL. Two published conventions do this and they compose. The first is the <code>Link</code> header from <a href="https://www.rfc-editor.org/rfc/rfc8288">RFC 8288</a>, which carries a typed connection between resources: a target URI plus a relation type such as <code>next</code> or <code>prev</code>, registered with IANA rather than invented per API. GitHub returns exactly that, with <code>next</code>, <code>prev</code>, <code>first</code> and <code>last</code>, and its documentation tells callers to follow those URLs rather than build their own, precisely because the query parameters differ between endpoints.</p>
+
+  <p>The second is a token in the body, which is what AIP-158 specifies: a <code>next_page_token</code> the caller passes back as <code>page_token</code>, absent when the collection is exhausted. Note the termination rule in both: the caller stops when there is no next link or no token, never by comparing the number of items returned against the page size. A page can legitimately come back short, and a caller that stops on a short page stops early.</p>
+
+  <div class="callout warn">
+    A cursor removes the duplicate and the skip - it does not give you a snapshot. Items already delivered can still be edited or deleted after the caller read them, and a caller walking a large collection over several minutes is assembling a picture that was never true at any single instant. If the caller genuinely needs a consistent view, that is a different mechanism entirely: a repeatable-read transaction, an export job, or a change feed they replay. Say which one you are offering, because a cursor quietly reads like a snapshot and is not one.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A row is deleted from the head of a collection between page 1 and page 2. Under offset, what happens?</div>
+      <button class="q-opt">Page 2 repeats the final item of page 1</button>
+      <button class="q-opt">One item is never delivered to the caller</button>
+      <button class="q-opt">Page 2 comes back one item short of the limit</button>
+      <button class="q-opt">The offset is rejected as out of range</button>
+      <div class="q-fb">A delete shifts every later row up by one, so the row that would have been at position 51 moves to 50, which the caller already passed. A repeat is what an insert causes, the page still fills because rows further down slide up, and an offset past the end returns an empty page rather than an error.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does AIP-158 require page tokens to be opaque and not user-parseable?</div>
+      <button class="q-opt">An opaque token compresses to fewer bytes on the wire</button>
+      <button class="q-opt">Parsing a token would let a caller skip access checks</button>
+      <button class="q-opt">The token has to survive a change of sort order</button>
+      <button class="q-opt">A parsed token becomes a promise you never made</button>
+      <div class="q-fb">The token encodes an internal position, so the moment a caller reads or edits it, your encoding is frozen by dependence rather than by decision. Size is irrelevant at these lengths, authorization is checked on the request regardless of the token, and the matching-parameters rule, not opacity, is what handles a changed sort order.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0603-an-error-body-is-part-of-the-contract.html">an error body is part of the contract</a></b> covers the refusal a caller gets when the cursor they sent has expired or does not match their parameters.</li>
+    <li><b>Behind you, <a href="0601-resources-are-nouns-and-the-method-is-the-verb.html">resources are nouns and the method is the verb</a></b> is where the collection became a resource with its own URI.</li>
+    <li><b>Behind you, <a href="0203-headers-carry-what-the-body-cannot.html">headers carry what the body cannot</a></b> is why a pagination link belongs in a header an intermediary can read.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one list endpoint you own and work out what a caller sees if a row is inserted at the head between their two requests. Then ask the agent what compound sort key would make a cursor unique on that table, and what index it would need.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://www.postgresql.org/docs/current/queries-limit.html">PostgreSQL LIMIT and OFFSET</a> page is four paragraphs and states both the skipped-row cost and the warning that different offsets give inconsistent results without a constraining <code>ORDER BY</code>. Read <a href="https://google.aip.dev/158">AIP-158</a> for the token rules and <a href="https://www.rfc-editor.org/rfc/rfc8288">RFC 8288</a> for what a link relation actually is.</p>
+
+  <div class="pager">
+    <a href="0601-resources-are-nouns-and-the-method-is-the-verb.html"><span class="dir">&larr; Previous</span><span class="ttl">Resources are nouns and the method is the verb</span></a>
+    <a class="nxt" href="0603-an-error-body-is-part-of-the-contract.html"><span class="dir">Next &rarr;</span><span class="ttl">An error body is part of the contract</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0602 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -27,7 +27,7 @@ before the next depends on it.
 | 3 | Module 03 - Routing | reserved | How a request becomes a handler: path, method, middleware chain. |
 | 4 | Module 04 - Serialization and contracts (0400-0405) | written | The wire contract, JSON's six types, schema-first protobuf, boundary parsing, content negotiation, and the compatibility rules. Written before Module 03, which stays reserved, because nothing in it depends on routing. |
 | 5 | Module 05 - The layered service | reserved | Controllers, services, repositories; middleware; request context. |
-| 6 | Module 06 - API design | reserved | REST shaping; collections, errors, pagination, versioning. |
+| 6 | Module 06 - API design (0600-0605) | written | The promise and its cost of breaking, the uniform interface, cursor pagination, RFC 9457 problem documents, the three versioning bills, and idempotency keys. Written before Modules 03 and 05, which stay reserved, because nothing in it depends on routing or on the internal layering. |
 | 7 | Module 07 - Auth & security | reserved | Sessions, tokens, OAuth; the web's threat model (injection, XSS, CSRF). |
 | 8 | Module 08 - Data | reserved | The relational model, transactions, indexes; then the non-relational map. |
 | 9 | Module 09 - Caching | reserved | Why a cache exists; read/write patterns; invalidation. |
@@ -47,6 +47,10 @@ A position reserved costs nothing; a position taken by accident is a renumbering
 
 Modules 03-13 above are all reserved from the first scaffold, mapped to the upstream chapters. Each
 lands as a separate change so the course grows a module at a time without a trapped mega-PR.
+
+Module 06 landed fourth, after Module 04, because the API surface is what the serialization contract is
+a surface *of*: the compatibility rules of lesson 0405 run out at a breaking change, and lesson 0604 is
+where that hand-off is made. It needs neither routing nor the layered service to be readable.
 
 Module 02 landed second, immediately after the on-ramp and before any of modules 03 to 13, because
 every later module consumes the vocabulary it defines: routing consumes the method and the target,

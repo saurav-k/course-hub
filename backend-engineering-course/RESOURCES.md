@@ -103,6 +103,41 @@ TBD as lessons landing.
   [ProtoJSON mapping](https://protobuf.dev/programming-guides/json/) for the name-keyed rules and the
   unknown-field default that inverts the binary one.
 
+### Module 06 - API design
+
+- Lesson 0600, the promise: [Stripe - API upgrades](https://docs.stripe.com/upgrades) for the published
+  list of backward-compatible changes, including the reserved right to change opaque identifier formats,
+  and [GitHub - API Versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions) for the
+  mirror-image list of changes that force a new version.
+- Lesson 0601, the uniform interface: [RFC 9110 &sect;3.1](https://www.rfc-editor.org/rfc/rfc9110#section-3.1)
+  for the stated design goal of separating resource identification from request semantics,
+  [Fielding, *Architectural Styles and the Design of Network-based Software Architectures*, chapter 5](https://ics.uci.edu/~fielding/pubs/dissertation/rest_arch_style.htm)
+  for the four uniform-interface constraints and the efficiency they cost, and
+  [AIP-136](https://google.aip.dev/136) for the custom-method colon form and the rule that standard
+  methods are preferred.
+- Lesson 0602, pagination: [PostgreSQL - LIMIT and OFFSET](https://www.postgresql.org/docs/current/queries-limit.html)
+  for the skipped-row cost and the inconsistent-results warning, [AIP-158](https://google.aip.dev/158)
+  for opaque page tokens and the matching-parameters rule, [RFC 8288](https://www.rfc-editor.org/rfc/rfc8288)
+  for what a link relation is, and
+  [GitHub - Using pagination in the REST API](https://docs.github.com/en/rest/using-the-rest-api/using-pagination-in-the-rest-api)
+  for the `link` header with `next`, `prev`, `first` and `last` and the advice to follow those URLs
+  rather than construct them.
+- Lesson 0603, error bodies: [RFC 9457](https://www.rfc-editor.org/rfc/rfc9457.html) for the
+  problem-details object, its five members, the `about:blank` default, extension members (&sect;3.2), and
+  the security considerations (&sect;5) that bound what `detail` may say.
+- Lesson 0604, versioning: [GitHub - API Versions](https://docs.github.com/en/rest/about-the-rest-api/api-versions)
+  for the `X-GitHub-Api-Version` header, the `2022-11-28` default, the 24-month support window and the
+  410, [Stripe - Versioning](https://docs.stripe.com/api/versioning) for the account-pinned variant,
+  [RFC 9745](https://www.rfc-editor.org/rfc/rfc9745.html) for the `Deprecation` header and
+  [RFC 8594](https://www.rfc-editor.org/rfc/rfc8594.html) for `Sunset`.
+- Lesson 0605, idempotency: [RFC 9110 &sect;9.2.2](https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2)
+  for the definition and the conditional permission to auto-retry,
+  [Stripe - Idempotent requests](https://docs.stripe.com/api/idempotent_requests) for the stored
+  status-and-body behaviour, the 24-hour pruning and the parameter comparison, and
+  [draft-ietf-httpapi-idempotency-key-header](https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header)
+  for the 400 / 409 / 422 refusals. **That draft expired in April 2026 rather than shipping**, which is
+  why lesson 0605 treats the header as a convention and cites Stripe for the practice.
+
 ## Wisdom
 
 Where the practitioners argue, for a reader who wants to test their understanding against people who do this.
