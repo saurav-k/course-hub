@@ -151,7 +151,9 @@ TBD as lessons landing.
   length-prefixed message framing, and the rule that status is sent in trailers even when it is OK;
   [gRPC core concepts](https://grpc.io/docs/what-is-grpc/core-concepts/) for the four call shapes; and
   [gRPC custom load balancing](https://grpc.io/docs/guides/custom-load-balancing/) for `pick_first`
-  doing no load balancing at all.
+  doing no load balancing at all; and
+  [the gRPC-Web protocol](https://github.com/grpc/grpc/blob/master/doc/PROTOCOL-WEB.md) for the browser
+  limitation, the status moved into the response body, and the proxy-translation deployment model.
 - Lesson 1202, deadlines: [gRPC - Deadlines](https://grpc.io/docs/guides/deadlines/) for the
   deadline-against-timeout distinction, the absence of a default, the propagation rule that deducts
   elapsed time so clocks need not agree, and the guidance on choosing a value;
@@ -176,7 +178,7 @@ TBD as lessons landing.
   producer and transactions, the advice to store the consumer offset alongside its output, and the rule
   that a partition is read by exactly one consumer in a group. Head-of-line blocking on a partition is
   derived on the page from those rules rather than quoted.
-- Lesson 1205, WebSockets: [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455) for the polling
+- Lesson 1205, WebSockets: [RFC 6455](https://www.rfc-editor.org/rfc/rfc6455), &sect;1.1 and &sect;1.3, for the polling
   background, the `Upgrade` handshake with `Sec-WebSocket-Key` and `Sec-WebSocket-Accept`, the 101
   response, the independent two-way channel and the closing handshake;
   [MDN - Writing WebSocket client applications](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_client_applications)
