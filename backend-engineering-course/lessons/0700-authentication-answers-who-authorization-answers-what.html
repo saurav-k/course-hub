@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Authentication answers who, authorization answers what - Backend Engineering</title>
+<meta name="description" content="Identity is established once, at a cost you deliberately make high. Permission is decided again on every single request. Confusing the two lifetimes is what most access-control defects are.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Auth and security &middot; Lesson 0700</div>
+  <h1>Identity is established once and permission is decided again on every request</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">8 min</span>
+    The two questions the rest of this module answers separately. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-11">RFC 9110 &sect;11, HTTP Authentication</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Authentication</b> answers who is calling. <b>Authorization</b> answers what this caller may do to this resource, and they are different decisions with different lifetimes.</li>
+      <li>Authentication is <b>deliberately expensive and rare</b>: a password check is designed to take about a second, so you run it once and hand back something cheap to re-present.</li>
+      <li>Authorization is <b>cheap and constant</b>: it is re-decided on every request, because nothing about the earlier login says anything about this URL.</li>
+      <li>HTTP frames only the first question. It gives you a challenge, a credential field and two refusals - 401 for "I do not know you", 403 for "I know you and the answer is no".</li>
+      <li>What it costs: the thing handed back after login <b>is</b> the identity from then on, so everything in the rest of this module is about who else can get hold of it or make your browser send it.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The credential shapes and the attacks are two halves of one subject.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Module 06&lt;br/&gt;the API surface&lt;br/&gt;you published"] --> T["THIS PAGE&lt;br/&gt;two questions,&lt;br/&gt;two lifetimes"]
+  T --> A["Lessons 0701 to 0703&lt;br/&gt;what the caller&lt;br/&gt;re-presents"]
+  T --> B["Lessons 0704 to 0706&lt;br/&gt;how an attacker&lt;br/&gt;gets it sent"]
+  A --> B
+  W["Module 07&lt;br/&gt;auth and security"] -.- T
+    </div>
+    <figcaption>Module 06 decided what the interface promises. This module decides who may invoke it, and the second half of the module exists because the answer is carried in a credential that travels back and forth on every request. <b>Sessions, tokens and OAuth are three shapes for one object, and injection, XSS and CSRF are three ways of getting at it.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two questions, two lifetimes</h2>
+
+  <h3 id="two-questions">One is answered once and one is answered always</h3>
+  <p>OWASP states the split plainly: authentication is verifying an entity's identity, and authorization is <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">the process of verifying that a requested action or service is approved for a specific entity</a>. Read as a pair of sentences they sound like two steps of one operation. They are not, and the difference that matters is how long each answer is good for.</p>
+
+  <p>Authentication is priced to be slow. The recommended password hash is Argon2id at <a href="https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html">m=19456 (19 MiB), t=2, p=1</a>, chosen so that verifying one password costs real memory and real time; the whole point is that an attacker with a stolen table pays that cost per guess. You cannot pay it on every request, so you pay it once and hand the caller something cheap to show instead.</p>
+
+  <p>Authorization has the opposite shape. The earlier login said nothing about the resource in front of you now, so the answer has to be recomputed: OWASP's rule is that permission <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">should be validated correctly on every request, regardless of whether the request was initiated by an AJAX script, server-side, or any other source</a>, with a deny-by-default posture and the check on the server rather than in the client that drew the button.</p>
+
+  <h2>2. The mechanism: what HTTP actually supplies</h2>
+
+  <h3 id="challenge-response">A challenge, a credential field, and no scheme</h3>
+  <p>HTTP supplies a frame and almost nothing else. RFC 9110 describes <a href="https://www.rfc-editor.org/rfc/rfc9110#section-11.1">a general framework for access control and authentication, via an extensible set of challenge-response authentication schemes</a>, and then says outright that the document specifies no schemes of its own. A server challenges with a 401 carrying <code>WWW-Authenticate</code>; a client answers with an <code>Authorization</code> field. That is the whole protocol-level contract.</p>
+
+  <p>One piece of it is worth knowing because it explains browser behaviour that otherwise looks like magic. A <a href="https://www.rfc-editor.org/rfc/rfc9110#section-11.5">protection space</a> is the origin plus the realm, and it <em>determines the domain over which credentials can be automatically applied</em>: once a request in that space has been authorized, the user agent may reuse the same credentials for every other request in it, without being asked again. Automatic re-presentation is written into the specification, and lesson 0706 is about what an attacker does with exactly that.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Login, then every request after</div>
+    <div class="fig-claim">Only the first exchange checks the password - the rest check a credential.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  participant V as Credential store
+  C->>S: GET /orders/91 - no credentials
+  S-->>C: 401 - WWW-Authenticate names a scheme
+  C->>S: POST /login - username and password
+  S->>V: verify password hash - about 1 second
+  V-->>S: this is user 42
+  S-->>C: 200 - here is a credential to re-present
+  C->>S: GET /orders/91 - credential attached
+  S->>S: is user 42 allowed this order - decided now
+  S-->>C: 403 - order 91 belongs to user 17
+    </div>
+    <figcaption>The expensive step runs once, near the top. Every exchange below it re-presents a credential and re-decides permission from scratch, which is why the last line can refuse a caller the server is perfectly certain about. <b>A logged-in caller is not an authorized caller, and the second question is asked again at every arrow.</b></figcaption>
+  </figure>
+
+  <h3 id="401-vs-403">The two refusals say different things</h3>
+  <p>The status codes carry the distinction, and RFC 9110 is precise about it. A <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.2">401 (Unauthorized)</a> says the request <em>lacks valid authentication credentials for the target resource</em>, and a server generating one <em>MUST</em> send a <code>WWW-Authenticate</code> challenge - a 401 with no challenge is a malformed response. A <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15.5.4">403 (Forbidden)</a> says the server understood and refuses, and if credentials were supplied it <em>considers them insufficient to grant access</em>; the client <em>SHOULD NOT</em> automatically repeat the request with the same credentials.</p>
+
+  <p>So the pair is a retry instruction as much as a diagnosis. A 401 tells a client to go and get credentials; a 403 tells it not to bother. The specification adds one escape hatch worth knowing: a server that wishes to hide the existence of a forbidden resource <em>MAY</em> answer 404 instead, which is how you avoid confirming that order 91 exists to somebody who is not allowed to read it.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Choosing the refusal</div>
+    <div class="fig-claim">Which code you send is a fact about credentials, not about severity.</div>
+    <div class="mermaid">
+flowchart TB
+  Q["Request arrives"] --> C1{"Credentials&lt;br/&gt;present and valid?"}
+  C1 -- "no" --> R401["401&lt;br/&gt;plus WWW-Authenticate&lt;br/&gt;go and get credentials"]
+  C1 -- "yes" --> C2{"Allowed to do&lt;br/&gt;this, to this?"}
+  C2 -- "yes" --> OK["2xx"]
+  C2 -- "no" --> C3{"May the caller learn&lt;br/&gt;the resource exists?"}
+  C3 -- "yes" --> R403["403&lt;br/&gt;do not retry&lt;br/&gt;with these credentials"]
+  C3 -- "no" --> R404["404&lt;br/&gt;existence withheld"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class OK ok
+  class R401 bad
+  class R403 bad
+    </div>
+    <figcaption>The first branch is authentication and the second is authorization, and only the first one is allowed to produce a 401. The third branch is a disclosure decision rather than an access decision, which is why it sits below the refusal rather than beside it. <b>Sending 403 where 401 belongs tells a client to stop trying when it merely needed to log in.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the credential becomes the identity</h2>
+
+  <p>Everything above buys one thing and sells another. It buys you a login that can afford to be slow and careful. It sells you a period - minutes, hours, sometimes weeks - during which a short string is treated as though it were the user. Nothing later in the request path re-examines the password; it examines the credential, and anyone presenting that credential is, to your service, that person.</p>
+
+  <p>That is why the second half of this module is threats rather than mechanisms. Lessons 0701 to 0703 are three shapes for the credential: an opaque handle to server state, a signed document the client carries, and a scoped grant issued by somebody else. Lessons 0704 to 0706 are three ways an attacker reaches it - by getting your database to run their string, by getting your page to run their script, or by getting the browser to attach the credential to a request they wrote.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Occurrences in the OWASP dataset</div>
+    <div class="fig-claim">The two largest data-ranked categories are both this module's subject.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Bar chart of total occurrences for the eight OWASP Top 10 2021 categories that were ranked from contributed data. Broken access control is highest at 318,487 and injection second at 274,228. Identification and authentication failures is 132,195. The remaining five categories range from 30,457 to 262,407.">
+      <line class="axis" x1="60" y1="250" x2="620" y2="250"/>
+      <line class="axis" x1="60" y1="40" x2="60" y2="250"/>
+      <rect class="m-alarm" x="74"  y="60"  width="46" height="190"/>
+      <rect class="m-noise" x="140" y="111" width="46" height="139"/>
+      <rect class="m-alarm" x="206" y="87"  width="46" height="163"/>
+      <rect class="m-noise" x="272" y="94"  width="46" height="156"/>
+      <rect class="m-noise" x="338" y="126" width="46" height="124"/>
+      <rect class="m-noise" x="404" y="232" width="46" height="18"/>
+      <rect class="m-alarm" x="470" y="171" width="46" height="79"/>
+      <rect class="m-noise" x="536" y="221" width="46" height="29"/>
+      <text class="ttl" x="60" y="26">Total occurrences, OWASP Top 10:2021, data-ranked categories only</text>
+      <text class="lbl-sm t-alarm" x="97"  y="52">318,487</text>
+      <text class="lbl-sm t-alarm" x="229" y="79">274,228</text>
+      <text class="lbl-sm t-alarm" x="493" y="163">132,195</text>
+      <text class="lbl-sm" x="97"  y="266" text-anchor="middle">A01</text>
+      <text class="lbl-sm" x="163" y="266" text-anchor="middle">A02</text>
+      <text class="lbl-sm" x="229" y="266" text-anchor="middle">A03</text>
+      <text class="lbl-sm" x="295" y="266" text-anchor="middle">A04</text>
+      <text class="lbl-sm" x="361" y="266" text-anchor="middle">A05</text>
+      <text class="lbl-sm" x="427" y="266" text-anchor="middle">A06</text>
+      <text class="lbl-sm" x="493" y="266" text-anchor="middle">A07</text>
+      <text class="lbl-sm" x="559" y="266" text-anchor="middle">A08</text>
+      <text class="lbl-sm" x="60" y="286">A01 access control &middot; A03 injection &middot; A07 identification and authentication</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>owned by this module</span><span><i class="sw-noise"></i>owned elsewhere</span></div>
+    <figcaption>Eight of the ten 2021 categories were ranked from contributed data covering over 500,000 applications; the other two came from a practitioner survey and are left out here because they are not on the same scale. Three of the eight are what this module teaches, and they include the first and second by occurrence count. <b>These are not exotic failures - they are the ordinary ones, written fresh into applications rather than inherited from a dependency.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    An incidence rate here is the share of tested applications with at least one instance, so these bars count findings in a contributed dataset rather than exploited breaches. They say what testing tools find often, which is not the same claim as what attackers use most. Treat the ordering as evidence that these defects are common, and not as a ranking of risk to your particular service.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why is the permission decision made again on every request rather than at login?</div>
+      <button class="q-opt">Because credentials expire between one request and the next one</button>
+      <button class="q-opt">Because HTTP forbids a server from storing any decision at all</button>
+      <button class="q-opt">Because the password hash has to be recomputed for each call</button>
+      <button class="q-opt">Because the login said nothing about the resource being asked for</button>
+      <div class="q-fb">Login establishes identity, and identity does not imply permission on a resource nobody had mentioned yet. Credentials do expire, but that is a separate timer and not the reason. HTTP stores nothing either way and imposes no such rule, and the whole point of a credential is that the expensive hash is <em>not</em> recomputed per call.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A caller sends a valid session cookie and asks for another user's order. What is correct?</div>
+      <button class="q-opt">401, because the caller lacks credentials valid for that resource</button>
+      <button class="q-opt">403, or 404 where the resource must not be shown to exist</button>
+      <button class="q-opt">401 with no challenge, since a challenge would leak the realm</button>
+      <button class="q-opt">400, because the request identified a resource the caller lacks</button>
+      <div class="q-fb">The credentials are valid and merely insufficient, which is exactly RFC 9110's definition of 403 - and the same section permits 404 to hide the resource. A 401 would tell the client to fetch credentials it already has, a 401 without <code>WWW-Authenticate</code> violates a MUST, and 400 claims the request was malformed when it was well-formed and refused.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0701-a-session-is-server-state-behind-an-opaque-id.html">a session is server state behind an opaque id</a></b> takes the first shape of the credential and asks what the server has to keep.</li>
+    <li><b>Ahead, <a href="0706-csrf-is-the-server-trusting-the-browser.html">CSRF is the server trusting the browser</a></b> is the automatic re-presentation in RFC 9110 &sect;11.5 turned into an attack.</li>
+    <li><b>Behind you, <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> is where 401 and 403 were first placed in their families.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one endpoint you own and write down where the authentication check lives and where the authorization check lives, as two separate lines of code. Ask the agent what happens if a caller reaches the second one with a valid credential for a different user, and whether your handler would notice.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-11">RFC 9110 &sect;11</a> is four pages and worth reading in full: it is the whole of what HTTP itself says about authentication, and its brevity is the point - every scheme you use is defined somewhere else. Read it beside <a href="https://cheatsheetseries.owasp.org/cheatsheets/Authorization_Cheat_Sheet.html">OWASP's Authorization Cheat Sheet</a>, which owns the half the RFC deliberately does not.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0701-a-session-is-server-state-behind-an-opaque-id.html"><span class="dir">Next &rarr;</span><span class="ttl">A session is server state behind an opaque id</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0700 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
