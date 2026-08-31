@@ -229,6 +229,36 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0905-a-cache-moves-the-failure-it-does-not-remove-it.html"
         }
       ]
+    },
+    {
+      "n": "12",
+      "title": "Inter-service communication",
+      "lessons": [
+        {
+          "title": "A call, a queue and a socket are three couplings",
+          "href": "lessons/1200-a-call-a-queue-and-a-socket-are-three-couplings.html"
+        },
+        {
+          "title": "gRPC is a contract on a connection",
+          "href": "lessons/1201-grpc-is-a-contract-on-a-connection.html"
+        },
+        {
+          "title": "A deadline is the caller's only defence",
+          "href": "lessons/1202-a-deadline-is-the-callers-only-defence.html"
+        },
+        {
+          "title": "A broker turns an outage into a backlog",
+          "href": "lessons/1203-a-broker-turns-an-outage-into-a-backlog.html"
+        },
+        {
+          "title": "A log is not a queue",
+          "href": "lessons/1204-a-log-is-not-a-queue.html"
+        },
+        {
+          "title": "A WebSocket is a session, and a session is state",
+          "href": "lessons/1205-a-websocket-is-a-session-and-a-session-is-state.html"
+        }
+      ]
     }
   ],
   "extras": [
