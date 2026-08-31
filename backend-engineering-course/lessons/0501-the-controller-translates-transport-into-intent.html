@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The controller translates transport into intent - Backend Engineering</title>
+<meta name="description" content="A controller turns an HTTP request into a call that has no HTTP in it, and turns the result back into a status and a body. Everything else it does belongs to another layer.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; The layered service &middot; Lesson 0501</div>
+  <h1>A controller turns a request into a call with no HTTP in it, and a result back into a status</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Two translations, and nothing else. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-15">RFC 9110 &sect;15 - Status Codes</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A controller performs <b>two translations and no third thing</b>: transport into intent on the way in, result into status on the way out.</li>
+      <li>The call it makes carries <b>no transport type</b> - no request object, no header map, no framework context - which is what makes the layer below portable.</li>
+      <li>The outward translation is a <b>mapping table</b>: each named outcome the layer below can produce gets one status, decided once.</li>
+      <li>RFC 9110 already separates the cases you need: <b>400 for malformed, 422 for well-formed but unprocessable, 409 for a state conflict</b>.</li>
+      <li>What it costs: the table is duplication of a kind, and a second transport means a second one that has to agree with the first.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The first boundary of the module is the one HTTP stops at.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0500&lt;br/&gt;a layer is a boundary&lt;br/&gt;you can test across"] --> T["THIS PAGE&lt;br/&gt;the controller as&lt;br/&gt;a two-way translator"]
+  T --> A["Lesson 0502&lt;br/&gt;the service that&lt;br/&gt;receives the intent"]
+  T --> B["Module 06&lt;br/&gt;API design, which&lt;br/&gt;shapes what is translated"]
+  T --> C["Module 11&lt;br/&gt;error handling, which&lt;br/&gt;extends the same table"]
+  W["Module 05&lt;br/&gt;the layered service"] -.- T
+    </div>
+    <figcaption>The previous page set the test a boundary has to pass. This one applies it to the outermost boundary in a service, the one where HTTP is allowed to exist on one side and forbidden on the other. Every layer after this is reached through the call this page describes. <b>HTTP stops at the controller, and that is the entire reason the controller exists.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: a translator faces two ways</h2>
+
+  <p>A controller sits between a protocol and a program. On one side there is a method, a target, a header section and possibly a body, all of which are facts about HTTP. On the other side there is a function that wants an order identifier and a reason. Nothing in the second description mentions the first, and the controller's whole job is to get from one to the other and back.</p>
+
+  <p>NestJS states the outward-facing half plainly: controllers are responsible for handling incoming requests and sending responses back to the client. The part worth adding is that the two halves are separate translations with separate failure modes. Inbound, the controller is turning bytes and strings that arrived from a stranger into values a program can act on. Outbound, it is turning an outcome the program produced into a status a stranger will interpret. A controller that does anything between those two is doing another layer's work at the one place in the system where the framework is hardest to test around.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The two translations</div>
+    <div class="fig-claim">Transport types exist above the dashed line and nowhere below it.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant H as Controller
+  participant S as Service
+  C->>H: POST /orders/ord-7/cancel with a JSON body
+  H->>H: read path parameter, decode body, build CancelOrder
+  H->>S: Cancel(ctx, OrderID "ord-7", reason "customer request")
+  Note over H,S: below this point nothing knows the word HTTP
+  S-->>H: ErrAlreadyShipped
+  H->>H: look the outcome up in the mapping table
+  H-->>C: 409 Conflict with a problem body
+    </div>
+    <figcaption>Two crossings of one boundary. Inbound, strings from the wire become a typed intent. Outbound, a named outcome becomes a number the client already knows how to read. The service never sees either translation and could be called from a queue consumer or a command line with no change. <b>The controller is the only place in the service allowed to know that HTTP happened.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="controller">What the controller owns</h3>
+  <p>Four things, and they are all translation. It reads the request parts that address the work: the path parameters, the query string, the relevant header fields. It decodes and validates the body into the values Module 04 taught it to trust. It calls exactly one operation on the layer below, passing values that carry no transport type. Then it writes a status, any response fields the answer needs, and a body.</p>
+
+  <p>The thing it must not own is the decision. Whether an order may be cancelled is a rule about orders, not about requests, and a rule written inside a handler can only ever be exercised by constructing a request. That is the substitution test from the previous page, failing: there is no seam between the rule and the transport, so the rule cannot be run without one.</p>
+
+  <div class="code-cap">the shape in two voices &middot; both handlers are translation and dispatch, with no rule inside</div>
+<pre><code>// Go: net/http. The handler reads, calls once, and maps.
+func (h *OrderHandler) Cancel(w http.ResponseWriter, r *http.Request) {
+    id := OrderID(r.PathValue("id"))
+    var body cancelRequest
+    if err := json.NewDecoder(r.Body).Decode(&amp;body); err != nil {
+        writeProblem(w, http.StatusBadRequest, "body is not valid JSON")
+        return
+    }
+    err := h.orders.Cancel(r.Context(), id, body.Reason)
+    writeProblem(w, statusFor(err), err)   // one table, one place
+}
+
+# Python: the same three moves, with the framework doing more of the reading.
+async def cancel(order_id: str, body: CancelRequest) -&gt; Response:
+    try:
+        await orders.cancel(order_id=OrderID(order_id), reason=body.reason)
+    except DomainError as err:
+        raise HTTPException(status_code=STATUS_FOR[type(err)], detail=str(err))
+    return Response(status_code=204)
+</code></pre>
+
+  <h3 id="status-mapping">Mapping a result onto a status</h3>
+  <p>The outward translation is a table from named outcomes to status codes, and RFC 9110 has already done most of the work of separating the cases. A body that is not valid JSON is a 400, which the specification defines as the server not processing the request because of something perceived to be a client error, malformed syntax included. A body that parsed cleanly but asks for something incoherent is a 422: the specification reserves it for content whose syntax is correct but whose instructions the server was unable to process. An order that exists but is in the wrong state is a 409, defined as a conflict with the current state of the target resource. A resource that is not there is a 404. An outcome nobody anticipated is a 500, which the specification defines as an unexpected condition, and that word is the test: if you predicted it, it is not a 500.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One table, four outcomes</div>
+    <div class="fig-claim">Each named outcome has exactly one status, decided in one place.</div>
+    <div class="mermaid">
+flowchart LR
+  D["Outcome from the service layer"] --> A["Order not found&lt;br/&gt;no current representation"]
+  D --> B["Already shipped&lt;br/&gt;conflict with current state"]
+  D --> C["Reason field empty&lt;br/&gt;parsed but incoherent"]
+  D --> E["Anything unanticipated&lt;br/&gt;an unexpected condition"]
+  A --> A2["404 Not Found"]
+  B --> B2["409 Conflict"]
+  C --> C2["422 Unprocessable Content"]
+  E --> E2["500 Internal Server Error"]
+  classDef known fill:var(--ok-soft),stroke:var(--ok)
+  classDef surprise fill:var(--warn-soft),stroke:var(--warn)
+  class A2,B2,C2 known
+  class E2 surprise
+    </div>
+    <figcaption>Three of these are outcomes the service named on purpose, so the table can map them and the client can act on them. The fourth is the one nobody predicted, and it is the only case that deserves a 500. A service whose every failure arrives as a 500 has a table with one row, and a client with nothing to decide on. <b>A status is a claim about which side erred, so an unnamed outcome costs the client the ability to respond.</b></figcaption>
+  </figure>
+
+  <h2>3. What the table costs</h2>
+
+  <p>The mapping is duplication of a sort: the service already knows that shipping an order makes cancellation impossible, and now the controller knows it too, in a second vocabulary. That is the price of the boundary and it is worth paying, because the alternative is a service that returns status codes, which is a service that has HTTP in it and cannot be called from a queue consumer.</p>
+
+  <p>The price is charged again for each additional transport. A gRPC front end for the same service needs its own table onto gRPC's status codes, and the two tables have to agree about which outcomes exist even though they disagree about what to call them. The way to keep them agreeing is to make the outcomes an explicit, enumerated part of the service's contract rather than a set of exception types that grew, which is what the next page is about.</p>
+
+  <div class="callout warn">
+    The failure that is easy to ship: passing the underlying error's text through to the client as the body. A driver's message names the table, the column, sometimes the query, and it reaches every client and every intermediary that logs a response. The status is the part the client acts on and the message is the part your on-call engineer needs, so map the first and log the second. Module 07 owns the threat model, and this is where the exposure starts.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">The service reports that an order has already shipped. Which status?</div>
+      <button class="q-opt">409, a conflict with current state</button>
+      <button class="q-opt">422, the syntax parsed correctly</button>
+      <button class="q-opt">400, the request looked malformed</button>
+      <button class="q-opt">500, the server hit a surprise</button>
+      <div class="q-fb">RFC 9110 defines 409 as a conflict with the current state of the target resource, which is exactly this. 422 is for content that parsed but could not be processed, 400 is for a request perceived as malformed, and 500 is reserved for an unexpected condition - and an outcome the service named is by definition not unexpected.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What does a controller owe the layer directly below it?</div>
+      <button class="q-opt">A request object it can read fields from</button>
+      <button class="q-opt">A framework context holding the raw body</button>
+      <button class="q-opt">Values with no transport type among them</button>
+      <button class="q-opt">The status code it will return afterwards</button>
+      <div class="q-fb">Anything the layer below can only obtain from a request has put HTTP inside it, which is the coupling the boundary exists to prevent. The first two options hand a transport type across under different names, and the fourth inverts the direction: the status is produced from the outcome, never supplied to the code that produces the outcome.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0502-the-service-layer-owns-the-decision.html">the service layer owns the decision</a></b> takes the call this page makes and says what is allowed to be on the other end of it.</li>
+    <li><b>Back to <a href="0202-status-codes-are-three-families-with-one-job-each.html">status codes are three families</a></b> for the class semantics the mapping table depends on.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take the longest handler in your own service and cross out every line that is reading a request or writing a response. Ask the agent whether what is left is one call or a decision, and if it is a decision, where it would have to move for a test to reach it without a request.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-15">RFC 9110 &sect;15</a> gives the one-sentence definition of every status code, and the four this page maps are worth reading side by side: <a href="https://www.rfc-editor.org/rfc/rfc9110#name-400-bad-request">400</a> against <a href="https://www.rfc-editor.org/rfc/rfc9110#name-422-unprocessable-content">422</a> is the syntax-against-semantics split most tables get wrong. <a href="https://docs.nestjs.com/controllers">NestJS on controllers</a> states the responsibility in framework terms and shows how much of the inbound translation a decorator can do for you.</p>
+
+  <div class="pager">
+    <a href="0500-a-layer-is-a-boundary-you-can-test-across.html"><span class="dir">&larr; Previous</span><span class="ttl">A layer is a boundary you can test across</span></a>
+    <a class="nxt" href="0502-the-service-layer-owns-the-decision.html"><span class="dir">Next &rarr;</span><span class="ttl">The service layer owns the decision</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0501 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
