@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CoreDNS and the zero-allocation DNS pipeline - Systems Engineering in Go</title>
+<meta name="description" content="How CoreDNS processes hundreds of thousands of DNS requests per second using composable plugin.Handler pipelines and miekg/dns zero-copy wire packet decoding.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Edge & Web Infrastructure &middot; Lesson 0600</div>
+  <h1>CoreDNS routes high-throughput DNS requests through composable plugin.Handler pipelines and zero-copy binary wire decoding</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The DNS backbone of Kubernetes clusters &middot;
+    <a href="https://github.com/coredns/coredns">coredns/coredns</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>CoreDNS is the default cluster DNS server in Kubernetes, engineered in pure Go to replace complex C++ DNS stacks like <code>bind</code> and <code>dnsmasq</code>.</li>
+      <li>All server functionality is structured as an ordered chain of <b><code>plugin.Handler</code></b> instances: logging, metrics, caching, Kubernetes service discovery, and upstream forwarding.</li>
+      <li>If a plugin can satisfy a request (e.g. <code>cache</code> finding an unexpired record), it writes the DNS response packet and halts the chain; otherwise, it calls <code>plugin.NextOrFailure</code> to delegate to the next handler.</li>
+      <li>Underneath, CoreDNS relies on <b><code>miekg/dns</code></b>, using pre-allocated byte slices and zero-copy parsing of the 12-byte binary DNS wire header to process 100k+ QPS per core without GC pauses.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Client["Client Query (UDP Port 53)"] --> NetListener["net.ListenUDP Socket"]
+  NetListener --> Unpacker["miekg/dns Wire Unpacker (Zero-Copy)"]
+  subgraph PluginPipeline["Ordered CoreDNS Plugin Pipeline"]
+    direction TB
+    PLog["plugin/log (Logs query stats)"]
+    PCache["plugin/cache (Checks memory cache)"]
+    PKube["plugin/kubernetes (Resolves cluster services)"]
+    PFwd["plugin/forward (Upstream 8.8.8.8 fallback)"]
+    PLog --> PCache
+    PCache -->|"Cache Miss: Next"| PKube
+    PKube -->|"External Domain: Next"| PFwd
+  end
+  Unpacker --> PluginPipeline
+  PCache -.->|"Cache Hit: Write Response"| Writer["dns.ResponseWriter"]
+  PKube -.->|"Cluster Hit: Write Response"| Writer
+  PFwd -.->|"Upstream Answer"| Writer
+  Writer -->|"Raw UDP Bytes"| Client
+    </div>
+    <figcaption>Where this sits. The CoreDNS plugin execution pipeline and packet processing path.
+    <b>Each plugin evaluates the DNS query and either answers immediately or forwards to the next handler.</b></figcaption>
+  </figure>
+
+  <h2>1. The plugin.Handler chain pattern</h2>
+  <p>In many web frameworks, middleware handles HTTP requests via <code>http.Handler</code>. CoreDNS adapts this architectural pattern to the high-performance world of DNS packets via <code>plugin.Handler</code> in <code>coredns/plugin/plugin.go</code>:</p>
+
+  <pre><code>// The core interface implemented by every CoreDNS feature
+type Handler interface {
+	ServeDNS(context.Context, dns.ResponseWriter, *dns.Msg) (int, error)
+	Name() string
+}</code></pre>
+
+  <p>The <code>ServeDNS</code> function receives the incoming parsed DNS message (<code>*dns.Msg</code>) and a <code>dns.ResponseWriter</code>. If the plugin handles the query, it populates the answer section and writes the packet. If not, it hands control to downstream plugins:</p>
+
+  <pre><code>// Pattern from coredns/plugin/cache/handler.go
+func (c *Cache) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
+	state := request.Request{W: w, Req: r}
+	qname := state.Name()
+	qtype := state.QType()
+
+	// 1. Check in-memory LRU cache
+	if item := c.get(qname, qtype); item != nil {
+		resp := item.toMsg(r)
+		w.WriteMsg(resp)
+		return dns.RcodeSuccess, nil
+	}
+
+	// 2. Cache miss: pass to downstream plugin in chain
+	crw := &ResponseWriter{ResponseWriter: w, Cache: c}
+	return plugin.NextOrFailure(c.Name(), c.Next, ctx, crw, r)
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as Pod Client
+  participant Cache as Cache Plugin
+  participant Kube as Kubernetes Plugin
+  participant Fwd as Forward Plugin
+  participant Ext as Upstream DNS (1.1.1.1)
+  Client->>Cache: Query: api.internal.svc.cluster.local
+  Cache->>Cache: LRU Cache Lookup (Miss)
+  Cache->>Kube: ServeDNS(Next)
+  Kube->>Kube: Resolve Pod IP from Informer Cache
+  Kube-->>Client: Return 10.96.0.1 (Direct Answer)
+  Note over Client,Cache: Subsequent Query for google.com
+  Client->>Cache: Query: google.com
+  Cache->>Kube: Cache Miss -> ServeDNS
+  Kube->>Fwd: Non-cluster domain -> ServeDNS
+  Fwd->>Ext: Upstream UDP Query
+  Ext-->>Fwd: 142.250.190.46
+  Fwd-->>Cache: Populate LRU cache
+  Fwd-->>Client: Return Answer
+    </div>
+    <figcaption>Plugin traversal sequence during service discovery and internet resolution.
+    <b>Short-circuit evaluation eliminates unnecessary upstream network calls.</b></figcaption>
+  </figure>
+
+  <h2>2. Binary DNS wire decoding: miekg/dns</h2>
+  <p>At 100,000 requests per second, allocating new memory objects for every query string causes massive garbage collection pauses. CoreDNS uses Miek Gieben's high-performance <code>miekg/dns</code> library, parsing raw UDP datagrams according to RFC 1035:</p>
+
+  <pre><code>// 12-byte DNS wire header layout
+// 0               1               2               3
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                      ID (16 bits)                             |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |QR|   Opcode  |AA|TC|RD|RA|   Z    |RCODE| (Flags 16 bits)     |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                    QDCOUNT (16 bits)                          |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                    ANCOUNT (16 bits)                          |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                    NSCOUNT (16 bits)                          |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                    ARCOUNT (16 bits)                          |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</code></pre>
+
+  <p>Rather than converting domain names to heap-allocated strings immediately, <code>miekg/dns</code> validates labels directly within the raw byte slice, copying memory only when a plugin specifically mutates or stores the record.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Received: UDP Packet arrives on socket
+  Received --> Unpacked: miekg/dns extracts 12-byte header + question
+  Unpacked --> PluginChain: Passed to root handler
+  PluginChain --> AnsweredLocal: Cache hit or Kubernetes service found
+  PluginChain --> Forwarded: No local match - dispatched upstream
+  Forwarded --> AnsweredRemote: Upstream reply received
+  AnsweredLocal --> ResponseFlushed: WriteMsg called; raw bytes sent over UDP
+  AnsweredRemote --> ResponseFlushed
+  ResponseFlushed --> [*]: Buffer recycled via sync.Pool
+    </div>
+    <figcaption>DNS query lifecycle state machine. From socket read to buffer recycling.
+    <b>Buffers are recycled through sync.Pool to maintain zero-allocation steady state.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does CoreDNS structure internal features like caching, metrics, and forwarding?</div>
+      <button class="q-opt">As chained plugin.Handler implementations called in turn</button>
+      <button class="q-opt">As separate microservice containers linked by gRPC hubs</button>
+      <button class="q-opt">As kernel eBPF bytecode programs compiled into root sys</button>
+      <button class="q-opt">As dynamic C shared libraries loaded using dlopen calls</button>
+      <div class="q-fb">CoreDNS structures all capabilities as plugins implementing plugin.Handler, chained sequentially in a pipeline configured by the Corefile.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does CoreDNS avoid heap allocations when parsing UDP DNS queries?</div>
+      <button class="q-opt">Linux network stacks drop fragmented UDP query packets</button>
+      <button class="q-opt">Garbage collection pauses degrade DNS lookup latencies</button>
+      <button class="q-opt">The DNS wire protocol prohibits variable length buffers</button>
+      <button class="q-opt">Pre-allocated arrays compress payload bytes using gzip</button>
+      <div class="q-fb">At high query rates (over 100k QPS), frequent heap allocations trigger Go garbage collection pauses, causing lookup latencies and client timeouts to spike.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What happens when a plugin in the CoreDNS chain cannot answer a query?</div>
+      <button class="q-opt">It writes an immediate SERVFAIL response to the socket</button>
+      <button class="q-opt">It terminates the active UDP listener goroutine thread</button>
+      <button class="q-opt">It invokes plugin.NextOrFailure to pass to downstream</button>
+      <button class="q-opt">It queries the etcd Raft state machine for DNS records</button>
+      <div class="q-fb">If a plugin cannot resolve the query, it invokes plugin.NextOrFailure, transferring execution to the next plugin in the chain.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The Chain of Responsibility pattern used by CoreDNS is ideal for protocol proxies. By keeping the handler interface minimalistic (<code>ServeDNS</code>) and providing a standard next-delegation mechanism, developers can add custom routing and filtering logic without touching core network code.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the plugin contract in <a href="https://github.com/coredns/coredns/tree/master/plugin">coredns/plugin</a> and inspect binary packet decoding in Miek Gieben's library at <a href="https://github.com/miekg/dns">miekg/dns</a>.</p>
+
+  <div class="pager">
+    <a href="0502-vault-barrier-encryption-and-shamir-secret-sharing.html"><span class="dir">&larr; Lesson 0502</span><span class="ttl">Vault barrier encryption and Shamir secret sharing</span></a>
+    <a class="nxt" href="0601-traefik-dynamic-configuration-and-reactive-providers.html"><span class="dir">Next &rarr;</span><span class="ttl">Traefik dynamic configuration and reactive providers</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0600 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

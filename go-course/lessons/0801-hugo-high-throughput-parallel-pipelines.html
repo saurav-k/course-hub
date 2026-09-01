@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hugo parallel compilation pipelines and buffer recycling - Systems Engineering in Go</title>
+<meta name="description" content="How Hugo compiles tens of thousands of pages per second using concurrent worker pools, zero-allocation sync.Pool buffer recycling, and content-addressed asset memoization in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; High-Performance Storage &middot; Lesson 0801</div>
+  <h1>Hugo renders thousands of pages in milliseconds using multi-stage worker pools, zero-allocation buffer recycling, and content memoization</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The world's fastest static site compiler &middot;
+    <a href="https://github.com/gohugoio/hugo">gohugoio/hugo</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>While other static site generators take minutes to build large websites, <b>Hugo</b> builds 10,000 pages in less than one second by designing for Go concurrency and memory efficiency.</li>
+      <li>Page compilation is parallelized across CPU cores using a bounded <b>worker pool</b> scaled to <code>runtime.GOMAXPROCS(0)</code>, processing markdown ASTs and template renderings concurrently.</li>
+      <li>To eliminate garbage collector thrashing during template rendering, Hugo recycles byte buffers using <b><code>sync.Pool</code></b>; buffers are reused across millions of operations without new heap allocations.</li>
+      <li>Assets (images, CSS, JavaScript) are content-addressed using SHA-256 hashes and <b>memoized</b> in memory, guaranteeing that shared resources are transformed exactly once per build.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  ContentDir["Raw Markdown Files (10,000+ files)"] --> Discovery["Parallel Content Walker"]
+  Discovery -->|"Dispatches Pages"| Queue["Work Queue Channel"]
+  subgraph WorkerPool["Parallel Worker Pool (GOMAXPROCS Workers)"]
+    direction TB
+    Worker1["Worker 1: Parse Frontmatter & Goldmark AST"]
+    Worker2["Worker 2: Execute Shortcodes & Templates"]
+    WorkerN["Worker N: Render HTML into Recycled Buffer"]
+  end
+  Queue --> WorkerPool
+  subgraph MemoryRecycling["Zero-Allocation Buffer Recycling"]
+    direction LR
+    BufPool["sync.Pool (bytes.Buffer)"]
+    BufPool <-->|"GetBuffer() / PutBuffer()"| WorkerPool
+  end
+  WorkerPool --> VFS["Virtual Filesystem (spf13/afero in memory)"]
+  VFS -->|"Buffered Disk Flush"| DiskOut["Target public/ Output Directory"]
+    </div>
+    <figcaption>Where this sits. The Hugo parallel compilation and buffer recycling pipeline.
+    <b>Worker goroutines recycle shared byte buffers, keeping heap allocations near zero.</b></figcaption>
+  </figure>
+
+  <h2>1. Zero-allocation rendering with sync.Pool</h2>
+  <p>In a site with 50,000 pages, calling <code>new(bytes.Buffer)</code> for every rendered page, partial, and shortcode allocates gigabytes of short-lived objects. The Go runtime would spend more time pausing for garbage collection (GC) than compiling pages.</p>
+
+  <p>Hugo eliminates GC pauses using a centralized <code>bufferpool</code> package:</p>
+
+  <pre><code>// Pattern from hugolib/bufferpool.go
+var bufPool = &sync.Pool{
+	New: func() any {
+		return new(bytes.Buffer)
+	},
+}
+
+func GetBuffer() *bytes.Buffer {
+	return bufPool.Get().(*bytes.Buffer)
+}
+
+func PutBuffer(buf *bytes.Buffer) {
+	// Reset length to 0 while retaining underlying allocated byte slice capacity
+	buf.Reset()
+	bufPool.Put(buf)
+}</code></pre>
+
+  <p>Notice the critical optimization in <code>PutBuffer</code>: calling <code>buf.Reset()</code> sets the buffer's slice length to 0 without reallocating the underlying memory array. Subsequent operations reuse existing memory buffers at full CPU L1/L2 cache speeds.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Worker as Worker Goroutine
+  participant Pool as sync.Pool Buffer Cache
+  participant VFS as Virtual Filesystem
+  Worker->>Pool: GetBuffer()
+  Pool-->>Worker: Return recycled *bytes.Buffer (Warm cache)
+  Worker->>Worker: Execute html/template.Execute(buf, pageData)
+  Worker->>VFS: Write buf.Bytes() to destination file
+  Worker->>Worker: buf.Reset() (Retain slice capacity)
+  Worker->>Pool: PutBuffer(buf)
+  Note over Pool: Buffer immediately ready for next page render
+    </div>
+    <figcaption>Byte buffer recycling sequence. Zero allocations per page compilation.
+    <b>Buffers retain allocated capacity across thousands of cycles without triggering GC.</b></figcaption>
+  </figure>
+
+  <h2>2. Bounded worker pools and pipeline stages</h2>
+  <p>Rather than spawning 50,000 unconstrained goroutines (which would cause severe context-switching overhead and memory thrashing), Hugo limits concurrency to available CPU cores:</p>
+
+  <pre><code>// Worker pool pattern
+numWorkers := runtime.GOMAXPROCS(0)
+var wg sync.WaitGroup
+pageChan := make(chan *Page, numWorkers*2)
+
+for i := 0; i &lt; numWorkers; i++ {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		buf := bufferpool.GetBuffer()
+		defer bufferpool.PutBuffer(buf)
+
+		for page := range pageChan {
+			page.Render(buf)
+			buf.Reset()
+		}
+	}()
+}</code></pre>
+
+  <h2>3. Content-addressed asset memoization</h2>
+  <p>Modern websites process complex asset pipelines: compiling SCSS to CSS, running PostCSS autoprefixing, resizing images to multiple responsive WebP variants, and generating SRI subresource integrity hashes.</p>
+
+  <p>Hugo hashes the content of each input asset using SHA-256. If a layout template references <code>image.Resize "800x600"</code> on fifty different pages, Hugo calculates the output once, stores the result in a concurrent cache (<code>sync.Map</code>), and serves the cached transformation to all subsequent pages in nanoseconds.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Discovered: File identified by parallel content walker
+  Discovered --> FrontmatterParsed: YAML/TOML metadata extracted
+  FrontmatterParsed --> MarkdownRendered: Goldmark generates HTML AST
+  MarkdownRendered --> TemplateApplied: html/template executes into pooled buffer
+  TemplateApplied --> BufferRecycled: Bytes flushed to VFS; buffer returned to pool
+  BufferRecycled --> Written: Finished page committed to public/ directory
+  Written --> [*]
+    </div>
+    <figcaption>Page compilation lifecycle state machine. From discovery to disk commit.
+    <b>Every stage transforms data in place to maximize memory mechanical sympathy.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does Hugo use sync.Pool for template rendering byte buffers?</div>
+      <button class="q-opt">To encrypt compiled HTML files before saving to disk</button>
+      <button class="q-opt">To bypass Linux kernel filesystem permission checks</button>
+      <button class="q-opt">To eliminate heap allocations and garbage collection</button>
+      <button class="q-opt">To compress static markdown files into zip archives</button>
+      <div class="q-fb">Recycling byte buffers through sync.Pool prevents millions of transient heap allocations, eliminating garbage collection pauses during large site compilations.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does Hugo partition work across multi-core processors?</div>
+      <button class="q-opt">Using a worker pool scaled to runtime.GOMAXPROCS</button>
+      <button class="q-opt">By spawning isolated Linux virtual machine guests</button>
+      <button class="q-opt">By distributing jobs to remote Kubernetes worker pods</button>
+      <button class="q-opt">Through sequential recursive single-threaded loops</button>
+      <div class="q-fb">Hugo bounds parallelism to the number of logical CPU cores (runtime.GOMAXPROCS), maximizing throughput while avoiding thread thrashing and context switching.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does Hugo prevent redundant processing of identical images and assets?</div>
+      <button class="q-opt">By deleting duplicate asset files from project disk</button>
+      <button class="q-opt">By memoizing processed assets using content SHA hashes</button>
+      <button class="q-opt">By disabling CSS minification when compiling bundles</button>
+      <button class="q-opt">By asking developers for interactive terminal consent</button>
+      <div class="q-fb">Hugo content-addresses assets via SHA-256 hashes, caching processed outputs so identical image transformations and stylesheet bundles execute exactly once.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Hugo achieves unbelievable speed not through esoteric language tricks, but through rigorous memory discipline. By recycling buffers, bounding concurrency to CPU cores, and caching expensive asset transformations, Go software can outperform C and Rust implementations.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the site build coordination in <a href="https://github.com/gohugoio/hugo/tree/master/hugolib">gohugoio/hugo/hugolib</a> and study buffer recycling in <a href="https://github.com/gohugoio/hugo/tree/master/bufferpool">gohugoio/hugo/bufferpool</a>.</p>
+
+  <div class="pager">
+    <a href="0800-minio-simd-erasure-coding-and-bitrot-protection.html"><span class="dir">&larr; Lesson 0800</span><span class="ttl">MinIO SIMD erasure coding and HighwayHash bitrot protection</span></a>
+    <a class="nxt" href="0900-concurrency-patterns-across-17-codebases.html"><span class="dir">Next &rarr;</span><span class="ttl">Universal Go concurrency patterns across 17 landmark codebases</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0801 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

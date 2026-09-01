@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caddy modular architecture and zero-downtime reloads - Systems Engineering in Go</title>
+<meta name="description" content="How Caddy powers automated HTTPS and zero-downtime configuration reloads through unified module lifecycles, certmagic, and socket pool handovers in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Edge & Web Infrastructure &middot; Lesson 0602</div>
+  <h1>Caddy powers automated HTTPS and zero-downtime configuration reloads through unified module lifecycles and socket pool handovers</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Extensible web architecture and automated TLS inside Caddy &middot;
+    <a href="https://github.com/caddyserver/caddy">caddyserver/caddy</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every component in <b>Caddy 2</b> is a <b>Module</b>: HTTP handlers, TLS managers, storage drivers, and config adapters all share a standardized lifecycle (<code>Provision</code> &rarr; <code>Validate</code> &rarr; <code>Cleanup</code>).</li>
+      <li>Caddy democratized the web by embedding <b><code>certmagic</code></b>, completely automating ACME certificate issuance, renewal timers, and OCSP stapling with zero manual intervention.</li>
+      <li>When updating configuration via <code>POST /load</code>, Caddy compiles and provisions the new generation first; if any module fails validation, the load is rejected atomically, and the old server stays live.</li>
+      <li>To achieve true zero-downtime reloads without dropping TCP handshakes, Caddy maintains an internal <b>listener pool</b>: new configurations inherit open socket file descriptors from the pool rather than rebinding ports.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  AdminAPI["Admin API: POST /load (New JSON Config)"] --> ProvisionNew["Phase 1: Provision & Validate New Modules"]
+  subgraph ValidationGate["Atomic Safety Verification"]
+    direction TB
+    Validate["Run Validate() on all new modules"]
+    FailCheck{"Validation Passed?"}
+    Validate --> FailCheck
+  end
+  ProvisionNew --> ValidationGate
+  FailCheck -->|"No: Abort load"| Reject["Reject with 400 - Old config stays 100% live"]
+  FailCheck -->|"Yes: Proceed"| SocketHandover["Phase 2: Socket Pool Handover"]
+  subgraph SocketPool["Shared In-Memory Listener Pool"]
+    direction LR
+    Sock443["Open Socket: 0.0.0.0:443 (net.Listener)"]
+    Sock80["Open Socket: 0.0.0.0:80 (net.Listener)"]
+  end
+  SocketHandover --> SocketPool
+  SocketPool --> SwitchActive["Phase 3: Swap Active App Context"]
+  SwitchActive --> CleanupOld["Phase 4: Run Cleanup() on Old Modules"]
+    </div>
+    <figcaption>Where this sits. The atomic configuration reload and socket handover architecture in Caddy.
+    <b>Listeners are inherited across configuration generations, eliminating port rebinding latency.</b></figcaption>
+  </figure>
+
+  <h2>1. The unified module lifecycle</h2>
+  <p>Most server architectures separate plugins by category: authentication plugins, logging plugins, storage plugins. Caddy simplifies its entire codebase into a single universal abstraction in <code>caddy.go</code>:</p>
+
+  <pre><code>// The universal module contracts from caddyserver/caddy/v2
+type Module interface {
+	CaddyModule() ModuleInfo
+}
+
+type Provisioner interface {
+	Provision(Context) error
+}
+
+type Validator interface {
+	Validate() error
+}
+
+type CleanerUpper interface {
+	Cleanup() error
+}</code></pre>
+
+  <p>Any Go struct implementing <code>CaddyModule()</code> can register itself in an <code>init()</code> function via <code>caddy.RegisterModule()</code>. When Caddy starts up or reloads, it walks the module tree and executes lifecycle hooks in strict order:</p>
+
+  <ol>
+    <li><b><code>Provision(ctx)</code>:</b> Modules allocate memory, open database pools, and compile regex patterns.</li>
+    <li><b><code>Validate()</code>:</b> Modules check that all required fields are valid and dependencies exist.</li>
+    <li><b><code>Cleanup()</code>:</b> When a configuration generation is replaced, retired modules close sockets and flush disk buffers.</li>
+  </ol>
+
+  <h2>2. Automated HTTPS with certmagic</h2>
+  <p>Before Caddy, setting up HTTPS required generating private keys, creating certificate signing requests (CSRs), running separate cron scripts (like <code>certbot</code>), and reloading NGINX. If a renewal cron job failed, the site went dark with an expired certificate warning.</p>
+
+  <p>Caddy solved this natively with <a href="https://github.com/caddyserver/certmagic">certmagic</a>. When Caddy starts:</p>
+  <ul>
+    <li>It inspects all hostnames in the routing tree (e.g. <code>example.com</code>).</li>
+    <li>It checks local storage for an existing certificate; if missing or within 30 days of expiration, it contacts Let's Encrypt or ZeroSSL using the ACME protocol.</li>
+    <li>It solves <b>HTTP-01</b> challenges by intercepting requests on port 80, or <b>TLS-ALPN-01</b> challenges directly inside the TLS handshake state machine.</li>
+    <li>Renewals run continuously in background goroutines, coordinating distributed file locks across multi-instance clusters.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Admin as Admin / API
+  participant Core as Caddy Core Engine
+  participant Pool as Socket Listener Pool
+  participant OldMod as Old Modules (Gen 1)
+  participant NewMod as New Modules (Gen 2)
+  Admin->>Core: POST /load (Generation 2)
+  Core->>NewMod: NewMod.Provision(ctx)
+  Core->>NewMod: NewMod.Validate()
+  Note over Core,NewMod: Validation succeeds!
+  Core->>Pool: Request listener for ":443"
+  Pool-->>NewMod: Return existing open net.Listener (Zero rebinding)
+  Core->>Core: Swap active engine pointer to Generation 2
+  Core->>OldMod: OldMod.Cleanup()
+  OldMod->>OldMod: Drain in-flight requests and release memory
+  Core-->>Admin: 200 OK (Reload Complete)
+    </div>
+    <figcaption>Zero-downtime configuration reload sequence. Transitioning traffic across module generations.
+    <b>Open sockets transfer seamlessly without dropping in-flight TCP handshakes.</b></figcaption>
+  </figure>
+
+  <h2>3. Zero-downtime socket handovers</h2>
+  <p>What happens when a web server tries to reload and open port 443 while the old process is still listening? On POSIX systems, calling <code>net.Listen("tcp", ":443")</code> returns an immediate error: <code>bind: address already in use</code>.</p>
+
+  <p>Caddy bypasses this using an internal <b>listener pool</b>. In <code>listeners.go</code>, Caddy tracks active <code>net.Listener</code> instances in a thread-safe registry keyed by network address. When a reload occurs:</p>
+
+  <ul>
+    <li>The new configuration asks the pool for <code>":443"</code>.</li>
+    <li>The pool notices that an active listener already exists, increments its reference count, and hands the live <code>net.Listener</code> directly to the new HTTP server.</li>
+    <li>The new server begins calling <code>listener.Accept()</code> immediately.</li>
+    <li>The old server calls <code>server.Shutdown(ctx)</code>, stopping new accepts while allowing existing HTTP connections to finish naturally.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Registered: Module registered in init()
+  Registered --> Provisioning: Engine runs Provision(Context)
+  Provisioning --> Validated: Engine runs Validate()
+  Validated --> Running: Inherits listener from Socket Pool
+  Running --> Running: Serves HTTP/3 and automated TLS
+  Running --> CleaningUp: New config generation lands
+  CleaningUp --> Stopped: Engine runs Cleanup()
+  Stopped --> [*]
+    </div>
+    <figcaption>Caddy module lifecycle state machine. From static binary registration to graceful cleanup.
+    <b>Standardized lifecycle stages guarantee deterministic startup and shutdown ordering.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does Caddy reload configuration without dropping active TCP connections?</div>
+      <button class="q-opt">By compiling a new Linux kernel module before restarting</button>
+      <button class="q-opt">By serializing active HTTP socket streams into database</button>
+      <button class="q-opt">By reusing open net.Listener descriptors from pool cache</button>
+      <button class="q-opt">By routing traffic through an external Python proxy node</button>
+      <div class="q-fb">Caddy maintains an internal socket pool; new configuration generations inherit existing open net.Listener instances directly rather than closing and rebinding the port.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What happens if a newly loaded Caddy configuration fails validation?</div>
+      <button class="q-opt">The new config is aborted and the current config stays live</button>
+      <button class="q-opt">The active Caddy process panics and drops all connections</button>
+      <button class="q-opt">The Linux operating system unlinks the server TLS certs</button>
+      <button class="q-opt">The administrative HTTP API port is permanently closed</button>
+      <div class="q-fb">Because Caddy provisions and validates new configurations before swapping them active, a failed configuration is rejected atomically with zero impact on the running server.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does Caddy's certmagic library automate HTTPS certificate renewals?</div>
+      <button class="q-opt">By prompting human administrators with interactive alerts</button>
+      <button class="q-opt">By running background ACME challenge checks before expiry</button>
+      <button class="q-opt">By requesting manual approvals from browser root stores</button>
+      <button class="q-opt">By disabling TLS encryption when certificates reach end</button>
+      <div class="q-fb">certmagic tracks certificate expiration dates in background goroutines, initiating automated ACME HTTP-01 or TLS-ALPN-01 challenges 30 days prior to expiration.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Caddy proves that complex infrastructure software can offer both extreme extensibility and unmatched developer ergonomics. By consolidating all extensions under a single <code>Module</code> interface and automating TLS at the networking layer, Caddy eliminated millions of lines of custom DevOps scripting worldwide.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the module lifecycle contracts in <a href="https://github.com/caddyserver/caddy/tree/master/caddy.go">caddyserver/caddy/caddy.go</a> and study automated certificate management in <a href="https://github.com/caddyserver/certmagic">caddyserver/certmagic</a>.</p>
+
+  <div class="pager">
+    <a href="0601-traefik-dynamic-configuration-and-reactive-providers.html"><span class="dir">&larr; Lesson 0601</span><span class="ttl">Traefik dynamic configuration and reactive providers</span></a>
+    <a class="nxt" href="0700-prometheus-tsdb-architecture-and-chunk-compression.html"><span class="dir">Next &rarr;</span><span class="ttl">Prometheus TSDB architecture and Gorilla chunk compression</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0602 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

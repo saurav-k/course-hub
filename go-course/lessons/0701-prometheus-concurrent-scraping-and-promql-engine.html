@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prometheus concurrent scraping and the PromQL engine - Systems Engineering in Go</title>
+<meta name="description" content="How Prometheus orchestrates concurrent pull-based scraping without thundering herds and evaluates queries via vectorized PromQL Abstract Syntax Tree execution in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Observability &middot; Lesson 0701</div>
+  <h1>Prometheus prevents thundering herd contention through jittered scrape loops and evaluates metric queries via vectorized AST traversal</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Pull-based telemetry and PromQL mechanics &middot;
+    <a href="https://github.com/prometheus/prometheus">prometheus/prometheus</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Unlike push-based monitoring agents that overwhelm centralized collectors during outages, <b>Prometheus</b> pulls metrics over HTTP, retaining full control over ingestion rates.</li>
+      <li>To avoid the <b>thundering herd problem</b> (where thousands of targets scrape on the exact same second), Prometheus initializes each scrape loop with randomized phase jitter.</li>
+      <li>Scrape loops compensate for network latency by computing wake times relative to nominal target deadlines, preventing clock drift over long uptime horizons.</li>
+      <li>The <b>PromQL Engine</b> compiles queries into an Abstract Syntax Tree (AST), executing vectorized operations across in-memory and memory-mapped chunks to calculate rates, histograms, and aggregations at microsecond speeds.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Discovery["Service Discovery (Kubernetes / Consul)"] --> TargetMgr["Target Manager"]
+  TargetMgr -->|"Spawns Goroutine per Target"| ScrapeLoop["Scrape Loop (Jittered Ticker)"]
+  subgraph ScrapeWorker["Concurrent Scrape Worker"]
+    direction TB
+    Wake["Calculate Nominal Next Deadline"]
+    HTTPGet["HTTP GET /metrics (HTTP Client)"]
+    Parser["Stream Parser (OpenMetrics text format)"]
+    Wake --> HTTPGet --> Parser
+  end
+  ScrapeLoop --> ScrapeWorker
+  Parser --> Appender["tsdb.Appender (Transactional Ingestion)"]
+  Appender --> HeadBlock["In-Memory Head Block"]
+  subgraph QuerySide["PromQL Query Execution"]
+    direction TB
+    AST["Parse PromQL Query into AST"]
+    VectorEval["Vectorized Node Evaluation"]
+    ChunkReader["Read Chunks from TSDB Head & Blocks"]
+    AST --> VectorEval
+    ChunkReader --> VectorEval
+  end
+  HeadBlock --> ChunkReader
+  VectorEval --> Result["HTTP JSON Query Result"]
+    </div>
+    <figcaption>Where this sits. The Prometheus concurrent scrape ingestion and PromQL query execution pipeline.
+    <b>Ingestion and query paths run concurrently against the TSDB without read-write deadlocks.</b></figcaption>
+  </figure>
+
+  <h2>1. Scrape loop jitter and drift compensation</h2>
+  <p>If you monitor 10,000 microservice pods and all of them scrape every 15 seconds, a naive timer causes all 10,000 HTTP requests to fire at $t=0, 15, 30\dots$, creating massive network packet drops and CPU spikes.</p>
+
+  <p>In <code>scrape/scrape.go</code>, Prometheus applies randomized startup offset jitter:</p>
+
+  <pre><code>// Pattern from prometheus/scrape/scrape.go
+func (sl *scrapeLoop) run(interval, timeout time.Duration) {
+	// 1. Calculate random phase jitter on startup
+	select {
+	case &lt;-time.After(sl.offset(interval)):
+	case &lt;-sl.stop:
+		return
+	}
+
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+
+	// 2. Track nominal target deadline to prevent drift
+	last := time.Now()
+	for {
+		select {
+		case &lt;-sl.stop:
+			return
+		case t := &lt;-ticker.C:
+			// Compensate for slow HTTP response latency
+			sl.scrapeAndReport(last, timeout)
+			last = t
+		}
+	}
+}
+
+func (sl *scrapeLoop) offset(interval time.Duration) time.Duration {
+	// Uniform random distribution across the scrape interval
+	return time.Duration(rand.Float64() * float64(interval))
+}</code></pre>
+
+  <p>By spreading 10,000 targets uniformly across the 15-second window, Prometheus flattens CPU and network utilization into an even, predictable baseline.</p>
+
+  <h2>2. Transactional metric appenders</h2>
+  <p>When a scrape response returns with 500 metric lines, Prometheus appends them as an atomic transaction. If the scrape times out midway, the transaction rolls back, preventing partially written metrics from corrupting histograms:</p>
+
+  <pre><code>// Pattern from tsdb/head_append.go
+app := tsdb.Appender(ctx)
+for _, metric := range parsedMetrics {
+	if _, err := app.Append(0, metric.Labels, metric.Timestamp, metric.Value); err != nil {
+		app.Rollback()
+		return err
+	}
+}
+// Atomically commit all samples to WAL and in-memory Head
+if err := app.Commit(); err != nil {
+	return err
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant User as Grafana Dashboard
+  participant PromQL as PromQL Engine
+  participant AST as AST Evaluator
+  participant TSDB as TSDB Index & Chunks
+  User->>PromQL: Query: rate(http_requests_total[5m])
+  PromQL->>AST: Parse into CallNode("rate", [MatrixSelector])
+  AST->>TSDB: Select series matching __name__="http_requests_total"
+  TSDB-->>AST: Return Series Chunk Iterators
+  loop Vectorized Evaluation
+    AST->>AST: Fetch samples in 5-minute sliding window
+    AST->>AST: Compute delta(val) / delta(time) with counter reset detection
+  end
+  AST-->>PromQL: Vector of per-series rate values
+  PromQL-->>User: JSON Matrix response with timestamps & rates
+    </div>
+    <figcaption>PromQL AST evaluation sequence. Vectorized rate calculation across time windows.
+    <b>Counter reset logic handles pod restarts automatically without producing negative rates.</b></figcaption>
+  </figure>
+
+  <h2>3. The PromQL vectorized AST engine</h2>
+  <p>PromQL queries are compiled into an Abstract Syntax Tree (AST) representing mathematical expressions. When evaluating functions like <code>rate()</code> or <code>histogram_quantile()</code>, the engine performs <b>vectorized operations</b>:</p>
+
+  <pre><code>// Pattern from promql/engine.go
+type Evaluator struct {
+	startTimestamp int64
+	endTimestamp   int64
+	step           int64
+}
+
+func (ev *Evaluator) Eval(node parser.Node) (parser.Value, error) {
+	switch n := node.(type) {
+	case *parser.VectorSelector:
+		return ev.evalVectorSelector(n)
+	case *parser.MatrixSelector:
+		return ev.evalMatrixSelector(n)
+	case *parser.Call:
+		// Execute built-in functions: rate, increase, sum_over_time
+		return ev.evalCall(n)
+	case *parser.BinaryExpr:
+		return ev.evalBinaryExpr(n)
+	default:
+		return nil, fmt.Errorf("unknown node: %T", node)
+	}
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Discovered: Target found via Service Discovery
+  Discovered --> JitterDelay: Sleeping initial random offset phase
+  JitterDelay --> ScrapingHTTP: Dispatches HTTP GET /metrics
+  ScrapingHTTP --> Parsing: Streams OpenMetrics text lines
+  Parsing --> Appended: app.Commit() flushes samples to Head
+  Appended --> ScheduledNext: Waits for ticker deadline
+  ScheduledNext --> ScrapingHTTP: Next interval arrives
+  ScheduledNext --> [*]: Target removed from discovery
+    </div>
+    <figcaption>Scrape worker lifecycle state machine. From discovery phase to periodic scraping.
+    <b>Dynamic discovery guarantees real-time adaptation as Kubernetes pods spin up and down.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does Prometheus introduce randomized startup jitter to its scrape loops?</div>
+      <button class="q-opt">To bypass rate limits enforced by cloud firewalls</button>
+      <button class="q-opt">To prevent periodic CPU and network thundering herds</button>
+      <button class="q-opt">To reorder metric labels into alphabetical sequence</button>
+      <button class="q-opt">To synchronize system clocks across container nodes</button>
+      <div class="q-fb">Without randomized startup jitter, all targets discovered at the same time would scrape simultaneously, creating severe periodic resource contention every 15 seconds.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does Prometheus prevent scrape intervals from drifting due to slow HTTP replies?</div>
+      <button class="q-opt">It aborts scrape requests that exceed two milliseconds</button>
+      <button class="q-opt">It relies on the Linux kernel NTP clock sync daemon</button>
+      <button class="q-opt">It advances the next wake time relative to schedule</button>
+      <button class="q-opt">It queries the target pod via raw UDP socket packets</button>
+      <div class="q-fb">By scheduling next wakeups against the target's nominal schedule rather than the completion timestamp of the previous scrape, intervals remain steady regardless of HTTP response times.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does the PromQL engine calculate rate(http_requests_total[5m]) across scrapes?</div>
+      <button class="q-opt">By computing gradients across range vector sample series</button>
+      <button class="q-opt">By executing SQL aggregation queries against SQLite tables</button>
+      <button class="q-opt">By parsing unstructured log messages using regex groups</button>
+      <button class="q-opt">By transmitting raw metrics to external Python services</button>
+      <div class="q-fb">The PromQL engine retrieves the time series samples within the 5-minute range vector, compensates for counter resets, and computes the rate of increase per second.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The pull model invert the traditional relationship between monitoring servers and clients. Rather than burdening client applications with retry loops, buffering queues, and backpressure handling, Prometheus centralizes resilience logic in a robust, jitter-governed pull engine.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the scrape loop implementation in <a href="https://github.com/prometheus/prometheus/tree/main/scrape">prometheus/scrape</a> and study PromQL engine execution in <a href="https://github.com/prometheus/prometheus/tree/main/promql">prometheus/promql</a>.</p>
+
+  <div class="pager">
+    <a href="0700-prometheus-tsdb-architecture-and-chunk-compression.html"><span class="dir">&larr; Lesson 0700</span><span class="ttl">Prometheus TSDB architecture and Gorilla chunk compression</span></a>
+    <a class="nxt" href="0702-grafana-backend-routing-and-streaming-channels.html"><span class="dir">Next &rarr;</span><span class="ttl">Grafana backend routing and streaming channels</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0701 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

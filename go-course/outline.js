@@ -59,6 +59,110 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Workload Orchestration",
+      "lessons": [
+        {
+          "title": "Kubernetes and the declarative reconciliation loop",
+          "href": "lessons/0400-kubernetes-the-declarative-reconciliation-loop.html"
+        },
+        {
+          "title": "Kubernetes API machinery and type schemes",
+          "href": "lessons/0401-kubernetes-api-machinery-and-type-schemes.html"
+        },
+        {
+          "title": "Nomad optimistic concurrency and the evaluation broker",
+          "href": "lessons/0402-nomad-optimistic-concurrency-and-eval-brokers.html"
+        },
+        {
+          "title": "Helm chart rendering and the three-way strategic merge",
+          "href": "lessons/0403-helm-chart-rendering-and-kubernetes-storage-drivers.html"
+        }
+      ]
+    },
+    {
+      "n": "05",
+      "title": "Infrastructure as Code",
+      "lessons": [
+        {
+          "title": "Terraform DAG construction and concurrent graph walking",
+          "href": "lessons/0500-terraform-dag-construction-and-graph-walking.html"
+        },
+        {
+          "title": "Terraform, Vault, and the go-plugin IPC subsystem",
+          "href": "lessons/0501-terraform-and-vault-the-go-plugin-subsystem.html"
+        },
+        {
+          "title": "Vault barrier encryption and Shamir secret sharing",
+          "href": "lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "Edge & Web Infrastructure",
+      "lessons": [
+        {
+          "title": "CoreDNS and the zero-allocation DNS pipeline",
+          "href": "lessons/0600-coredns-zero-allocation-dns-pipeline.html"
+        },
+        {
+          "title": "Traefik dynamic configuration and reactive providers",
+          "href": "lessons/0601-traefik-dynamic-configuration-and-reactive-providers.html"
+        },
+        {
+          "title": "Caddy modular architecture and zero-downtime reloads",
+          "href": "lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Observability & Time-Series",
+      "lessons": [
+        {
+          "title": "Prometheus TSDB architecture and Gorilla chunk compression",
+          "href": "lessons/0700-prometheus-tsdb-architecture-and-chunk-compression.html"
+        },
+        {
+          "title": "Prometheus concurrent scraping and the PromQL engine",
+          "href": "lessons/0701-prometheus-concurrent-scraping-and-promql-engine.html"
+        },
+        {
+          "title": "Grafana backend routing and streaming channels",
+          "href": "lessons/0702-grafana-backend-routing-and-streaming-channels.html"
+        }
+      ]
+    },
+    {
+      "n": "08",
+      "title": "High-Performance Storage & Compilation",
+      "lessons": [
+        {
+          "title": "MinIO SIMD erasure coding and HighwayHash bitrot protection",
+          "href": "lessons/0800-minio-simd-erasure-coding-and-bitrot-protection.html"
+        },
+        {
+          "title": "Hugo parallel compilation pipelines and buffer recycling",
+          "href": "lessons/0801-hugo-high-throughput-parallel-pipelines.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Cross-Cutting Systems Patterns",
+      "lessons": [
+        {
+          "title": "Universal Go concurrency patterns across 17 landmark codebases",
+          "href": "lessons/0900-concurrency-patterns-across-17-codebases.html"
+        },
+        {
+          "title": "Go memory management and mechanical sympathy at scale",
+          "href": "lessons/0901-memory-management-and-mechanical-sympathy.html"
+        }
+      ]
     }
   ],
   "extras": [
