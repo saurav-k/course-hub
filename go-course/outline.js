@@ -59,6 +59,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html"
         }
       ]
+    },
+    {
+      "n": "04",
+      "title": "Workload Orchestration",
+      "lessons": [
+        {
+          "title": "Kubernetes and the declarative reconciliation loop",
+          "href": "lessons/0400-kubernetes-the-declarative-reconciliation-loop.html"
+        },
+        {
+          "title": "Kubernetes API machinery and type schemes",
+          "href": "lessons/0401-kubernetes-api-machinery-and-type-schemes.html"
+        },
+        {
+          "title": "Nomad optimistic concurrency and the evaluation broker",
+          "href": "lessons/0402-nomad-optimistic-concurrency-and-eval-brokers.html"
+        },
+        {
+          "title": "Helm chart rendering and the three-way strategic merge",
+          "href": "lessons/0403-helm-chart-rendering-and-kubernetes-storage-drivers.html"
+        }
+      ]
     }
   ],
   "extras": [

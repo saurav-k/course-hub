@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Nomad optimistic concurrency and the evaluation broker - Systems Engineering in Go</title>
+<meta name="description" content="How HashiCorp Nomad achieves high-throughput distributed scheduling using parallel optimistic evaluation workers, plan queues, and transactional Raft commits in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Workload Orchestration &middot; Lesson 0402</div>
+  <h1>Nomad achieves extreme scheduling throughput through parallel optimistic evaluation workers and transactional plan commits</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    High-throughput cluster scheduling in HashiCorp Nomad &middot;
+    <a href="https://github.com/hashicorp/nomad">hashicorp/nomad</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Pessimistic schedulers lock cluster nodes while computing placements, creating severe head-of-line bottlenecks as cluster size and scheduling frequency grow.</li>
+      <li><b>HashiCorp Nomad</b> uses <b>Optimistic Concurrency Control (OCC)</b>: parallel scheduler worker goroutines evaluate placement plans concurrently against in-memory state snapshots without locking machines.</li>
+      <li>State changes are buffered in an <b>Evaluation Broker</b>, a thread-safe priority queue that distributes evaluations across scheduler workers according to job priority and type.</li>
+      <li>Each worker submits an allocation <b>Plan</b> to the Raft leader. The leader commits the plan transactionally; if a resource conflict is detected (e.g. another worker claimed the same CPU cores), the loser's plan is rejected and re-evaluated immediately.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Event["Job Registration / Node Failure"] --> EvalBroker["Evaluation Broker (Priority Queue)"]
+  subgraph ParallelWorkers["Concurrent Scheduler Workers"]
+    direction TB
+    W1["Worker 1 (Core 1): Computes Plan A"]
+    W2["Worker 2 (Core 2): Computes Plan B"]
+    W3["Worker 3 (Core 3): Computes Plan C"]
+  end
+  EvalBroker -->|"Dequeues Evaluation"| W1
+  EvalBroker -->|"Dequeues Evaluation"| W2
+  EvalBroker -->|"Dequeues Evaluation"| W3
+  subgraph CommitEngine["Transactional Raft Commit Pipeline"]
+    direction TB
+    PlanQueue["Plan Queue (Serialized by Leader)"]
+    ConflictDetect["CAS Check: Are requested resources free?"]
+    RaftCommit["Raft Commit Log: Assign Allocation to Node"]
+    PlanQueue --> ConflictDetect --> RaftCommit
+  end
+  W1 -->|"Submits Plan A"| PlanQueue
+  W2 -->|"Submits Plan B"| PlanQueue
+  ConflictDetect -.->|"Conflict Detected on Plan B"| ReEnqueue["Re-enqueue Evaluation in Broker"]
+  ReEnqueue --> EvalBroker
+    </div>
+    <figcaption>Where this sits. The Nomad parallel evaluation pipeline and optimistic plan commit architecture.
+    <b>Workers evaluate placements concurrently in memory; the Raft leader serializes commits atomically.</b></figcaption>
+  </figure>
+
+  <h2>1. Why pessimistic scheduling fails at scale</h2>
+  <p>In centralized cluster architectures, a scheduler locks the target node, checks CPU and memory availability, binds the container, and releases the lock. While simple, this serializes all decisions through a single thread.</p>
+
+  <p>When deploying 100,000 tasks across 10,000 nodes, pessimistic locking spends more time waiting on mutexes than computing optimal bin-packing algorithms. Nomad breaks this bottleneck by adopting Google's Omega scheduling paradigm: <b>optimistic evaluation with transactional commit</b>.</p>
+
+  <h2>2. The Evaluation Broker</h2>
+  <p>Whenever an event occurs (a job is submitted, a deployment is rolled out, or a machine crashes), Nomad creates an <b>Evaluation</b>. Evaluations encapsulate the intent to reconcile a specific job.</p>
+
+  <p>In <code>nomad/nomad/eval_broker.go</code>, Nomad maintains a specialized, thread-safe priority queue called the <code>EvalBroker</code>:</p>
+
+  <pre><code>// Pattern from nomad/nomad/eval_broker.go
+type EvalBroker struct {
+	// Priority queues indexed by scheduler type (service, batch, system)
+	pool map[string]*priorityQueue
+
+	// In-progress evaluations currently being processed by workers
+	inProgress map[string]*structs.Evaluation
+
+	// Unblocks worker goroutines when work arrives
+	readyCh chan struct{}
+	mu      sync.RWMutex
+}
+
+func (b *EvalBroker) Dequeue(types []string, timeout time.Duration) (*structs.Evaluation, error) {
+	// Dequeue highest priority evaluation matching worker capabilities
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	for _, schedType := range types {
+		if eval := b.pool[schedType].Pop(); eval != nil {
+			b.inProgress[eval.ID] = eval
+			return eval, nil
+		}
+	}
+	return nil, ErrNoWork
+}</code></pre>
+
+  <h2>3. Parallel planning and conflict detection</h2>
+  <p>Multiple scheduler workers dequeue evaluations simultaneously. Each worker evaluates placement against an immutable snapshot of cluster state, calculating the optimal node placements based on constraints, affinities, and bin-packing algorithms.</p>
+
+  <p>Once placement is determined, the worker generates a <b>Plan</b>. The plan is not written to the node; it is submitted to the Raft leader's plan queue.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant W1 as Worker 1
+  participant W2 as Worker 2
+  participant Leader as Raft Leader
+  participant Broker as Eval Broker
+  W1->>W1: Plan A: Allocate Node 4 (Cores 0-2)
+  W2->>W2: Plan B: Allocate Node 4 (Cores 1-3)
+  W1->>Leader: SubmitPlan(Plan A)
+  Note over Leader: Leader verifies Cores 0-2 are free
+  Leader->>Leader: Raft commit Plan A
+  Leader-->>W1: 200 OK (Plan Committed)
+  W2->>Leader: SubmitPlan(Plan B)
+  Note over Leader: Conflict! Core 1 already claimed by Plan A
+  Leader-->>W2: ConflictRejection(Plan B)
+  W2->>Broker: Re-enqueue Evaluation for immediate retry
+  Note over Broker: Worker 2 re-evaluates against updated state
+    </div>
+    <figcaption>Optimistic plan conflict resolution. Parallel workers with serialized atomic leader verification.
+    <b>Conflicting plans fail fast and re-enqueue, allowing non-conflicting plans to commit without delay.</b></figcaption>
+  </figure>
+
+  <p>Because node conflicts are rare in large clusters (the probability of two workers picking the exact same node at the exact same millisecond is small), over 99% of plans commit on the first try. This architecture allowed Nomad to schedule 2 million containers across 61 host regions in under 22 minutes.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Pending: Enqueued in EvalBroker
+  Pending --> InProgress: Dequeued by Scheduler Worker
+  InProgress --> Planned: Bin-packing calculation succeeds
+  Planned --> Committed: Raft leader verifies zero conflict
+  Planned --> Conflict: Core or memory collision on target node
+  Conflict --> Pending: Re-enqueued with fresh state snapshot
+  Committed --> [*]: Allocation dispatched to client agent
+  InProgress --> Failed: Constraints cannot be satisfied
+  Failed --> [*]
+    </div>
+    <figcaption>Evaluation state lifecycle. From queue arrival through optimistic conflict resolution.
+    <b>Evaluations transition through planned states and retry automatically upon conflicts.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does Nomad use optimistic concurrency instead of pessimistic locking during scheduling?</div>
+      <button class="q-opt">Pessimistic locks prevent cgroups from launching tasks</button>
+      <button class="q-opt">Optimistic plans let parallel schedulers run on cores</button>
+      <button class="q-opt">The Raft consensus protocol cannot serialize Go structs</button>
+      <button class="q-opt">UDP network sockets cannot support mutual exclusion locks</button>
+      <div class="q-fb">Optimistic concurrency allows multiple worker threads to evaluate placement plans simultaneously against state snapshots without lock contention.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What happens when two Nomad scheduler workers propose placing tasks on the same node CPU?</div>
+      <button class="q-opt">Both allocations are discarded and the cluster restarts</button>
+      <button class="q-opt">The host kernel overcommits physical hardware threads</button>
+      <button class="q-opt">The leader commits the first plan and rejects the second</button>
+      <button class="q-opt">The evaluation broker terminates the slower scheduler</button>
+      <div class="q-fb">The Raft leader commits the first plan that arrives; the second conflicting plan is rejected and its evaluation is re-enqueued to re-evaluate with fresh cluster state.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What role does Nomad's Evaluation Broker play in cluster orchestration?</div>
+      <button class="q-opt">It buffers and prioritizes state change requests in queues</button>
+      <button class="q-opt">It compiles Go templates into container filesystem layers</button>
+      <button class="q-opt">It distributes cryptographic barrier keys across servers</button>
+      <button class="q-opt">It routes incoming HTTP internet requests to backend pods</button>
+      <div class="q-fb">The Evaluation Broker maintains prioritized queues of evaluations, feeding work to available scheduler goroutines based on job type and priority.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Contrast Nomad with Kubernetes: Kubernetes separates concerns across multiple decoupled controllers (deployment controller, replicaset controller, scheduler), using workqueues and informers. Nomad centralizes scheduling through parallel evaluation workers coordinated by a transactional Raft leader, maximizing raw allocation velocity.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the broker implementation in <a href="https://github.com/hashicorp/nomad/tree/main/nomad/eval_broker.go">nomad/eval_broker.go</a>, study the planner in <a href="https://github.com/hashicorp/nomad/tree/main/nomad/plan_queue.go">nomad/plan_queue.go</a>, and read the Google Omega paper: <a href="https://research.google/pubs/pub41684/">Omega: flexible, scalable schedulers for large compute clusters</a>.</p>
+
+  <div class="pager">
+    <a href="0401-kubernetes-api-machinery-and-type-schemes.html"><span class="dir">&larr; Lesson 0401</span><span class="ttl">Kubernetes API machinery and type schemes</span></a>
+    <a class="nxt" href="0403-helm-chart-rendering-and-kubernetes-storage-drivers.html"><span class="dir">Next &rarr;</span><span class="ttl">Helm chart rendering and the three-way strategic merge</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0402 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

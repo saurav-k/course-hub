@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kubernetes and the declarative reconciliation loop - Systems Engineering in Go</title>
+<meta name="description" content="How Kubernetes controllers converge cluster state using client-go SharedInformers, DeltaFIFO queues, thread-safe Indexer caches, and rate-limited Workqueues in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Workload Orchestration &middot; Lesson 0400</div>
+  <h1>Kubernetes drives cluster convergence through client-go Informers, local Indexer caches, and rate-limited Workqueues</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The control plane loop inside Kubernetes and custom operators &middot;
+    <a href="https://github.com/kubernetes/kubernetes">kubernetes/kubernetes</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Kubernetes does not execute imperative commands (e.g. "create one pod"); it continuously reconciles <b>observed actual state</b> against <b>declared desired state</b> until they match.</li>
+      <li>To protect the API server and etcd from being overwhelmed by thousands of controllers, <code>client-go</code> uses <b>SharedInformers</b> with a two-phase <b>ListWatch</b> pattern: an initial HTTP List followed by a streaming chunked HTTP Watch.</li>
+      <li>Watched events populate an in-memory <b>Indexer</b> cache (allowing instant local queries via Listers) and push lightweight resource keys (`namespace/name`) into a <b>Workqueue</b>.</li>
+      <li>The Workqueue provides key <b>deduplication</b> (multiple events for the same pod collapse into one work item), exponential backoff rate limiting, and parallel processing locks.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  APIServer["Kubernetes API Server"] -->|"HTTP ListWatch"| Reflector["Reflector (client-go)"]
+  subgraph InformerPipeline["SharedInformer Pipeline"]
+    direction TB
+    Reflector -->|"Pushes delta events"| DeltaFIFO["DeltaFIFO Queue"]
+    DeltaFIFO -->|"Updates cache"| Indexer["Indexer (In-Memory B-Tree)"]
+    DeltaFIFO -->|"Triggers handler"| Handler["ResourceEventHandler"]
+  end
+  Handler -->|"Enqueues key: default/nginx"| Workqueue["RateLimitingQueue"]
+  subgraph ControllerWorker["Reconciler Worker Pool"]
+    direction TB
+    Worker["Reconcile(key)"]
+    Lister["Lister: Read Indexer Cache"]
+    Actuator["Actuator: Compare Spec vs Status"]
+    Worker --> Lister --> Actuator
+  end
+  Workqueue -->|"Dequeues key"| Worker
+  Actuator -->|"Mutates state if delta exists"| APIServer
+    </div>
+    <figcaption>Where this sits. The complete client-go Informer and controller-runtime architecture.
+    <b>Controllers never poll the API server directly; they observe events and read from local Indexer RAM.</b></figcaption>
+  </figure>
+
+  <h2>1. Declarative reconciliation vs imperative actions</h2>
+  <p>In classical deployment scripts, provisioning is imperative: <code>createPod()</code>, <code>attachDisk()</code>, <code>startNetwork()</code>. If step 2 fails due to a network timeout, the script crashes, leaving the system in an ambiguous, half-created state.</p>
+
+  <p>Kubernetes fundamentally rethinks automation around <b>Level-Triggered Declarative Convergence</b>:</p>
+
+  <pre><code>// The universal controller contract in controller-runtime
+func (r *DeploymentReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// 1. Fetch current desired spec and observed status from local cache
+	var deploy appsv1.Deployment
+	if err := r.Get(ctx, req.NamespacedName, &deploy); err != nil {
+		return ctrl.Result{}, client.IgnoreNotFound(err)
+	}
+
+	// 2. Count active pods matching deployment selector
+	activePods := r.countActivePods(ctx, &deploy)
+
+	// 3. Reconcile delta between desired replicas and observed pods
+	if activePods < deploy.Spec.Replicas {
+		return ctrl.Result{}, r.createPod(ctx, &deploy)
+	} else if activePods > deploy.Spec.Replicas {
+		return ctrl.Result{}, r.terminatePod(ctx, &deploy)
+	}
+
+	// Desired matches observed; nothing to do
+	return ctrl.Result{}, nil
+}</code></pre>
+
+  <p>The controller does not care whether a pod crashed, was deleted by a user, or was evicted by an OOM killer. On every iteration, it simply measures the delta between what the spec asks for and what exists, and takes a single corrective step.</p>
+
+  <h2>2. Inside client-go: Reflector, DeltaFIFO, and Indexer</h2>
+  <p>If every controller in a 5,000-node cluster polled the API server every second, etcd would instantly collapse under read load. Kubernetes prevents this using <code>client-go/tools/cache</code>:</p>
+
+  <ul>
+    <li><b>Reflector:</b> Issues an initial HTTP <code>GET /api/v1/pods</code> to capture a full baseline, extracting the latest <code>resourceVersion</code> token. It then opens an indefinite HTTP stream (<code>GET /api/v1/pods?watch=true&resourceVersion=14920</code>). Every creation, modification, and deletion streams over this single long-lived connection.</li>
+    <li><b>DeltaFIFO:</b> A specialized thread-safe FIFO queue that buffers incoming deltas (<code>Added</code>, <code>Updated</code>, <code>Deleted</code>, <code>Sync</code>) keyed by object identity.</li>
+    <li><b>Indexer:</b> An in-memory cache that stores the full Go structs. When a worker invokes <code>lister.Pods(ns).Get(name)</code>, the call reads directly from local memory pointers with zero network I/O and sub-microsecond latency.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Kubelet as Kubelet Node
+  participant API as API Server / etcd
+  participant Refl as client-go Reflector
+  participant Cache as Local Indexer Cache
+  participant Q as Workqueue
+  participant Rec as Reconciler Worker
+  Kubelet->>API: Pod crash notification
+  API->>Refl: Streaming Watch Event (MODIFIED: pod status=Failed)
+  Refl->>Cache: Update in-memory Pod struct
+  Refl->>Q: Add("default/nginx-deployment")
+  Q->>Rec: Get() -> "default/nginx-deployment"
+  Rec->>Cache: Read local pod status (Zero API network call)
+  Rec->>API: POST /api/v1/namespaces/default/pods (Spawn replacement)
+  Rec->>Q: Done(key)
+    </div>
+    <figcaption>Watch event streaming and controller reconciliation sequence. Handling pod crashes through level triggers.
+    <b>Watch events trigger key enqueues; workers query local memory caches to resolve state.</b></figcaption>
+  </figure>
+
+  <h2>3. Workqueue: deduplication and rate limiting</h2>
+  <p>Resource event handlers do not pass full object copies to workers. They extract the object's key string (e.g. <code>"prod/payment-service"</code>) and push it into a <code>workqueue.RateLimitingInterface</code>.</p>
+
+  <p>The Workqueue solves three massive distributed systems challenges:</p>
+  <ul>
+    <li><b>Deduplication:</b> If a deployment's pods crash 50 times in two seconds, the event handler calls <code>queue.Add("prod/payment-service")</code> 50 times. The workqueue maintains an internal set; if the key is already queued, the duplicates are collapsed into a single execution.</li>
+    <li><b>Parallel Processing Protection:</b> If worker 1 is actively processing <code>"prod/payment-service"</code>, the workqueue marks the key as dirty but will not yield it to worker 2 until worker 1 calls <code>queue.Done(key)</code>. This guarantees that two worker goroutines never execute concurrent reconciliations for the same resource.</li>
+    <li><b>Exponential Backoff Rate Limiting:</b> If reconciliation fails (e.g. cloud provider quota exceeded), the key is re-queued with exponential backoff (e.g. 5ms, 10ms, 20ms, capped at 1000s), preventing crash-looping controllers from hammering the API server.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Enqueued: queue.Add(key)
+  Enqueued --> Processing: queue.Get() leases key to Worker
+  Processing --> Succeeded: Reconcile returns err=nil
+  Succeeded --> [*]: queue.Forget(key) and queue.Done(key)
+  Processing --> RateLimitedBackoff: Reconcile returns err != nil
+  RateLimitedBackoff --> Enqueued: Backoff duration expires (e.g. 50ms)
+  Processing --> DirtyWhileProcessing: New event arrives while Worker runs
+  DirtyWhileProcessing --> Enqueued: Worker calls Done(key); key instantly re-enqueued
+    </div>
+    <figcaption>Workqueue item lifecycle state machine. Deduplication and backoff rate limiting under failure.
+    <b>Keys are leased exclusively to one worker; failures trigger exponential backoff retry.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does a Kubernetes controller query its local Informer cache instead of the API server?</div>
+      <button class="q-opt">Local caches prevent saturating etcd and API server</button>
+      <button class="q-opt">The API server cannot respond to GET request queries</button>
+      <button class="q-opt">The Linux kernel blocks outbound TCP calls in pods</button>
+      <button class="q-opt">Local memory caches encrypt JSON payloads with keys</button>
+      <div class="q-fb">If hundreds of controllers constantly queried the API server directly, the central database (etcd) would become saturated; reading from local Indexer memory eliminates read pressure.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What happens when five rapid watch events arrive for the same Kubernetes resource?</div>
+      <button class="q-opt">Five parallel workers execute reconciliation routines</button>
+      <button class="q-opt">The rate-limited Workqueue deduplicates into one key</button>
+      <button class="q-opt">The API server terminates the active controller pod</button>
+      <button class="q-opt">The controller flushes all cached state to SSD disks</button>
+      <div class="q-fb">The client-go Workqueue deduplicates keys; if multiple events arrive for the same resource while it is waiting in the queue, it is processed only once.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What distinguishes declarative reconciliation from imperative command execution?</div>
+      <button class="q-opt">Declarative loops require human shell approval votes</button>
+      <button class="q-opt">Imperative engines execute without using memory caches</button>
+      <button class="q-opt">Reconcilers converge toward desired state repeatedly</button>
+      <button class="q-opt">Declarative handlers communicate only over UDP pipes</button>
+      <div class="q-fb">Declarative reconcilers compare observed state against desired state on every iteration, self-healing any drift regardless of how or why the discrepancy occurred.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The level-triggered reconciliation loop is the single most resilient design pattern in cloud software. Never write an edge-triggered system that assumes every network event arrives in order. Always build your controllers so that reading current state from a cache and applying idempotent convergence produces the correct system state.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the canonical controller patterns in <a href="https://github.com/kubernetes/client-go/tree/master/tools/cache">client-go/tools/cache</a> and examine the Workqueue implementation in <a href="https://github.com/kubernetes/client-go/tree/master/util/workqueue">client-go/util/workqueue</a>.</p>
+
+  <div class="pager">
+    <a href="0303-cockroachdb-multi-raft-and-pebble-lsm.html"><span class="dir">&larr; Lesson 0303</span><span class="ttl">CockroachDB Multi-Raft and the Pebble LSM-tree</span></a>
+    <a class="nxt" href="0401-kubernetes-api-machinery-and-type-schemes.html"><span class="dir">Next &rarr;</span><span class="ttl">Kubernetes API machinery and type schemes</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0400 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

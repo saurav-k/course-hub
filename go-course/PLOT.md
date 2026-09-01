@@ -25,10 +25,10 @@ Status marks used below:
 | 7 | `lessons/0301-etcd-write-ahead-log-and-mvcc-bbolt.html` | written | WAL, CRC validation, revisions, bbolt B+tree storage engine |
 | 8 | `lessons/0302-consul-swim-gossip-with-memberlist.html` | written | Memberlist, SWIM protocol, failure detection, state sync |
 | 9 | `lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html` | written | Multi-Raft ranges, range leases, Pebble LSM-tree engine replacing CGo RocksDB |
-| 10 | `lessons/0400-kubernetes-the-declarative-reconciliation-loop.html` | reserved | Controller-manager, Informers, Lister, DeltaFIFO, Workqueue rate limiting |
-| 11 | `lessons/0401-kubernetes-api-machinery-and-type-schemes.html` | reserved | runtime.Object, dynamic typing, Scheme registration, field selectors |
-| 12 | `lessons/0402-nomad-optimistic-concurrency-and-eval-brokers.html` | reserved | Nomad plan/eval scheduling pipeline, task runner drivers |
-| 13 | `lessons/0403-helm-chart-rendering-and-kubernetes-storage-drivers.html` | reserved | Go `text/template` sandboxing, release state in K8s Secrets, 3-way merge |
+| 10 | `lessons/0400-kubernetes-the-declarative-reconciliation-loop.html` | written | Controller-manager, Informers, Lister, DeltaFIFO, Workqueue rate limiting |
+| 11 | `lessons/0401-kubernetes-api-machinery-and-type-schemes.html` | written | runtime.Object, dynamic typing, Scheme registration, field selectors |
+| 12 | `lessons/0402-nomad-optimistic-concurrency-and-eval-brokers.html` | written | Nomad plan/eval scheduling pipeline, task runner drivers |
+| 13 | `lessons/0403-helm-chart-rendering-and-kubernetes-storage-drivers.html` | written | Go `text/template` sandboxing, release state in K8s Secrets, 3-way merge |
 | 14 | `lessons/0500-terraform-dag-construction-and-graph-walking.html` | reserved | Directed Acyclic Graph, topological sort, concurrent worker evaluation |
 | 15 | `lessons/0501-terraform-and-vault-the-go-plugin-subsystem.html` | reserved | HashiCorp `go-plugin`, net/rpc and gRPC IPC, handshake verification, process supervision |
 | 16 | `lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html` | reserved | AES-GCM envelope barrier encryption, Shamir GF(2^8) math, dynamic lease revocation |

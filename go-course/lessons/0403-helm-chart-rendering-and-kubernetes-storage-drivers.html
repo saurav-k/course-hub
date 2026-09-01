@@ -1,0 +1,209 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Helm chart rendering and the three-way strategic merge - Systems Engineering in Go</title>
+<meta name="description" content="How Helm renders dynamic Kubernetes manifests with Go text/template, persists release state in Kubernetes Secrets, and applies three-way strategic merge patches.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Workload Orchestration &middot; Lesson 0403</div>
+  <h1>Helm coordinates Kubernetes application releases using hermetic template sandboxing, secret-backed storage drivers, and three-way strategic merge patches</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Package management and release engineering in Helm &middot;
+    <a href="https://github.com/helm/helm">helm/helm</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>Helm v3</b> eliminated the server-side Tiller pod completely, transforming Helm into a pure client-side CLI that coordinates releases directly via <code>k8s.io/client-go</code>.</li>
+      <li>Template compilation uses Go's standard <code>text/template</code> library extended with the <b>Sprig</b> function suite, running hermetically without external shell or filesystem side effects.</li>
+      <li>Release state is stored natively inside Kubernetes: each release revision is serialized into a gzipped, base64-encoded Protobuf payload stored as a Kubernetes <b>Secret</b> in the target namespace.</li>
+      <li>To avoid overwriting runtime mutations (such as Horizontal Pod Autoscalers changing replica counts), Helm applies a <b>three-way strategic merge patch</b> comparing the previous chart, the live cluster state, and the new target chart.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  UserValues["values.yaml + CLI overrides"] --> Engine["Helm Engine (Go text/template + Sprig)"]
+  ChartTemplates["Chart Templates (*.yaml)"] --> Engine
+  Engine --> Manifests["Target Manifests (Revision N)"]
+  subgraph StorageDriver["Secret-Backed Release Storage"]
+    direction TB
+    PrevRelease["Secret: sh.helm.release.v1.my-app.v1\n(Original Manifest N-1)"]
+    NewRelease["Secret: sh.helm.release.v1.my-app.v2\n(Gzipped Protobuf)"]
+  end
+  subgraph ThreeWayMerge["Three-Way Strategic Merge Engine"]
+    direction TB
+    Original["Original Manifest (N-1)"]
+    Live["Live Cluster State (API Server)"]
+    Target["Target Manifest (N)"]
+    Patch["Computed Strategic Merge Patch"]
+    Original & Live & Target --> Patch
+  end
+  PrevRelease --> Original
+  Manifests --> Target
+  Patch -->|"APPLY PATCH"| APIServer["Kubernetes API Server"]
+  Patch --> NewRelease
+    </div>
+    <figcaption>Where this sits. The Helm template rendering and three-way merge release pipeline.
+    <b>Upgrades calculate deltas against both previous releases and live cluster states.</b></figcaption>
+  </figure>
+
+  <h2>1. Hermetic template rendering in pure Go</h2>
+  <p>Rather than introducing a custom domain-specific language (DSL), Helm builds on Go's built-in <code>text/template</code> engine. In <code>pkg/engine/engine.go</code>, Helm wraps template execution in a sandboxed runtime, injecting values, release metadata, and over 100 helper functions from the open-source <a href="https://github.com/Masterminds/sprig">Sprig</a> library.</p>
+
+  <pre><code>// Pattern from helm/pkg/engine/engine.go
+func (e *Engine) Render(chrt *chart.Chart, values chartutil.Values) (map[string]string, error) {
+	t := template.New(chrt.Name()).Funcs(e.FuncMap)
+
+	// Add all chart templates to the Go template set
+	for _, file := range chrt.Templates {
+		if _, err := t.New(file.Name).Parse(string(file.Data)); err != nil {
+			return nil, fmt.Errorf("parse error in %s: %w", file.Name, err)
+		}
+	}
+
+	rendered := make(map[string]string)
+	for _, file := range chrt.Templates {
+		var buf bytes.Buffer
+		if err := t.ExecuteTemplate(&buf, file.Name, values); err != nil {
+			return nil, fmt.Errorf("render error in %s: %w", file.Name, err)
+		}
+		rendered[file.Name] = buf.String()
+	}
+	return rendered, nil
+}</code></pre>
+
+  <p>To keep rendering hermetic and deterministic across team members and CI pipelines, Helm strictly restricts template execution: templates cannot execute external processes, read arbitrary local files outside the chart tarball, or access network sockets.</p>
+
+  <h2>2. Secret-backed release storage</h2>
+  <p>Where does Helm remember what is currently installed in the cluster? In Helm v2, this state was managed by an in-cluster pod named Tiller. Helm v3 abolished Tiller, delegating all state persistence directly to Kubernetes itself.</p>
+
+  <p>In <code>pkg/storage/driver/secrets.go</code>, Helm implements a storage driver using standard Kubernetes <code>v1.Secret</code> resources:</p>
+
+  <ul>
+    <li>Each release revision creates a dedicated Secret named <code>sh.helm.release.v1.{release-name}.v{revision}</code>.</li>
+    <li>The release payload (containing release history, raw manifests, and values) is marshaled to binary Protobuf, compressed with <code>gzip</code>, and base64-encoded into the Secret's <code>data.release</code> field.</li>
+    <li>Secrets are labeled with <code>owner=helm</code> and <code>name={release-name}</code>, allowing instant retrieval via Kubernetes label selectors without external databases.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> PendingInstall: helm install started
+  PendingInstall --> Deployed: Manifests created in API Server
+  Deployed --> PendingUpgrade: helm upgrade started
+  PendingUpgrade --> Deployed: Three-way merge patch succeeds (Revision N+1)
+  PendingUpgrade --> Failed: Pod creation or health check times out
+  Deployed --> Superseded: Replaced by newer successful revision
+  Deployed --> Uninstalled: helm uninstall removes cluster resources
+  Uninstalled --> [*]
+    </div>
+    <figcaption>Helm release revision lifecycle. Each state transition creates a distinct immutable Secret record.
+    <b>Failed upgrades retain their historical records to allow instant rollbacks via helm rollback.</b></figcaption>
+  </figure>
+
+  <h2>3. The three-way strategic merge patch</h2>
+  <p>Consider what happens during a chart upgrade using a naive two-way diff between old chart and new chart:</p>
+
+  <ol>
+    <li>Your chart originally specified <code>replicas: 2</code>.</li>
+    <li>A Horizontal Pod Autoscaler (HPA) observed high traffic and scaled the deployment live in Kubernetes to <code>replicas: 10</code>.</li>
+    <li>You update the container image tag in your chart and run <code>helm upgrade</code>.</li>
+  </ol>
+
+  <p>If Helm performed a naive two-way overwrite, it would reset <code>replicas</code> back to 2, causing an immediate service outage during peak traffic!</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant User as Operator (helm upgrade)
+  participant Helm as Helm Client
+  participant Secret as Kubernetes Secret Storage
+  participant API as Kubernetes API Server
+  User->>Helm: helm upgrade my-app ./chart
+  Helm->>Secret: Read Revision N-1 (Original Manifest)
+  Helm->>API: GET /apis/apps/v1/deployments/my-app (Live Cluster State)
+  Note over Helm: Three-Way Merge Calculation
+  Note over Helm: Original: replicas=2, image=v1.0&lt;br/&gt;Live: replicas=10 (HPA), image=v1.0&lt;br/&gt;Target: replicas=2, image=v2.0
+  Note over Helm: Decision: Keep live replicas=10, update image=v2.0
+  Helm->>API: PATCH /apis/apps/v1/deployments/my-app
+  Helm->>Secret: Save Revision N (Deployed)
+  Helm-->>User: Release upgraded successfully
+    </div>
+    <figcaption>Three-way strategic merge sequence. Reconciling user intent with live controller mutations.
+    <b>Live mutations made by cluster autoscalers are preserved across chart upgrades.</b></figcaption>
+  </figure>
+
+  <p>By computing a <b>three-way strategic merge patch</b> between (1) the original chart manifest, (2) the live API server state, and (3) the new chart manifest, Helm accurately distinguishes between intentional chart changes and runtime controller mutations.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does Helm perform a three-way strategic merge patch during chart upgrades?</div>
+      <button class="q-opt">To encrypt release secrets with symmetric AES cipher keys</button>
+      <button class="q-opt">To parallelize container layer downloads across node pools</button>
+      <button class="q-opt">To preserve live cluster mutations made by autoscalers</button>
+      <button class="q-opt">To convert YAML manifests into executable Linux ELF files</button>
+      <div class="q-fb">A three-way merge compares the original chart, the live cluster object, and the target chart, ensuring runtime modifications (like HPA scaling) are not accidentally overwritten.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does Helm v3 store release history records and revision manifests?</div>
+      <button class="q-opt">Inside standard Kubernetes Secrets in target namespaces</button>
+      <button class="q-opt">On an external database cluster managed by a daemon pod</button>
+      <button class="q-opt">Inside local git repository commits on client machines</button>
+      <button class="q-opt">Inside the Linux kernel virtual memory page cache pool</button>
+      <div class="q-fb">Helm v3 persists release records as gzipped, base64-encoded Protobuf payloads directly inside standard Kubernetes Secrets in the application namespace.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What mechanism does Helm use to render dynamic Kubernetes manifest files?</div>
+      <button class="q-opt">Executing arbitrary shell scripts inside container pods</button>
+      <button class="q-opt">Go text/template augmented with Sprig helper utilities</button>
+      <button class="q-opt">Evaluating JavaScript code through a WebAssembly runtime</button>
+      <button class="q-opt">Transpiling TypeScript models directly to JSON payloads</button>
+      <div class="q-fb">Helm renders manifests using Go's built-in text/template package enriched with over 100 mathematical, cryptographic, and string functions from the Sprig library.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> By eliminating the central Tiller server in Helm v3, Helm embraced the UNIX philosophy: do one thing well as a stateless client tool. Storing state directly in the system you manage (Kubernetes Secrets) eliminates synchronization drift between the manager and the managed platform.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the rendering engine in <a href="https://github.com/helm/helm/tree/main/pkg/engine">helm/pkg/engine</a>, study the Secret storage driver in <a href="https://github.com/helm/helm/tree/main/pkg/storage/driver">helm/pkg/storage/driver</a>, and explore Kubernetes strategic merge patching in <a href="https://github.com/kubernetes/apimachinery/tree/master/pkg/util/strategicpatch">apimachinery/pkg/util/strategicpatch</a>.</p>
+
+  <div class="pager">
+    <a href="0402-nomad-optimistic-concurrency-and-eval-brokers.html"><span class="dir">&larr; Lesson 0402</span><span class="ttl">Nomad optimistic concurrency and the evaluation broker</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Course map &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0403 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
