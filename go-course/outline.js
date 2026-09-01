@@ -99,6 +99,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Edge & Web Infrastructure",
+      "lessons": [
+        {
+          "title": "CoreDNS and the zero-allocation DNS pipeline",
+          "href": "lessons/0600-coredns-zero-allocation-dns-pipeline.html"
+        },
+        {
+          "title": "Traefik dynamic configuration and reactive providers",
+          "href": "lessons/0601-traefik-dynamic-configuration-and-reactive-providers.html"
+        },
+        {
+          "title": "Caddy modular architecture and zero-downtime reloads",
+          "href": "lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html"
+        }
+      ]
     }
   ],
   "extras": [

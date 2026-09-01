@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Traefik dynamic configuration and reactive providers - Systems Engineering in Go</title>
+<meta name="description" content="How Traefik achieves zero-downtime routing updates using reactive provider event streams, middleware constructor chains, and atomic pointer swapping in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Edge & Web Infrastructure &middot; Lesson 0601</div>
+  <h1>Traefik updates routing topographies without dropped connections through reactive provider streams and atomic pointer swapping</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Cloud-native reverse proxy architecture inside Traefik &middot;
+    <a href="https://github.com/traefik/traefik">traefik/traefik</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Legacy reverse proxies require reloading processes or regenerating static text configuration files whenever backend container IP addresses change.</li>
+      <li><b>Traefik</b> implements <b>Reactive Providers</b> that listen to event streams from Docker UNIX sockets, Kubernetes Informers, and Consul catalogs, publishing topology deltas over Go channels.</li>
+      <li>To avoid data races with concurrent HTTP requests, Traefik never mutates routing trees in place; it compiles an entirely new immutable routing graph and executes an <b>atomic pointer swap</b>.</li>
+      <li>In-flight HTTP requests continue executing against the older immutable routing generation until completion, eliminating connection resets and dropped packets during canary rollouts.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph EventSources["Reactive Configuration Providers"]
+    direction TB
+    Docker["Docker Provider (events socket)"]
+    Kube["Kubernetes Provider (Informer CRDs)"]
+    Consul["Consul Catalog Provider (Gossip)"]
+  end
+  Docker & Kube & Consul -->|"chan dynamic.Message"| Aggregator["Configuration Aggregator"]
+  subgraph Compiler["Routing Tree Compilation"]
+    direction TB
+    Aggregator --> Parser["Compile Routers, Middlewares, Services"]
+    Parser --> NewTree["New Immutable Routing Graph (Generation N+1)"]
+  end
+  Compiler --> Swap["atomic.StorePointer(&currentRouter, newTree)"]
+  subgraph Execution["Active HTTP Ingress"]
+    direction LR
+    ClientReq["Incoming HTTP Request"] --> CurrentRouter["Active Router Pointer"]
+    CurrentRouter --> Backend["Upstream Backend Pod"]
+  end
+  Swap -->|"Instantaneous Switch"| CurrentRouter
+    </div>
+    <figcaption>Where this sits. The Traefik reactive provider and atomic router compilation pipeline.
+    <b>Dynamic configuration updates compile off the hot request path and swap atomically into memory.</b></figcaption>
+  </figure>
+
+  <h2>1. The reactive provider model</h2>
+  <p>In microservice clusters, services scale up and down continuously. In traditional architectures, orchestrators like Kubernetes run agents that write an <code>nginx.conf</code> file and trigger <code>nginx -s reload</code>, spawning new worker processes and recycling master sockets.</p>
+
+  <p>Traefik treats configuration as an event stream. In <code>pkg/provider/provider.go</code>, all infrastructure integrations implement the <code>Provider</code> interface:</p>
+
+  <pre><code>// The provider contract from traefik/pkg/provider
+type Provider interface {
+	Init() error
+	Provide(configurationChan chan<- dynamic.Message, pool *safe.Pool) error
+}
+
+type Message struct {
+	ProviderName  string
+	Configuration *dynamic.Configuration
+}</code></pre>
+
+  <p>When a container starts in Docker, the Docker daemon emits a <code>start</code> event over the Docker UNIX socket. Traefik's Docker provider catches this event, reads container labels (e.g. <code>traefik.http.routers.my-app.rule=Host(`example.com`)</code>), constructs a <code>dynamic.Configuration</code> struct, and sends it down the channel.</p>
+
+  <h2>2. Zero-lock routing: atomic pointer swapping</h2>
+  <p>How does Traefik apply a new routing configuration while processing 50,000 active HTTP requests without acquiring a global read-write mutex?</p>
+
+  <p>Mutating map entries in Go while readers are active triggers a fatal <code>concurrent map read and map write</code> panic. Acquiring a global mutex on every HTTP request serializes traffic and degrades tail latency.</p>
+
+  <p>Traefik solves this using <b>Atomic Pointer Swapping</b>:</p>
+
+  <pre><code>// Pattern from traefik/pkg/server/router_manager.go
+type RouterManager struct {
+	// Holds *runtime.Router in an atomic pointer
+	currentRouter atomic.Pointer[http.Handler]
+}
+
+func (m *RouterManager) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
+	// 1. Load active router generation with zero mutex contention
+	router := m.currentRouter.Load()
+	if router == nil {
+		http.Error(rw, "Service Unavailable", http.StatusServiceUnavailable)
+		return
+	}
+
+	// 2. Route request through immutable middleware and service tree
+	(*router).ServeHTTP(rw, req)
+}
+
+func (m *RouterManager) UpdateConfiguration(newConfig *dynamic.Configuration) {
+	// 3. Build new immutable router graph off the request hot path
+	newRouter := m.buildRoutingTree(newConfig)
+
+	// 4. Atomic pointer swap: takes effect immediately for all subsequent requests
+	m.currentRouter.Store(&newRouter)
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as HTTP Client
+  participant Server as Traefik Server
+  participant TreeOld as Router Generation 1
+  participant Compiler as Config Compiler
+  participant TreeNew as Router Generation 2
+  Client->>Server: GET /api/v1/users
+  Server->>TreeOld: Route to Backend Pod A (IP 10.244.0.5)
+  Note over Compiler: Docker Provider emits new container event
+  Compiler->>Compiler: Compile Generation 2 in background memory
+  Compiler->>Server: atomic.StorePointer(&router, Gen2)
+  Note over TreeOld: Request 1 completes safely on Generation 1
+  TreeOld-->>Client: 200 OK
+  Client->>Server: GET /api/v1/orders (New Request)
+  Server->>TreeNew: Instant hit on Generation 2 (IP 10.244.0.9)
+  TreeNew-->>Client: 200 OK
+    </div>
+    <figcaption>Atomic pointer swap sequence. In-flight requests run safely against previous generations.
+    <b>In-flight requests complete against immutable trees; subsequent requests hit the fresh router.</b></figcaption>
+  </figure>
+
+  <h2>3. Composable middleware chains</h2>
+  <p>Every router in Traefik can attach an ordered chain of middlewares. Rather than writing monolithic proxy handlers, Traefik uses the classic Go <b>constructor wrapping pattern</b>:</p>
+
+  <pre><code>// Middleware constructor pattern
+type Constructor func(http.Handler) (http.Handler, error)
+
+func BuildMiddlewareChain(handler http.Handler, constructors ...Constructor) (http.Handler, error) {
+	for i := len(constructors) - 1; i >= 0; i-- {
+		var err error
+		handler, err = constructors[i](handler)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return handler, nil
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Listening: Providers watch Docker/K8s event streams
+  Listening --> Compiling: New topology delta received over channel
+  Compiling --> SwappedActive: atomic.StorePointer updates router reference
+  SwappedActive --> DrainingOld: Previous router retains in-flight HTTP calls
+  DrainingOld --> [*]: Old generation garbage collected when requests finish
+  SwappedActive --> Compiling: Subsequent topology delta arrives
+    </div>
+    <figcaption>Configuration generation lifecycle state machine. Garbage collection cleans up retired trees.
+    <b>Go's automatic garbage collector safely frees old routing trees once all references terminate.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does Traefik use atomic pointer swapping instead of mutating existing router trees?</div>
+      <button class="q-opt">The Linux operating system prohibits in-place heap writes</button>
+      <button class="q-opt">Atomic swaps prevent data races with in-flight HTTP calls</button>
+      <button class="q-opt">In-place mutation requires closing active TCP socket ports</button>
+      <button class="q-opt">Atomic pointers automatically compress JSON configuration</button>
+      <div class="q-fb">Mutating active maps and routing trees while requests are being routed causes data races and panics; atomic pointer swaps ensure readers always observe a complete, immutable graph.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How do Traefik providers discover new backend containers in real time?</div>
+      <button class="q-opt">By polling disk configuration files every thirty seconds</button>
+      <button class="q-opt">By executing shell scripts inside running container pods</button>
+      <button class="q-opt">By streaming events from Docker sockets or K8s Informers</button>
+      <button class="q-opt">By broadcasting UDP discovery ping packets across subnets</button>
+      <div class="q-fb">Traefik providers maintain persistent reactive event listeners (such as Docker UNIX domain socket streams or Kubernetes Informer watch feeds), emitting changes over Go channels.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What happens to in-flight HTTP requests during a Traefik configuration reload?</div>
+      <button class="q-opt">They finish cleanly against the prior immutable router tree</button>
+      <button class="q-opt">They are aborted with an immediate 502 Bad Gateway status</button>
+      <button class="q-opt">They are paused until the host operating system reboots</button>
+      <button class="q-opt">They are re-routed to an external Python load balancer hub</button>
+      <div class="q-fb">Because routing trees are immutable, requests that started before the atomic swap continue executing against the older tree until they complete, ensuring zero dropped connections.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The atomic pointer swap pattern is the foundation of high-concurrency Go services. If a configuration or cache is read millions of times per second and updated only occasionally, never use a mutex. Build the new structure entirely in background memory, and swap the pointer atomically with <code>atomic.Pointer</code>.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the provider channel architecture in <a href="https://github.com/traefik/traefik/tree/master/pkg/provider">traefik/pkg/provider</a> and study the server router coordination in <a href="https://github.com/traefik/traefik/tree/master/pkg/server">traefik/pkg/server</a>.</p>
+
+  <div class="pager">
+    <a href="0600-coredns-zero-allocation-dns-pipeline.html"><span class="dir">&larr; Lesson 0600</span><span class="ttl">CoreDNS and the zero-allocation DNS pipeline</span></a>
+    <a class="nxt" href="0602-caddy-modular-architecture-and-zero-downtime-reloads.html"><span class="dir">Next &rarr;</span><span class="ttl">Caddy modular architecture and zero-downtime reloads</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0601 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

@@ -32,9 +32,9 @@ Status marks used below:
 | 14 | `lessons/0500-terraform-dag-construction-and-graph-walking.html` | written | Directed Acyclic Graph, topological sort, concurrent worker evaluation |
 | 15 | `lessons/0501-terraform-and-vault-the-go-plugin-subsystem.html` | written | HashiCorp `go-plugin`, net/rpc and gRPC IPC, handshake verification, process supervision |
 | 16 | `lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html` | written | AES-GCM envelope barrier encryption, Shamir GF(2^8) math, dynamic lease revocation |
-| 17 | `lessons/0600-coredns-zero-allocation-dns-pipeline.html` | reserved | Plugin chain pattern, `plugin.Handler`, `miekg/dns` wire packet parsing |
-| 18 | `lessons/0601-traefik-dynamic-configuration-and-reactive-providers.html` | reserved | Atomic configuration swapping, provider event listeners, middleware chains |
-| 19 | `lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html` | reserved | Caddy module lifecycle, `certmagic` automated ACME TLS, socket file descriptor handovers |
+| 17 | `lessons/0600-coredns-zero-allocation-dns-pipeline.html` | written | Plugin chain pattern, `plugin.Handler`, `miekg/dns` wire packet parsing |
+| 18 | `lessons/0601-traefik-dynamic-configuration-and-reactive-providers.html` | written | Atomic configuration swapping, provider event listeners, middleware chains |
+| 19 | `lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html` | written | Caddy module lifecycle, `certmagic` automated ACME TLS, socket file descriptor handovers |
 | 20 | `lessons/0700-prometheus-tsdb-architecture-and-chunk-compression.html` | reserved | Head block, inverted index posting lists, Gorilla float64 XOR encoding, mmap |
 | 21 | `lessons/0701-prometheus-concurrent-scraping-and-promql-engine.html` | reserved | Scrape loop jitter, atomic append, PromQL AST and vectorized execution |
 | 22 | `lessons/0702-grafana-backend-routing-and-streaming-channels.html` | reserved | Go backend architecture, service registry, WebSocket/SSE live channels |
