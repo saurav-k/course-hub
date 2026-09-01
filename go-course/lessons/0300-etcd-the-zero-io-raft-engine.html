@@ -1,0 +1,245 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>etcd and the zero-I/O Raft consensus engine - Systems Engineering in Go</title>
+<meta name="description" content="How etcd's go.etcd.io/raft implements distributed consensus as a pure in-memory state machine using the Ready channel pattern without disk or network I/O.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Distributed Consensus &middot; Lesson 0300</div>
+  <h1>etcd decouples consensus logic from disk and network I/O through the pure-state-machine Ready channel pattern</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The consensus core of Kubernetes and CockroachDB &middot;
+    <a href="https://github.com/etcd-io/etcd">etcd-io/etcd</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>etcd</b>'s Raft implementation (<code>go.etcd.io/raft</code>) is one of the most widely copied designs in distributed systems because it contains <b>zero network calls and zero disk writes</b>.</li>
+      <li>Instead of executing I/O, the Raft state machine runs purely in memory and exports a single output channel: <code><-node.Ready()</code>.</li>
+      <li>Each <code>Ready</code> struct informs the outer application loop of entries that must be written to the Write-Ahead Log (WAL), outbound peer messages that must be sent over the network, and committed entries ready to apply to the database.</li>
+      <li>Once the application finishes writing to disk and dispatching network messages, it calls <code>node.Advance()</code> to signal the state machine to proceed, ensuring strict linearizability and deterministic unit testing.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph RaftCore["Pure In-Memory State Machine (go.etcd.io/raft)"]
+    direction TB
+    State["Raft Protocol Logic - Leader/Follower"]
+    Log["In-Memory Unstable Log"]
+    ReadyCh["Ready Channel: <-node.Ready()"]
+    AdvanceCh["Advance Signal: node.Advance()"]
+    State --> Log --> ReadyCh
+    AdvanceCh --> State
+  end
+  subgraph AppDriver["Application Driver Loop (etcdserver)"]
+    direction TB
+    Loop["for select on Ready()"]
+    WALWriter["Write entries to disk WAL and fsync"]
+    NetSender["Send peer messages via gRPC/HTTP"]
+    KVApplier["Apply committed entries to bbolt KV"]
+    Loop --> WALWriter
+    Loop --> NetSender
+    Loop --> KVApplier
+  end
+  ReadyCh -->|"Emits Ready struct"| Loop
+  WALWriter --> AdvanceCh
+  NetSender --> AdvanceCh
+    </div>
+    <figcaption>Where this sits. The decoupling boundary between etcd's pure consensus engine and the physical I/O driver loop.
+    <b>Raft calculates what needs to happen; the host application executes the disk and network I/O.</b></figcaption>
+  </figure>
+
+  <h2>1. Why consensus engines drown in I/O</h2>
+  <p>In classical distributed systems implementations, consensus algorithms (like Paxos or early Raft prototypes) intertwine state transitions with socket calls and file descriptors. A function that increments a term or casts a vote also calls <code>net.Dial()</code> or <code>file.Write()</code>.</p>
+
+  <p>This coupling introduces severe architectural problems:</p>
+  <ul>
+    <li><b>Non-deterministic testing:</b> Testing edge cases (split brains, dropped packets, slow disk flushes) requires mocking operating system sockets and timers, making edge cases notoriously difficult to reproduce.</li>
+    <li><b>Thread contention:</b> Network timeouts and disk fsync latencies block core state machine goroutines, creating head-of-line blocking during elections.</li>
+    <li><b>Zero portability:</b> A Raft engine tied to standard TCP sockets cannot be easily reused by systems using different transports (such as CockroachDB's Multi-Raft gRPC multiplexers).</li>
+  </ul>
+
+  <p>The architects of etcd resolved this by designing <code>go.etcd.io/raft</code> as a pure, deterministic state machine driven entirely by discrete function steps (<code>Step()</code>) and output notifications (<code>Ready()</code>).</p>
+
+  <h2>2. The Ready contract</h2>
+  <p>The central interface of the etcd consensus engine is the <code>Ready</code> struct. When internal events occur (such as a heartbeat tick, an incoming proposal, or a peer vote), the state machine prepares a <code>Ready</code> snapshot:</p>
+
+  <pre><code>// Pattern from go.etcd.io/raft/v3/node.go
+type Ready struct {
+	// SoftState contains volatile state: Leader ID and current Role
+	*SoftState
+
+	// HardState contains persistent state: Term, Vote, and Commit Index
+	pb.HardState
+
+	// Entries must be saved to the Write-Ahead Log (WAL) before sending messages
+	Entries []pb.Entry
+
+	// Snapshot specifies the point-in-time snapshot to save to disk
+	Snapshot pb.Snapshot
+
+	// CommittedEntries must be applied to the key-value state machine
+	CommittedEntries []pb.Entry
+
+	// Messages must be sent to peer nodes over the network
+	Messages []pb.Message
+
+	// MustSync indicates whether Entries and HardState must be fsync'd to disk
+	MustSync bool
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as Client Proposal
+  participant Node as Raft Node (Memory)
+  participant Loop as etcd Server Loop
+  participant Disk as Disk WAL (Storage)
+  participant Net as Peer Nodes (Network)
+  participant KV as bbolt KV Engine
+  Client->>Node: node.Propose(ctx, data)
+  Node->>Loop: <-node.Ready()
+  Note over Loop: Extract Ready struct batch
+  par Concurrent Persistence and Network Dispatch
+    Loop->>Disk: wal.Save(rd.HardState, rd.Entries)
+    alt rd.MustSync is true
+      Loop->>Disk: wal.Sync() (fsync to disk)
+    end
+  and
+    Loop->>Net: transport.Send(rd.Messages)
+  end
+  Loop->>Node: node.Advance()
+  Note over Node: Quorum reaches agreement
+  Node->>Loop: <-node.Ready() (CommittedEntries available)
+  Loop->>KV: Apply committed entries to key-value store
+  Loop->>Node: node.Advance()
+    </div>
+    <figcaption>The Ready and Advance execution sequence. Pipeline parallelization between disk WAL persistence and network RPC.
+    <b>Entries are safely written to disk before peer network messages are dispatched.</b></figcaption>
+  </figure>
+
+  <h2>3. The driver loop in production</h2>
+  <p>In <code>etcdserver/server.go</code>, etcd runs a dedicated goroutine that processes the <code>Ready</code> channel in an endless loop. Notice how clean and linear the driver loop becomes when the state machine contains no internal I/O:</p>
+
+  <pre><code>func runRaftLoop(n raft.Node, wal *wal.WAL, transport Transport, kvStore KV) {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			n.Tick() // Drive election and heartbeat timers
+
+		case rd := <-n.Ready():
+			// 1. Save uncommitted entries and hard state to disk WAL
+			if err := wal.Save(rd.HardState, rd.Entries); err != nil {
+				log.Fatalf("failed to save WAL: %v", err)
+			}
+			if rd.MustSync {
+				if err := wal.Sync(); err != nil {
+					log.Fatalf("failed to fsync WAL: %v", err)
+				}
+			}
+
+			// 2. Dispatch network messages to cluster peers
+			transport.Send(rd.Messages)
+
+			// 3. Apply committed entries to the user key-value state machine
+			for _, entry := range rd.CommittedEntries {
+				if entry.Type == pb.EntryNormal && len(entry.Data) > 0 {
+					kvStore.Apply(entry.Index, entry.Data)
+				}
+			}
+
+			// 4. Signal Raft that the batch has landed
+			n.Advance()
+		}
+	}
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Follower: Boot with Term 0
+  Follower --> Candidate: Election timeout ticks without leader heartbeat
+  Candidate --> Candidate: Election timeout split vote (increment Term)
+  Candidate --> Leader: Secure majority votes from quorum
+  Candidate --> Follower: Discover higher term or valid leader heartbeat
+  Leader --> Follower: Discover peer with higher term
+    </div>
+    <figcaption>Raft node role state transitions. Role changes occur inside memory and surface through the SoftState field of Ready.
+    <b>Role transitions trigger state machine emissions on the Ready channel.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does etcd's core Raft package perform no network or disk I/O directly?</div>
+      <button class="q-opt">Decoupling I/O makes the consensus logic deterministic</button>
+      <button class="q-opt">The Linux kernel prohibits disk writes inside goroutines</button>
+      <button class="q-opt">Network sockets in Go cannot transmit binary protobufs</button>
+      <button class="q-opt">Consensus algorithms only execute in user space memory</button>
+      <div class="q-fb">By stripping all network sockets, disk operations, and clocks from the Raft package, the consensus engine becomes completely deterministic, making it easy to test and embed in other applications.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">In the Ready channel pattern, what must occur before calling node.Advance()?</div>
+      <button class="q-opt">The cluster leader must issue a full hardware reboot</button>
+      <button class="q-opt">Entries are written to WAL and messages sent to peers</button>
+      <button class="q-opt">All follower nodes must respond to HTTP health checks</button>
+      <button class="q-opt">The runtime garbage collector must sweep heap pointers</button>
+      <div class="q-fb">The application must persist new entries to the Write-Ahead Log (WAL) and send pending messages to peers before calling Advance to confirm the batch is handled.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does a Raft leader establish that an entry is safe to apply to the KV store?</div>
+      <button class="q-opt">By requesting an external cryptographic signature key</button>
+      <button class="q-opt">By verifying the file modification timestamp in kernel</button>
+      <button class="q-opt">By securing matching acknowledgements from a quorum</button>
+      <button class="q-opt">By broadcasting an unacknowledged UDP broadcast packet</button>
+      <div class="q-fb">A proposed log entry is committed only when the leader receives acknowledgements that the entry has been replicated to a majority quorum of nodes.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The <code>Ready</code> pattern is the gold standard for Go systems architecture. Whenever you build complex distributed algorithms, isolate state transitions into a pure data struct that returns commands to execute rather than letting functions perform external I/O directly.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Inspect the canonical Raft state machine in <a href="https://github.com/etcd-io/raft">etcd-io/raft</a>, review the node interface in <code>node.go</code>, and study Ongaro & Ousterhout's original paper: <a href="https://raft.github.io/raft.pdf">In Search of an Understandable Consensus Algorithm</a>.</p>
+
+  <div class="pager">
+    <a href="0202-content-addressable-storage-and-snapshotters.html"><span class="dir">&larr; Lesson 0202</span><span class="ttl">Content-addressable storage and overlayfs snapshotters</span></a>
+    <a class="nxt" href="0301-etcd-write-ahead-log-and-mvcc-bbolt.html"><span class="dir">Next &rarr;</span><span class="ttl">etcd write-ahead logs and bbolt MVCC storage</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0300 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

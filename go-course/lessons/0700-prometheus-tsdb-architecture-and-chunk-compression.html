@@ -1,0 +1,214 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prometheus TSDB architecture and Gorilla chunk compression - Systems Engineering in Go</title>
+<meta name="description" content="How Prometheus TSDB compresses millions of time series samples into memory-mapped chunks using Gorilla float64 XOR encoding and inverted label posting lists.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Observability &middot; Lesson 0700</div>
+  <h1>Prometheus TSDB compresses millions of time-series samples into memory-mapped chunks using Gorilla float64 XOR encoding and inverted label posting lists</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The time-series storage engine powering cloud observability &middot;
+    <a href="https://github.com/prometheus/prometheus">prometheus/prometheus</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Storing raw time-series metrics (8-byte timestamp + 8-byte float64 value = 16 bytes per sample) at million-sample ingestion rates consumes terabytes of RAM and disk every week.</li>
+      <li><b>Prometheus TSDB</b> uses the <b>Gorilla compression algorithm</b>: timestamps are compressed using double-delta encoding ($\Delta(\Delta t)$), while float64 values are bitpacked using XOR differences against previous values.</li>
+      <li>Gorilla reduces 16-byte raw samples down to an average of <b>1.37 bytes per sample</b> - an astonishing 91% compression ratio achieved in pure Go bit-manipulation routines.</li>
+      <li>Incoming metrics hit an in-memory <b>Head Block</b> backed by a Write-Ahead Log (WAL); every 2 hours, the head cuts an immutable on-disk block queried via <b>memory-mapped files (<code>mmap</code>)</b> with inverted label posting lists.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  ScrapedMetric["Scraped Metric: http_requests{method='GET'} 1042"] --> HeadBlock["TSDB In-Memory Head Block"]
+  subgraph Ingestion["Head Block Ingestion & Safety"]
+    direction TB
+    WAL["Write-Ahead Log (WAL append to disk)"]
+    Posting["Inverted Index: Label -> Posting List (Series IDs)"]
+    ChunkEnc["Gorilla Encoder: Float64 XOR + Double-Delta"]
+    WAL & Posting & ChunkEnc
+  end
+  HeadBlock --> Ingestion
+  Ingestion -->|"Every 2 Hours: Cut Block"| Block["Immutable 2-Hour Disk Block"]
+  subgraph OnDiskBlock["On-Disk Block Layout"]
+    direction TB
+    Meta["meta.json (Time range & stats)"]
+    IndexFile["index (Roaring posting lists)"]
+    ChunkFiles["chunks/000001 (mmap read)"]
+    Meta & IndexFile & ChunkFiles
+  end
+  Block --> OnDiskBlock
+  OnDiskBlock -->|"Queried via mmap(2)"| PromQLEngine["PromQL Query Execution Engine"]
+    </div>
+    <figcaption>Where this sits. The Prometheus TSDB storage architecture from Head ingestion to 2-hour immutable blocks.
+    <b>Recent samples reside in volatile RAM; historical blocks read directly from kernel memory-mapped pages.</b></figcaption>
+  </figure>
+
+  <h2>1. Gorilla compression: double-delta timestamps</h2>
+  <p>In monitoring systems, targets are scraped on regular schedules (e.g. every 15 seconds). This predictable rhythm allows radical timestamp compression:</p>
+
+  <ol>
+    <li>Let $D = t_n - t_{n-1}$ be the first delta (e.g. 15,000 ms).</li>
+    <li>Let $D' = (t_n - t_{n-1}) - (t_{n-1} - t_{n-2})$ be the <b>delta-of-deltas</b>.</li>
+    <li>If the scrape arrived exactly on time, $D' = 0$. Instead of writing a 64-bit integer, Prometheus writes a <b>single bit: <code>0</code></b>!</li>
+    <li>If jitter occurs (e.g. network latency shifts the scrape by 100 ms), $D'$ falls between -63 and 64, fitting into a 2-bit prefix followed by a tiny 7-bit signed integer.</li>
+  </ol>
+
+  <h2>2. Gorilla compression: floating-point XOR encoding</h2>
+  <p>Standard data compression algorithms like gzip or zstd are too slow for real-time streaming ingestion. Prometheus uses bitwise XOR operations ($v_{curr} \oplus v_{prev}$) directly on IEEE 754 float64 representations:</p>
+
+  <pre><code>// Pattern from prometheus/tsdb/chunks/xor.go
+func (a *xorAppender) Append(t int64, v float64) {
+	// 1. Double-delta timestamp encoding
+	// ...
+
+	// 2. Float64 XOR value encoding
+	valBits := math.Float64bits(v)
+	prevValBits := math.Float64bits(a.val)
+	xor := valBits ^ prevValBits
+
+	if xor == 0 {
+		// Value unchanged: emit single 0 bit
+		a.b.writeBit(zero)
+	} else {
+		a.b.writeBit(one)
+		leading := bits.LeadingZeros64(xor)
+		trailing := bits.TrailingZeros64(xor)
+
+		if leading >= a.leading && trailing >= a.trailing {
+			// Bits fit within previous variable bit window
+			a.b.writeBit(zero)
+			bitsToWrite := xor >> a.trailing
+			a.b.writeBits(bitsToWrite, 64-a.leading-a.trailing)
+		} else {
+			// New bit window
+			a.b.writeBit(one)
+			a.b.writeBits(uint64(leading), 5)
+			significant := 64 - leading - trailing
+			a.b.writeBits(uint64(significant), 6)
+			a.b.writeBits(xor>>trailing, significant)
+			a.leading, a.trailing = leading, trailing
+		}
+	}
+	a.val = v
+}</code></pre>
+
+  <p>Because metrics often stay constant or change by small increments, successive floating point numbers share identical sign, exponent, and high-order mantissa bits. The XOR yields large sequences of leading and trailing zeroes, which Gorilla discards.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Scrape as Scraper
+  participant Enc as Gorilla XOR Encoder
+  participant Bitstream as Byte Buffer
+  Scrape->>Enc: Sample 1: (t=0, v=100.0)
+  Enc->>Bitstream: Store 64-bit timestamp + 64-bit raw float
+  Scrape->>Enc: Sample 2: (t=15, v=100.0) (Unchanged value)
+  Enc->>Enc: Timestamp delta-of-delta = 0 (emit bit 0)
+  Enc->>Enc: Value XOR = 0 (emit bit 0)
+  Enc->>Bitstream: 2 bits total written!
+  Scrape->>Enc: Sample 3: (t=30, v=100.5) (Small increment)
+  Enc->>Enc: Timestamp delta-of-delta = 0 (emit bit 0)
+  Enc->>Enc: Value XOR has 11 leading and 40 trailing zeroes
+  Enc->>Bitstream: 1 bit timestamp + 13 bits value = 14 bits written
+    </div>
+    <figcaption>Gorilla bitpacking sequence across sequential metrics. Compressing samples into single-bit deltas.
+    <b>Unchanged samples compress into just 2 bits, enabling millions of points in minimal RAM.</b></figcaption>
+  </figure>
+
+  <h2>3. Inverted index and posting lists</h2>
+  <p>How does Prometheus find which time series match <code>http_requests{method="POST", status="500"}</code> among 10 million active series in sub-millisecond time?</p>
+
+  <p>In <code>tsdb/index/index.go</code>, Prometheus maintains an <b>inverted index</b>. Each label name and value pair (e.g. <code>method="POST"</code>) points to a sorted list of 32-bit Series IDs called a <b>Posting List</b>.</p>
+
+  <p>When executing a PromQL query with multiple label selectors, Prometheus fetches the posting lists for each label and computes a <b>set intersection</b> using roaring bitmaps. Because Series IDs are strictly sorted integers, intersection is an $O(N)$ linear walk across CPU cache lines.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> HeadActive: Samples appended to memory buffer and WAL
+  HeadActive --> HeadCompacting: 2 hours elapsed (Head cut)
+  HeadCompacting --> ImmutableBlock: Flushed to chunks/ and index files
+  ImmutableBlock --> QueriedViaMmap: Queries map blocks into virtual memory
+  ImmutableBlock --> TierCompacted: Background compaction merges multiple 2h blocks into 6h
+  TierCompacted --> Expired: Retention period expires (e.g. 15 days)
+  Expired --> [*]: Block directory unlinked from disk
+    </div>
+    <figcaption>TSDB block lifecycle state machine. From active RAM head to multi-tier compacted blocks.
+    <b>Background compactions merge smaller blocks into larger blocks to maximize sequential disk reads.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does Gorilla double-delta encoding compress timestamps in Prometheus?</div>
+      <button class="q-opt">By storing the difference between consecutive scrape steps</button>
+      <button class="q-opt">By rounding all timestamps to the nearest integer hour</button>
+      <button class="q-opt">By serializing epoch timestamps into base64 text keys</button>
+      <button class="q-opt">By hashing timestamps with SHA-256 cryptographic keys</button>
+      <div class="q-fb">Double-delta encoding measures the change in delta between successive timestamps; when scrapes occur at regular intervals, the delta-of-delta is 0, stored as a single bit.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does Gorilla float64 XOR compression compress metrics so effectively?</div>
+      <button class="q-opt">Because floating point numbers cannot exceed 100 on Linux</button>
+      <button class="q-opt">Consecutive gauge values share identical leading bits</button>
+      <button class="q-opt">The Linux operating system maps memory to CPU registers</button>
+      <button class="q-opt">Prometheus truncates all decimal values to pure integers</button>
+      <div class="q-fb">Consecutive measurements of physical metrics share the same sign, exponent, and upper mantissa bits; bitwise XORing them zeroes out common prefixes, leaving only a small variable bit window.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What role do inverted index posting lists play in Prometheus TSDB?</div>
+      <button class="q-opt">They compile PromQL algebraic AST nodes into machine code</button>
+      <button class="q-opt">They encrypt historical metrics before sending to AWS S3</button>
+      <button class="q-opt">They allow rapid intersection of series matching label sets</button>
+      <button class="q-opt">They synchronize scrape timers across Kubernetes nodes</button>
+      <div class="q-fb">Posting lists map each label key-value pair to a sorted list of Series IDs, allowing Prometheus to locate matching series via fast set intersections without scanning the database.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Prometheus TSDB demonstrates the power of domain-specific encoding. By recognizing the mathematical properties of time series (regular intervals and small incremental changes), Prometheus achieved 10x better compression and speed than generic databases could ever match.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the chunk encoder in <a href="https://github.com/prometheus/prometheus/tree/main/tsdb/chunks">prometheus/tsdb/chunks</a> and read the original Facebook paper: <a href="https://www.vldb.org/pvldb/vol8/p1816-teller.pdf">Gorilla: A Fast, Scalable, In-Memory Time Series Database</a>.</p>
+
+  <div class="pager">
+    <a href="0602-caddy-modular-architecture-and-zero-downtime-reloads.html"><span class="dir">&larr; Lesson 0602</span><span class="ttl">Caddy modular architecture and zero-downtime reloads</span></a>
+    <a class="nxt" href="0701-prometheus-concurrent-scraping-and-promql-engine.html"><span class="dir">Next &rarr;</span><span class="ttl">Prometheus concurrent scraping and the PromQL engine</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0700 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
