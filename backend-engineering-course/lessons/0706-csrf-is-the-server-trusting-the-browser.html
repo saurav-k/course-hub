@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CSRF is the server trusting the browser - Backend Engineering</title>
+<meta name="description" content="The browser attaches your cookie to a request whoever wrote it, so the presence of a credential proves nothing about who intended the request. The defence is a secret the attacker's page cannot read.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Auth and security &middot; Lesson 0706</div>
+  <h1>The browser attaches the cookie whoever asked, so presence proves nothing</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The last threat, and the one that needs no injected code. &middot;
+    <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP - CSRF Prevention Cheat Sheet</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>The threat first.</b> Another site causes your reader's browser to send a request to you. The browser attaches the session cookie, because <b>browser requests automatically include all cookies</b>.</li>
+      <li>Your server sees a well-formed, fully authenticated request. Nothing about it is abnormal, so <b>authentication cannot distinguish it</b> from one the user meant.</li>
+      <li>The attacker <b>cannot read your response</b> - the same-origin policy still holds - and does not need to, because the damage is the write.</li>
+      <li>The defence is a secret the attacker's page cannot obtain: a <b>synchroniser token</b>, or a custom header that a cross-site form cannot set.</li>
+      <li>What it costs: <code>SameSite</code> is a strong default and OWASP is explicit that it <b>does not replace a proper CSRF defence</b>, so it is the second layer rather than the first.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The module ends with the attack that needs nothing of yours.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0705&lt;br/&gt;the attacker's code&lt;br/&gt;runs on your page"] --> T["THIS PAGE&lt;br/&gt;the attacker needs&lt;br/&gt;no code at all"]
+  T --> A["Module 08&lt;br/&gt;the data this&lt;br/&gt;request would change"]
+  T --> B["Lesson 0700&lt;br/&gt;automatic credentials,&lt;br/&gt;written into HTTP"]
+  W["Module 07&lt;br/&gt;auth and security"] -.- T
+    </div>
+    <figcaption>Injection and XSS both need a defect in your code. This one needs only a logged-in reader and a form on somebody else's page, which is why it survives in applications with no other flaw. The link back to lesson 0700 is deliberate: automatic re-presentation of credentials within a protection space is specified behaviour, and this is the cost of it. <b>A correct application with no bugs is vulnerable to this by default.</b></figcaption>
+  </figure>
+
+  <h2>1. The threat: authentication answers the wrong question</h2>
+
+  <h3 id="ambient-authority">The cookie says who, and nobody asked who sent it</h3>
+  <p>A cross-site request forgery, in OWASP's words, <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">occurs when a malicious web site, email, blog, instant message, or program tricks an authenticated user's web browser into performing an unwanted action on a trusted site</a>. The mechanism is one sentence long: browser requests automatically include all cookies, including session cookies, and the browser does not care which page caused the request.</p>
+
+  <p>Set that beside lesson 0700 and the shape becomes clear. Your server asks two questions - who is this, and may they do it - and both get the right answer. The user is real, and they are allowed to transfer their own money. The question nobody asked is whether the user <em>intended</em> this request, and HTTP offers no field that answers it. That is the gap, and it exists for every application that authenticates with something the browser sends on its own.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A forged transfer</div>
+    <div class="fig-claim">Every step is legitimate except the one that chose the parameters.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant U as Reader browser
+  participant E as evil.example
+  participant B as bank.example
+  U->>B: earlier - logs in, receives a session cookie
+  U->>E: later, in another tab, loads a page
+  E-->>U: HTML with an auto-submitting form to bank.example
+  U->>B: POST /transfer - cookie attached by the browser
+  B->>B: session valid, user may transfer own funds
+  B-->>U: 200 - the transfer happened
+  Note over E,B: evil.example never reads this response
+    </div>
+    <figcaption>The attacker writes only the second and third arrows. The fourth is the browser following its own rules, and the fifth is your server being correct. The note matters as much as the flow: the same-origin policy stops evil.example reading the reply, which is why forgery targets writes and why a read-only endpoint is rarely the target. <b>Nothing here is a bug in the bank - the request is indistinguishable from a real one at every layer that inspects it.</b></figcaption>
+  </figure>
+
+  <h2>2. The defence: require something the other site cannot know</h2>
+
+  <h3 id="synchroniser-token">A token that lives where a cross-site page cannot look</h3>
+  <p>Since the credential arrives automatically, the fix is to demand a second thing that does not. The synchroniser token pattern issues an unpredictable value, unique per user session, and requires it back in the body or a header of every state-changing request. The attacker's page can cause a request but cannot read your pages, so it cannot learn the value. OWASP adds one constraint that is easy to miss: the token is <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">generated using cryptographically secure methods rather than stored in cookies</a> - a token delivered as a cookie is attached automatically too, which defeats the point.</p>
+
+  <p>That last sentence explains why the naive double-submit pattern is weak. It puts the same value in a cookie and in the form, and compares them; but OWASP records that this is <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">bypassable by an attacker who can write cookies on the target domain</a>, which a sibling subdomain can do - the integrity gap RFC 6265 admitted in lesson 0701. The signed variant, an HMAC bound to the session, closes it.</p>
+
+  <p>For APIs called by script there is a cheaper defence. A custom request header cannot be set by a cross-site form, and adding one puts the request outside the CORS-safelisted set, so the browser preflights it and your policy from lesson 0205 decides. OWASP's reasoning is that requests with custom headers <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">are automatically subject to the same-origin policy</a>.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Three defences, three gaps</div>
+    <div class="fig-claim">Only the first two require something the attacker cannot supply.</div>
+    <div class="mermaid">
+flowchart LR
+  R["Forged POST arrives&lt;br/&gt;with a valid cookie"] --> T1["Synchroniser token&lt;br/&gt;secret, per session,&lt;br/&gt;never in a cookie"]
+  R --> T2["Custom header&lt;br/&gt;a form cannot set it -&lt;br/&gt;preflight applies"]
+  R --> T3["SameSite Lax or Strict&lt;br/&gt;browser withholds&lt;br/&gt;the cookie"]
+  T1 --> G1["gap: leaked by any&lt;br/&gt;XSS on your origin"]
+  T2 --> G2["gap: none for forms -&lt;br/&gt;needs a script client"]
+  T3 --> G3["gap: registrable domain,&lt;br/&gt;and Lax allows GET"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef mid fill:var(--gold-soft),stroke:var(--gold)
+  class T1,T2 ok
+  class T3 mid
+    </div>
+    <figcaption>Read the bottom row rather than the middle one. The first two defences fail only to an attacker who already has script on your origin, which is lesson 0705's problem and not this one. The third is a browser default doing useful work, and its gaps are structural: it is scoped to the registrable domain, so a sibling host is same-site, and <code>Lax</code> lets safe methods through on top-level navigation. <b>That last gap is why a GET must never change state - under Lax, a link is enough.</b></figcaption>
+  </figure>
+
+  <h3 id="samesite">SameSite is a good default and not a defence</h3>
+  <p>The <code>SameSite</code> attribute lets the browser withhold the cookie on cross-site requests. <code>Strict</code> sends it only for requests <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie">originating from the same site that set the cookie</a>; <code>Lax</code> adds an exception for top-level navigations using a safe method, so following a link into your site still works while a cross-site <code>POST</code> does not; <code>None</code> restores the old behaviour and must be paired with <code>Secure</code>. Most browsers now treat <code>Lax</code> as the default when the attribute is absent.</p>
+
+  <p>It is genuinely valuable, and OWASP still refuses to call it sufficient: it <a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">is useful as a defense-in-depth control but it does not replace a proper CSRF defense in most deployments</a>. Two reasons carry the argument. Same-site is measured at the registrable domain, so a compromised or careless sibling host is not cross-site at all; and any endpoint that changes state on a <code>GET</code> is still reachable under <code>Lax</code>, which is the sharpest form of OWASP's rule: <em>do not use GET requests for state changing operations</em>.</p>
+
+  <h2>3. The trade-off, and the pair that closes the module</h2>
+
+  <p>Token plumbing is real cost. Every form and every scripted write has to carry the value, single-page applications have to fetch it and refresh it, and a session that expires mid-form produces a failure that looks like a bug to the user. The pattern is worth it because the alternative is trusting a signal that was never about intent - but it is worth choosing per endpoint, and the endpoints that need it are exactly the ones that change something.</p>
+
+  <p>It is worth ending the module on the symmetry. Cross-site scripting is your reader's browser trusting content because your site served it. Cross-site request forgery is your server trusting a request because the reader's browser sent it. Two directions of one misplaced trust, and neither is fixed by making authentication stronger - which is the sentence lesson 0700 was written to earn.</p>
+
+  <div class="callout warn">
+    Every defence on this page is downstream of lesson 0705. Script running on your origin can read your synchroniser token out of the page, set any custom header it likes, and issue same-site requests that <code>SameSite</code> was never meant to stop. So an unfixed XSS is not one vulnerability beside this one; it is the thing that removes all three defences at once, and it is the first bug to fix when both are open.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why can the attacking site cause the request but not read the response?</div>
+      <button class="q-opt">Sending is not restricted by origin, but reading the reply is</button>
+      <button class="q-opt">The response omits the cookie, so the attacker learns nothing from it</button>
+      <button class="q-opt">The browser strips the response body on any cross-site navigation</button>
+      <button class="q-opt">The server refuses to answer a request from an unrecognised origin</button>
+      <div class="q-fb">The same-origin policy governs reading, not sending, which is exactly why forgery targets writes. Responses do not carry cookies back in that sense, bodies are not stripped on navigation, and the server answers normally - it saw nothing unusual, which is the whole problem.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your session cookie is <code>SameSite=Lax</code>. Which endpoint is still forgeable?</div>
+      <button class="q-opt">A POST to /transfer submitted by a form on another site</button>
+      <button class="q-opt">A PUT to /profile issued by script running on another site</button>
+      <button class="q-opt">A DELETE to /account issued by script running on another site</button>
+      <button class="q-opt">A GET to /logout that ends the session as a side effect of the call</button>
+      <div class="q-fb"><code>Lax</code> withholds the cookie from cross-site unsafe methods but sends it on a top-level navigation with a safe method, so a plain link reaches a state-changing GET with full authority. The other three are all unsafe methods and all blocked - which is why the rule is to keep state changes off GET rather than to rely on the attribute.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Behind you, <a href="0705-xss-is-code-injected-into-someone-elses-browser.html">XSS is code injected into someone else's browser</a></b> is the attack that removes every defence on this page.</li>
+    <li><b>Behind you, <a href="0700-authentication-answers-who-authorization-answers-what.html">authentication answers who, authorization answers what</a></b> named the automatic re-presentation this exploits.</li>
+    <li><b>Ahead, Module 08 - Data</b> takes the request that survives all of this and asks what it does to the store.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> List every endpoint in your service that changes state, and check the method on each - any GET on that list is forgeable today. Then ask the agent where your CSRF token comes from, and whether it is delivered in a cookie.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html">OWASP's CSRF Prevention Cheat Sheet</a> is unusually good on the patterns that <em>nearly</em> work, which is where most of the real defects are. Read <a href="https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie">MDN's <code>Set-Cookie</code> reference</a> beside it for the precise definitions of <code>Lax</code> and <code>Strict</code>, since the difference between them is the difference between two of the answers above.</p>
+
+  <div class="pager">
+    <a href="0705-xss-is-code-injected-into-someone-elses-browser.html"><span class="dir">&larr; Previous</span><span class="ttl">XSS is code injected into someone else's browser</span></a>
+    <a class="nxt" href="0800-a-constraint-is-the-only-rule-every-writer-obeys.html"><span class="dir">Next &rarr;</span><span class="ttl">A constraint is the only rule every writer obeys</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0706 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

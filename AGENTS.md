@@ -423,13 +423,25 @@ design with a dark code plate does not drag inline code dark with it. Both pairs
 `scripts/contrast.py` holds both to 7:1.
 
 **`main.wrap` must not gain a background that changes on a palette switch.** It is the scroller's
-big child, and repainting it on a switch exposes a Chromium behaviour the computed-style harness
-reads straight through: after a switch, an element inside a closed `<details>` keeps the computed
-style it had while every ancestor updates correctly. It is measured, not inferred - the harness
-printed the ancestor chain with the child a palette behind its parent - and it cannot be waited out,
-because the stale value is perfectly stable; polling it is worse, because each read re-caches it.
-That is why the reading pane is a palette value and why `press` paints none. Anything that gives
-that element a switch-varying background again owes assertion A2 a re-run.
+big child, and repainting it on a switch exposes a Chromium behaviour: after a switch, an element
+inside a closed `<details>` keeps the computed style it had while every ancestor updates correctly.
+It is measured, not inferred - the harness printed the ancestor chain with the child a palette
+behind its parent - and it cannot be waited out, because the stale value is perfectly stable;
+polling it is worse, because each read re-caches it. That is why the reading pane is a palette value
+and why `press` paints none. Anything that gives that element a switch-varying background again owes
+assertion A2 a re-run.
+
+**The harness no longer reads through that, and a closed disclosure is now a fault rather than a
+measurement.** `style_snapshot.py` opens every `<details>` on the way in, before the first read and
+before any switch, and fails by name if one will not open. Until it did, any page carrying a
+`details.solution` could fail A2 at random - `.worked` and `.p-check` handing back the palette the
+page arrived on, an exact ink-to-paper swap, on pull requests that touched neither the page nor a
+shared asset. Opening records a state a reader reaches with one click, where the collapsed state
+renders nothing for anybody to see. Skipping the locked subtree instead would drop 20 recorded rows -
+`.worked`, `.keynum` and `.p-check`, on 11 of the 22 sampled pages - and drop them quietly, because
+other pages render all three of those classes outside a disclosure and coverage would go on passing
+at 86 of 86. Anything that hides a probed element behind a second render lock - `content-visibility`
+is the other one - owes this the same treatment.
 
 **A palette and a design are data, and nothing branches on either name.** No function in `hub.js`
 and no rule in `hub.css` knows one by name: the two registries are plain arrays, the blocks are
@@ -523,6 +535,45 @@ canvas readback: `staff-ai-course/learning-records/0001-choosing-the-hue.md` car
 a measured comparison table for four shipped hues. Compare against that table, not against the
 paragraph in `hub.css`, whose "worst of the 84 course accents" figures were measured when the hub
 had seven courses and were never re-run.
+
+**A figure is composed, and the closed set is a set of class names rather than a set of pictures.**
+`svg.chart` carries two instruments: the charting classes say *how much*, and the eleven `d-*` classes
+added in 2026-08 say *what is where* - a box, a boundary, a connector, four states, a mono face and a
+reading. Three things about them are decided. **The arrowhead is one `<marker>` per page**, `#hub-arrow`,
+injected by `mountFigureDefs` in `hub.js` and never by a figure's own `<defs>`: an id is unique in a
+document, so copies collide the moment a page carries two diagrams and the second silently resolves to
+the first. It fills with `context-stroke`, so a head takes its line's colour and cannot disagree with
+what it points along, and it is the one part of the vocabulary that needs the script - a connector
+without it still draws and loses only its head. **`.chart :where(.d-flow)` holds the default stroke at
+zero specificity**, exactly as `.ref` does and for the identical reason: `.chart .d-flow` is (0,2,0) and
+would out-argue `.chart .s-signal`, drawing every connector grey. **On paper `--ok` and `--warn` both
+resolve to `#333` and their `-soft` partners to `#fff`**, so `d-keep` and `d-drop` arrive as the same
+box; the print block gives `d-keep` a light fill, which is the only collision paper produces and the
+reason to check a new state against the PAPER block rather than against the screen.
+
+Two rules were **deleted** rather than rescoped, and the reasoning is the transferable part: a 3.43:1
+"house shape" and a 10% paint ceiling were measured on the reference site and applied here without
+being checked against this corpus, where **755 of 763 figures fail the first and 44% the second**. A
+rule the corpus breaks is a trap for the next author. Measure a borrowed number here before it becomes
+a rule.
+
+**`check_pages.py` derives a hand-drawn figure's kind from its own classes**, in `svg_kind`, the way the
+section rail derives from the page's own headings - `d-*` makes it `svg-diagram`, an axis or grid makes
+it `svg-plot`, anything else `svg-chart`, and the precedence is that order. It used to collapse all
+hand-authored SVG to one kind while counting each Mermaid type separately, which is the asymmetry that
+produced a hub where 98% of lesson pages carry a flowchart and 90% open with one. The course-level floor
+therefore tests `kinds & HAND_KINDS` and never the literal string `svg-chart`. The colour check in the
+same file is a **whitelist**, not a hex pattern: a paint value is absent, a `var(--token)`, or a
+reference like `url(#…)` / `context-stroke`, and it reads all three forms that carry one - the
+attribute, a `style=` declaration and a Mermaid `classDef`, which writes `fill:#hex` and so evaded the
+attribute-only rule it replaces.
+
+The author-facing statement for all of it is
+`.claude/skills/course-authoring/references/widgets.md`, "A diagram, when the claim is a structure" and
+"What the checks catch, and what rests on your judgement". Do not restate it here. That last section
+exists because the licence is real: a figure whose roles contradict each other - a `d-ghost` box with a
+live `d-flow` into it - renders, validates, reaches no console, and teaches the wrong thing. Nothing in
+this repository can catch it.
 
 The Cloud Architecture category adds one data-driven widget to the shared system: the capability
 matrix (`figure.cmatrix`), rendered by `hub.js` from `cloud-comparison-course/matrix.js`, which is

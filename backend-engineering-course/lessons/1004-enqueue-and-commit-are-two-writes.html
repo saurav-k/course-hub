@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Enqueue and commit are two writes - Backend Engineering</title>
+<meta name="description" content="A handler that writes a row and sends a message is writing to two systems with no transaction between them, so a crash in the gap loses one or the other. The outbox makes them one write and moves the sending to a relay.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; Async work and search &middot; Lesson 1004</div>
+  <h1>A handler that writes a row and sends a message is writing to two systems that cannot agree</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    The defect deliberately left in lesson 1000's code. &middot;
+    <a href="https://microservices.io/patterns/data/transactional-outbox.html">microservices.io - Transactional outbox</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A command that must update the database <b>and</b> publish a message is two writes to two systems, and there is no transaction spanning them. Every ordering of the two loses something.</li>
+      <li>Publish first and the message may describe a transaction that rolled back. Commit first and, as the pattern's own statement of the problem puts it, <b>there is no guarantee the process will not crash before sending the message</b>.</li>
+      <li>The fix is to make it one write: <b>insert the message into an OUTBOX table in the same local transaction</b> as the business data, and let a separate relay publish from that table.</li>
+      <li>The relay is at-least-once by construction - it can crash after publishing and before recording that it did - so <b>the outbox does not remove lesson 1003's obligation</b>, it depends on it.</li>
+      <li>What it costs: a table that grows, a relay you now operate, publish latency measured in polling intervals, and ordering that has to be arranged rather than assumed.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The queue was trusted from lesson 1000, and the handoff into it was not.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 1000&lt;br/&gt;enqueue then commit&lt;br/&gt;left as a known defect"] --> T["THIS PAGE&lt;br/&gt;one write, and a&lt;br/&gt;relay that publishes"]
+  I["Lesson 1003&lt;br/&gt;the idempotent&lt;br/&gt;consumer"] --> T
+  T --> A["Lesson 1005&lt;br/&gt;the search index is&lt;br/&gt;fed exactly this way"]
+  T --> B["Module 12&lt;br/&gt;the same problem&lt;br/&gt;between two services"]
+    </div>
+    <figcaption>Lessons 1001 to 1003 hardened everything from the broker rightwards: the lease, the retry, the duplicate. This page turns left and looks at the one seam none of that covers, which is the moment the job first enters the system. It is placed after the idempotent consumer rather than before it on purpose, because the outbox's relay is itself a duplicate producer and would be a poor bargain without a consumer that can absorb one. <b>A durable queue does not help if the thing that puts work into it can lose the handoff.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two stores, no shared transaction</h2>
+
+  <h3 id="dual-write">Both orderings are wrong, differently</h3>
+  <p>The requirement is ordinary. A service command <a href="https://microservices.io/patterns/data/transactional-outbox.html">"typically needs to create/update/delete aggregates in the database and send messages/events to a message broker"</a>, and it needs those two facts to be true together. A database transaction cannot cover a broker, and a distributed transaction across the two - two-phase commit - is generally not available and would couple the service's availability to the broker's, so it is not the answer either.</p>
+
+  <p>That leaves a choice of orderings, and both leak. Publish before the commit and a rollback - a constraint violation, a deadlock, a validation failure late in the handler - leaves a message describing an order that does not exist, which a consumer will faithfully act on. Commit before the publish and the pattern's own statement of the problem applies exactly: "if a service sends a message after committing the transaction there's no guarantee that it won't crash before sending the message". The row exists and nobody will ever be told.</p>
+
+  <p>Of the two, the second is the one shipped by default, because it looks careful. It also fails silently in the direction that is hardest to notice: there is no error, no exception and no failed job. There is simply an order in the database that no consumer has heard of, discovered days later by a customer asking where their confirmation went.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The gap between two writes</div>
+    <div class="fig-claim">A crash in either window produces a state no consumer can detect.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant H as Handler
+  participant D as Database
+  participant B as Broker
+  H->>B: publish OrderPlaced
+  H->>D: commit - fails on a constraint
+  Note over H,D: a message about an order that does not exist
+  H->>D: commit the order row
+  H--xB: the process dies here
+  Note over H,B: an order nobody will ever be told about
+  H->>D: commit the order row AND the outbox row
+  H->>H: the relay takes it from here
+    </div>
+    <figcaption>The first two blocks are the two orderings and the third is this page's answer. Read the middle one as the dangerous case rather than the first: publishing early produces a message that a consumer may reject or that reconciliation can catch, while committing early produces silence, and silence has no signal to alarm on. The third block does not eliminate the gap so much as move it somewhere a transaction can reach. <b>You cannot make two systems agree, so make it one write and give the second system its own reader.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the outbox table and its relay</h2>
+
+  <h3 id="outbox">One transaction, two tables</h3>
+  <p>The solution is stated in one sentence by the pattern: the service that sends the message first stores the message in the database as part of the transaction that updates the business entities, and a separate process then sends the messages to the message broker. The outbox row is ordinary data in the same database as the order, so the database's own atomicity covers both - either the order and its pending message both exist, or neither does. No new guarantee is invented; an existing one is stretched to cover the second write by turning it into a row.</p>
+
+  <div class="code-cap">place_order.py &middot; the corrected version of the snippet in lesson 1000</div>
+  <pre><code>def place_order(session, account_id: int, items: list[Item]) -> str:
+    order = Order(account_id=account_id, state="placed")
+    session.add(order)
+    session.flush()
+
+    session.add(Outbox(                       # same session, same transaction
+        aggregate_type="order",
+        aggregate_id=order.id,
+        event_type="OrderPlaced",
+        payload={"order_id": order.id, "v": 1},
+    ))
+    session.commit()                          # both rows, or neither
+    return order.public_id</code></pre>
+
+  <p>Compare it with lesson 1000's version and the difference is that <code>enqueue</code> has become an <code>INSERT</code>. That is the whole idea, and it is worth noticing what it buys structurally: the handler no longer talks to the broker at all, so a broker outage now delays publication instead of failing the request. The command path's availability has stopped depending on the messaging system's.</p>
+
+  <h3 id="relay">The relay, and the two ways it reads</h3>
+  <p>Something has to move rows out of that table. There are two families. A <b>polling publisher</b> selects unpublished rows on an interval, publishes them, and marks them sent - simple, needs no privileges beyond the ones your service already has, and its cost is a query against the table on every tick plus a publish latency of up to one interval. <b>Transaction-log tailing</b> instead reads the database's own replication log and publishes what it sees, which is how change-data-capture tools do it; it adds no query load and no latency of its own, and it costs a second piece of infrastructure with database-level privileges.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two relays, one table</div>
+    <div class="fig-claim">Both readers publish the same rows and pay in different currencies.</div>
+    <div class="mermaid">
+flowchart LR
+  H["Handler&lt;br/&gt;one transaction"] --> D[("Database&lt;br/&gt;orders + outbox")]
+  D --> P["Polling publisher&lt;br/&gt;SELECT unpublished&lt;br/&gt;every N seconds"]
+  D --> L["Log tailing&lt;br/&gt;reads the replication&lt;br/&gt;stream, no queries"]
+  P --> B["Broker"]
+  L --> B
+  B --> C["Consumer&lt;br/&gt;idempotent, per lesson 1003"]
+    </div>
+    <figcaption>The two middle boxes are interchangeable from the handler's position and from the consumer's, which is what makes this a decision you can defer and revisit. Polling costs a repeated query and up to one interval of latency, and it needs nothing your service does not already have. Log tailing costs a second component holding replication privileges on your primary, and gives back near-zero added latency and no query load. Note that both arrive at the same consumer with the same guarantee. <b>The relay is an implementation detail of the outbox, not a property of it.</b></figcaption>
+  </figure>
+
+  <p>Whichever you pick, the relay's guarantee is fixed and it is the one this module has been circling. The pattern states it without hedging: <a href="https://microservices.io/patterns/data/transactional-outbox.html">"The Message relay might publish a message more than once. It might, for example, crash after publishing a message but before recording the fact that it has done so."</a> The publish and the mark-as-sent are, once again, two writes to two systems. The outbox does not escape that; it relocates it to a component where a duplicate is harmless because lesson 1003's consumer absorbs it.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">An outbox row's life</div>
+    <div class="fig-claim">Only the transition to Published can repeat, and a consumer absorbs it.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Pending: committed with the business row
+  Pending --> Publishing: the relay picks it up
+  Publishing --> Published: broker acknowledged, row marked sent
+  Publishing --> Pending: the relay died before marking - republished
+  Published --> Pruned: retention job removes it
+  Pruned --> [*]
+    </div>
+    <figcaption>Four states and one loop, and the loop is the entire residual weakness of the design. A relay that dies between the broker's acknowledgement and its own bookkeeping leaves a row that says Pending for a message that was already delivered, so it goes out a second time. Every other edge is inside one transaction and cannot half-happen. Notice the Pruned state, which is not decoration - an outbox with no retention job is a table that grows for the life of the service and eventually makes the relay's own query slow. <b>The design converts an undetectable loss into a detectable duplicate, which is the trade the whole module keeps making.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: a table, a component, and an ordering question</h2>
+
+  <p>The obvious costs are the table and the relay. The table takes a write on every command that publishes anything, and it needs an index that makes "unpublished rows, oldest first" cheap, plus a pruning job so that index stays small. The relay is a process with its own deploy, its own failure modes and its own alerting, and if it stops, nothing breaks loudly - the database keeps accepting commands and the queue simply goes quiet, which is another silent failure to put a monitor on.</p>
+
+  <p>The subtler cost is ordering. Messages leave the outbox in whatever order the relay reads them, and two commands that committed in one order can be published in another if the relay parallelises or if identifiers are not monotonic. Where order matters, it has to be arranged deliberately - a single reader per aggregate, or a key that puts related messages on the same partition - and it must not be assumed because the rows looked sequential in the table. Lesson 1003's version check is the defence that does not depend on getting this right.</p>
+
+  <div class="callout warn">
+    An outbox is not a licence to publish the whole entity. The row is written inside the transaction, so its payload is a snapshot taken before commit, and a consumer receiving a fat event is reading a copy of your schema that will drift from it. Publish the identifiers and the fact that happened - the shape lesson 1000 asked for - and let the consumer read the current state if it needs more. Every argument module 04 made about a wire contract applies here, with the extra difficulty that these messages can sit in the table across a deploy.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why is committing the row and then publishing the message the more dangerous ordering?</div>
+      <button class="q-opt">The broker will reject a message sent after a commit</button>
+      <button class="q-opt">It holds the database transaction open for longer</button>
+      <button class="q-opt">The loss is silent, with nothing raising an error</button>
+      <button class="q-opt">It makes the publish call impossible to retry safely</button>
+      <div class="q-fb">A crash after the commit leaves committed data that no consumer ever hears about, and there is no exception, no failed job and no signal to alarm on - which is worse than publishing early, where the surplus message can at least be rejected or reconciled. Brokers do not care when a message was sent relative to your transaction. Publishing after the commit shortens the transaction rather than lengthening it. And the publish is as retryable as any other call - the problem is the process that would have retried it is gone.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">The outbox makes the write atomic. What guarantee does the relay still fail to give?</div>
+      <button class="q-opt">Exactly-once publishing to the broker</button>
+      <button class="q-opt">Durability of the message before it is sent</button>
+      <button class="q-opt">Atomicity between the two business tables</button>
+      <button class="q-opt">Delivery of the message to any consumer at all</button>
+      <div class="q-fb">The relay can crash after the broker acknowledges and before it marks the row sent, so it republishes - at-least-once, exactly as the pattern documents. Durability is precisely what the outbox row buys, since the message is committed before anything tries to send it. Atomicity across the business tables is the local transaction's job and is unaffected. And delivery does happen, possibly more than once, which is the whole point of the residual weakness.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, <a href="1005-search-is-an-inverted-index-not-a-scan.html">search is an inverted index</a></b> introduces a second store that has to be kept in step with the database, and this is the machinery that does it.</li>
+    <li><b>Behind you, <a href="1003-a-consumer-must-be-idempotent.html">a consumer must be idempotent</a></b> is what makes the relay's at-least-once publishing an acceptable price rather than a new bug.</li>
+    <li><b>Behind you, <a href="0405-compatibility-is-a-rule-not-a-hope.html">compatibility is a rule, not a hope</a></b> governs the payload of every outbox row, which outlives the deploy that wrote it.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Find one handler in your codebase that both writes to the database and publishes or enqueues something. Write down what exists in the world if the process is killed between those two lines, in both orderings. Then ask the agent what would have to change for the second write to become a row in the first transaction.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://microservices.io/patterns/data/transactional-outbox.html">The transactional outbox pattern</a> states the problem, the solution and - unusually - the residual weakness in the same page, which is why it is cited here for all three. Read it beside <a href="https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/standard-queues.html">Amazon SQS standard queues</a>, which is where the at-least-once guarantee the relay inherits is written down, and lesson 1003 for the consumer that makes both survivable.</p>
+
+  <div class="pager">
+    <a href="1003-a-consumer-must-be-idempotent.html"><span class="dir">&larr; Previous</span><span class="ttl">A consumer must be idempotent</span></a>
+    <a class="nxt" href="1005-search-is-an-inverted-index-not-a-scan.html"><span class="dir">Next &rarr;</span><span class="ttl">Search is an inverted index, not a scan</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1004 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

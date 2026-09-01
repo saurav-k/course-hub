@@ -1,0 +1,180 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Injection is data arriving where code is expected - Backend Engineering</title>
+<meta name="description" content="Build a query by concatenation and the interpreter cannot see where your string stopped and the user's began, because after concatenation there is only one string. Parameterisation restores the boundary at the sink.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Auth and security &middot; Lesson 0704</div>
+  <h1>An interpreter cannot see where your string stopped and the user's began</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The first of the three threats, and the one with a complete fix. &middot;
+    <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP - SQL Injection Prevention Cheat Sheet</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>The threat first.</b> You build a command by joining your text to the user's text. The interpreter receives one string, parses all of it, and the user's half is now grammar rather than a value.</li>
+      <li>This is not a fact about SQL. It is a fact about <b>every interpreter</b> you hand a constructed string to - shells, LDAP filters, template engines, ORM fragments.</li>
+      <li>The fix is <b>structural, not lexical</b>: send the command and the values on separate channels, so the database <b>always distinguishes between code and data, regardless of what user input is supplied</b>.</li>
+      <li>Parameters bind values, never identifiers. A table name, a column name or a sort direction <b>cannot be a placeholder</b>, and those are the parts you must allow-list.</li>
+      <li>What it costs: the defence lives at the sink, so it protects the one call site that uses it and no other. Escaping is the last resort and OWASP says it cannot be guaranteed to work.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The credential is intact - the attacker went around it into the interpreter.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0700 to 0703&lt;br/&gt;who is calling,&lt;br/&gt;and with what"] --> T["THIS PAGE&lt;br/&gt;a value becomes&lt;br/&gt;a command"]
+  T --> A["Lesson 0705&lt;br/&gt;the same defect&lt;br/&gt;in a browser"]
+  T --> B["Module 08&lt;br/&gt;the database&lt;br/&gt;this reaches"]
+  W["Module 07&lt;br/&gt;auth and security"] -.- T
+    </div>
+    <figcaption>The first half of this module made the credential correct. Injection ignores all of it: an authenticated caller with entirely legitimate permissions sends a value that the interpreter reads as instructions, and the query runs with the service's own privileges rather than the caller's. <b>Every access-control decision you made upstream is bypassed, because the request was never abnormal.</b></figcaption>
+  </figure>
+
+  <h2>1. The threat: concatenation destroys the boundary</h2>
+
+  <h3 id="the-parse">Two strings go in and one string comes out</h3>
+  <p>Consider a lookup by email. Your code holds a template and a value, and it joins them; what reaches the database is a single sequence of characters with no record of which half came from where. The parser then does its job perfectly: it reads quotes as quotes, semicolons as statement separators and <code>OR</code> as a boolean operator, because that is what those characters mean in the language it was handed.</p>
+
+  <p>So an email of <code>x' OR '1'='1</code> does not smuggle anything past a check. It closes your string literal, adds a disjunction that is always true, and reopens a literal so the trailing quote you wrote still balances. The result is valid SQL that means something you never wrote. There was no moment at which the database could have known better: by the time it saw the text, the boundary you were relying on no longer existed.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where the boundary is lost</div>
+    <div class="fig-claim">Concatenation happens before the parse - binding happens after it.</div>
+    <div class="mermaid">
+flowchart LR
+  A1["JOINED FIRST&lt;br/&gt;template + user value"] --> A2["parser sees one string&lt;br/&gt;quotes and OR are grammar"]
+  A2 --> A3["a query you&lt;br/&gt;did not write"]
+  B1["BOUND AFTER&lt;br/&gt;template with a placeholder"] --> B2["parser sees the template&lt;br/&gt;the plan is fixed here"]
+  B2 --> B3["the query you wrote,&lt;br/&gt;whatever the value holds"]
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  class A3 bad
+  class B3 ok
+    </div>
+    <figcaption>The two paths differ in one place only: whether the value is present when the parser runs. On the left it is, so it can change the grammar. On the right the statement is parsed and planned first and the value arrives afterwards, into a slot that can hold data and nothing else. <b>Escaping tries to make a dangerous character harmless - binding makes the position incapable of holding a command in the first place.</b></figcaption>
+  </figure>
+
+  <h2>2. The defence: separate channels, at the sink</h2>
+
+  <h3 id="parameterised-query">The same shape in both voices</h3>
+  <p>OWASP puts prepared statements first among the primary defences and gives the reason in one sentence: with them <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">the database will always distinguish between code and data, regardless of what user input is supplied</a>. Note the scope of that promise - it holds whatever the input is, which is what makes it a defence rather than a filter you have to keep ahead of.</p>
+
+  <div class="code-cap">lookup.go &middot; the placeholder is part of the statement, Go</div>
+  <pre><code>// Wrong: one string reaches the parser, and the value is part of it.
+q := "SELECT id, name FROM users WHERE email = '" + email + "'"
+rows, err := db.Query(q)
+
+// Right: the statement and the value travel separately.
+rows, err := db.Query(
+    "SELECT id, name FROM users WHERE email = $1",
+    email,
+)</code></pre>
+
+  <div class="code-cap">lookup.py &middot; the same boundary in Python, DB-API 2.0</div>
+  <pre><code># Wrong: an f-string is concatenation with better ergonomics.
+cur.execute(f"SELECT id, name FROM users WHERE email = '{email}'")
+
+# Right: the driver sends the statement, then the parameters.
+cur.execute(
+    "SELECT id, name FROM users WHERE email = %s",
+    (email,),
+)</code></pre>
+
+  <p>The two languages disagree about the placeholder's spelling and agree about everything that matters. Nothing here is escaping the value, and nothing is inspecting it. The value is never part of the text the parser sees, so its contents cannot reach the grammar - which is why this works for an email containing a quote, a name containing a semicolon, and a deliberate attack, without treating them differently.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Prepare, then bind</div>
+    <div class="fig-claim">The plan is fixed before the value is sent, so the value cannot change it.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant A as Application
+  participant D as Database
+  A->>D: PREPARE - statement text with a placeholder
+  D->>D: parse and plan - the shape is now fixed
+  D-->>A: statement handle
+  A->>D: BIND and EXECUTE - the value, as a typed parameter
+  D->>D: fill the slot - no re-parse of the text
+  D-->>A: rows
+  Note over A,D: a quote in the value is a quote in the value
+    </div>
+    <figcaption>Two round trips in the worst case, and most drivers collapse them into one message. What matters is the ordering rather than the count: parsing finishes before the parameter is read, so there is no later moment at which the value could be reinterpreted as syntax. <b>The security property comes from the sequence, not from any inspection of the value.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: parameters bind values, and not everything is a value</h2>
+
+  <p>Placeholders stand where a literal may stand, and nowhere else. A table name, a column name, and the <code>ASC</code> or <code>DESC</code> in an <code>ORDER BY</code> are parts of the statement's structure, so no driver will bind them. OWASP is direct about what to do instead: where a query cannot use bind variables, <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">input validation or query redesign is the most appropriate defense</a>. In practice that means mapping the caller's <code>sort=created_at</code> through a fixed dictionary of permitted columns and rejecting anything absent from it - an allow-list, never a pattern that tries to describe what a bad identifier looks like.</p>
+
+  <p>The other limit is reach. Lesson 0403 argued that validation belongs at the boundary, once, and this defence is the opposite kind: it belongs at the sink, every time. One call site left concatenated is one vulnerability, whatever the other four hundred do, which is why this is a defect that survives code review and gets found by a scanner. The two rules are complements - boundary parsing narrows what values exist, and parameterisation makes the surviving values harmless at the point of use.</p>
+
+  <div class="callout warn">
+    Escaping is on OWASP's list and is last on it, with an unusually blunt warning: it <a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">is very database specific in its implementation</a>, is fragile compared to the other defences, and cannot be guaranteed to prevent all SQL injection in all situations. Stored procedures carry a similar caveat - they are safe only when they do not themselves build a statement from their arguments, which is easy to do and invisible from the calling code.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Why does a parameterised query stop injection where careful escaping might not?</div>
+      <button class="q-opt">The driver rejects any parameter containing quotes or a semicolon</button>
+      <button class="q-opt">The database applies stricter rules to statements it has prepared</button>
+      <button class="q-opt">The parameter is escaped by the driver rather than by your own code</button>
+      <button class="q-opt">The statement is parsed before the value exists, so it cannot be grammar</button>
+      <div class="q-fb">The property is about ordering: planning completes first, and the value then lands in a slot that holds data only. Nothing rejects quotes - a quote in a surname must work. The database does not treat prepared statements more strictly, and the third option describes client-side escaping, which is the fragile defence this one replaces.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A caller supplies the column to sort by. What is the correct defence?</div>
+      <button class="q-opt">Map the value through a fixed set of permitted columns and reject the rest</button>
+      <button class="q-opt">Bind the column name as a parameter exactly as any value is bound</button>
+      <button class="q-opt">Escape the column name with the driver's own identifier quoting call</button>
+      <button class="q-opt">Reject any value that contains a space, a quote or a semicolon char</button>
+      <div class="q-fb">An identifier is structure, so it is allow-listed rather than sanitised. Binding it is not possible - drivers bind values only, and the placeholder would be sent as a string literal. Identifier quoting helps but still admits any name the caller invents, and the last option is a deny-list, which fails on the input nobody thought of.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0705-xss-is-code-injected-into-someone-elses-browser.html">XSS is code injected into someone else's browser</a></b> is this same defect with a browser as the interpreter.</li>
+    <li><b>Behind you, <a href="0403-validation-belongs-at-the-boundary-once.html">validation belongs at the boundary, once</a></b> is the complement: it narrows the values, and this makes the survivors harmless.</li>
+    <li><b>Ahead, Module 08 - Data</b> is where the queries this page protects are actually designed.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Search your repository for string formatting next to the word <code>SELECT</code>, <code>INSERT</code> or <code>WHERE</code>, in every language it uses. Then ask the agent which of the hits are dynamic identifiers rather than values, since those cannot be fixed by binding and need an allow-list instead.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html">OWASP's SQL Injection Prevention Cheat Sheet</a> is short, ordered by strength, and honest about the weak options, which is rarer than it should be. Read <a href="https://owasp.org/Top10/2021/A03_2021-Injection/">A03:2021 - Injection</a> after it for the shape of the general case: the concept, as OWASP puts it, is identical among all interpreters.</p>
+
+  <div class="pager">
+    <a href="0703-oauth-delegates-access-without-sharing-the-password.html"><span class="dir">&larr; Previous</span><span class="ttl">OAuth delegates access without sharing the password</span></a>
+    <a class="nxt" href="0705-xss-is-code-injected-into-someone-elses-browser.html"><span class="dir">Next &rarr;</span><span class="ttl">XSS is code injected into someone else's browser</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0704 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

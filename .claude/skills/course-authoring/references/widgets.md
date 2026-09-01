@@ -305,6 +305,46 @@ A `timeline` suits a history, a `mindmap` suits a chapter that indexes topics, a
 
 The bar, and the test the figure has to pass, are in [`pedagogy.md`](pedagogy.md).
 
+### Compose the figure the idea needs
+
+There is no catalogue of approved pictures and there is not going to be one.
+A figure nobody has drawn before is the **expected** outcome of a page with a new idea in it, not an exception you have to justify.
+If the drawing in your head is not in this file, draw it.
+
+Six things must hold, whatever you compose.
+They are the whole list.
+
+1. **Colour comes from a token.** A class, or `var(--token)`. Never a value, in any spelling. This is what lets a figure follow seven palettes, two modes and paper without you thinking about it.
+2. **It has an accessible name.** `role="img"` and an `aria-label` that says what the drawing shows, not what it is called.
+3. **It scales.** A `viewBox`, never a `width`/`height` pair.
+4. **No new dependency.** No chart library, no build step, no CDN, no network at render time.
+5. **It works offline**, from a file, with script blocked.
+6. **It prints.** Which the first rule already gives you.
+
+Everything else in this section is guidance from figures that worked.
+Guidance tells you what has usually been true; it does not tell you what you may draw.
+Where a rule below names an instrument - chart or diagram - it applies to that instrument and not to the other.
+
+The one thing on that list with a footnote is the arrowhead.
+`#hub-arrow` is injected by `hub.js`, so with the script blocked a `d-flow` connector still draws, in the right colour, and loses only its head.
+Never rest a figure's direction on the arrowhead alone: let the layout, the labels or a verb carry it too, and the head becomes confirmation rather than the whole claim.
+
+### Which of the three to draw
+
+Three instruments, and most technical pages need at least two of them.
+
+| Instrument | The question it answers | Reach for it when |
+|---|---|---|
+| a **chart** (`svg.chart`, `m-*` `s-*` `f-*`) | *how much* | a quantity, a distribution, a density, a band, a comparison of sizes |
+| a **diagram** (`svg.chart`, `d-*`) | *what is where* | boxes, boundaries, a labelled connector, state, an addressed row, anything positioned on purpose |
+| **Mermaid** (`div.mermaid`) | *what connects to what* | a graph whose layout you do not care about: any sane arrangement will do |
+
+**Mermaid's strength is that it lays the graph out for you, and that is also when to stop using it.**
+The moment position carries meaning - an offset axis under a row of cells, two panels aligned row by row, a thing that sits *inside* a boundary - Mermaid has no way to express it, because a Mermaid node has no position you chose.
+Draw it by hand instead.
+
+A page whose figures are all the same instrument has probably not asked what the reader is actually confused about.
+
 ### Mermaid, for structure
 
 ```html
@@ -338,6 +378,7 @@ Pick the kind by what the reader is confused about:
 
 `timeline` shrinks rather than wraps, so keep it to about six columns and split a longer one into two figures.
 `quadrantChart` centres a label under its point and neither clips nor wraps it, so keep point labels under about 26 characters and away from the axes.
+A `flowchart` grows along its stated direction and *unboundedly* across it, so a `TB` graph with several independent roots, or one whose subgraphs sit side by side, lays out wider than the reading column and is clipped at the column edge. Nothing reports it: `validate_site.py` and `check_pages.py` both pass, no console message appears, and the figure looks complete until you notice a node missing at the right. Turn the direction so the many-node axis runs down the page, or cut the row to three or four nodes, and measure the rendered `svg` against its `figure` rather than trusting the source.
 
 A `mindmap` and a `timeline` take their branch colours from Mermaid's own twelve-step scale rather than from the theme it is handed.
 `hub.js` supplies that scale from the `--branch-0..7` tokens and `hub.css` pins the mindmap root disc, so both follow the palette.
@@ -363,11 +404,10 @@ Three rules.
 - **Do not set `color`.** The label already takes `--ink` from the theme, in both modes. Setting it is how a fill and its label drift apart later.
 - **Spell the token correctly.** A name the stylesheet does not declare is left exactly as written, so Mermaid fails to parse it and draws a red error box. That is deliberate: a visible failure beats a colour quietly taken from somewhere else.
 
-### Inline SVG, for anything quantitative
+### A chart, when the claim is a quantity
 
 Mermaid cannot draw a distribution, a density, a confidence band, or a scatter plot, and it cannot put one saturated mark in a neutral field so that the colour is the argument.
 That last one is a real reason to draw by hand: a figure whose whole point is *this one thing, among these others* is clearer when nine tenths of it is unpainted.
-It is not a reason to redraw a flowchart that is doing its job.
 Write the SVG by hand, in the page. No chart library, no build step, no extra CDN.
 
 ```html
@@ -383,11 +423,17 @@ Write the SVG by hand, in the page. No chart library, no build step, no extra CD
 </figure>
 ```
 
-- Always a `viewBox`, never a `width`/`height` pair. Around `640 x 300` keeps 13px text readable.
-- Always `role="img"` and an `aria-label` saying what the chart shows.
-- **Colour comes only from the semantic classes.** A literal hex looks right in one theme and vanishes in the other, and it cannot follow the print stylesheet either.
-- **Paint about a tenth of the canvas and no more.** Colour marks the subject; the field around it stays `panel`, `grid`, `axis` and `ink`. Measured on the figures the caption anatomy comes from, the saturated area is a median of 10.7% of the canvas and under 10% on 109 of 234. A chart where every mark is coloured has no subject, and the reader has to be told which one matters instead of seeing it.
-- **A wide short band sits in the column like a rule between paragraphs.** Those same figures run a median aspect ratio of 3.43:1. A tall figure is an interruption, and a `640 x 300` viewBox is already close to the shape.
+- Always a `viewBox`, never a `width`/`height` pair. Around `640 x 300` keeps 13px text readable. This one holds for both instruments.
+- Always `role="img"` and an `aria-label` saying what the chart shows. This one holds for both instruments too.
+- **Colour comes only from the semantic classes**, or from a `var(--token)` naming one of them. A literal hex looks right in one theme and vanishes in the other, and it cannot follow the print stylesheet either.
+- **In a chart, colour marks the subject and the field stays neutral.** The field is `panel`, `grid`, `axis` and `ink`; roughly a tenth of the canvas carries the saturated mark. If every series is saturated the chart has no subject, and the reader has to be *told* which one matters instead of seeing it. **This is a charting rule and it stops here.** In a diagram a filled box is a state, so fill as much as the idea needs - see the section below.
+- **A figure is usually wider than it is tall**, because a tall one interrupts the column. The hub's own median is 2.13:1 and a `640 x 300` viewBox is a good default. There is no ratio to hit.
+
+> **Two rules were deleted from this list in 2026-08, and it is worth knowing why.**
+> A "house shape" of 3.43:1 and a hard 10% paint ceiling were both measured on the reference site's corpus and then applied to ours without anybody checking them against our own work.
+> Measured: **755 of our 763 hand-drawn figures - 99% - sit below 3.43:1**, and **44% exceed the paint ceiling**, including figures the captain singled out as the ones he wanted more of.
+> A rule the whole corpus breaks is not a standard, it is a trap for the next author, and it was the mechanism keeping the box shut.
+> If you find yourself about to write a rule in this file from a number you measured somewhere else, measure it here first.
 
 The colour names are a **closed set, shared by the whole hub** and declared in `assets/hub.css`: `stat`, `prob`, `signal`, `noise`, `alarm`, `gold`, `plum`, `sky`, and `ink` for marks and strokes.
 They are not a per-course palette any more; a course's identity comes from its accent hue, not from its charts.
@@ -403,6 +449,148 @@ They are not a per-course palette any more; a course's identity comes from its a
 | `lbl-sm`, `lbl-b`, `lbl-on`, `ttl` | chart text faces | |
 
 One idea keeps one colour on every page of a course.
+
+`fill="var(--token)"` and `style="fill:var(--token)"` are both legitimate and both already in use across the hub.
+Reach for one when no class says what you mean and the colour is genuinely a one-off; name a **semantic** token - `--ok`, `--warn`, `--gold`, `--accent-2`, `--surface-2`, `--line-strong`, `--ink-faint` and their `-soft` partners - and never a raw `--l-*` or `--d-*`, which belong to the terminal transcript and to nothing else.
+
+### A diagram, when the claim is a structure
+
+A chart says how much. A diagram says what is where.
+Both are `svg.chart`, so a diagram inherits the frame, the text sizing, the tabular figures and the print behaviour; what it adds is the shapes a chart has no use for.
+
+Until 2026-08 there were none of those shapes.
+The 45-class set was a statistics-plot set, `<marker>` appeared **once in 763 figures**, and there was no box, no connector, no state and no way to set machine text inside a drawing.
+So every directed arrow in the hub was a Mermaid arrow, and an author who wanted an architecture drawing had nowhere to go.
+These eleven classes are that gap closed.
+
+| Class | What it draws | What it means |
+|---|---|---|
+| `d-box` | a filled box with a strong edge | a thing: a component, a cell, a participant |
+| `d-bound` | an unfilled box with a heavier edge | a boundary: a process, a host, a trust zone, drawn *around* things |
+| `d-focus` | an accent fill and an accent edge | **the one under discussion** - at most one or two per figure |
+| `d-keep` | an `--ok` fill and edge | kept, written, retained, passing |
+| `d-drop` | a `--warn` fill and edge | dropped, evicted, rejected, failing |
+| `d-absent` | no fill, a dashed faint edge | not yet: unwritten, unallocated, the next one |
+| `d-ghost` | a faint box at 45% opacity | no longer, or "and so on" |
+| `d-flow` | a connector with an arrowhead | a direction: a call, a write, a read, a move |
+| `d-flow ref` | the same, dashed | a weaker link: optional, asynchronous, implied |
+| `d-mono` | text in the mono face, small and soft | machine text: an offset, a key, a wire value, a file name |
+| `read` | italic text in full ink | the sentence the figure says out loud |
+
+Three things about them, and each is the reason a rule is written the way it is.
+
+- **Fill is a state, not decoration.** A row of `d-keep` cells with one `d-absent` at the end is a claim about the row. That is why the charting paint rule is scoped to charts and does not reach here.
+- **A connector takes its colour from a paired `s-*` class, and the arrowhead follows.** `class="d-flow s-alarm"` is a red line with a red head; `class="d-flow"` alone is a neutral one. The head fills with `context-stroke`, so it can never disagree with the line it sits on, and you never state a colour to get one.
+- **`d-mono` is what makes a drawing read as a machine.** The reference corpus uses a mono face inside a figure 504 times; before this we had no way to.
+
+#### The worked example
+
+An append-only log, addressed by offset.
+Mermaid cannot draw this, and the reason is exactly the one in the table above: **position on the line is the address**, and a Mermaid node has no position you chose.
+
+```html
+<figure class="diagram">
+  <div class="fig-cap">Append-only, offset-addressed</div>
+  <div class="fig-claim">Writes go to the tail; the offset is a permanent address.</div>
+  <svg class="chart" viewBox="0 0 640 240" role="img" aria-label="An append-only log of four
+       written events and one not-yet-written cell at the tail, with producers appending at the
+       tail, an offset axis beneath the written cells, and three consumers each sitting under the
+       offset it holds">
+
+    <rect class="d-box" x="20" y="20" width="100" height="30" rx="5"/>
+    <text class="lbl-b" x="70" y="40" text-anchor="middle">producers</text>
+    <path class="d-flow s-alarm" d="M122 36 C240 20 380 20 504 66"/>
+    <text class="d-mono" x="180" y="46">append</text>
+
+    <rect class="d-keep"   x="150" y="70" width="72" height="36" rx="4"/>
+    <text class="d-mono"   x="186" y="92" text-anchor="middle">e0</text>
+    <rect class="d-keep"   x="230" y="70" width="72" height="36" rx="4"/>
+    <text class="d-mono"   x="266" y="92" text-anchor="middle">e1</text>
+    <rect class="d-keep"   x="310" y="70" width="72" height="36" rx="4"/>
+    <text class="d-mono"   x="346" y="92" text-anchor="middle">e2</text>
+    <rect class="d-focus"  x="390" y="70" width="72" height="36" rx="4"/>
+    <text class="d-mono"   x="426" y="92" text-anchor="middle">e3</text>
+    <rect class="d-absent" x="470" y="70" width="72" height="36" rx="4"/>
+    <text class="d-mono"   x="506" y="92" text-anchor="middle">...</text>
+    <text class="d-mono"   x="552" y="92">tail</text>
+
+    <text class="d-mono" x="186" y="124" text-anchor="middle">0</text>
+    <text class="d-mono" x="266" y="124" text-anchor="middle">1</text>
+    <text class="d-mono" x="346" y="124" text-anchor="middle">2</text>
+    <text class="d-mono" x="426" y="124" text-anchor="middle">3</text>
+    <line class="axis" x1="150" y1="136" x2="462" y2="136"/>
+    <line class="tick" x1="186" y1="136" x2="186" y2="142"/>
+    <line class="tick" x1="266" y1="136" x2="266" y2="142"/>
+    <line class="tick" x1="346" y1="136" x2="346" y2="142"/>
+    <line class="tick" x1="426" y1="136" x2="426" y2="142"/>
+    <text class="d-mono" x="140" y="140" text-anchor="end">offset</text>
+
+    <path class="d-flow s-signal" d="M186 146 L186 172"/>
+    <rect class="d-box" x="152" y="176" width="68" height="28" rx="4"/>
+    <text class="lbl-sm" x="186" y="194" text-anchor="middle">C @ 0</text>
+    <path class="d-flow s-signal" d="M266 146 L266 172"/>
+    <rect class="d-box" x="232" y="176" width="68" height="28" rx="4"/>
+    <text class="lbl-sm" x="266" y="194" text-anchor="middle">B @ 1</text>
+    <path class="d-flow s-signal" d="M426 146 L426 172"/>
+    <rect class="d-box" x="392" y="176" width="68" height="28" rx="4"/>
+    <text class="lbl-sm" x="426" y="194" text-anchor="middle">A @ 3</text>
+
+    <text class="read" x="320" y="228" text-anchor="middle">Each consumer keeps its own
+      position, so reading one event never removes it.</text>
+  </svg>
+  <figcaption>Every mark takes its colour from a token, so this follows seven palettes and both
+    modes. <b>A log is addressed by position, which is why one reader cannot consume another's
+    event.</b></figcaption>
+</figure>
+```
+
+It paints far more than a tenth of its canvas and it runs at 2.7:1, so under the two deleted rules it was twice wrong.
+It is the figure the captain asked for.
+
+Read the geometry as carefully as the classes, because that half is nobody's job but yours.
+Each consumer sits directly under the offset it holds, so no connector crosses a cell, a label or another connector; the append arc travels over the row and lands on the tail, because the claim is that writes go to the tail and an arrow pointing anywhere else would contradict it; and the axis stops at `e3`, because the unwritten cell has no offset yet.
+An earlier draft of this same figure crossed the offset labels with two connectors and pointed the append arrow at `e0`, and it validated.
+
+#### The states, side by side
+
+The remaining structural classes, which the worked example above has no use for:
+
+```html
+<svg class="chart" viewBox="0 0 640 150" role="img" aria-label="The structural states">
+  <rect class="d-bound" x="12"  y="26" width="120" height="58" rx="6"/>
+  <rect class="d-box"   x="24"  y="40" width="96"  height="30" rx="4"/>
+  <rect class="d-drop"  x="360" y="40" width="88"  height="30" rx="4"/>
+  <rect class="d-ghost" x="552" y="40" width="72"  height="30" rx="4"/>
+  <path class="d-flow ref" d="M540 55 L548 55"/>
+</svg>
+```
+
+`d-bound` is drawn *around* the things it contains rather than beside them, which is the whole difference between a boundary and a box.
+All eleven are rendered together, live and in both modes, at `design-system/index.html`.
+
+### What the checks catch, and what rests on your judgement
+
+The licence to compose is real, and so is the cost: more freedom is more ways to be wrong.
+Building the prototype for this vocabulary produced **five defects that no check in this repository catches**, and one of them was semantic - a box drawn `d-ghost`, meaning removed, while being drawn a live connector, meaning reading. Every check passed.
+
+**Caught by machine, on the pull request:**
+
+| What | By |
+|---|---|
+| a colour written as a value, in any of the four spellings - `fill="#hex"`, `style="fill:#hex"`, `rgb()`/`hsl()`/a named colour, a Mermaid `classDef` | `check_pages.py`, FAIL, and it names the offending value |
+| a misspelled `d-*`, `m-*`, `s-*`, `f-*`, `t-*` or `sw-*` class | `check_pages.py`, FAIL |
+| an `svg.chart` with no `viewBox` or no `aria-label` | `check_pages.py`, FAIL |
+| the caption pair's shape, order and length | `validate_site.py` check 19, `check_pages.py` |
+| every token the vocabulary uses, over seven palettes and two modes | `contrast_matrix.py` |
+
+**Not caught by anything. These are yours:**
+
+- **Roles that contradict each other.** A `d-ghost` box with a live `d-flow` into it. The colour says gone, the arrow says busy, and the figure teaches the wrong thing while passing every gate. This is the worst of them and it is new with the licence.
+- **Text that runs past the frame.** SVG text does not wrap and is clipped at the `viewBox` edge with nothing reported. Read the longest line in every figure, at 360px and at full width.
+- **Connectors that cross labels, axes or each other.** Geometric nonsense renders perfectly.
+- **A figure that is illegible at 360px.**
+
+So: **open the page in a browser and look at the figure.** Not at the markup, and not at the console, which stays clean through all four.
 
 ## Interactive builds
 

@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Idempotency keys make retries safe - Backend Engineering</title>
+<meta name="description" content="A client cannot tell a lost request from a lost response, so a retried POST is a gamble unless the server can recognise the repeat. Recognition is a stored key with the first result beside it, written in the same transaction as the work.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; API design &middot; Lesson 0605</div>
+  <h1>A retried POST is safe only when the server can recognise the repeat, and that is a stored key</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The promise the network cannot make for you. &middot;
+    <a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2">RFC 9110 &sect;9.2.2 - Idempotent Methods</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A client that gets no response <b>cannot tell whether the request was lost or the response was</b>, and those need opposite actions.</li>
+      <li>RFC 9110 lets a client automatically repeat a request <b>only if the method is idempotent</b>. POST is not, so a retried POST is a second order unless you make it otherwise.</li>
+      <li>An idempotency key is a value the <b>client</b> generates and the server stores <b>with the first result beside it</b>, so a repeat is answered rather than executed.</li>
+      <li>Stripe stores the status code and body of the first attempt <b>whether it succeeded or failed</b>, prunes keys after at least 24 hours, and errors when a key returns with different parameters.</li>
+      <li>What it costs: a key store with a retention policy, a fingerprint, and a hard truth - the key protects only what is inside your transaction.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The module closes on the promise that survives a failed network.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0600 to 0604&lt;br/&gt;the shape and how&lt;br/&gt;it may change"] --> T["THIS PAGE&lt;br/&gt;the promise when&lt;br/&gt;nothing came back"]
+  M["Lesson 0201&lt;br/&gt;safe, idempotent&lt;br/&gt;and cacheable"] --> T
+  T --> A["Module 10&lt;br/&gt;queues, where every&lt;br/&gt;delivery is at-least-once"]
+  T --> B["Module 11&lt;br/&gt;retries, timeouts&lt;br/&gt;and backoff"]
+    </div>
+    <figcaption>Every earlier page in this module designed for a request that arrived and a response that came back. This one is about the case where neither is certain, which is the ordinary condition of a network rather than an exception. It is also the last page of the module because it is the promise the previous five make possible: a caller can only retry safely against an interface that told them they could. <b>Designing the happy path is the smaller half of designing an interface.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: two failures that look identical</h2>
+
+  <h3 id="ambiguous-failure">The client sees one thing and it means two</h3>
+  <p>A client sends a request and the connection times out. Two histories produce that observation. In the first the request never arrived, nothing happened, and the correct action is to send it again. In the second the request arrived, the server did the work, and the response was lost coming back, so the correct action is to do nothing. The evidence is identical and the client still has to choose.</p>
+
+  <p>RFC 9110 addresses this directly and its answer is a permission with a condition: if a communication failure occurs before the response is fully received, a client may automatically repeat the request if and only if the method is idempotent. GET, HEAD, PUT and DELETE qualify. POST does not, which is not an oversight - POST is defined as asking the target to process an enclosed representation according to its own semantics, and two of those are two of whatever it does.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The lost response</div>
+    <div class="fig-claim">The same client behaviour charges once or twice depending on a stored key.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as Client
+  participant S as Service
+  participant D as Datastore
+  C->>S: POST /payments with no key
+  S->>D: write the payment
+  S--xC: response lost in the network
+  C->>S: POST /payments again - same body
+  S->>D: write a second payment
+  S-->>C: 201 - the customer paid twice
+  Note over C,D: with a key, the second call is recognised
+  C->>S: POST /payments Idempotency-Key abc
+  S->>D: claim key abc, then write the payment
+  S--xC: response lost again
+  C->>S: POST /payments Idempotency-Key abc
+  S->>D: key abc already holds a result
+  S-->>C: the stored 201 - one payment
+    </div>
+    <figcaption>The upper half is the ordinary outcome and it is nobody's mistake: the client retried a request it had no reason to think had landed, which is what a well-behaved client does. The lower half changes one thing, a value the client chose before the first attempt, and that value is what turns the second call from an instruction into a question. <b>The key is generated by the client because only the client knows that two calls are the same intent - the server sees two identical requests either way.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: claim the key before doing the work</h2>
+
+  <h3 id="idempotency-key">What the server stores</h3>
+  <p>The server keeps a record per key holding the outcome of the first attempt. Stripe's implementation is worth copying in one respect that surprises people: it saves the status code and body of the first request for a given key <em>regardless of whether it succeeded or failed</em>, so a retry receives the same result including a 500. That is correct behaviour: retrying a key that failed lets the retry take a different path from the original, which puts you back where you started.</p>
+
+  <p>The rest of the contract is scope and lifetime. Keys are removed after they are at least 24 hours old, and a key reused after that pruning starts a fresh request. Sensitive data does not belong in a key, because the key is a lookup token and lives in your storage and your logs. And a key is only meaningful where it was needed: Stripe accepts keys on every POST and says not to send them on GET or DELETE, which are idempotent already.</p>
+
+  <h3 id="idempotency-fingerprint">The fingerprint, and the ordering that actually matters</h3>
+  <p>A key on its own is not enough, because a client can send the same key with a different body, by accident or by attack. The answer is a fingerprint: a digest of the request payload stored beside the key, compared on every arrival. The IETF's <a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header">Idempotency-Key draft</a> names the three refusals that follow - 400 when a required key is missing, 422 when a key returns with a different payload, and 409 when the retry arrives while the original is still in flight.</p>
+
+  <p>That third one is where implementations go wrong, and it is an ordering problem rather than a storage one. If the key record is written after the work completes, two retries racing each other both find no record and both do the work, which is the exact failure the key exists to prevent. The claim has to come first and it has to be atomic: insert the key row under a unique constraint, in the same transaction as the effect, so that the second arrival either loses the insert and reads the winner's state, or finds a claimed-but-unfinished record and is refused with a 409.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of one key</div>
+    <div class="fig-claim">Every arrival after the first is answered from the record, never executed.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Unseen
+  Unseen --> Claimed: insert wins the unique constraint
+  Unseen --> Rejected: no key sent where one is required - 400
+  Claimed --> Completed: work commits, result stored
+  Claimed --> Conflict: a retry arrives mid-flight - 409
+  Completed --> Replayed: retry with the same payload - stored result
+  Completed --> Mismatch: retry with a different payload - 422
+  Completed --> Unseen: pruned after the retention window
+    </div>
+    <figcaption>The states are what the record is in, and every edge out of Completed is a decision taken without touching the domain at all. Read the last edge carefully: pruning returns the key to Unseen, so a retry arriving after the retention window is a new request that will do the work again. That is not a defect, it is the published limit, and it is why a retention window is part of the contract rather than a tuning parameter. <b>An idempotency guarantee has an expiry date, and a caller who retries a day later is outside it.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the key protects your transaction, not the world</h2>
+
+  <p>The guarantee is exactly as wide as the atomic write that claims the key. If the endpoint writes one row in one database, the key and the row commit together and the protection is total. If the endpoint charges a card, publishes an event and writes a row, the key covers only the part that shares a transaction with it, and a crash between the charge and the commit leaves an effect nobody's key knows about. Every module after this one that adds an integration point makes this cost larger, which is why the honest version of the promise names its boundary.</p>
+
+  <p>The rest of the bill is ordinary but real: a record per mutating request for at least a day, indexed by a client-supplied value, with a pruning job that actually runs. And you are now replaying stored responses, so a wrong stored result is served identically forever. The key store is a piece of the interface, not a cache in front of it.</p>
+
+  <div class="callout warn">
+    The <code>Idempotency-Key</code> header is not a standard. The IETF draft that defines it is expired, so what you have is a widely copied convention with provider-specific semantics underneath: the retention window, what counts as a payload mismatch and which status a conflict returns are all decisions each provider made separately. Read the specific provider's documentation rather than assuming the draft, and when you publish an endpoint that accepts keys, document your own window and your own refusals. A caller cannot infer them, and a caller who guesses wrong retries outside your window and pays twice.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why must the idempotency key be generated by the client rather than the server?</div>
+      <button class="q-opt">A server value would not survive a connection reset</button>
+      <button class="q-opt">Only a server key could collide across two tenants</button>
+      <button class="q-opt">Only the client knows two calls are one intent</button>
+      <button class="q-opt">A client key is cheaper for the server to index</button>
+      <div class="q-fb">The server receives two identical requests and cannot tell a retry from a genuine second order, so the sameness has to be asserted by the party that has it: the caller. A server-issued value would need a round trip that the failure case has already lost, collisions are handled by scoping the key rather than by who made it, and indexing cost is identical either way.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A retry arrives while the first request is still executing. What should the server return?</div>
+      <button class="q-opt">200 with the result the first request will give</button>
+      <button class="q-opt">409, because the original has not finished</button>
+      <button class="q-opt">422, because the key is already claimed</button>
+      <button class="q-opt">202, and run the second request in parallel</button>
+      <div class="q-fb">The draft assigns 409 to a retry that overlaps an in-flight original, because the server has claimed the key but has no result to replay yet. It cannot return a result it does not have, 422 is reserved for a key reused with a different payload, and running the second request is the duplicate the key exists to prevent.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Ahead, Module 10, async work</b> takes the same problem to a queue, where delivery is at-least-once and a consumer needs this mechanism by default rather than on request.</li>
+    <li><b>Behind you, <a href="0201-methods-are-verbs-with-guarantees.html">methods are verbs with guarantees</a></b> is where idempotence was defined, and this page is what to do when the method does not have it.</li>
+    <li><b>Behind you, <a href="0603-an-error-body-is-part-of-the-contract.html">an error body is part of the contract</a></b> is how a 409 or a 422 from this mechanism tells the caller which refusal it was.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one endpoint of yours that creates something and write out what happens if the same request arrives twice, one second apart. Then ask the agent where the key claim would have to sit relative to your transaction boundary, and which side effects would still escape it.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rfc-editor.org/rfc/rfc9110#section-9.2.2">RFC 9110 &sect;9.2.2</a> is half a page and is the reason this mechanism has to exist. Read <a href="https://docs.stripe.com/api/idempotent_requests">Stripe's idempotent requests</a> for a complete worked contract - key length, retention, parameter comparison and what is stored - and the <a href="https://datatracker.ietf.org/doc/html/draft-ietf-httpapi-idempotency-key-header">Idempotency-Key draft</a> for the refusals, remembering that it expired rather than shipped.</p>
+
+  <div class="pager">
+    <a href="0604-versioning-is-choosing-who-pays-to-change.html"><span class="dir">&larr; Previous</span><span class="ttl">Versioning is choosing who pays to change</span></a>
+    <a class="nxt" href="0700-authentication-answers-who-authorization-answers-what.html"><span class="dir">Next &rarr;</span><span class="ttl">Authentication answers who, authorization answers what</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0605 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

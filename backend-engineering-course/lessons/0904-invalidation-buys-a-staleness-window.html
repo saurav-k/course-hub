@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Invalidation buys a staleness window - Backend Engineering</title>
+<meta name="description" content="Three mechanisms remove a wrong entry: a lifetime, a removal on write, and a replacement on write. Each buys a different staleness window, each loses a different race, and only the lifetime survives its own message being lost.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Caching &middot; Lesson 0904</div>
+  <h1>Every invalidation strategy buys a staleness window, and each one loses a different race</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    The second half of the hard problem, and the one with a race in it. &middot;
+    <a href="https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf">Nishtala et al., Scaling Memcache at Facebook (NSDI 2013)</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Only three things ever remove a wrong entry: <b>a lifetime running out, a write removing it, or a write replacing it</b>. Everything else is one of those three with delivery attached.</li>
+      <li>A lifetime is <b>reliable and slow</b>: it needs no message, so nothing can lose it, and its window is up to the whole lifetime.</li>
+      <li>A removal is <b>fast and unreliable</b>: its window is a few milliseconds when the message arrives and unbounded when it does not.</li>
+      <li>The race neither of them wins is the <b>stale set</b> - a reader that missed, queried, and is then descheduled can store the old value <em>after</em> the write removed it. Correct ordering does not close it.</li>
+      <li>What it costs: closing the race needs coordination on the miss path - a lease, a compare-and-set - and the alternative to closing it is a lifetime short enough to bound the damage you accepted.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This page is the one that decides how wrong a reader can be.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0903&lt;br/&gt;which names a write&lt;br/&gt;made wrong"] --> T["THIS PAGE&lt;br/&gt;when they are removed,&lt;br/&gt;and what beats it"]
+  T --> A["Lesson 0905&lt;br/&gt;what the removal&lt;br/&gt;does to the store"]
+  T --> B["Module 11&lt;br/&gt;stating the staleness&lt;br/&gt;you chose, out loud"]
+  T --> C["Module 12&lt;br/&gt;the commit log as the&lt;br/&gt;source of invalidations"]
+  W["Module 09&lt;br/&gt;Caching"] -.- T
+    </div>
+    <figcaption>Lesson 0903 produced a set of names. This page is what happens to them and when, and it is the page where a caching design either states its correctness guarantee or discovers it in production. Everything before this was reversible by changing code; a staleness window is a promise your users have already started relying on. <b>A cache without a stated staleness window still has one, chosen by whoever last set a lifetime.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: reliability and immediacy are different purchases</h2>
+
+  <h3 id="three-mechanisms">Three mechanisms, and what each one needs to work</h3>
+  <p>A lifetime removes an entry with no message from anybody. That is its entire advantage: there is no delivery to fail, no consumer to be down, no ordering to get wrong, and no code that can forget. It works when the process that wrote the entry has since been replaced, when the invalidation daemon is broken, and when nobody remembers the cache exists. Its cost is that it is indifferent to your writes - the entry stays wrong for the rest of its lifetime whether the row changed a second ago or a week ago.</p>
+
+  <p>A removal on write is the opposite purchase. It responds to the actual change, so the window shrinks to the delivery delay - and it is a message, so it can be lost, delayed, reordered, or sent to a cache that has since restarted. AWS's guidance recommends running both, and states why in one line: a lifetime added to every write "doesn't guarantee that a value isn't stale. However, it keeps data from getting too stale". That is the correct framing. The lifetime is not the cheap version of invalidation; it is the bound on how badly invalidation can fail.</p>
+
+  <h3 id="the-arithmetic">What the two are worth, arithmetically</h3>
+  <p>The two combine into one expression, and writing it down is what makes the argument for keeping both instead of choosing.</p>
+
+  <div class="math">
+    mean staleness = (1 &minus; p) &times; d + p &times; (T &divide; 2)
+    <span class="gloss">Read as: on average an entry is wrong for the delivery delay <i>d</i> of a removal that arrives, which happens a <i>1 &minus; p</i> share of the time, plus the lifetime's own contribution <i>T</i> &divide; 2 on the <i>p</i> share of writes whose removal never lands. <i>T</i> is the entry's lifetime and <i>p</i> is the probability the removal is lost.</span>
+  </div>
+
+  <ol class="worked">
+    <li><b>Assume how the writes land.</b> Take a write arriving at a uniformly random moment during an entry's life, so with no removal at all the entry is wrong for half a lifetime on average. That uniformity is an assumption, not a measurement, and every number below rests on it.</li>
+    <li><b>Read the lifetime on its own.</b> Every removal is lost, so <i>p</i> = 1 and the expression collapses to <i>T</i> &divide; 2. At a five-minute lifetime that is <b>150 seconds</b> of mean staleness.</li>
+    <li><b>Add a removal.</b> Take <i>d</i> = 5 ms and <i>p</i> = 0.001, both illustrative. Then (0.999 &times; 0.005) + (0.001 &times; 150) = 0.005 + 0.15 = <b>0.155 s</b>.</li>
+    <li><b>Take the ratio.</b> 150 &divide; 0.155 is about <b>970 times</b> less staleness for one delete call on the write path.</li>
+    <li><b>Now remove the lifetime.</b> With no <i>T</i> the second term has nothing to multiply, and the one write in a thousand whose removal was lost leaves an entry that is wrong <b>permanently</b>, with no mechanism anywhere that will ever notice.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="fig-cap">Window against lifetime</div>
+    <div class="fig-claim">A removal collapses the window to the loss rate times the same line.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Mean staleness against entry lifetime: with a lifetime alone the mean staleness is half the lifetime, a straight line rising to 300 seconds at a 600 second lifetime; with a removal on write it sits on the horizontal axis at about 0.155 seconds">
+      <line class="grid" x1="70" y1="183" x2="610" y2="183"/>
+      <line class="grid" x1="70" y1="117" x2="610" y2="117"/>
+      <line class="axis" x1="70" y1="250" x2="610" y2="250"/>
+      <line class="axis" x1="70" y1="250" x2="70" y2="50"/>
+      <line class="s-alarm thick" x1="70" y1="250" x2="610" y2="50"/>
+      <line class="s-stat thick" x1="70" y1="249" x2="610" y2="248"/>
+      <circle class="m-alarm" cx="340" cy="150" r="6"/>
+      <circle class="m-stat" cx="340" cy="248" r="6"/>
+      <text class="lbl-sm" x="62" y="254" text-anchor="end">0</text>
+      <text class="lbl-sm" x="62" y="187" text-anchor="end">100</text>
+      <text class="lbl-sm" x="62" y="121" text-anchor="end">200</text>
+      <text class="lbl-sm" x="62" y="54"  text-anchor="end">300</text>
+      <text class="lbl-sm" x="70"  y="268" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="340" y="268" text-anchor="middle">300</text>
+      <text class="lbl-sm" x="610" y="268" text-anchor="middle">600</text>
+      <text class="lbl-sm" x="70" y="40">mean staleness, seconds</text>
+      <text class="lbl-b" x="356" y="182">150 s at a 300 s lifetime</text>
+      <text class="lbl-sm" x="352" y="240">0.155 s, same lifetime</text>
+      <text class="lbl-sm" x="340" y="291" text-anchor="middle">entry lifetime T, seconds</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>lifetime alone</span><span><i class="sw-stat"></i>removal on write, same lifetime kept as a backstop</span></div>
+    <figcaption>The arithmetic above, drawn. The rising line is what a lifetime buys on its own and it is linear in the lifetime, which is why tuning a TTL always feels like a bad trade - halving the staleness doubles the miss rate. The lower line is the same system with a delete added, and it is not a lower slope but a different order of magnitude, sitting on the axis at every lifetime. <b>The lifetime and the removal are not alternatives to be tuned against each other - one sets the floor and the other sets the ceiling.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the race that both of them lose</h2>
+
+  <h3 id="stale-set">The stale set, in four messages</h3>
+  <p>Lesson 0902 established the ordering rule - store first, cache second - and warned that it narrows a race without closing it. This is that race. It does not need the writer to do anything wrong; it needs a reader to be slow between two of its own steps, which every reader occasionally is. The memcache paper names the outcome: "A stale set occurs when a web server sets a value in memcache that does not reflect the latest value that should be cached", and attributes it to concurrent updates being reordered.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The stale set</div>
+    <div class="fig-claim">A read, not a write, is what puts the old value back after the delete.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant R as Reader
+  participant W as Writer
+  participant C as Cache
+  participant D as Database
+  R->>C: get user-42
+  C-->>R: miss
+  R->>D: SELECT for id 42
+  D-->>R: value A
+  Note over R: descheduled here&lt;br/&gt;holding a stale A
+  W->>D: UPDATE to value B
+  W->>C: delete user-42
+  Note over C: nothing stored&lt;br/&gt;the delete removes nothing
+  R->>C: set user-42 to A
+  Note over C,D: the cache holds A&lt;br/&gt;the store holds B - indefinitely
+    </div>
+    <figcaption>Every message is in the order its sender intended and the writer obeyed the rule from lesson 0902. The damage comes from the reader's own gap, between reading the store and writing the cache, which is long enough for a scheduler hiccup or a garbage collection pause. Note where the entry ends up: not merely stale, but stale with a fresh lifetime, because the set restarted the clock. <b>The only mechanism that ends this state is the lifetime, which is why it is not optional.</b></figcaption>
+  </figure>
+
+  <h3 id="leases">Closing it: the miss has to be claimed</h3>
+  <p>Closing the race means giving the cache a way to know that the value being stored was computed before something invalidated it. Facebook's memcache does it with a <b>lease</b>: on a miss the cache hands the client "a 64-bit token bound to the specific key the client originally requested", the client presents that token when it sets, and the cache refuses the set if the token has been invalidated by a delete in the meantime. The paper compares it to load-link and store-conditional, which is the right mental model - the set is conditional on nothing having happened to the key since the miss.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A claimed miss</div>
+    <div class="fig-claim">A delete invalidates the token, so the late set is refused rather than applied.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant R as Reader
+  participant W as Writer
+  participant C as Cache
+  participant D as Database
+  R->>C: get user-42
+  C-->>R: miss, plus a lease token
+  R->>D: SELECT for id 42
+  D-->>R: value A
+  W->>D: UPDATE to value B
+  W->>C: delete user-42
+  Note over C: the delete invalidates&lt;br/&gt;the outstanding token
+  R->>C: set user-42 to A, with the token
+  C-->>R: refused - the token is stale
+  Note over C,D: the entry stays absent&lt;br/&gt;the next reader fills it with B
+    </div>
+    <figcaption>The same interleaving as the previous figure with one thing added, and the outcome inverted. The cost is that every miss now carries state at the cache, and every fill carries a token - real coordination on the busiest path in the system. Where a cache offers no such primitive, the same guarantee is built from a compare-and-set on a version stored beside the value, and where neither is available the honest fallback is a short lifetime and the knowledge that this window exists. <b>You either coordinate on the miss path or you bound the damage - there is no third option that is free.</b></figcaption>
+  </figure>
+
+  <h3 id="delivery">Where the invalidation should come from</h3>
+  <p>One more failure sits between the write and the removal, and it is the reason large systems do not send invalidations from application code. A service that commits its transaction and then crashes before issuing the delete has produced a durable change and a lost invalidation, and no retry survives the process that was going to do the retrying. Facebook's answer is to derive the invalidation from the same durable record as the write: daemons on each database inspect the committed SQL, extract the deletes that were amended into it, and broadcast them, which also lets them batch - the paper reports an <span class="keynum">18&times;</span> improvement in deletes per packet from batching alone.</p>
+
+  <p>The pattern generalises to any service with a database and is worth naming, because it is the same shape as a transactional outbox: the invalidation is written inside the transaction that made the change, so it is impossible to have one without the other, and a separate process delivers it with retries that outlive any single request. Module 12 develops the delivery half of that mechanism; the part that belongs here is the rule that an invalidation issued outside the transaction can be lost independently of the write it describes.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two places to issue it</div>
+    <div class="fig-claim">Only one of the two makes a lost invalidation impossible without a lost write.</div>
+    <div class="mermaid">
+flowchart TB
+  A["Commit the transaction"] --> B["Then call delete&lt;br/&gt;from the handler"]
+  B --> B2["Process dies here&lt;br/&gt;committed change,&lt;br/&gt;no invalidation, no retrier"]
+  C["Write the change and the&lt;br/&gt;keys in one transaction"] --> D["A separate reader of the&lt;br/&gt;commit log delivers them"]
+  D --> D2["Process dies here&lt;br/&gt;the record survives&lt;br/&gt;and is redelivered"]
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  class B2 bad
+  class D2 ok
+    </div>
+    <figcaption>The same invalidation, issued from two places, with the crash drawn in the same position on both paths. The upper path has no durable record that a delete was owed, so nothing anywhere can discover the omission. The lower path wrote that obligation inside the transaction, so recovering it is a matter of reading further down a log that already exists. <b>An invalidation is only as durable as the record it was written into, and a variable in a dead process is not a record.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: you are choosing which guarantee to give up</h2>
+
+  <p>Line the three mechanisms up against what each one needs and the choice stops being a matter of taste. A lifetime needs nothing and gives you a bound. A removal needs delivery and gives you immediacy. A lease or a compare-and-set needs coordination on every miss and gives you correctness under concurrency. No single mechanism gives all three, and the reason is not implementation quality: an entry stored by a process that cannot see the future is going to be wrong occasionally, and the only questions are for how long and who finds out.</p>
+
+  <p>What a design owes its reader, then, is the number. Memcache states one for its own cluster-warming mode - deletes carry a two-second hold-off, and the paper says plainly that "the operational benefits of cold cluster warmup far outweigh the cost of rare cache consistency issues". That is a staleness window written down, argued for, and accepted. The alternative is not a system with no window; it is a system whose window is whatever the last person to set a lifetime happened to type.</p>
+
+  <div class="callout warn">
+    The strongest guarantee a cache-aside design can offer without leases is read-after-write for the writer's own request, and it is worth building deliberately because users notice its absence immediately - they saved a form and the page still shows the old value. Memcache does exactly this: a web server that modifies data "also sends invalidations to its own cluster to provide read-after-write semantics for a single user request". In a smaller system it means the request that performed the write skips the cache on its subsequent read, or reads through to the store, for the rest of that request. It does nothing for any other reader, and saying so out loud is part of the design rather than an admission.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does an entry keep a lifetime even when every write deletes it?</div>
+      <button class="q-opt">A delete is a message, and a lost one is never retried by anything</button>
+      <button class="q-opt">A delete leaves the entry present until the next read refills it</button>
+      <button class="q-opt">A lifetime is what makes the delete arrive in bounded time</button>
+      <button class="q-opt">A lifetime is what the cache uses to choose an eviction victim</button>
+      <div class="q-fb">The lifetime is the only mechanism with no message in it, so it is the only one that still works when the invalidation path is broken - which is exactly why it is the bound rather than the plan. The second option describes what a delete does not do, since a delete removes the entry immediately; the third reverses the relationship; and the fourth confuses expiry with eviction, which lesson 0905 separates.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">In the stale-set race, which participant puts the wrong value into the cache?</div>
+      <button class="q-opt">The writer, by deleting the entry before it updates the row</button>
+      <button class="q-opt">The writer, by updating the entry rather than removing it</button>
+      <button class="q-opt">A reader, by storing a value it read before the write landed</button>
+      <button class="q-opt">The cache, by resurrecting an entry it evicted too early</button>
+      <div class="q-fb">The read path is the culprit: a reader that missed, queried and then stalled writes back a value the writer has already superseded, and no ordering the writer can adopt prevents it. The first option is the ordering bug from lesson 0902, which is a different and separately fixable race; the second describes why removal beats replacement; and the fourth is not a behaviour any cache has.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0905-a-cache-moves-the-failure-it-does-not-remove-it.html">a cache moves the failure</a></b> is what happens to the store at the moment all those entries are removed at once.</li>
+    <li><b>Behind you, <a href="0902-a-write-pattern-chooses-who-waits.html">a write pattern chooses who waits</a></b> is where the ordering rule this page could not rescue was established.</li>
+    <li><b>Sideways, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the same claim-before-you-act mechanism as a lease, applied to a request instead of a fill.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Pick your most-read cached key and write the sentence "a reader may see a value up to N seconds out of date, because ___". Ask the agent to check your N against where the invalidation is actually issued from - inside the transaction, after the commit, or nowhere - and what N becomes when that path is broken.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>&sect;3.2.1 of <a href="https://users.cs.utah.edu/~stutsman/cs6963/public/papers/memcached.pdf">Scaling Memcache at Facebook</a> is two columns and contains the definition of a stale set, the lease mechanism, and the measured effect of both. &sect;4.1 is the invalidation pipeline and is the best short argument in print for deriving invalidations from the commit log rather than from application code. The paper's home is at <a href="https://research.facebook.com/publications/scaling-memcache-at-facebook/">Meta Research</a>.</p>
+
+  <div class="pager">
+    <a href="0903-invalidation-begins-with-the-key.html"><span class="dir">&larr; Previous</span><span class="ttl">Invalidation begins with the key</span></a>
+    <a class="nxt" href="0905-a-cache-moves-the-failure-it-does-not-remove-it.html"><span class="dir">Next &rarr;</span><span class="ttl">A cache moves the failure, it does not remove it</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0904 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

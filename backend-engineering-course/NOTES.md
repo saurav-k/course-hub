@@ -63,6 +63,17 @@ The things that cost an hour, so they cost the next author nothing.
   that prove the mechanism, not a fuller app.
 - Go and Python both need source links for behaviour claims about their runtimes; `RESOURCES.md` holds
   the canonical docs.
+- A Mermaid `timeline` allocates a fixed width per event regardless of how short the label is, so it
+  is the one kind whose overflow shortening does not fix. Measured while writing lesson 0800: four
+  events rendered about 1,190px against an 856px figure, and cutting the label text moved it by 30px.
+  Three events is what fits a reading column at desktop width. `hub.js` does give an overflowing
+  figure a `tabindex`, so a wide one scrolls and is keyboard reachable rather than clipped.
+- A `mindmap` and a `flowchart TB` both widen unboundedly across the reading column. Shortening the
+  deepest labels is what pulls them back, and the number to check is the rendered `svg` width against
+  the `figure` width rather than anything in the source.
+- Codd's 1970 paper is paywalled on the ACM digital library and every mirror tried returned a 403, a
+  404 or an unparsed PDF. Ground the relational model on the PostgreSQL documentation, which states
+  the same properties in prose a lesson can quote, and leave the paper in `## Gaps`.
 
 ## Honesty notes
 

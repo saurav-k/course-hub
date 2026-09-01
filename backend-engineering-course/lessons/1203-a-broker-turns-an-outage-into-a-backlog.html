@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A broker turns an outage into a backlog - Backend Engineering</title>
+<meta name="description" content="A message broker owns a message between sent and done, and the acknowledgement is the boundary. Routing, redelivery, dead-lettering and the dual-write problem all follow from where that boundary sits.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 12 &middot; Inter-service communication &middot; Lesson 1203</div>
+  <h1>A broker owns the message between sent and done, and the acknowledgement is where that ownership ends</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The asynchronous branch, and the guarantee it actually offers. &middot;
+    <a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ - Consumer acknowledgements and publisher confirms</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The whole mechanism is one boundary: the broker keeps a message until a consumer <b>acknowledges</b> it, and only then is it gone.</li>
+      <li>Automatic acknowledgement moves that boundary to delivery - "a message is considered to be successfully delivered immediately after it is sent" - which the documentation calls <b>unsafe</b>.</li>
+      <li>An unacknowledged delivery is <b>requeued</b> when its channel or connection closes, which is what makes broker delivery <b>at least once</b> and duplicates ordinary.</li>
+      <li>Producers publish to an <b>exchange</b>, never to a queue. Bindings decide whether one message becomes one unit of work or ten copies for ten readers.</li>
+      <li>What it costs: your database and the broker are two systems with no shared transaction, so publishing after a commit is a <b>dual write</b> that can half-happen.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">This is the branch of lesson 1200 where the sender stops waiting.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 1201, 1202&lt;br/&gt;the call, and the&lt;br/&gt;deadline that bounds it"] --> T["THIS PAGE&lt;br/&gt;the queue that holds&lt;br/&gt;work for later"]
+  T --> A["Lesson 1204&lt;br/&gt;the log, which keeps&lt;br/&gt;what a queue discards"]
+  T --> B["Module 10&lt;br/&gt;background jobs&lt;br/&gt;and workers"]
+  W["Lesson 1200&lt;br/&gt;the asynchronous branch"] -.- T
+    </div>
+    <figcaption>The two previous pages were about making a wait safe. This one removes the wait, and in exchange takes on a third system that now holds work your service has already reported as done. The failure you design for is no longer a caller seeing an error - it is a backlog nobody is watching. <b>A broker does not delete a failure, it relocates it to a place where you have time to notice.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: who is holding the message right now</h2>
+
+  <p>At every instant a message is in exactly one of three places: with the producer, with the broker, or being worked on by a consumer. The design question that decides everything else is when the broker is allowed to forget it, and the answer is: when a consumer says so. That single decision generates redelivery, duplicate handling, dead-lettering and the shape of a worker's error handling.</p>
+
+  <p><a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ</a> offers the shortcut and warns about it in the same breath. In automatic acknowledgement mode "a message is considered to be successfully delivered immediately after it is sent", so the broker forgets it before anyone has done anything with it, and the documentation says outright that this "should be considered unsafe and not suitable for all workloads". If the consumer's connection drops mid-work, the message the server sent "will be lost". Manual acknowledgement moves the boundary to the end of the work, which is where it belongs.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The life of one delivery</div>
+    <div class="fig-claim">Every exit except the acknowledgement puts the message back in play.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Ready: published and routed
+  Ready --> Unacked: delivered to a consumer
+  Unacked --> [*]: basic.ack - the work is done
+  Unacked --> Ready: channel closes before an ack
+  Unacked --> Ready: nack or reject with requeue true
+  Unacked --> DeadLettered: nack or reject with requeue false
+  Ready --> DeadLettered: TTL expired, or queue length exceeded
+  DeadLettered --> [*]: republished to another exchange
+    </div>
+    <figcaption>Four ways out and only one of them means success. Note that the two paths back to Ready are not errors the broker is recovering from - they are the guarantee working: an unacknowledged delivery is automatically requeued when the channel or connection on which it happened is closed, whether that was a crash, a network drop or a protocol exception. <b>The broker treats silence as failure, which is why a consumer that dies loses nothing and a consumer that acknowledges early loses everything.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism</h2>
+
+  <h3 id="at-least-once">Redelivery, and the duplicate that follows</h3>
+  <p>Requeueing has a consequence the documentation states rather than implies: "consumers must be prepared to handle redeliveries and otherwise be implemented with idempotence in mind". A message that was fully processed by a worker that then crashed before acknowledging will be delivered again, and the work will be done twice. The broker marks the second copy - redeliveries carry a boolean <code>redeliver</code> property set to true, false on a first delivery - but that flag tells you a redelivery is possible, not that the first attempt succeeded.</p>
+
+  <p>So the guarantee a broker of this kind offers is at least once, and the design consequence is not optional: the handler must be safe to run twice on the same input. That is the same requirement lesson 0605 imposed on an HTTP endpoint, arrived at from the other direction, and the mechanism is the same - a stored key, claimed before the work, that lets the second run recognise itself.</p>
+
+  <h3 id="poison-message">Dead-lettering, for the message that will never succeed</h3>
+  <p>Requeueing on failure is right for a transient error and catastrophic for a permanent one: a message that always throws is requeued, redelivered, throws again, and occupies a worker forever. Dead-lettering is the escape. A message is <a href="https://www.rabbitmq.com/docs/dlx">dead-lettered</a> when a consumer rejects it with <code>requeue</code> set to false, when a per-message TTL expires, when the queue exceeds a length limit, or when it has been returned to a quorum queue more times than its delivery limit. The broker republishes it to a dead letter exchange, which is an ordinary exchange, and records the history in an <code>x-death</code> header that counts how many times and for what reason.</p>
+
+  <h3 id="exchange-routing">Routing decides work-sharing or fan-out</h3>
+  <p>Producers do not publish to queues. They publish to <a href="https://www.rabbitmq.com/tutorials/amqp-concepts">an exchange</a>, and bindings - rules with an optional routing key - decide which queues receive a copy. The exchange type is the routing algorithm: a direct exchange matches the routing key exactly, a topic exchange matches it as a pattern, a headers exchange ignores it in favour of header values, and a fanout exchange "routes messages to all of the queues that are bound to it and the routing key is ignored".</p>
+
+  <p>That indirection is what lets one publish mean two entirely different things. Many consumers on <b>one</b> queue share the work, because each message goes to one of them. One publish to a fanout exchange bound to <b>several</b> queues gives every reader its own copy. Getting this backwards is how a team ends up sending three confirmation emails, or how a job runs on one worker when it was meant to reach all of them.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One publish, two topologies</div>
+    <div class="fig-claim">The difference between sharing work and copying it is the binding, not the code.</div>
+    <div class="mermaid">
+flowchart LR
+  P1["publish&lt;br/&gt;order.placed"] --> D["Direct exchange&lt;br/&gt;one bound queue"]
+  D --> Q1["orders queue&lt;br/&gt;two workers share it"]
+  P2["publish&lt;br/&gt;order.placed"] --> F["Fanout exchange&lt;br/&gt;routing key ignored"]
+  F --> Q2["email queue"]
+  F --> Q3["search queue"]
+  F --> Q4["ledger queue"]
+    </div>
+    <figcaption>Identical publishing code in both halves. In the upper arrangement two workers drain the single bound queue and each message reaches exactly one of them, which is how you scale a slow handler. In the lower arrangement the fanout exchange copies the message into all three bound queues, which is how three unrelated services learn about one event. <b>Scale by adding consumers to a queue - add readers by adding queues to the exchange.</b></figcaption>
+  </figure>
+
+  <h2 id="dual-write">3. The trade-off: the dual write</h2>
+
+  <p>Here is the cost that no broker feature solves. Your service commits an order to its database and then publishes <code>order.placed</code>. Those are two systems with no transaction between them. Crash after the commit and before the publish, and the order exists with no event; publish first and crash before the commit, and the event describes an order that does not. Neither is recoverable by retrying, because the process that knew what to do is gone.</p>
+
+  <p>The standard answer is the <a href="https://microservices.io/patterns/data/transactional-outbox.html">transactional outbox</a>: write the message into an <code>outbox</code> table in the <b>same</b> local transaction that writes the business data, so the two either both happen or neither does, and let a separate relay read that table and publish. The catalogued drawback is honest and worth quoting: "the message relay might publish a message more than once. It might, for example, crash after publishing a message but before recording the fact that it has done so." Which lands you exactly where the section above already left you - the consumer has to be idempotent - and that is the point. The outbox buys atomicity, not exactly-once.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Dual write and outbox</div>
+    <div class="fig-claim">The outbox moves the crash window into a place a transaction covers.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant S as Service
+  participant DB as Database
+  participant B as Broker
+  S->>DB: commit the order
+  Note over S: crash here - the order&lt;br/&gt;exists, the event never will
+  S->>B: publish order.placed
+  Note over S,DB: the outbox arrangement
+  S->>DB: one transaction - the order&lt;br/&gt;and the outbox row together
+  Note over DB: both rows, or neither
+  DB->>B: relay reads the row&lt;br/&gt;and publishes it
+  B-->>DB: relay marks it sent&lt;br/&gt;- or crashes and repeats
+    </div>
+    <figcaption>In the upper half the two writes are independent and the gap between them is unprotected. In the lower half there is only one write that can fail, because the message is business data until the relay picks it up. The relay can still publish twice, which is the residue the pattern does not remove. <b>The outbox turns an inconsistency you cannot detect into a duplicate you already had to handle.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    A queue is a place where work goes to be forgotten. Nobody is waiting for it, so nothing complains when it stops moving: the symptom of a broken consumer is a number on a dashboard nobody opened. Alert on queue depth and on the age of the oldest unacknowledged message, and alert on the dead letter queue being non-empty, because the whole point of dead-lettering is that it fails quietly on purpose.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A worker finishes the work, then crashes before acknowledging. What happens?</div>
+      <button class="q-opt">The broker drops it, since the delivery was made</button>
+      <button class="q-opt">It is requeued, and the work is done twice</button>
+      <button class="q-opt">It is dead-lettered, since the consumer failed</button>
+      <button class="q-opt">The broker replays it once the worker returns</button>
+      <div class="q-fb">Any delivery not acknowledged when the channel or connection closes is automatically requeued, so the message goes to another consumer and the work runs again. The first option describes automatic acknowledgement mode, the third needs an explicit reject with requeue false, and the fourth invents a per-consumer replay the protocol has no concept of.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Three services each need to react to one <code>order.placed</code> event. What routes it?</div>
+      <button class="q-opt">One queue with three consumers reading from it</button>
+      <button class="q-opt">One direct exchange with three matching routing keys</button>
+      <button class="q-opt">A fanout exchange with three queues bound to it</button>
+      <button class="q-opt">Three publishes, one to each service's own queue</button>
+      <div class="q-fb">A fanout exchange copies the message into every bound queue and ignores the routing key, so each service gets its own copy and drains it at its own pace. One queue with three consumers shares the work instead - each message reaches exactly one. The second option describes a routing scheme, not a duplication one, and the fourth puts knowledge of every consumer into the producer.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="1204-a-log-is-not-a-queue.html">a log is not a queue</a></b> keeps the message after it is read, which changes what the same three services can do with it.</li>
+    <li><b>Behind you, <a href="0605-idempotency-keys-make-retries-safe.html">idempotency keys make retries safe</a></b> is the mechanism this page's at-least-once guarantee makes mandatory.</li>
+    <li><b>Ahead, <a href="1205-a-websocket-is-a-session-and-a-session-is-state.html">a WebSocket is a session</a></b> is the third branch, where the server rather than the sender starts the conversation.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take one handler behind a queue in your system and ask what happens if it runs twice on the same message - not whether it will, but what the second run does. Then ask the agent where your service does a dual write today, and what evidence would exist if the crash landed between the two halves.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://www.rabbitmq.com/docs/confirms">RabbitMQ's acknowledgements page</a> is the clearest statement of the boundary this page is built on, including the warning about automatic mode and the redelivery rule. Read <a href="https://www.rabbitmq.com/tutorials/amqp-concepts">AMQP 0-9-1 concepts</a> for the exchange types, <a href="https://www.rabbitmq.com/docs/dlx">dead letter exchanges</a> for the four dead-lettering conditions, and <a href="https://microservices.io/patterns/data/transactional-outbox.html">the transactional outbox pattern</a> for the dual write and its residue.</p>
+
+  <div class="pager">
+    <a href="1202-a-deadline-is-the-callers-only-defence.html"><span class="dir">&larr; Previous</span><span class="ttl">A deadline is the caller's only defence</span></a>
+    <a class="nxt" href="1204-a-log-is-not-a-queue.html"><span class="dir">Next &rarr;</span><span class="ttl">A log is not a queue</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 1203 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Compatibility is a rule, not a hope - Backend Engineering</title>
+<meta name="description" content="Adding an optional field is safe and reusing a field number is corruption, but the rules are not the same for JSON and protobuf, because the two encodings key on different things.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Serialization and contracts &middot; Lesson 0405</div>
+  <h1>Adding a field is safe and reusing a number is corruption, and JSON and protobuf disagree about renaming</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The rules follow from what the reader matches on. &middot;
+    <a href="https://protobuf.dev/programming-guides/proto3/#updating">Protocol Buffers - Updating a Message Type</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two directions, and a rolling deploy exercises both at once: <b>backward</b> is new code reading old data, <b>forward</b> is old code reading new data.</li>
+      <li>In protobuf the wire identity is the number, so <b>renaming is free and reusing a number is corruption</b>. Deleting a field means reserving its number forever.</li>
+      <li>In JSON the wire identity is the name, so <b>renaming is the breaking change</b> that protobuf renaming is not. ProtoJSON keys on names too, which is why it accepts both spellings.</li>
+      <li>Some type changes are wire-compatible and <b>lossy</b>: an int64 read as an int32 truncates exactly as a cast would, with no error.</li>
+      <li>What it costs: a field you added and regret is a field you keep forever, marked reserved, because the alternative is a number that means two things.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The module closes on the rules that keep the earlier four true over time.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lessons 0400 to 0404&lt;br/&gt;the contract at&lt;br/&gt;one moment"] --> T["THIS PAGE&lt;br/&gt;how the contract may&lt;br/&gt;change over time"]
+  T --> A["Module 06&lt;br/&gt;API versioning,&lt;br/&gt;when a rule is not enough"]
+  T --> B["Module 12&lt;br/&gt;gRPC and Kafka, where&lt;br/&gt;schemas outlive services"]
+  T --> C["Module 13&lt;br/&gt;shipping, where the&lt;br/&gt;rolling deploy happens"]
+  W["Module 04&lt;br/&gt;Serialization and contracts"] -.- T
+    </div>
+    <figcaption>Everything so far described a contract as it stands today. A running system never has one version of anything, so this page is about the only interesting question left: which edits you may make while both versions are live. <b>A compatibility rule is what turns a deploy from an event you coordinate into one you do not.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: both directions, at the same time</h2>
+
+  <h3 id="backward-compatibility">Backward: new code reading old data</h3>
+  <p>Backward compatibility is the direction people think of first, because it is the one a database migration has. Your new consumer must still make sense of every message written by the producer as it stands, and of everything already sitting in a queue, a log or a table.</p>
+
+  <h3 id="forward-compatibility">Forward: old code reading new data</h3>
+  <p>Forward compatibility is the harder one and the one a rolling deploy forces on you. While the deploy is in flight, some instances run the new build and some run the old, and the old ones are receiving messages from the new ones. That is old code reading new data, and it is not a theoretical case: it is every deploy, for as long as the deploy takes.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A rolling deploy, mid-flight</div>
+    <div class="fig-claim">Both compatibility directions are exercised by the same deploy.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant N as Producer instance, new build
+  participant O as Producer instance, old build
+  participant CN as Consumer, new build
+  participant CO as Consumer, old build
+  N->>CO: a message carrying the new field
+  CO->>CO: old code reads new data - forward
+  O->>CN: a message without the new field
+  CN->>CN: new code reads old data - backward
+    </div>
+    <figcaption>Four processes from two builds, all live at once, which is the ordinary state of a fleet for several minutes on every release. Neither pairing is unusual and neither can be avoided by ordering the rollout, because both producers and both consumers overlap. <b>Any schema change that is safe in only one direction breaks something during its own deploy.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: the protobuf rules, stated</h2>
+
+  <h3 id="reserved-field-number">Safe, unsafe, and safe but lossy</h3>
+  <p>Because the reader matches on the number, the rules are unusually crisp and the language guide states them as a list. Adding a field is safe: old code parses the message and keeps the new field as an unknown one. Removing a field is safe provided the number is never used again. Adding a value to an enum is safe. Turning a single field with explicit presence into a member of a <em>new</em> <code>oneof</code> is safe; moving it into an existing one is not. Changing the number of an existing field is not safe, and neither is reusing a number that a deleted field once held.</p>
+
+  <p>A third category exists and is the one that bites: changes that parse and lose information. <code>int32</code>, <code>uint32</code>, <code>int64</code>, <code>uint64</code> and <code>bool</code> are all mutually compatible on the wire, and a 64-bit value read as an <code>int32</code> is truncated to 32 bits exactly as a C++ cast would truncate it. <code>sint32</code> and <code>sint64</code> are compatible with each other and with none of the others. <code>string</code> and <code>bytes</code> are compatible as long as the bytes are valid UTF-8. Each of those is a legal edit that produces wrong values rather than an error, which is lesson 0400's silence arriving on schedule.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The three categories of edit</div>
+    <div class="fig-claim">The middle group is the one no tool reports.</div>
+    <div class="mermaid">
+flowchart LR
+  S1["Add a field"] --> S["Safe&lt;br/&gt;both directions hold"]
+  S2["Remove a field&lt;br/&gt;and reserve its number"] --> S
+  S3["Add an enum value"] --> S
+  L1["int64 field read&lt;br/&gt;as int32"] --> L["Parses and loses&lt;br/&gt;truncated like a cast"]
+  L2["string field read&lt;br/&gt;as bytes"] --> L
+  U1["Change a field's number"] --> U["Unsafe&lt;br/&gt;the reader matches&lt;br/&gt;the wrong field"]
+  U2["Reuse a deleted number"] --> U
+  U3["Move into an&lt;br/&gt;existing oneof"] --> U
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef mid fill:var(--gold-soft),stroke:var(--gold)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class S ok
+  class L mid
+  class U bad
+    </div>
+    <figcaption>The published rules sorted by what happens when you break them. A compiler catches none of these, because each edit is valid in the file it is made in - the disagreement only exists between two builds. This is why <code>reserved</code> exists at all: it is the one part of the rule set the compiler can enforce, by refusing a number or a name you have promised never to use again. <b>Reserve a number the day you delete its field, because nothing else prevents the reuse.</b></figcaption>
+  </figure>
+
+  <h2>3. The mechanism: JSON's rules are the other way round</h2>
+
+  <h3 id="json-compatibility">The identity is the name, so the name is frozen</h3>
+  <p>Run the same reasoning over JSON and the answers invert, because the reader is matching a string. Adding a member is safe, for the same reason and with the same caveat: most parsers ignore what they do not recognise, and Go's <code>encoding/json</code> ignores unmatched keys by default. Removing a member is safe only if no consumer required it, which is a fact about your consumers rather than about the format. And renaming a member is a hard break, in both directions at once: the old reader stops finding the value and the new reader finds nothing in old data.</p>
+
+  <p>The clearest evidence that this is a real difference rather than a stylistic one is that the Protocol Buffers project had to write it down. The <a href="https://protobuf.dev/programming-guides/json/">ProtoJSON mapping</a> keys on names, defaulting to lowerCamelCase, and it specifies that a parser must accept both that name and the original proto field name. It also states that a ProtoJSON parser should reject unknown fields by default, which is the opposite of the binary format's retention rule. The same schema, encoded two ways, gives you two different sets of legal edits.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The same edit, two encodings</div>
+    <div class="fig-claim">Renaming is free on one wire and breaking on the other.</div>
+    <div class="mermaid">
+flowchart LR
+  E["Rename customer_email&lt;br/&gt;to contact_email"] --> B["Binary protobuf&lt;br/&gt;reader matches field 3"]
+  E --> J["JSON or ProtoJSON&lt;br/&gt;reader matches a string"]
+  B --> B2["No change on the wire&lt;br/&gt;every consumer unaffected"]
+  J --> J2["Old name no longer found&lt;br/&gt;value silently absent"]
+  classDef ok fill:var(--ok-soft),stroke:var(--ok)
+  classDef bad fill:var(--warn-soft),stroke:var(--warn)
+  class B2 ok
+  class J2 bad
+    </div>
+    <figcaption>One edit to one schema, evaluated against the two encodings that schema can produce. A service that offers both a gRPC interface and a JSON gateway is subject to both columns at once, so the safe rule for such a service is the intersection: never rename, never renumber. <b>The compatibility rules are a property of the encoding, not of the schema language, so a second encoding is a second rule set.</b></figcaption>
+  </figure>
+
+  <h2>4. The trade-off: wire-safe is not program-safe</h2>
+
+  <p>The rules above are about parsing, and parsing is not the whole story. Adding an enum value is listed as safe, and it is: an older reader receives the unknown number, keeps it, and re-serialises it intact. What that reader then does with it is entirely your problem. Generated code will typically surface it as the zero value or as an unrecognised case, so a switch statement written before the value existed falls through to its default, and a status the business now treats as distinct is handled as if it were something else.</p>
+
+  <p>So the discipline is two-layered. Follow the encoding's rules so the bytes survive, and separately make every consumer handle a value it does not recognise in a way you chose deliberately: reject it, route it to a human, or pass it through untouched. The rule set keeps your data intact; only your own code keeps your behaviour correct.</p>
+
+  <div class="callout warn">
+    A compatibility rule protects you only where it is checked, and none of these is checked by the compiler that builds each side. What checks them is a schema registry or a CI step that compares the proposed schema against the deployed one and fails the build on a forbidden edit. Without that, the rules on this page are a convention, and a convention is exactly what lesson 0400 called a contract nobody re-reads. If you take one operational action from this module, make it that comparison.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why must a deleted protobuf field number be reserved rather than freed?</div>
+      <button class="q-opt">Old messages still carry it, and a reuse misreads them</button>
+      <button class="q-opt">The compiler cannot renumber the fields that follow it</button>
+      <button class="q-opt">Reserving is what removes it from the generated code</button>
+      <button class="q-opt">The number stays in the wire format until a major bump</button>
+      <div class="q-fb">Messages written before the deletion are still in queues, logs and tables, and a new field on the same number would parse those old bytes as its own value. Field numbers are chosen by hand and never renumbered automatically, deleting the field is what removes it from generated code, and there is no version bump that retires a number.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which edit is safe in binary protobuf and breaking in JSON?</div>
+      <button class="q-opt">Deleting a field that a consumer reads</button>
+      <button class="q-opt">Changing an int64 field to an int32</button>
+      <button class="q-opt">Renaming a field and keeping its number</button>
+      <button class="q-opt">Adding a value to an existing enum</button>
+      <div class="q-fb">The binary format matches on the number, so a rename never reaches the wire, while a JSON reader matches the name and simply stops finding the value. Deleting a field a consumer needs breaks both, narrowing an int64 truncates in both, and adding an enum value is wire-safe in both and is a program concern rather than an encoding one.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Module 06, API design</b> takes over where a compatibility rule runs out and an explicit version becomes the honest answer.</li>
+    <li><b>Behind you, <a href="0402-schema-first-makes-the-contract-the-source.html">schema-first makes the contract the source</a></b> is where the numbering that produces these rules was chosen.</li>
+    <li><b>Behind you, <a href="0400-a-wire-format-is-a-contract-you-can-break-silently.html">a wire format is a contract</a></b> named the silence that every unsafe edit here produces.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Take the last three schema changes your team shipped and classify each as safe, lossy or unsafe in the encoding you actually use. Ask the agent which of them would have been caught by comparing the new schema against the deployed one in CI, and what that check would have had to know.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The <a href="https://protobuf.dev/programming-guides/proto3/#updating">Updating a Message Type</a> section is the complete rule list, including the compatible numeric conversions and the truncation behaviour, and it is short enough to read in one sitting. The <a href="https://protobuf.dev/programming-guides/json/">ProtoJSON mapping</a> is where the name-keyed rules and the unknown-field default are specified, and reading the two together is the fastest way to see that the encoding, not the schema, sets the rules.</p>
+
+  <div class="pager">
+    <a href="0404-content-negotiation-picks-the-representation.html"><span class="dir">&larr; Previous</span><span class="ttl">Content negotiation picks the representation</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0405 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

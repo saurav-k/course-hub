@@ -45,6 +45,352 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0205-cors-is-the-browser-enforcing-the-servers-own-policy.html"
         }
       ]
+    },
+    {
+      "n": "03",
+      "title": "Routing",
+      "lessons": [
+        {
+          "title": "A route is a pattern and a method",
+          "href": "lessons/0300-a-route-is-a-pattern-and-a-method.html"
+        },
+        {
+          "title": "Path parameters and query strings say different things",
+          "href": "lessons/0301-path-parameters-and-query-strings-say-different-things.html"
+        },
+        {
+          "title": "Matching is a tree, not a list of ifs",
+          "href": "lessons/0302-matching-is-a-tree-not-a-list-of-ifs.html"
+        },
+        {
+          "title": "Middleware is a chain, and order is the design",
+          "href": "lessons/0303-middleware-is-a-chain-and-order-is-the-design.html"
+        },
+        {
+          "title": "404 and 405 are routing verdicts",
+          "href": "lessons/0304-404-and-405-are-routing-verdicts.html"
+        },
+        {
+          "title": "Mounting composes routers",
+          "href": "lessons/0305-mounting-composes-routers.html"
+        }
+      ]
+    },
+    {
+      "n": "04",
+      "title": "Serialization and contracts",
+      "lessons": [
+        {
+          "title": "A wire format is a contract you can break silently",
+          "href": "lessons/0400-a-wire-format-is-a-contract-you-can-break-silently.html"
+        },
+        {
+          "title": "JSON is text and text has no types",
+          "href": "lessons/0401-json-is-text-and-text-has-no-types.html"
+        },
+        {
+          "title": "Schema-first makes the contract the source",
+          "href": "lessons/0402-schema-first-makes-the-contract-the-source.html"
+        },
+        {
+          "title": "Validation belongs at the boundary, once",
+          "href": "lessons/0403-validation-belongs-at-the-boundary-once.html"
+        },
+        {
+          "title": "Content negotiation picks the representation",
+          "href": "lessons/0404-content-negotiation-picks-the-representation.html"
+        },
+        {
+          "title": "Compatibility is a rule, not a hope",
+          "href": "lessons/0405-compatibility-is-a-rule-not-a-hope.html"
+        }
+      ]
+    },
+    {
+      "n": "05",
+      "title": "The layered service",
+      "lessons": [
+        {
+          "title": "A layer is a boundary you can test across",
+          "href": "lessons/0500-a-layer-is-a-boundary-you-can-test-across.html"
+        },
+        {
+          "title": "The controller translates transport into intent",
+          "href": "lessons/0501-the-controller-translates-transport-into-intent.html"
+        },
+        {
+          "title": "The service layer owns the decision",
+          "href": "lessons/0502-the-service-layer-owns-the-decision.html"
+        },
+        {
+          "title": "The repository hides the store behind a contract",
+          "href": "lessons/0503-the-repository-hides-the-store-behind-a-contract.html"
+        },
+        {
+          "title": "Request context carries what every layer needs",
+          "href": "lessons/0504-request-context-carries-what-every-layer-needs.html"
+        },
+        {
+          "title": "Dependency direction is the design",
+          "href": "lessons/0505-dependency-direction-is-the-design.html"
+        }
+      ]
+    },
+    {
+      "n": "06",
+      "title": "API design",
+      "lessons": [
+        {
+          "title": "An API is a promise with a cost of breaking",
+          "href": "lessons/0600-an-api-is-a-promise-with-a-cost-of-breaking.html"
+        },
+        {
+          "title": "Resources are nouns and the method is the verb",
+          "href": "lessons/0601-resources-are-nouns-and-the-method-is-the-verb.html"
+        },
+        {
+          "title": "Collections need pagination, not a limit",
+          "href": "lessons/0602-collections-need-pagination-not-a-limit.html"
+        },
+        {
+          "title": "An error body is part of the contract",
+          "href": "lessons/0603-an-error-body-is-part-of-the-contract.html"
+        },
+        {
+          "title": "Versioning is choosing who pays to change",
+          "href": "lessons/0604-versioning-is-choosing-who-pays-to-change.html"
+        },
+        {
+          "title": "Idempotency keys make retries safe",
+          "href": "lessons/0605-idempotency-keys-make-retries-safe.html"
+        }
+      ]
+    },
+    {
+      "n": "07",
+      "title": "Auth and security",
+      "lessons": [
+        {
+          "title": "Authentication answers who, authorization answers what",
+          "href": "lessons/0700-authentication-answers-who-authorization-answers-what.html"
+        },
+        {
+          "title": "A session is server state behind an opaque id",
+          "href": "lessons/0701-a-session-is-server-state-behind-an-opaque-id.html"
+        },
+        {
+          "title": "A token moves the state to the client",
+          "href": "lessons/0702-a-token-moves-the-state-to-the-client.html"
+        },
+        {
+          "title": "OAuth delegates access without sharing the password",
+          "href": "lessons/0703-oauth-delegates-access-without-sharing-the-password.html"
+        },
+        {
+          "title": "Injection is data arriving where code is expected",
+          "href": "lessons/0704-injection-is-data-arriving-where-code-is-expected.html"
+        },
+        {
+          "title": "XSS is code injected into someone else's browser",
+          "href": "lessons/0705-xss-is-code-injected-into-someone-elses-browser.html"
+        },
+        {
+          "title": "CSRF is the server trusting the browser",
+          "href": "lessons/0706-csrf-is-the-server-trusting-the-browser.html"
+        }
+      ]
+    },
+    {
+      "n": "08",
+      "title": "Data",
+      "lessons": [
+        {
+          "title": "A constraint is the only rule every writer obeys",
+          "href": "lessons/0800-a-constraint-is-the-only-rule-every-writer-obeys.html"
+        },
+        {
+          "title": "A transaction is a boundary and the log keeps it",
+          "href": "lessons/0801-a-transaction-is-a-boundary-and-the-log-keeps-it.html"
+        },
+        {
+          "title": "Isolation levels are a menu of anomalies",
+          "href": "lessons/0802-isolation-levels-are-a-menu-of-anomalies.html"
+        },
+        {
+          "title": "A lock is held until commit",
+          "href": "lessons/0803-a-lock-is-held-until-commit.html"
+        },
+        {
+          "title": "An index is a second sorted copy",
+          "href": "lessons/0804-an-index-is-a-second-sorted-copy.html"
+        },
+        {
+          "title": "A composite index has one useful order",
+          "href": "lessons/0805-a-composite-index-has-one-useful-order.html"
+        },
+        {
+          "title": "The non-relational map is four shapes",
+          "href": "lessons/0806-the-non-relational-map-is-four-shapes.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Caching",
+      "lessons": [
+        {
+          "title": "A cache is a bet that the question repeats",
+          "href": "lessons/0900-a-cache-is-a-bet-that-the-question-repeats.html"
+        },
+        {
+          "title": "Cache-aside puts the policy in your code",
+          "href": "lessons/0901-cache-aside-puts-the-policy-in-your-code.html"
+        },
+        {
+          "title": "A write pattern chooses who waits",
+          "href": "lessons/0902-a-write-pattern-chooses-who-waits.html"
+        },
+        {
+          "title": "Invalidation begins with the key",
+          "href": "lessons/0903-invalidation-begins-with-the-key.html"
+        },
+        {
+          "title": "Invalidation buys a staleness window",
+          "href": "lessons/0904-invalidation-buys-a-staleness-window.html"
+        },
+        {
+          "title": "A cache moves the failure, it does not remove it",
+          "href": "lessons/0905-a-cache-moves-the-failure-it-does-not-remove-it.html"
+        }
+      ]
+    },
+    {
+      "n": "10",
+      "title": "Async work and search",
+      "lessons": [
+        {
+          "title": "Async work is work that outlives the response",
+          "href": "lessons/1000-async-work-is-work-that-outlives-the-response.html"
+        },
+        {
+          "title": "A queue delivers at least once",
+          "href": "lessons/1001-a-queue-delivers-at-least-once.html"
+        },
+        {
+          "title": "A failed job is a policy you wrote in advance",
+          "href": "lessons/1002-a-failed-job-is-a-policy-you-wrote-in-advance.html"
+        },
+        {
+          "title": "A consumer must be idempotent",
+          "href": "lessons/1003-a-consumer-must-be-idempotent.html"
+        },
+        {
+          "title": "Enqueue and commit are two writes",
+          "href": "lessons/1004-enqueue-and-commit-are-two-writes.html"
+        },
+        {
+          "title": "Search is an inverted index, not a scan",
+          "href": "lessons/1005-search-is-an-inverted-index-not-a-scan.html"
+        },
+        {
+          "title": "Relevance is a ranking function",
+          "href": "lessons/1006-relevance-is-a-ranking-function.html"
+        }
+      ]
+    },
+    {
+      "n": "11",
+      "title": "Resilience and observability",
+      "lessons": [
+        {
+          "title": "Errors are values with exactly one owner",
+          "href": "lessons/1100-errors-are-values-with-exactly-one-owner.html"
+        },
+        {
+          "title": "Configuration is an input, not a constant",
+          "href": "lessons/1101-configuration-is-an-input-not-a-constant.html"
+        },
+        {
+          "title": "A log line is a query you will run later",
+          "href": "lessons/1102-a-log-line-is-a-query-you-will-run-later.html"
+        },
+        {
+          "title": "A trace is one request across every hop",
+          "href": "lessons/1103-a-trace-is-one-request-across-every-hop.html"
+        },
+        {
+          "title": "Metrics answer how often, never which one",
+          "href": "lessons/1104-metrics-answer-how-often-never-which-one.html"
+        },
+        {
+          "title": "Graceful shutdown is a sequence, not a signal",
+          "href": "lessons/1105-graceful-shutdown-is-a-sequence-not-a-signal.html"
+        }
+      ]
+    },
+    {
+      "n": "12",
+      "title": "Inter-service communication",
+      "lessons": [
+        {
+          "title": "A call, a queue and a socket are three couplings",
+          "href": "lessons/1200-a-call-a-queue-and-a-socket-are-three-couplings.html"
+        },
+        {
+          "title": "gRPC is a contract on a connection",
+          "href": "lessons/1201-grpc-is-a-contract-on-a-connection.html"
+        },
+        {
+          "title": "A deadline is the caller's only defence",
+          "href": "lessons/1202-a-deadline-is-the-callers-only-defence.html"
+        },
+        {
+          "title": "A broker turns an outage into a backlog",
+          "href": "lessons/1203-a-broker-turns-an-outage-into-a-backlog.html"
+        },
+        {
+          "title": "A log is not a queue",
+          "href": "lessons/1204-a-log-is-not-a-queue.html"
+        },
+        {
+          "title": "A WebSocket is a session, and a session is state",
+          "href": "lessons/1205-a-websocket-is-a-session-and-a-session-is-state.html"
+        }
+      ]
+    },
+    {
+      "n": "13",
+      "title": "Scale, fleet and shipping",
+      "lessons": [
+        {
+          "title": "Concurrency is how a server waits",
+          "href": "lessons/1300-concurrency-is-how-a-server-waits.html"
+        },
+        {
+          "title": "Shared state is where concurrency is paid for",
+          "href": "lessons/1301-shared-state-is-where-concurrency-is-paid-for.html"
+        },
+        {
+          "title": "Statelessness is what makes a fleet possible",
+          "href": "lessons/1302-statelessness-is-what-makes-a-fleet-possible.html"
+        },
+        {
+          "title": "A container is a process with its own view",
+          "href": "lessons/1303-a-container-is-a-process-with-its-own-view.html"
+        },
+        {
+          "title": "Kubernetes is a control loop, not a deployer",
+          "href": "lessons/1304-kubernetes-is-a-control-loop-not-a-deployer.html"
+        },
+        {
+          "title": "Tests buy confidence at different prices",
+          "href": "lessons/1305-tests-buy-confidence-at-different-prices.html"
+        },
+        {
+          "title": "The pipeline ships the artefact you tested",
+          "href": "lessons/1306-the-pipeline-ships-the-artefact-you-tested.html"
+        }
+      ]
     }
   ],
   "extras": [

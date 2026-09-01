@@ -4092,6 +4092,42 @@
     markScrollables();
   }
 
+  /* ============================================================
+     THE PAGE'S ONE ARROWHEAD
+
+     A hand-drawn diagram needs a connector with a head on it, and an SVG head
+     is a `<marker>`, which is a definition referenced by id. That id has to be
+     unique in the document, so a `<defs>` block copied into each figure
+     collides the moment a page carries two diagrams: the second figure's
+     `url(#hub-arrow)` resolves to the first figure's marker, which renders,
+     validates, and reaches no console. One marker per page, owned here,
+     removes the collision by removing the copies - and it means no page's
+     markup mentions it, which is what lets the vocabulary reach all 797 pages
+     without one of them being edited.
+
+     `fill="context-stroke"` is the whole design. The head takes the colour of
+     the line it sits on, so `class="d-flow s-alarm"` draws a red line with a
+     red head and the author states no colour anywhere. An arrowhead that
+     cannot disagree with what it points along is one less thing a figure can
+     be quietly wrong about.
+
+     This is the one part of the diagram vocabulary that needs this file. With
+     the script blocked a connector still draws, in the right colour, and loses
+     only its head, which is why the skill tells an author never to rest a
+     figure's direction on the arrowhead alone.
+     ============================================================ */
+  function mountFigureDefs() {
+    if (document.getElementById('hub-arrow')) return;
+    var holder = document.createElement('div');
+    holder.innerHTML =
+      '<svg class="hub-defs" aria-hidden="true" focusable="false"><defs>' +
+      '<marker id="hub-arrow" markerWidth="7" markerHeight="7" refX="6" refY="2.5"' +
+      ' orient="auto" markerUnits="strokeWidth">' +
+      '<path d="M0 0 L6 2.5 L0 5 Z" fill="context-stroke"/>' +
+      '</marker></defs></svg>';
+    document.body.appendChild(holder.firstChild);
+  }
+
   function wireCopyButtons() {
     Array.prototype.forEach.call(document.querySelectorAll('pre'), function (block) {
       var button = el('button', 'copy-btn', 'copy');
@@ -4391,6 +4427,9 @@
      3. WIRE PHASE
      ============================================================ */
   function start() {
+    /* First, because a hand-drawn connector is already on the page and paints
+       its head the moment the marker exists. */
+    mountFigureDefs();
     var outline = window.COURSE_OUTLINE;
     var hasRail = !!(outline && outline.sections && outline.sections.length);
     if (hasRail) {

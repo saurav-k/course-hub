@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Middleware is a chain, and order is the design - Backend Engineering</title>
+<meta name="description" content="Middleware wraps the handler rather than queueing in front of it, so the order you register is the order of the request and the reverse order of the response, and a chain that does not call the next link ends the request where it stands.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">BACKEND ENGINEERING</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Routing &middot; Lesson 0303</div>
+  <h1>Middleware wraps the handler in both directions, so registration order is request order and reverse response order</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The chain around the handler. &middot;
+    <a href="https://peps.python.org/pep-3333/#middleware-components-that-play-both-sides">PEP 3333 - Middleware components</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A middleware is not a step in a queue. It <b>wraps</b> the thing after it: PEP 3333 describes it as an application to the server above and a server to the application below.</li>
+      <li>Wrapping gives every link <b>two passes</b>: code before it calls the next link runs on the way in, code after it runs on the way out.</li>
+      <li>So one registration order gives you two orders. First registered is first in and <b>last out</b>.</li>
+      <li>A link that never calls the next one <b>ends the request</b> there. That is not an error, it is how authentication and rate limits work.</li>
+      <li>What it costs: the outward pass is only real until the first byte is written, and after that the status and fields cannot be changed.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The router found a handler - this is everything wrapped around it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0302&lt;br/&gt;the tree walk that&lt;br/&gt;found one handler"] --> T["THIS PAGE&lt;br/&gt;the chain wrapped&lt;br/&gt;around that handler"]
+  T --> A["Lesson 0304&lt;br/&gt;the verdicts made&lt;br/&gt;before any link runs"]
+  T --> B["Module 05&lt;br/&gt;request context and&lt;br/&gt;the layered service"]
+  T --> C["Module 11&lt;br/&gt;logging, tracing&lt;br/&gt;and error handling"]
+  W["Module 03&lt;br/&gt;Routing"] -.- T
+    </div>
+    <figcaption>Everything a request meets between the router's verdict and your business logic lives here, and so does everything the response meets on its way back out. <b>The chain is where cross-cutting work goes, and its order is a design decision rather than a formality.</b></figcaption>
+  </figure>
+
+  <h2>1. The mental model: an onion, not a queue</h2>
+
+  <p>The word "chain" invites the wrong picture: a row of steps, each finishing before the next begins, with your handler at the end. That picture cannot explain how a timing middleware measures a request, because a step that has already finished has nothing left to measure with.</p>
+
+  <p>PEP 3333 gives the right picture in one sentence: a middleware component acts <b>as an application to its containing server, and as a server to a contained application</b>. It is both halves of the interface at once, which means it holds the call to the next link inside itself. Control goes in through every layer and comes back out through every layer, in reverse. The layers are an onion, and your handler is at the centre.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">In forwards, out backwards</div>
+    <div class="fig-claim">One registration order produces the request order and its exact reverse.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant L as Logging - registered first
+  participant A as Auth - registered second
+  participant H as Handler
+  L->>A: start the timer, pass control on
+  A->>H: identity resolved, pass control on
+  H-->>A: 200 with a body
+  A-->>L: nothing to add on the way out
+  L-->>L: stop the timer, write the log line
+    </div>
+    <figcaption>Two links and a handler, drawn against time. Logging is entered first and left last, which is exactly what makes it able to measure everything inside it, including the auth check. <b>Register a link earlier and you move it outwards, not just forwards.</b></figcaption>
+  </figure>
+
+  <h2>2. The mechanism: a function that returns a handler</h2>
+
+  <h3 id="middleware">The shape, in both voices</h3>
+  <p>Go states it in the type system. A handler is anything with a <code>ServeHTTP</code> method, so a middleware is a function taking a handler and returning a handler. The returned handler closes over the one it was given and decides when to call it. Python's WSGI states the same thing with a callable that holds another callable. Neither framework invented the pattern; it falls out of the interface being the same on both sides.</p>
+
+  <div class="code-cap">middleware.go &middot; Go, net/http, a handler wrapped in a handler</div>
+<pre><code>func withTiming(next http.Handler) http.Handler {
+    return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+        started := time.Now()          // the inward pass
+        next.ServeHTTP(w, r)           // everything inside runs here
+        log.Printf("%s %s took %s",    // the outward pass
+            r.Method, r.URL.Path, time.Since(started))
+    })
+}
+
+srv := withTiming(withAuth(mux))       // outermost written first</code></pre>
+
+  <div class="code-cap">middleware.py &middot; Python, WSGI, a callable that holds a callable</div>
+<pre><code>class Timing:
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        started = time.perf_counter()              # the inward pass
+        body = self.app(environ, start_response)   # everything inside
+        log(environ["PATH_INFO"], time.perf_counter() - started)
+        return body                                # the outward pass
+
+app = Timing(Auth(router))</code></pre>
+
+  <h3 id="middleware-chain">The chain: one order, two directions</h3>
+  <p>Composition is what builds the chain, and the nesting is visible in the source. Express reaches the same arrangement from the other end, by registration: its documentation states that the order of middleware loading is important and that functions loaded first are also executed first. Both statements describe one structure. Registered first means outermost means first in and last out.</p>
+
+  <h3 id="short-circuit">The short circuit: not calling the next link</h3>
+  <p>A link is under no obligation to continue. Express says a middleware that does not end the request-response cycle <b>must</b> call <code>next()</code> or the request hangs, and the contrapositive is the useful half: a link that writes a response and returns without calling <code>next()</code> has ended the request, and nothing inside it ever runs. That is not a failure mode. It is the mechanism behind every authentication gate, rate limiter and maintenance switch you have written.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two orders, two behaviours</div>
+    <div class="fig-claim">Moving one link past another changes what a rejected request costs.</div>
+    <div class="mermaid">
+flowchart LR
+  subgraph good["rate limit outside auth"]
+    G1["rate limit&lt;br/&gt;rejects at the edge"] --> G2["auth&lt;br/&gt;never reached"] --> G3["handler"]
+  end
+  subgraph bad["auth outside rate limit"]
+    B1["auth&lt;br/&gt;verifies a token&lt;br/&gt;on every flood request"] --> B2["rate limit&lt;br/&gt;rejects too late"] --> B3["handler"]
+  end
+    </div>
+    <figcaption>The same two links, registered in the two possible orders, on a request that will be refused either way. On the lower path the expensive signature check has already run before anything decides the request should not have been served at all. <b>Put the cheapest rejection outermost, because everything inside a link is work a short circuit could have avoided.</b></figcaption>
+  </figure>
+
+  <h2>3. The trade-off: the order is now yours to get right</h2>
+
+  <p>The chain buys you one place to put every cross-cutting concern, and charges you for a decision you now have to make deliberately. Three ordering rules cover most of it, and each one follows from the onion rather than from taste.</p>
+
+  <p>Anything that must observe everything goes outermost: request logging, tracing, panic recovery. A recovery link inside the handler cannot catch a panic raised by a link outside it. Anything that rejects goes next, cheapest first, because a short circuit only saves the work still inside it. Anything that <b>prepares</b> state for the handler goes innermost: body parsing, session loading, the request context of Module 05, since only the handler needs it and doing it for a request that will be refused is pure waste.</p>
+
+  <p>The rule that catches people is the outward pass. A link that wants to add a response field - a cache directive, a correlation identifier, a compression encoding - has to be outside anything that might write the response, because the outward pass is where it will do its work and by then it may be too late.</p>
+
+  <div class="callout warn">
+    The outward pass is not symmetric with the inward one, and the asymmetry is in the protocol rather than in any framework. A response's status line and fields go on the wire before its body, so once the first byte is written they are gone. Go's <code>ResponseWriter</code> documents it exactly: changing the header map after a call to <code>WriteHeader</code> or <code>Write</code> has no effect. A middleware that sets a header on the way out is correct only while nothing inside it has started writing, which is why response-shaping links buffer or wrap the writer rather than trusting their position alone.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A link is registered first. Where does it sit in the two passes?</div>
+      <button class="q-opt">First on the way in and first on the way out</button>
+      <button class="q-opt">Last on the way in and last on the way out</button>
+      <button class="q-opt">First on the way in and last on the way out</button>
+      <button class="q-opt">Last on the way in and first on the way out</button>
+      <div class="q-fb">Registered first means outermost, and an onion is entered from the outside and left from the inside, so first in is last out. The first and second options describe a queue rather than a wrapping, and the fourth reverses the nesting entirely.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Where does a rate limiter belong relative to token verification?</div>
+      <button class="q-opt">Outside it, so refusals skip the check</button>
+      <button class="q-opt">Inside it, so only real users are counted</button>
+      <button class="q-opt">Beside it, since neither one calls next</button>
+      <button class="q-opt">Anywhere, since both of them reject</button>
+      <div class="q-fb">A short circuit only saves the work nested inside it, so the cheaper rejection belongs further out. Counting only verified users is a real requirement but it pays a signature check per flood request; middleware nests rather than sitting side by side; and position matters precisely because rejecting is what they do.</div>
+    </div>
+  </div>
+
+  <h2>How this connects</h2>
+  <ul>
+    <li><b>Next, <a href="0304-404-and-405-are-routing-verdicts.html">404 and 405 are routing verdicts</a></b> covers the two answers the router gives before any link in this chain is entered.</li>
+    <li><b>Back at <a href="0000-the-shape-of-a-request.html">the shape of a request</a></b> is the spine this chain sits on, between the HTTP layer and your code.</li>
+  </ul>
+
+  <div class="teacher-note"><b>Your teacher.</b> Write your service's middleware out in registration order and mark each link as observing, rejecting or preparing. Ask the agent which links are in the wrong band, and what a refused request currently pays for before it is refused.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p><a href="https://peps.python.org/pep-3333/#middleware-components-that-play-both-sides">PEP 3333's middleware section</a> is the clearest short statement of why wrapping is the shape, because it defines middleware by the two roles it plays rather than by what it is used for. <a href="https://expressjs.com/en/guide/writing-middleware.html">Express's writing-middleware guide</a> states the loading-order rule and the <code>next()</code> obligation in the same page.</p>
+
+  <div class="pager">
+    <a href="0302-matching-is-a-tree-not-a-list-of-ifs.html"><span class="dir">&larr; Previous</span><span class="ttl">Matching is a tree, not a list of ifs</span></a>
+    <a class="nxt" href="0304-404-and-405-are-routing-verdicts.html"><span class="dir">Next &rarr;</span><span class="ttl">404 and 405 are routing verdicts</span></a>
+  </div>
+
+  <footer><p>Backend Engineering &middot; Lesson 0303 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
