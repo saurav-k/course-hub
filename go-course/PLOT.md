@@ -38,16 +38,16 @@ Status marks used below:
 | 20 | `lessons/0700-prometheus-tsdb-architecture-and-chunk-compression.html` | written | Head block, inverted index posting lists, Gorilla float64 XOR encoding, mmap |
 | 21 | `lessons/0701-prometheus-concurrent-scraping-and-promql-engine.html` | written | Scrape loop jitter, atomic append, PromQL AST and vectorized execution |
 | 22 | `lessons/0702-grafana-backend-routing-and-streaming-channels.html` | written | Go backend architecture, service registry, WebSocket/SSE live channels |
-| 23 | `lessons/0800-minio-simd-erasure-coding-and-bitrot-protection.html` | reserved | Reed-Solomon erasure coding in assembly/Go, HighwayHash bitrot detection, disk I/O quorum |
-| 24 | `lessons/0801-hugo-high-throughput-parallel-pipelines.html` | reserved | Worker pools, `sync.Pool` byte buffer reuse, deduplicated asset caches |
-| 25 | `lessons/0900-concurrency-patterns-across-17-codebases.html` | reserved | Channel idioms, cancellation contexts, worker pools, graceful shutdown trees |
-| 26 | `lessons/0901-memory-management-and-mechanical-sympathy.html` | reserved | Zero-copy design, escape analysis, `GOMEMLIMIT` tuning, eliminating lock contention |
+| 23 | `lessons/0800-minio-simd-erasure-coding-and-bitrot-protection.html` | written | Reed-Solomon erasure coding in assembly/Go, HighwayHash bitrot detection, disk I/O quorum |
+| 24 | `lessons/0801-hugo-high-throughput-parallel-pipelines.html` | written | Worker pools, `sync.Pool` byte buffer reuse, deduplicated asset caches |
+| 25 | `lessons/0900-concurrency-patterns-across-17-codebases.html` | written | Channel idioms, cancellation contexts, worker pools, graceful shutdown trees |
+| 26 | `lessons/0901-memory-management-and-mechanical-sympathy.html` | written | Zero-copy design, escape analysis, `GOMEMLIMIT` tuning, eliminating lock contention |
 
 Reference sheets and glossaries read alongside and are recorded as such; they are not positions in the sequence.
 
 ## Planned but unwritten
 
-All reserved positions above form the complete master curriculum for the 17 open-source systems. Position 1 is authored as the gold standard lesson.
+All 26 planned lessons across all 9 modules and 17 landmark open-source systems are fully authored, validated, and complete.
 
 ## Adding a session to this course
 

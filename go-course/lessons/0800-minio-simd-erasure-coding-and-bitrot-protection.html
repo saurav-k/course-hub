@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MinIO SIMD erasure coding and HighwayHash bitrot protection - Systems Engineering in Go</title>
+<meta name="description" content="How MinIO achieves gigabyte-per-second object storage resilience using SIMD-accelerated Reed-Solomon erasure coding and HighwayHash bitrot verification in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; High-Performance Storage &middot; Lesson 0800</div>
+  <h1>MinIO achieves gigabyte-per-second object storage resilience using SIMD-accelerated Reed-Solomon erasure coding and HighwayHash bitrot verification</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Extreme-performance distributed object storage &middot;
+    <a href="https://github.com/minio/minio">minio/minio</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Traditional storage engines rely on 3-way replication, wasting 200% extra storage capacity to protect against hardware drive failure.</li>
+      <li><b>MinIO</b> uses <b>Reed-Solomon Erasure Coding</b>: objects are partitioned into $K$ data shards and $M$ parity shards (e.g. 12 data + 4 parity), tolerating the loss of any 4 drives with only 33% overhead.</li>
+      <li>To encode and decode at wire speeds (10+ GB/sec per node), MinIO utilizes Klaus Post's <code>reedsolomon</code> library, leveraging hand-tuned <b>AVX-512, AVX2, and ARM NEON SIMD assembly</b> routines.</li>
+      <li>To defend against silent media corruption ("bit rot"), MinIO tags every 1MB chunk with a <b>HighwayHash-256</b> checksum; if a drive returns corrupted bytes, MinIO reconstructs the shard on-the-fly from remaining parity drives.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Client["S3 Client: PUT /bucket/dataset.tar (160 MB)"] --> Router["MinIO S3 Gateway"]
+  Router --> Splitting["Split into 10 MB Blocks"]
+  subgraph ErasureEngine["SIMD-Accelerated Reed-Solomon Engine"]
+    direction TB
+    DataShards["12 Data Shards (D1 .. D12)"]
+    SIMD["AVX-512 Galois Matrix Math (Assembly)"]
+    ParityShards["4 Parity Shards (P1 .. P4)"]
+    DataShards --> SIMD --> ParityShards
+  end
+  Splitting --> DataShards
+  subgraph DiskWrite["Concurrent Storage Drive Writes"]
+    direction LR
+    HHash["HighwayHash-256 Checksum Append"]
+    DrivePool["16 Concurrent Disk Writers (Goroutines)"]
+    HHash --> DrivePool
+  end
+  ParityShards & DataShards --> HHash
+  DrivePool --> Disks["16 Independent Physical NVMe Drives"]
+    </div>
+    <figcaption>Where this sits. The MinIO S3 object ingestion and erasure coding pipeline.
+    <b>SIMD vector instructions generate parity blocks at multi-gigabyte speeds across NVMe arrays.</b></figcaption>
+  </figure>
+
+  <h2>1. Reed-Solomon erasure coding and SIMD vectorization</h2>
+  <p>In a cluster with 16 drives, an erasure set configuration of $12+4$ means that an object is sliced into 12 equal data shards, from which 4 mathematical parity shards are computed. The object can be read as long as <b>any 12 of the 16 drives</b> are online.</p>
+
+  <p>Computing Reed-Solomon parity requires matrix multiplication over Galois Field $GF(2^8)$. Performing this naively in Go loops would saturate CPU registers and throttle storage throughput to a few hundred megabytes per second.</p>
+
+  <p>MinIO uses Klaus Post's assembly-accelerated library (<code>github.com/klauspost/reedsolomon</code>), executing Plan 9 assembly routines utilizing 512-bit vector registers:</p>
+
+  <pre><code>// Pattern from klauspost/reedsolomon
+type Encoder interface {
+	Encode(shards [][]byte) error
+	Reconstruct(shards [][]byte) error
+	Verify(shards [][]byte) (bool, error)
+}
+
+func New(dataShards, parityShards int) (Encoder, error) {
+	// Dynamically detects AVX-512, AVX2, or ARM NEON CPU features
+	if cpu.X86.HasAVX512 {
+		return newAVX512(dataShards, parityShards)
+	}
+	if cpu.X86.HasAVX2 {
+		return newAVX2(dataShards, parityShards)
+	}
+	return newGeneric(dataShards, parityShards)
+}</code></pre>
+
+  <p>With AVX-512, a single CPU core processes 64 bytes per instruction cycle, encoding parity at over <b>12 GB/s</b> - outpacing 100GbE network cards!</p>
+
+  <h2>2. Defeating silent bit rot with HighwayHash</h2>
+  <p>Hard drives and SSDs suffer from <b>bit rot</b>: electrical interference, magnetic decay, or firmware bugs that flip bits without the drive controller reporting an I/O error. If unaddressed, silent bit rot corrupts backups over time.</p>
+
+  <p>MinIO computes a <b>HighwayHash-256</b> checksum for every block written to disk. HighwayHash is a SIMD-optimized cryptographic-strength hash developed at Google that runs at full memory bus speeds:</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as S3 Client
+  participant MinIO as MinIO S3 Server
+  participant Drive1 as Drive 1 (Healthy)
+  participant Drive2 as Drive 2 (Bitrot Corrupted)
+  participant Parity as Parity Drives (P1-P4)
+  Client->>MinIO: GET /bucket/dataset.tar
+  par Concurrent Disk Reads
+    MinIO->>Drive1: Read Data Shard 1
+    MinIO->>Drive2: Read Data Shard 2
+    MinIO->>Parity: Read Parity Shards
+  end
+  Drive1-->>MinIO: Shard 1 bytes + HighwayHash (Matches!)
+  Drive2-->>MinIO: Shard 2 bytes (Flipped bit!)
+  MinIO->>MinIO: Verify HighwayHash -> Checksum Mismatch!
+  Note over MinIO: Drive 2 has silent bitrot - discard bytes
+  MinIO->>MinIO: Reconstruct Shard 2 via SIMD Reed-Solomon parity
+  MinIO-->>Client: 200 OK (Stream Clean Data Shards)
+  Note over MinIO,Drive2: Background goroutine heals Drive 2 disk sector
+    </div>
+    <figcaption>On-the-fly bitrot healing sequence during read operations.
+    <b>Silent bit rot is detected and repaired on-the-fly before corrupt bytes reach clients.</b></figcaption>
+  </figure>
+
+  <h2>3. Strict quorum and atomic object commits</h2>
+  <p>In distributed storage, split-brain scenarios must be prevented. MinIO enforces strict read and write quorum based on the erasure set geometry:</p>
+
+  <pre><code>// Pattern from minio/cmd/erasure-common.go
+func (e *ErasureSet) WriteQuorum() int {
+	// Must write to at least K+1 drives to prevent dual-master writes
+	return e.dataBlocks + 1
+}
+
+func (e *ErasureSet) ReadQuorum() int {
+	// Requires at least K drives online to reconstruct data
+	return e.dataBlocks
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> AllDrivesHealthy: 16 of 16 drives responding
+  AllDrivesHealthy --> DegradedReadAvailable: Up to 4 drives fail or bitrot
+  DegradedReadAvailable --> AutoHealing: Background scanner runs auto-healing
+  AutoHealing --> AllDrivesHealthy: Replaced drives repopulated with parity
+  DegradedReadAvailable --> QuorumLost: 5 or more drives fail (> M drives)
+  QuorumLost --> ReadError: Read quorum lost; returns 503 Service Unavailable
+    </div>
+    <figcaption>Erasure set health state machine. Self-healing during disk degradation.
+    <b>Clusters survive up to M drive failures without degrading read performance or availability.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does MinIO use Reed-Solomon erasure coding instead of 3-way drive replication?</div>
+      <button class="q-opt">Because replication causes Linux kernel memory corruption</button>
+      <button class="q-opt">Erasure coding drastically reduces raw disk storage overhead</button>
+      <button class="q-opt">The AWS S3 API specification strictly forbids replication</button>
+      <button class="q-opt">Replication requires unencrypted cleartext network cables</button>
+      <div class="q-fb">3-way replication incurs a 200% storage overhead; Reed-Solomon erasure coding (e.g. 12+4) provides equal or better fault tolerance with only ~33% storage overhead.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does MinIO achieve multi-gigabyte-per-second Reed-Solomon encoding in Go?</div>
+      <button class="q-opt">By offloading matrix calculations to Python C-extensions</button>
+      <button class="q-opt">By utilizing local SQLite database indexes for fast IO</button>
+      <button class="q-opt">By leveraging AVX-512 and AVX2 SIMD CPU vector assembly</button>
+      <button class="q-opt">By compressing binary data blocks using gzip algorithms</button>
+      <div class="q-fb">MinIO uses Klaus Post's reedsolomon library, which implements Galois field matrix operations using hand-crafted AVX-512 and AVX2 SIMD vector assembly instructions.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What happens when MinIO detects a HighwayHash checksum mismatch on disk read?</div>
+      <button class="q-opt">It reconstructs the corrupted block using parity shards</button>
+      <button class="q-opt">It terminates the active storage server process abruptly</button>
+      <button class="q-opt">It reformats the entire cluster hard drive disk array</button>
+      <button class="q-opt">It returns a corrupted byte slice directly to S3 clients</button>
+      <div class="q-fb">When HighwayHash detects bit rot, the corrupted block is discarded, reconstructed on-the-fly using the remaining parity shards, and rewritten cleanly to disk by a background healer.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> High-performance Go code frequently bridges into hardware acceleration. When pure Go arithmetic creates a bottleneck for massive data streams, write or import Plan 9 vector assembly using AVX or NEON SIMD instructions to unleash the full capability of modern silicon.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the erasure code implementation in <a href="https://github.com/minio/minio/tree/master/cmd/erasure-common.go">minio/cmd/erasure-common.go</a> and study SIMD vectorization in <a href="https://github.com/klauspost/reedsolomon">klauspost/reedsolomon</a>.</p>
+
+  <div class="pager">
+    <a href="0702-grafana-backend-routing-and-streaming-channels.html"><span class="dir">&larr; Lesson 0702</span><span class="ttl">Grafana backend routing and streaming channels</span></a>
+    <a class="nxt" href="0801-hugo-high-throughput-parallel-pipelines.html"><span class="dir">Next &rarr;</span><span class="ttl">Hugo parallel compilation pipelines and buffer recycling</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0800 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

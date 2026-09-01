@@ -135,6 +135,34 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0702-grafana-backend-routing-and-streaming-channels.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "High-Performance Storage & Compilation",
+      "lessons": [
+        {
+          "title": "MinIO SIMD erasure coding and HighwayHash bitrot protection",
+          "href": "lessons/0800-minio-simd-erasure-coding-and-bitrot-protection.html"
+        },
+        {
+          "title": "Hugo parallel compilation pipelines and buffer recycling",
+          "href": "lessons/0801-hugo-high-throughput-parallel-pipelines.html"
+        }
+      ]
+    },
+    {
+      "n": "09",
+      "title": "Cross-Cutting Systems Patterns",
+      "lessons": [
+        {
+          "title": "Universal Go concurrency patterns across 17 landmark codebases",
+          "href": "lessons/0900-concurrency-patterns-across-17-codebases.html"
+        },
+        {
+          "title": "Go memory management and mechanical sympathy at scale",
+          "href": "lessons/0901-memory-management-and-mechanical-sympathy.html"
+        }
+      ]
     }
   ],
   "extras": [
