@@ -13,6 +13,50 @@ window.COURSE_OUTLINE = {
         {
           "title": "How Go talks to the Linux kernel",
           "href": "lessons/0100-how-go-talks-to-the-linux-kernel.html"
+        },
+        {
+          "title": "The anatomy of a zero-allocation network loop",
+          "href": "lessons/0101-the-anatomy-of-a-zero-allocation-network-loop.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Container Runtimes",
+      "lessons": [
+        {
+          "title": "Moby container lifecycle and daemon architecture",
+          "href": "lessons/0200-moby-container-lifecycle-and-daemon-architecture.html"
+        },
+        {
+          "title": "containerd, the shim pattern, and the topic event bus",
+          "href": "lessons/0201-containerd-the-shim-pattern-and-event-bus.html"
+        },
+        {
+          "title": "Content-addressable storage and overlayfs snapshotters",
+          "href": "lessons/0202-content-addressable-storage-and-snapshotters.html"
+        }
+      ]
+    },
+    {
+      "n": "03",
+      "title": "Distributed Consensus",
+      "lessons": [
+        {
+          "title": "etcd and the zero-I/O Raft consensus engine",
+          "href": "lessons/0300-etcd-the-zero-io-raft-engine.html"
+        },
+        {
+          "title": "etcd write-ahead logs and bbolt MVCC storage",
+          "href": "lessons/0301-etcd-write-ahead-log-and-mvcc-bbolt.html"
+        },
+        {
+          "title": "Consul and the SWIM gossip protocol in memberlist",
+          "href": "lessons/0302-consul-swim-gossip-with-memberlist.html"
+        },
+        {
+          "title": "CockroachDB Multi-Raft and the Pebble LSM-tree",
+          "href": "lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html"
         }
       ]
     }

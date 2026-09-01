@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Content-addressable storage and overlayfs snapshotters - Systems Engineering in Go</title>
+<meta name="description" content="How containerd manages immutable OCI image layer blobs using content-addressable storage (CAS) and mounts writable container root filesystems with overlayfs in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Container Runtimes &middot; Lesson 0202</div>
+  <h1>containerd mounts immutable OCI layer tarballs into writable container root filesystems through content-addressable storage and overlayfs</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The storage and snapshotter engine inside containerd &middot;
+    <a href="https://github.com/containerd/containerd">containerd/containerd</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Container images are not monolithic virtual machine disks; they are <b>immutable trees of content-addressed blobs</b> verified by their cryptographic SHA-256 digests.</li>
+      <li>containerd separates blob storage from directory mounting: the <b>Content Store</b> saves raw compressed tarball blobs, while <b>Snapshotters</b> unpack and layer those blobs into file trees.</li>
+      <li>On Linux, the default snapshotter uses <b>overlayfs</b>: stacking read-only parent directories (<code>lowerdir</code>) under a single writable directory (<code>upperdir</code>) with a temporary state directory (<code>workdir</code>).</li>
+      <li>File modifications copy the file up to the <code>upperdir</code> on demand (copy-on-write), and file deletions create specialized character device <b>whiteouts</b> (`0/0` device nodes) without ever altering underlying image layers.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph CAS["Content-Addressable Storage (CAS)"]
+    direction TB
+    Manifest["OCI Image Manifest JSON"]
+    Config["OCI Config Descriptor"]
+    Layer1["Blob: sha256:abc... - Base OS Tarball"]
+    Layer2["Blob: sha256:def... - Runtime Libraries"]
+    Layer3["Blob: sha256:789... - App Binary"]
+    Manifest --> Config
+    Manifest --> Layer1
+    Manifest --> Layer2
+    Manifest --> Layer3
+  end
+  subgraph Snapshotter["Overlayfs Snapshotter Engine"]
+    direction TB
+    Lower1["Lowerdir 1: /var/lib/containerd/snapshots/1/fs"]
+    Lower2["Lowerdir 2: /var/lib/containerd/snapshots/2/fs"]
+    Upper["Upperdir: /var/lib/containerd/snapshots/3/fs (Writable)"]
+    Work["Workdir: /var/lib/containerd/snapshots/3/work"]
+  end
+  CAS -->|"Unpack diff tarballs"| Snapshotter
+  Snapshotter -->|"sys/unix.Mount overlay"| Rootfs["Container Rootfs Mountpoint /run/containerd/io.../rootfs"]
+    </div>
+    <figcaption>Where this sits. The transformation from immutable content-addressed blobs to a unified overlayfs mount.
+    <b>Content-addressable storage guarantees blob integrity; overlayfs provides copy-on-write execution.</b></figcaption>
+  </figure>
+
+  <h2>1. Content-Addressable Storage (CAS) in Go</h2>
+  <p>An OCI container image contains no filenames in its storage layout. Everything stored in containerd's content store (located at <code>/var/lib/containerd/io.containerd.content.v1.content/blobs/sha256/</code>) is keyed strictly by its cryptographic hash.</p>
+
+  <p>In Go, containerd defines this contract via the <code>content.Store</code> interface in package <code>core/content</code>:</p>
+
+  <pre><code>// Pattern from containerd/core/content/content.go
+type Store interface {
+	Info(ctx context.Context, dgst digest.Digest) (Info, error)
+	ReaderAt(ctx context.Context, desc ocispec.Descriptor) (ReaderAt, error)
+	Writer(ctx context.Context, opts ...WriterOpt) (Writer, error)
+	Delete(ctx context.Context, dgst digest.Digest) error
+	Walk(ctx context.Context, fn WalkFunc, filters ...string) error
+}</code></pre>
+
+  <p>When an image is pulled, containerd streams the incoming HTTP body into a hash-verifying writer (<code>crypto/sha256</code>). If a single byte is corrupted in transit, the calculated digest will not match the requested descriptor, and the transaction is aborted. Because blobs are indexed by content rather than name, two completely different images that share the same Ubuntu base layer store that layer on disk exactly once.</p>
+
+  <h2>2. The Snapshotter interface and Overlayfs</h2>
+  <p>A compressed layer tarball cannot be directly mounted by the Linux kernel. Before a container can boot, the tarballs must be unpacked into directories and assembled into an active filesystem mount. This is the responsibility of containerd's <b>Snapshotter</b>.</p>
+
+  <pre><code>// Pattern from containerd/core/snapshots/snapshotter.go
+type Snapshotter interface {
+	Stat(ctx context.Context, key string) (Info, error)
+	Prepare(ctx context.Context, key, parent string, opts ...Opt) ([]mount.Mount, error)
+	View(ctx context.Context, key, parent string, opts ...Opt) ([]mount.Mount, error)
+	Commit(ctx context.Context, name, key string, opts ...Opt) error
+	Remove(ctx context.Context, key string) error
+	Mounts(ctx context.Context, key string) ([]mount.Mount, error)
+}</code></pre>
+
+  <p>On modern Linux hosts, containerd implements this using <b>overlayfs</b>. Overlayfs combines multiple directories into a single unified mountpoint:</p>
+  <ul>
+    <li><code>lowerdir</code>: A colon-separated list of read-only directories containing the unpacked parent image layers.</li>
+    <li><code>upperdir</code>: A single writable directory where all runtime file creations, edits, and deletions are isolated.</li>
+    <li><code>workdir</code>: A private auxiliary directory used by the Linux kernel to stage atomic operations (like rename and copy-up).</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Task as containerd Task Service
+  participant Sn as Overlayfs Snapshotter
+  participant Kernel as Linux Kernel
+  participant FS as Merged Rootfs
+  Task->>Sn: Prepare(container_id, parent_snapshot_id)
+  Sn->>Sn: Allocate upperdir and workdir on disk
+  Sn->>Task: Return mount specs with lowerdirs and upperdir
+  Task->>Kernel: sys/unix.Mount("overlay", target, "overlay", flags, data)
+  Kernel->>FS: Expose unified view to container
+  Note over FS: Container reads inherited file /etc/hosts from lowerdir
+  FS-->>Task: Read hit on lowerdir (zero copy-up)
+  Note over FS: Container modifies /etc/hosts
+  Kernel->>Kernel: Copy /etc/hosts from lowerdir to upperdir
+  Kernel->>FS: Apply edit in upperdir
+  Note over FS: Lowerdir remains unmodified and read-only
+    </div>
+    <figcaption>Overlayfs mount and copy-on-write sequence. How file reads and writes route across layered directories.
+    <b>Lower layers are immutable; all runtime modifications are confined to the upperdir.</b></figcaption>
+  </figure>
+
+  <h2>3. Copy-on-write and character whiteouts</h2>
+  <p>Overlayfs operations are designed for high performance through copy-on-write (CoW). When a process inside a container opens an existing file for reading, the kernel resolves the path in the top-most <code>lowerdir</code> where it exists, reading directly from the base image.</p>
+
+  <p>When the process attempts to write to an inherited file, the kernel intercepts the system call, allocates a new inode in the container's private <code>upperdir</code>, copies the entire contents from the lower layer, and applies the mutation. Subsequent reads and writes hit the copy in <code>upperdir</code>.</p>
+
+  <p>What happens when a container runs <code>rm -rf /bin/sh</code>? The container cannot delete the binary from the read-only lowerdir layer. Instead, the Linux kernel creates a <b>whiteout device file</b> in <code>upperdir</code>: a character device with major and minor numbers set to <code>0/0</code>:</p>
+
+  <pre><code>// Creating an overlayfs whiteout device in pure Go
+func createWhiteout(path string) error {
+	// S_IFCHR | 0666 with dev 0 creates an overlayfs deletion marker
+	dev := int(unix.Mkdev(0, 0))
+	return unix.Mknod(path, unix.S_IFCHR|0666, dev)
+}</code></pre>
+
+  <p>When overlayfs traverses the merged directory, encountering a <code>0/0</code> character device causes it to hide any matching filename in lower layers, creating the transparent illusion that the file was deleted.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Active: Snapshotter.Prepare()
+  Active --> MergedMount: unix.Mount(overlay)
+  MergedMount --> MutatedUpper: Writes and whiteouts in upperdir
+  MutatedUpper --> Committed: Snapshotter.Commit()
+  Committed --> ParentForNext: Used as lowerdir for new layer
+  Committed --> [*]: Snapshotter.Remove()
+    </div>
+    <figcaption>Snapshot state machine. Transitions from writable active container layers to committed image layers.
+    <b>Committed snapshots are frozen and become lowerdirs for subsequent container builds.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why are OCI container image layers stored by their cryptographic SHA-256 hash?</div>
+      <button class="q-opt">Hash algorithms accelerate gzip decompression speed</button>
+      <button class="q-opt">Identical layers are deduplicated across all images</button>
+      <button class="q-opt">The Linux kernel encrypts layers with SHA-256 keys</button>
+      <button class="q-opt">Hashes assign IP addresses to container interfaces</button>
+      <div class="q-fb">Content-Addressable Storage (CAS) keys data by hash, meaning identical layer blobs across different images are downloaded and stored on disk exactly once.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does an overlayfs snapshotter isolate container writes from the base image?</div>
+      <button class="q-opt">It copies all image files into RAM before execution</button>
+      <button class="q-opt">It converts tarball streams into block sector caches</button>
+      <button class="q-opt">It writes file modifications to an upperdir filesystem</button>
+      <button class="q-opt">It compiles filesystem diffs using Go AST generators</button>
+      <div class="q-fb">Overlayfs leaves parent image layers in read-only lowerdirs and directs all writes, file creations, and edits into an isolated upperdir directory.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What happens when a container deletes a file inherited from a lower read-only layer?</div>
+      <button class="q-opt">Overlayfs creates a character whiteout device file</button>
+      <button class="q-opt">The underlying base image layer is mutated on disk</button>
+      <button class="q-opt">The container process terminates with a SIGSEGV trap</button>
+      <button class="q-opt">The kernel executes an immediate unmount operation</button>
+      <div class="q-fb">Because lower layers cannot be modified, the kernel creates a character whiteout device (dev 0/0) in the upperdir, instructing overlayfs to hide the file from directory listings.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> If a container image is 2 GB in size, starting 1,000 containers does not consume 2 TB of storage. Because of overlayfs and CAS, starting 1,000 containers consumes 2 GB for the shared read-only lowerdirs, plus only the small delta of modified files in each container's upperdir.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the snapshotter interface and overlayfs driver in <a href="https://github.com/containerd/containerd/tree/main/plugins/snapshots/overlay">containerd/plugins/snapshots/overlay</a> and explore the OCI Image Format Specification at <a href="https://github.com/opencontainers/image-spec">opencontainers/image-spec</a>.</p>
+
+  <div class="pager">
+    <a href="0201-containerd-the-shim-pattern-and-event-bus.html"><span class="dir">&larr; Lesson 0201</span><span class="ttl">containerd, the shim pattern, and the topic event bus</span></a>
+    <a class="nxt" href="0300-etcd-the-zero-io-raft-engine.html"><span class="dir">Next &rarr;</span><span class="ttl">etcd and the zero-I/O Raft consensus engine</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0202 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

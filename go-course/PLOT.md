@@ -16,15 +16,15 @@ Status marks used below:
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1 | `lessons/0100-how-go-talks-to-the-linux-kernel.html` | in progress | Namespaces, cgroups, syscalls, `os/exec`, `sys/unix` |
-| 2 | `lessons/0101-the-anatomy-of-a-zero-allocation-network-loop.html` | reserved | epoll, network poller, buffer reuse, `sync.Pool` |
-| 3 | `lessons/0200-moby-container-lifecycle-and-daemon-architecture.html` | reserved | Docker/Moby daemon, client-server engine, TTY hijacking |
-| 4 | `lessons/0201-containerd-the-shim-pattern-and-event-bus.html` | reserved | containerd v2 shim, decoupling container lifetimes, topic event bus |
-| 5 | `lessons/0202-content-addressable-storage-and-snapshotters.html` | reserved | CAS, OCI image layers, diffing, overlayfs snapshotters in Go |
-| 6 | `lessons/0300-etcd-the-zero-io-raft-engine.html` | reserved | etcd `raft.Ready` pattern, decoupling state machine from disk/network |
-| 7 | `lessons/0301-etcd-write-ahead-log-and-mvcc-bbolt.html` | reserved | WAL, CRC validation, revisions, bbolt B+tree storage engine |
-| 8 | `lessons/0302-consul-swim-gossip-with-memberlist.html` | reserved | Memberlist, SWIM protocol, failure detection, state sync |
-| 9 | `lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html` | reserved | Multi-Raft ranges, range leases, Pebble LSM-tree engine replacing CGo RocksDB |
+| 1 | `lessons/0100-how-go-talks-to-the-linux-kernel.html` | written | Namespaces, cgroups, syscalls, `os/exec`, `sys/unix` |
+| 2 | `lessons/0101-the-anatomy-of-a-zero-allocation-network-loop.html` | written | epoll, network poller, buffer reuse, `sync.Pool` |
+| 3 | `lessons/0200-moby-container-lifecycle-and-daemon-architecture.html` | written | Docker/Moby daemon, client-server engine, TTY hijacking |
+| 4 | `lessons/0201-containerd-the-shim-pattern-and-event-bus.html` | written | containerd v2 shim, decoupling container lifetimes, topic event bus |
+| 5 | `lessons/0202-content-addressable-storage-and-snapshotters.html` | written | CAS, OCI image layers, diffing, overlayfs snapshotters in Go |
+| 6 | `lessons/0300-etcd-the-zero-io-raft-engine.html` | written | etcd `raft.Ready` pattern, decoupling state machine from disk/network |
+| 7 | `lessons/0301-etcd-write-ahead-log-and-mvcc-bbolt.html` | written | WAL, CRC validation, revisions, bbolt B+tree storage engine |
+| 8 | `lessons/0302-consul-swim-gossip-with-memberlist.html` | written | Memberlist, SWIM protocol, failure detection, state sync |
+| 9 | `lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html` | written | Multi-Raft ranges, range leases, Pebble LSM-tree engine replacing CGo RocksDB |
 | 10 | `lessons/0400-kubernetes-the-declarative-reconciliation-loop.html` | reserved | Controller-manager, Informers, Lister, DeltaFIFO, Workqueue rate limiting |
 | 11 | `lessons/0401-kubernetes-api-machinery-and-type-schemes.html` | reserved | runtime.Object, dynamic typing, Scheme registration, field selectors |
 | 12 | `lessons/0402-nomad-optimistic-concurrency-and-eval-brokers.html` | reserved | Nomad plan/eval scheduling pipeline, task runner drivers |

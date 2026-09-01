@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>etcd write-ahead logs and bbolt MVCC storage - Systems Engineering in Go</title>
+<meta name="description" content="How etcd guarantees ACID durability and non-blocking reads using pre-allocated Write-Ahead Log (WAL) segments and bbolt Multi-Version Concurrency Control (MVCC).">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Distributed Consensus &middot; Lesson 0301</div>
+  <h1>etcd guarantees durability through sequential WAL segment framing and multi-version B+tree concurrency in bbolt</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The persistence engine behind Kubernetes state &middot;
+    <a href="https://github.com/etcd-io/etcd">etcd-io/etcd</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Before any proposal is committed or replicated, etcd appends the raw entry to a <b>Write-Ahead Log (WAL)</b> using sequentially framed binary records with CRC32 checksums.</li>
+      <li>To prevent filesystem allocation latency spikes during peak workloads, etcd <b>pre-allocates 64 MB segments</b> on disk using fallocate, turning random fragmentation into sequential disk writes.</li>
+      <li>For key-value storage, etcd does not overwrite data in place; it uses <b>Multi-Version Concurrency Control (MVCC)</b> where every mutation increments a 64-bit cluster revision counter.</li>
+      <li>An in-memory B-tree index (<code>keyIndex</code>) maps human-readable keys to revision numbers, while the underlying data is stored inside <b>bbolt</b>, an embedded zero-copy B+tree database using Linux memory-mapped files (<code>mmap</code>).</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Proposal["Incoming Write Proposal"] --> WAL["Write-Ahead Log (WAL)"]
+  subgraph DiskWAL["WAL Disk Persistence"]
+    direction TB
+    Frame["8-Byte Header + CRC32"]
+    Prealloc["64MB Preallocated Segment Files"]
+    Fsync["Explicit fsync system call"]
+    Frame --> Prealloc --> Fsync
+  end
+  WAL --> DiskWAL
+  DiskWAL --> MemoryIndex["In-Memory B-Tree (keyIndex)"]
+  subgraph StorageEngine["etcd MVCC Architecture"]
+    direction TB
+    Revision["Cluster Revision: main.sub (e.g. 1042.1)"]
+    Bolt["bbolt B+Tree Database (mmap)"]
+    Revision --> Bolt
+  end
+  MemoryIndex -->|"Maps /foo -> Revision 1042"| StorageEngine
+  StorageEngine --> ReadView["Non-blocking Snapshot Reads"]
+    </div>
+    <figcaption>Where this sits. The two-tier storage path in etcd from sequential append-only WAL to bbolt MVCC B+tree.
+    <b>Durability is guaranteed by the WAL; non-blocking queries are served by bbolt MVCC.</b></figcaption>
+  </figure>
+
+  <h2>1. WAL architecture: framing and pre-allocation</h2>
+  <p>In distributed databases, the Write-Ahead Log (WAL) is the single source of truth. If an etcd node loses power mid-write, memory structures vanish, but the WAL on disk guarantees that uncorrupted entries can be replayed during crash recovery.</p>
+
+  <p>etcd structures its WAL files as 64 MB segments in <code>server/storage/wal/wal.go</code>. Every record written to the log is framed with an 8-byte length header followed by a CRC32 checksum:</p>
+
+  <pre><code>// WAL record framing layout
+// 0               1               2               3
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                          Length (56 bits)             | Type  |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                        CRC-32 Checksum (32 bits)              |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                        Record Data (Protobuf)                 |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</code></pre>
+
+  <p>Why pre-allocate 64 MB? On standard filesystems like ext4 or XFS, extending a file dynamically forces the kernel to update disk metadata (block bitmaps and inode tables). This metadata update can cause write latencies to spike from 200 microseconds to over 100 milliseconds. By calling <code>fallocate()</code> in Go when opening a segment, etcd guarantees all disk sectors are contiguous, allowing the storage hardware to write sequentially at bus speed.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant App as etcd Engine
+  participant WAL as WAL Manager
+  participant OS as Linux Kernel
+  participant Bolt as bbolt Storage
+  App->>WAL: Save(HardState, Entries)
+  WAL->>WAL: Encode binary frame with CRC32
+  WAL->>OS: write(fd, frame_bytes)
+  WAL->>OS: fdatasync(fd)
+  OS-->>WAL: Hardware flush confirmed
+  Note over WAL: Entry is now immutable on disk
+  App->>Bolt: Commit KV mutation at Revision N
+  Bolt->>OS: mmap page flush to disk
+    </div>
+    <figcaption>WAL append and sync sequence. Flushing transactions to physical storage before applying to state machines.
+    <b>fdatasync guarantees physical persistence before cluster peers are notified.</b></figcaption>
+  </figure>
+
+  <h2>2. Multi-Version Concurrency Control (MVCC)</h2>
+  <p>Traditional key-value stores update values in place: setting <code>key="alice"</code> to <code>"bob"</code> overwrites the previous memory or disk block. In etcd, updating a key never mutates the existing value. Instead, etcd increments a global 64-bit counter called the <b>revision</b>.</p>
+
+  <p>Every revision is represented by a pair: <code>{main, sub}</code>. The <code>main</code> revision increments with every committed transaction; the <code>sub</code> revision differentiates multiple operations executed within the same transaction batch.</p>
+
+  <p>To balance speed and capability, etcd splits storage into two distinct layers:</p>
+  <ul>
+    <li><b>In-Memory keyIndex:</b> A Google B-tree storing lightweight metadata in RAM. It maps a key (e.g. <code>"/registry/pods/default/web"</code>) to an array of revision generations, allowing etcd to find which revisions hold historical values.</li>
+    <li><b>bbolt Backend:</b> An embedded ACID B+tree database written in pure Go. In bbolt, the primary key is not the string key; the primary key is the binary-encoded <b>revision number</b>, and the value contains the full protobuf payload.</li>
+  </ul>
+
+  <pre><code>// Excerpt from etcd/server/storage/mvcc/key_index.go
+type keyIndex struct {
+	key         []byte
+	modified    revision // Revision of last modification
+	generations []generation
+}
+
+type generation struct {
+	ver         int64      // Mutation count within this generation
+	created     revision   // When key was created
+	revs        []revision // All revisions in this generation
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> CreatedRev1: Put(key, "v1") at Rev 1
+  CreatedRev1 --> ModifiedRev4: Put(key, "v2") at Rev 4
+  ModifiedRev4 --> TombstonedRev8: Delete(key) at Rev 8 (Generation closed)
+  TombstonedRev8 --> CreatedRev12: Put(key, "v3") at Rev 12 (New Generation starts)
+  CreatedRev12 --> Compacted: Compact(Rev 10) purges Rev 1, 4, 8
+  Compacted --> [*]
+    </div>
+    <figcaption>Key generation lifecycle under MVCC. Historical revisions remain queryable until an explicit compaction runs.
+    <b>Deletions write tombstone revisions rather than purging records from disk.</b></figcaption>
+  </figure>
+
+  <h2>3. Why bbolt uses memory-mapped files (mmap)</h2>
+  <p>Many databases use complex buffer pool managers with LRU caches to juggle disk pages in user memory. bbolt takes a radical, high-performance approach: it delegates all page caching to the Linux kernel via <code>mmap(2)</code>.</p>
+
+  <p>When etcd opens bbolt, the database maps the entire file into the process's virtual memory address space. Reading a key is a direct pointer dereference in Go: zero serialization, zero user-space cache copying, and zero allocation. The operating system page cache automatically caches hot pages in physical RAM and pages out cold data when memory is needed.</p>
+
+  <p>Because reads hit memory-mapped pages without acquiring database locks, readers in etcd never block writers, and writers never block readers. This provides Kubernetes controllers with instant snapshot reads of thousands of pods without stuttering cluster writes.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does etcd pre-allocate 64MB disk files for its Write-Ahead Log segments?</div>
+      <button class="q-opt">Pre-allocation avoids metadata allocation latency spikes</button>
+      <button class="q-opt">The Linux kernel requires fixed size sector boundaries</button>
+      <button class="q-opt">The bbolt B+tree engine cannot grow past fixed limits</button>
+      <button class="q-opt">Pre-allocation compresses protobuf records into blocks</button>
+      <div class="q-fb">Extending files dynamically requires filesystem metadata updates (block allocation) which cause severe latency spikes; pre-allocating ensures sequential sector writes.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does etcd's MVCC model support point-in-time historical range queries?</div>
+      <button class="q-opt">By locking the entire bbolt database for read queries</button>
+      <button class="q-opt">By indexing every mutation under a 64-bit revision key</button>
+      <button class="q-opt">By restoring archived tarball snapshots into memory RAM</button>
+      <button class="q-opt">By replaying all Raft log entries from initial index 1</button>
+      <div class="q-fb">Because mutations never overwrite existing values and are indexed by 64-bit revision numbers, readers can query the exact state of the database at any past revision until compaction runs.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What role does the in-memory keyIndex tree play in etcd's storage layer?</div>
+      <button class="q-opt">It routes incoming HTTP requests to cluster endpoints</button>
+      <button class="q-opt">It verifies CRC32 checksums on incoming gRPC packets</button>
+      <button class="q-opt">It maps human key strings to exact bbolt revision keys</button>
+      <button class="q-opt">It serializes container root filesystems to SSD disks</button>
+      <div class="q-fb">The in-memory keyIndex B-tree maps user string keys to their corresponding revisions, allowing etcd to look up the exact revision keys stored inside the bbolt B+tree.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Because MVCC retains every historical modification, etcd databases grow continuously on disk even if you are only updating the same 10 keys. Production Kubernetes clusters must run automated compaction jobs (e.g. <code>etcdctl compact</code>) and defragmentation (<code>etcdctl defrag</code>) to release empty bbolt database pages back to the filesystem.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the WAL implementation in <a href="https://github.com/etcd-io/etcd/tree/main/server/storage/wal">etcd/server/storage/wal</a>, the MVCC engine in <a href="https://github.com/etcd-io/etcd/tree/main/server/storage/mvcc">etcd/server/storage/mvcc</a>, and the pure-Go bbolt database at <a href="https://github.com/etcd-io/bbolt">etcd-io/bbolt</a>.</p>
+
+  <div class="pager">
+    <a href="0300-etcd-the-zero-io-raft-engine.html"><span class="dir">&larr; Lesson 0300</span><span class="ttl">etcd and the zero-I/O Raft consensus engine</span></a>
+    <a class="nxt" href="0302-consul-swim-gossip-with-memberlist.html"><span class="dir">Next &rarr;</span><span class="ttl">Consul and the SWIM gossip protocol in memberlist</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0301 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
