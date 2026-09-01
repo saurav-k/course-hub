@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The anatomy of a zero-allocation network loop - Systems Engineering in Go</title>
+<meta name="description" content="How high-throughput Go systems like Traefik, Caddy, CoreDNS, and MinIO use the Linux epoll netpoller, sync.Pool buffer recycling, and zero-copy I/O.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; Kernel Primitives &middot; Lesson 0101</div>
+  <h1>Go turns non-blocking epoll events into synchronous goroutine calls through its netpoller and sync.Pool</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    High-throughput I/O under Traefik, Caddy, and CoreDNS &middot;
+    <a href="https://github.com/traefik/traefik">traefik/traefik</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Go gives developers the illusion of synchronous blocking network I/O, but sets every underlying socket to <b>non-blocking mode</b> (`O_NONBLOCK`).</li>
+      <li>When a read would block (`EAGAIN`), the Go runtime parks the goroutine via <code>gopark()</code> and registers its file descriptor with the operating system’s event loop (<b>epoll</b> on Linux, <b>kqueue</b> on macOS).</li>
+      <li>A background runtime thread polls epoll and calls <code>goready()</code> to awaken the exact goroutine when bytes arrive, freeing operating system threads to run other work.</li>
+      <li>In servers handling 100,000 requests per second, allocating new byte slices for each connection triggers severe garbage collection pauses. Systems like Traefik, Caddy, and MinIO eliminate allocations completely by recycling byte slices using <code>sync.Pool</code>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph UserCode["Application Layer"]
+    direction TB
+    G1["Goroutine calls net.Conn.Read"]
+    G2["Goroutine resumes execution"]
+  end
+  subgraph RuntimeNetpoller["Go Runtime Netpoller"]
+    direction TB
+    N1["Socket returns EAGAIN"]
+    N2["gopark parks Goroutine"]
+    N3["epoll_wait detects socket ready"]
+    N4["goready puts G back on runq"]
+  end
+  subgraph LinuxKernel["Linux Kernel"]
+    direction TB
+    K1["epoll instance epoll_ctl"]
+    K2["Network packet arrives at NIC"]
+  end
+  G1 --> N1 --> N2 --> K1
+  K2 --> K1 --> N3 --> N4 --> G2
+    </div>
+    <figcaption>Where this sits. The Go runtime netpoller bridges synchronous goroutine code to asynchronous kernel epoll events.
+    <b>Goroutines block synchronously while underlying OS threads remain non-blocking.</b></figcaption>
+  </figure>
+
+  <h2>1. The illusion of synchronous I/O</h2>
+  <p>In standard C or POSIX programming, network programmers must choose between two models: either dedicate one OS thread per connection using blocking I/O (which collapses under tens of thousands of open connections due to thread stack memory), or write complex asynchronous callback state machines around raw <code>epoll</code> or <code>select</code>.</p>
+
+  <p>Go eliminates this tradeoff. To an application developer, reading from a TCP socket looks like ordinary linear code:</p>
+
+  <pre><code>buf := make([]byte, 4096)
+n, err := conn.Read(buf) // Looks like a blocking system call
+if err != nil {
+    return err
+}</code></pre>
+
+  <p>Under the hood, the Go runtime never executes a blocking read system call. When a socket is opened via <code>net.Dial</code> or <code>net.Listen</code>, Go automatically sets the file descriptor to non-blocking mode using <code>fcntl(fd, F_SETFL, O_NONBLOCK)</code> and registers the descriptor with the runtime netpoller.</p>
+
+  <h2>2. Inside the netpoller: gopark and goready</h2>
+  <p>When <code>conn.Read()</code> is invoked, Go attempts a non-blocking read. If bytes are already present in the kernel socket receive buffer, the call returns immediately with zero delay. But if no data is ready, the Linux kernel returns the error code <code>EAGAIN</code> (or <code>EWOULDBLOCK</code>).</p>
+
+  <p>Instead of yielding the operating system thread or spinning in a busy loop, the Go runtime performs a clean context switch:</p>
+
+  <ol>
+    <li>The socket file descriptor and current goroutine pointer are registered with the runtime’s epoll descriptor via <code>epoll_ctl(EPOLL_CTL_MOD, fd, EPOLLIN|EPOLLONESHOT)</code>.</li>
+    <li>The runtime calls <code>gopark()</code>. This parks the current goroutine, removes it from the processor’s local run queue (the P in Go’s G-M-P scheduler), and assigns the operating system thread (M) to immediately execute another waiting goroutine.</li>
+    <li>During idle periods or periodic runtime monitoring ticks, the runtime netpoller thread invokes <code>epoll_wait()</code> to fetch descriptors with pending network activity.</li>
+    <li>For every ready descriptor, the runtime extracts the parked goroutine pointer and calls <code>goready(gp)</code>, placing it back onto an active processor run queue.</li>
+  </ol>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant App as Goroutine
+  participant Net as net.Conn
+  participant Poll as Runtime Netpoller
+  participant Kern as Kernel epoll
+  App->>Net: Read(buf)
+  Net->>Kern: read(fd) syscall
+  Kern-->>Net: Returns EAGAIN
+  Net->>Poll: netpollblock()
+  Poll->>Kern: epoll_ctl(ADD or MOD, fd)
+  Poll->>App: gopark() parks Goroutine
+  Note over App: OS thread M is freed for other work
+  Kern-->>Poll: epoll_wait finds fd readable
+  Poll->>App: goready() moves G to runqueue
+  App->>Net: Read(buf) retried
+  Net->>Kern: read(fd) syscall succeeds
+  Net-->>App: Return n bytes
+    </div>
+    <figcaption>Netpoller lifecycle sequence. How the runtime parks and awakens goroutines across kernel epoll notifications.
+    <b>The Go scheduler decouples socket waiting from operating system thread availability.</b></figcaption>
+  </figure>
+
+  <h2>3. The allocation problem in high-speed servers</h2>
+  <p>While the netpoller solves the concurrency scaling problem, high-throughput network proxies (like Traefik and Caddy) and object stores (like MinIO) quickly run into a secondary bottleneck: memory allocations. If a server receives 50,000 HTTP requests per second, and each connection allocates a fresh 32 KB buffer to read headers and payloads, the application generates 1.6 GB of garbage every second.</p>
+
+  <p>The Go garbage collector must constantly trace and reclaim these ephemeral byte slices, stealing CPU cycles from active request handlers and causing latency spikes. To eliminate this overhead, production Go systems use <b>buffer pools</b> via <code>sync.Pool</code>.</p>
+
+  <pre><code>package main
+
+import (
+	"io"
+	"net"
+	"sync"
+)
+
+// Global pool of reusable 32KB byte buffers
+var bufferPool = sync.Pool{
+	New: func() any {
+		b := make([]byte, 32*1024)
+		return &b
+	},
+}
+
+func handleConnection(conn net.Conn) error {
+	defer conn.Close()
+
+	// Acquire buffer from pool without heap allocation
+	bufPtr := bufferPool.Get().(*[]byte)
+	defer bufferPool.Put(bufPtr) // Guarantee return on exit
+
+	buf := *bufPtr
+	for {
+		n, err := conn.Read(buf)
+		if err != nil {
+			if err == io.EOF {
+				return nil
+			}
+			return err
+		}
+		// Process received bytes (slice view without copying)
+		if err := processPayload(buf[:n]); err != nil {
+			return err
+		}
+	}
+}
+
+func processPayload(data []byte) error {
+	return nil
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> IdleInPool: sync.Pool initialization
+  IdleInPool --> LeasedToWorker: bufferPool.Get()
+  LeasedToWorker --> PopulatedFromSocket: conn.Read(buf)
+  PopulatedFromSocket --> SlicedForPayload: buf[:n] zero-copy view
+  SlicedForPayload --> ClearedForReturn: work complete
+  ClearedForReturn --> IdleInPool: bufferPool.Put()
+  IdleInPool --> ReclaimedByGC: dropped during memory pressure
+    </div>
+    <figcaption>Buffer pool lifecycle. Byte slices circulate between active network handlers and the pool without heap allocation.
+    <b>Buffer reuse keeps the Go garbage collector completely off the critical I/O path.</b></figcaption>
+  </figure>
+
+  <h2>4. Zero-copy transfer: splice and sendfile</h2>
+  <p>In proxies like Traefik or caching file servers like Caddy, data often flows directly from an incoming network connection to an outgoing socket or from disk to a socket. Reading bytes into user-space memory only to immediately write them back out wastes memory bus bandwidth.</p>
+
+  <p>The Go standard library detects when source and destination file descriptors support operating system zero-copy primitives. When calling <code>io.Copy(dstSocket, srcFile)</code>, Go automatically invokes <code>sendfile(2)</code> or <code>splice(2)</code> through package <code>internal/poll</code>, allowing the Linux kernel to transfer pages directly inside kernel memory buffers without copying bytes into userspace memory.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does Go's netpoller handle a blocking socket read without blocking OS threads?</div>
+      <button class="q-opt">It converts the socket to UDP packet buffering mode</button>
+      <button class="q-opt">It spawns a new OS kernel thread for each connection</button>
+      <button class="q-opt">It parks the goroutine and registers the fd in epoll</button>
+      <button class="q-opt">It polls the socket in a busy spin-lock in user space</button>
+      <div class="q-fb">When read returns EAGAIN, the runtime parks the calling goroutine via gopark and registers the file descriptor with epoll, allowing the underlying OS thread to execute other goroutines.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does using sync.Pool for byte buffers prevent garbage collection pauses?</div>
+      <button class="q-opt">Reused slices avoid heap allocation on the hot path</button>
+      <button class="q-opt">Pool objects are permanently pinned to physical RAM</button>
+      <button class="q-opt">The pool disables runtime GC sweeping on all threads</button>
+      <button class="q-opt">Memory inside sync.Pool is allocated with raw malloc</button>
+      <div class="q-fb">By reusing existing byte slices instead of allocating new buffers on every request, the application generates zero garbage on the heap, eliminating GC sweep overhead.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What happens to buffers stored in a sync.Pool during a garbage collection cycle?</div>
+      <button class="q-opt">They are pinned indefinitely across all future GCs</button>
+      <button class="q-opt">They can be dropped and reclaimed by the GC cycle</button>
+      <button class="q-opt">They are automatically serialized into disk paging</button>
+      <button class="q-opt">They are promoted to the eternal static data segment</button>
+      <div class="q-fb">Objects in a sync.Pool are weakly retained and may be evicted during garbage collection if memory pressure arises, making sync.Pool safe against memory leaks.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> When tuning network servers in Go, the two most impactful levers are eliminating per-request buffer allocations with <code>sync.Pool</code> and verifying that your write loops do not trigger small buffer flushes. Profiling with <code>go tool pprof -alloc_space</code> immediately shows whether your net loop is truly zero-allocation.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Explore the runtime netpoller implementation in <a href="https://github.com/golang/go/blob/master/src/runtime/netpoll_epoll.go">src/runtime/netpoll_epoll.go</a>, and examine how <a href="https://github.com/traefik/traefik">traefik/traefik</a> and <a href="https://github.com/miekg/dns">miekg/dns</a> structure zero-allocation packet parsing buffers.</p>
+
+  <div class="pager">
+    <a href="0100-how-go-talks-to-the-linux-kernel.html"><span class="dir">&larr; Lesson 0100</span><span class="ttl">How Go talks to the Linux kernel</span></a>
+    <a class="nxt" href="0200-moby-container-lifecycle-and-daemon-architecture.html"><span class="dir">Next &rarr;</span><span class="ttl">Moby container lifecycle and daemon architecture</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0101 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

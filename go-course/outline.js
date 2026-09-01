@@ -13,6 +13,28 @@ window.COURSE_OUTLINE = {
         {
           "title": "How Go talks to the Linux kernel",
           "href": "lessons/0100-how-go-talks-to-the-linux-kernel.html"
+        },
+        {
+          "title": "The anatomy of a zero-allocation network loop",
+          "href": "lessons/0101-the-anatomy-of-a-zero-allocation-network-loop.html"
+        }
+      ]
+    },
+    {
+      "n": "02",
+      "title": "Container Runtimes",
+      "lessons": [
+        {
+          "title": "Moby container lifecycle and daemon architecture",
+          "href": "lessons/0200-moby-container-lifecycle-and-daemon-architecture.html"
+        },
+        {
+          "title": "containerd, the shim pattern, and the topic event bus",
+          "href": "lessons/0201-containerd-the-shim-pattern-and-event-bus.html"
+        },
+        {
+          "title": "Content-addressable storage and overlayfs snapshotters",
+          "href": "lessons/0202-content-addressable-storage-and-snapshotters.html"
         }
       ]
     }

@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>containerd, the shim pattern, and the topic event bus - Systems Engineering in Go</title>
+<meta name="description" content="How containerd decouples container process execution through the v2 shim pattern, lightweight TTRPC, and an asynchronous topic event bus in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Container Runtimes &middot; Lesson 0201</div>
+  <h1>containerd decouples container runtimes through the v2 shim API and a topic-based TTRPC event bus</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The runtime backbone under Docker and Kubernetes CRI &middot;
+    <a href="https://github.com/containerd/containerd">containerd/containerd</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>containerd</b> is the industry-standard container supervisor, sitting directly between high-level engines (Docker, Kubernetes CRI) and low-level kernel runtimes (runc, Kata, gVisor).</li>
+      <li>To eliminate daemon failure coupling, containerd uses the <b>Shim v2 pattern</b>: every container (or Kubernetes pod) is parented by an independent, lightweight Go process that holds its standard I/O pipes and exit status.</li>
+      <li>Because standard gRPC incurs substantial memory and reflection overhead when multiplied across hundreds of shims per node, containerd engineers invented <b>TTRPC</b>, a stripped-down RPC protocol optimized for low memory footprints over Unix sockets.</li>
+      <li>State transitions (creation, start, OOM, exit) are broadcast through an internal <b>topic event bus</b>, allowing consumers to react asynchronously without polling container state.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph ClientLayer["Supervisors"]
+    Kubelet["Kubelet CRI"]
+    Docker["Docker Engine"]
+  end
+  subgraph ContainerdCore["containerd Daemon"]
+    direction TB
+    GRPCServer["gRPC API Services"]
+    EventBus["Topic Event Exchange"]
+    TaskService["Task Service Engine"]
+    GRPCServer --> TaskService
+    TaskService --> EventBus
+  end
+  subgraph ShimLayer["Shim Subreapers"]
+    direction TB
+    Shim1["containerd-shim-runc-v2 - Pod A"]
+    Shim2["containerd-shim-runc-v2 - Pod B"]
+  end
+  subgraph ProcessLayer["Containers"]
+    Proc1["Container Process A"]
+    Proc2["Container Process B"]
+  end
+  ClientLayer --> GRPCServer
+  TaskService -->|"TTRPC over Unix socket"| ShimLayer
+  Shim1 -->|"prctl subreaper"| Proc1
+  Shim2 -->|"prctl subreaper"| Proc2
+  Shim1 -->|"TTRPC events"| EventBus
+    </div>
+    <figcaption>Where this sits. The containerd supervision tree with detached v2 shims and the central topic event exchange.
+    <b>Each container is parented by an isolated shim rather than the main containerd daemon.</b></figcaption>
+  </figure>
+
+  <h2>1. Why the shim exists: the subreaper pattern</h2>
+  <p>In Unix systems, when a parent process exits, its orphan child processes are automatically reparented to PID 1 (usually <code>systemd</code> or <code>init</code>). If containerd were the direct parent of all containers, restarting containerd would leave container processes orphaned and reaped by PID 1, severing their stdio file descriptors and losing exit codes.</p>
+
+  <p>To solve this, Linux provides the <code>PR_SET_CHILD_SUBREAPER</code> system call (accessible in Go via <code>unix.Prctl(unix.PR_SET_CHILD_SUBREAPER, 1, 0, 0, 0)</code>). When containerd spawns a container, it first forks a tiny dedicated daemon: <code>containerd-shim-runc-v2</code>. The shim sets itself as a subreaper, invokes <code>runc</code> to construct the container namespaces, and remains alive as the container's permanent parent.</p>
+
+  <p>The shim performs three critical duties:</p>
+  <ul>
+    <li>It holds open the container's stdin, stdout, and stderr FIFOs or pseudo-terminal (pty) master file descriptors even if containerd restarts.</li>
+    <li>It waits on the container process using <code>wait4()</code>, capturing the exit code without letting zombie processes leak into the operating system table.</li>
+    <li>It serves a local Unix domain socket implementing the Shim v2 Task API over TTRPC.</li>
+  </ul>
+
+  <h2>2. TTRPC: stripping gRPC for low-memory shims</h2>
+  <p>Standard gRPC in Go is feature-packed: it includes HTTP/2 framing, dynamic name resolution, TLS negotiation, and reflection. However, running a standard gRPC server inside 200 shims on a single Kubernetes node would consume over 3 GB of RAM just for RPC plumbing.</p>
+
+  <p>To keep the shim's memory footprint under 3 MB, containerd authored <a href="https://github.com/containerd/ttrpc">TTRPC</a>. TTRPC replaces HTTP/2 with a simple binary protocol:</p>
+
+  <pre><code>// TTRPC message frame layout (10-byte header)
+// 0               1               2               3
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                          Length (32 bits)                     |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |           Stream ID (16 bits) |   Type (8)    |   Flags (8)   |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+// |                        Payload (Protobuf)                     |
+// +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+</code></pre>
+
+  <p>By compiling Protocol Buffers into code that reads and writes this compact binary header directly over Unix domain sockets, TTRPC cuts memory allocations to near zero and eliminates HTTP/2 state machines.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Daemon as containerd daemon
+  participant Shim as containerd-shim-runc-v2
+  participant OS as Linux Kernel
+  participant Task as Container Process
+  Daemon->>OS: Fork and exec containerd-shim-runc-v2
+  Shim->>OS: unix.Prctl(PR_SET_CHILD_SUBREAPER)
+  Shim->>OS: Listen on unix socket /run/containerd/s/hash
+  Daemon->>Shim: TTRPC Create(bundle, oci_spec)
+  Shim->>OS: runc create --bundle
+  OS->>Task: Process spawned and paused
+  Daemon->>Shim: TTRPC Start()
+  Shim->>OS: runc start
+  OS->>Task: Process begins execution
+  Note over Daemon,Task: Daemon may restart freely without affecting Task
+  Task->>OS: Process exits with code 0
+  OS->>Shim: SIGCHLD signal sent to subreaper shim
+  Shim->>OS: wait4() reaps exit code
+  Shim->>Daemon: TTRPC Publish(/tasks/exit event)
+    </div>
+    <figcaption>Shim execution and exit harvesting sequence. How the shim handles container lifecycles across daemon restarts.
+    <b>The shim acts as a crash-proof shield between the central daemon and running processes.</b></figcaption>
+  </figure>
+
+  <h2>3. The topic-based event bus</h2>
+  <p>In large Kubernetes clusters running hundreds of microservices per node, constantly polling container statuses would thrash CPU caches. Instead, containerd implements an internal publish-subscribe event exchange located in package <code>events/exchange.go</code>.</p>
+
+  <p>State changes are published as typed Protobuf events categorized under hierarchical topics:</p>
+  <ul>
+    <li><code>/tasks/create</code>: Container task allocated in shim.</li>
+    <li><code>/tasks/start</code>: Process execution initiated.</li>
+    <li><code>/tasks/oom</code>: Process killed by kernel out-of-memory controller.</li>
+    <li><code>/tasks/exit</code>: Process exited with status code and exit timestamp.</li>
+    <li><code>/images/create</code>: New OCI image ingested into content store.</li>
+  </ul>
+
+  <pre><code>// Pattern from containerd/events/exchange.go
+type Exchange struct {
+	mu          sync.RWMutex
+	subscribers map[chan *events.Envelope]matcher
+}
+
+func (e *Exchange) Publish(ctx context.Context, topic string, event any) error {
+	envelope := &events.Envelope{
+		Timestamp: time.Now().UTC(),
+		Topic:     topic,
+		Event:     mustMarshal(event),
+	}
+
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+
+	for ch, match := range e.subscribers {
+		if match(topic) {
+			select {
+			case ch <- envelope:
+			default:
+				// Non-blocking drop or buffer warning prevents slow subscribers
+			}
+		}
+	}
+	return nil
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Idle: Subscribed to /tasks/*
+  Idle --> EventPublished: Shim emits /tasks/exit
+  EventPublished --> TopicMatch: Pattern match against subscriber filter
+  TopicMatch --> ChannelEnqueue: Push envelope to Go channel
+  ChannelEnqueue --> ConsumedByCRI: Kubelet receives exit code
+  ConsumedByCRI --> PodStatusUpdated: Kubernetes API notified of container termination
+  PodStatusUpdated --> [*]
+    </div>
+    <figcaption>Event notification flow. How state changes travel asynchronously from shim to high-level subscribers.
+    <b>Topic filtering ensures consumers receive only relevant lifecycle events.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why did containerd invent TTRPC instead of using standard gRPC for shim communication?</div>
+      <button class="q-opt">TTRPC removes reflection and saves daemon memory space</button>
+      <button class="q-opt">TTRPC encrypts payload buffers using hardware AES keys</button>
+      <button class="q-opt">Standard gRPC cannot operate across unix domain sockets</button>
+      <button class="q-opt">The Linux kernel refuses standard HTTP2 framed packets</button>
+      <div class="q-fb">TTRPC eliminates HTTP/2 parsing and reflection, shrinking the memory footprint of each shim process from tens of megabytes to under 3 MB.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What role does the containerd v2 shim play during a container's execution lifetime?</div>
+      <button class="q-opt">It runs as the init PID 1 process inside the container</button>
+      <button class="q-opt">It acts as the detached subreaper holding open I/O pipes</button>
+      <button class="q-opt">It compiles container code into native machine binaries</button>
+      <button class="q-opt">It proxies external DNS requests to the host network card</button>
+      <div class="q-fb">The shim sets PR_SET_CHILD_SUBREAPER, parenting the container process, holding open its stdio FIFOs, and reaping its exit code even if the containerd daemon restarts.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does containerd's event bus notify subscribers of container state changes?</div>
+      <button class="q-opt">Writing structured log strings to local text files</button>
+      <button class="q-opt">Broadcasting UDP datagrams across the bridge network</button>
+      <button class="q-opt">Dispatching typed envelopes through an in-memory queue</button>
+      <button class="q-opt">Invoking external shell scripts registered in systemd</button>
+      <div class="q-fb">The containerd exchange matches event topics (e.g. /tasks/exit) and pushes typed Protobuf envelopes into subscribed Go channels without blocking the publisher.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The shim v2 architecture is why you can restart or upgrade <code>containerd</code> and <code>dockerd</code> on a live production server without interrupting a single HTTP request in running pods. Always verify that <code>systemd</code> is configured with <code>KillMode=process</code> so it does not sweep away the detached shims when stopping the daemon unit.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Explore the runtime v2 shim specification in <a href="https://github.com/containerd/containerd/tree/main/core/runtime/v2">containerd/core/runtime/v2</a> and inspect the TTRPC framing implementation in <a href="https://github.com/containerd/ttrpc">containerd/ttrpc</a>.</p>
+
+  <div class="pager">
+    <a href="0200-moby-container-lifecycle-and-daemon-architecture.html"><span class="dir">&larr; Lesson 0200</span><span class="ttl">Moby container lifecycle and daemon architecture</span></a>
+    <a class="nxt" href="0202-content-addressable-storage-and-snapshotters.html"><span class="dir">Next &rarr;</span><span class="ttl">Content-addressable storage and overlayfs snapshotters</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0201 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
