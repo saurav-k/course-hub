@@ -29,9 +29,9 @@ Status marks used below:
 | 11 | `lessons/0401-kubernetes-api-machinery-and-type-schemes.html` | written | runtime.Object, dynamic typing, Scheme registration, field selectors |
 | 12 | `lessons/0402-nomad-optimistic-concurrency-and-eval-brokers.html` | written | Nomad plan/eval scheduling pipeline, task runner drivers |
 | 13 | `lessons/0403-helm-chart-rendering-and-kubernetes-storage-drivers.html` | written | Go `text/template` sandboxing, release state in K8s Secrets, 3-way merge |
-| 14 | `lessons/0500-terraform-dag-construction-and-graph-walking.html` | reserved | Directed Acyclic Graph, topological sort, concurrent worker evaluation |
-| 15 | `lessons/0501-terraform-and-vault-the-go-plugin-subsystem.html` | reserved | HashiCorp `go-plugin`, net/rpc and gRPC IPC, handshake verification, process supervision |
-| 16 | `lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html` | reserved | AES-GCM envelope barrier encryption, Shamir GF(2^8) math, dynamic lease revocation |
+| 14 | `lessons/0500-terraform-dag-construction-and-graph-walking.html` | written | Directed Acyclic Graph, topological sort, concurrent worker evaluation |
+| 15 | `lessons/0501-terraform-and-vault-the-go-plugin-subsystem.html` | written | HashiCorp `go-plugin`, net/rpc and gRPC IPC, handshake verification, process supervision |
+| 16 | `lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html` | written | AES-GCM envelope barrier encryption, Shamir GF(2^8) math, dynamic lease revocation |
 | 17 | `lessons/0600-coredns-zero-allocation-dns-pipeline.html` | reserved | Plugin chain pattern, `plugin.Handler`, `miekg/dns` wire packet parsing |
 | 18 | `lessons/0601-traefik-dynamic-configuration-and-reactive-providers.html` | reserved | Atomic configuration swapping, provider event listeners, middleware chains |
 | 19 | `lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html` | reserved | Caddy module lifecycle, `certmagic` automated ACME TLS, socket file descriptor handovers |

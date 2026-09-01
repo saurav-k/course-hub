@@ -81,6 +81,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0403-helm-chart-rendering-and-kubernetes-storage-drivers.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Infrastructure as Code",
+      "lessons": [
+        {
+          "title": "Terraform DAG construction and concurrent graph walking",
+          "href": "lessons/0500-terraform-dag-construction-and-graph-walking.html"
+        },
+        {
+          "title": "Terraform, Vault, and the go-plugin IPC subsystem",
+          "href": "lessons/0501-terraform-and-vault-the-go-plugin-subsystem.html"
+        },
+        {
+          "title": "Vault barrier encryption and Shamir secret sharing",
+          "href": "lessons/0502-vault-barrier-encryption-and-shamir-secret-sharing.html"
+        }
+      ]
     }
   ],
   "extras": [

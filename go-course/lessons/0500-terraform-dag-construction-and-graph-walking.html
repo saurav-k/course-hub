@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terraform DAG construction and concurrent graph walking - Systems Engineering in Go</title>
+<meta name="description" content="How HashiCorp Terraform models infrastructure dependencies as a Directed Acyclic Graph (DAG) and executes concurrent provisioning walks in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Infrastructure as Code &middot; Lesson 0500</div>
+  <h1>Terraform determines safe parallel infrastructure provisioning through dependency graph construction and concurrent DAG walkers</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The graph evaluation engine inside HashiCorp Terraform &middot;
+    <a href="https://github.com/hashicorp/terraform">hashicorp/terraform</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Infrastructure provisioning cannot be executed in arbitrary order: a virtual machine cannot be launched before its virtual private cloud (VPC) network exists.</li>
+      <li><b>HashiCorp Terraform</b> parses HCL into an internal <b>Directed Acyclic Graph (DAG)</b> where each resource is a vertex and resource references form directed dependency edges.</li>
+      <li>To prevent unnecessary serialization, Terraform runs <b>transitive reduction</b>, pruning redundant indirect dependency paths and validating that the graph contains zero circular cycles.</li>
+      <li>The execution engine walks the graph concurrently using a worker semaphore: any vertex whose upstream dependency count reaches zero executes immediately, maximizing parallel cloud API throughput.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  HCL["HCL Resource Blocks (*.tf)"] --> AST["HCL Abstract Syntax Tree"]
+  AST --> Builder["Graph Builder: Identify Attribute References"]
+  subgraph Optimization["Graph Compilation & Optimization"]
+    direction TB
+    RawGraph["Raw Dependency Graph"]
+    TransitiveRed["Transitive Reduction (Prune redundant edges)"]
+    CycleCheck["Tarjan's Strongly Connected Cycle Check"]
+    RawGraph --> TransitiveRed --> CycleCheck
+  end
+  Builder --> RawGraph
+  CycleCheck --> ExecutionDAG["Executable DAG"]
+  subgraph WalkerPool["Concurrent Worker Pool (Semaphore N=10)"]
+    direction TB
+    VPC["aws_vpc.main\n(Zero upstream: EXECUTES)"]
+    Subnet1["aws_subnet.a\n(Waits on VPC)"]
+    Subnet2["aws_subnet.b\n(Waits on VPC)"]
+    VM["aws_instance.app\n(Waits on Subnet A + B)"]
+    VPC --> Subnet1 & Subnet2
+    Subnet1 & Subnet2 --> VM
+  end
+  ExecutionDAG --> WalkerPool
+    </div>
+    <figcaption>Where this sits. From raw HCL configuration to optimized concurrent DAG execution.
+    <b>Dependency analysis guarantees that resources are created in strict topological order.</b></figcaption>
+  </figure>
+
+  <h2>1. Representing infrastructure as a graph</h2>
+  <p>In procedural shell scripts, infrastructure creation is rigid: creating 50 AWS resources sequentially can take 20 minutes. But many resources (such as separate subnets in different availability zones, S3 buckets, or DNS records) have zero dependency on each other and can be created simultaneously.</p>
+
+  <p>Terraform models cloud resources as mathematical graphs using the internal <code>terraform/dag</code> package. Every resource block becomes a <code>Vertex</code>:</p>
+
+  <pre><code>// Foundational graph structures from terraform/dag
+type Graph struct {
+	vertices Set
+	edges    Set
+}
+
+type Vertex interface{}
+
+type NamedVertex interface {
+	Name() string
+}
+
+type Edge struct {
+	Source Vertex
+	Target Vertex
+}</code></pre>
+
+  <h2>2. Transitive reduction and cycle elimination</h2>
+  <p>When compiling references, graphs often develop redundant edges. Suppose resource $C$ references both $B$ and $A$, while $B$ references $A$:</p>
+  <ul>
+    <li>Edge 1: $B \rightarrow A$</li>
+    <li>Edge 2: $C \rightarrow B$</li>
+    <li>Edge 3: $C \rightarrow A$</li>
+  </ul>
+
+  <p>Because $C$ already depends on $B$, and $B$ depends on $A$, the direct edge $C \rightarrow A$ is redundant. Terraform applies <b>transitive reduction</b> to prune Edge 3. This simplifies the graph topology and prevents scheduler contention.</p>
+
+  <p>Next, Terraform verifies that the graph is strictly acyclic using Tarjan's algorithm. If a user writes a circular dependency (e.g. Security Group 1 references Security Group 2, which references Security Group 1), Terraform catches the cycle at compile time before making any destructive cloud API calls.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Walker as DAG Graph Walker
+  participant Worker1 as Worker Goroutine 1
+  participant Worker2 as Worker Goroutine 2
+  participant Cloud as Cloud Provider API
+  Walker->>Walker: Evaluate in-degree counters
+  Note over Walker: aws_vpc has in-degree=0
+  Walker->>Worker1: Dispatch aws_vpc.main
+  Worker1->>Cloud: POST /vpcs (Create VPC)
+  Cloud-->>Worker1: vpc-0a1b2c created
+  Worker1-->>Walker: aws_vpc completed
+  Note over Walker: Decrement in-degrees: Subnet A=0, Subnet B=0
+  par Concurrent Subnet Creation
+    Walker->>Worker1: Dispatch aws_subnet.a
+    Worker1->>Cloud: POST /subnets (AZ 1)
+  and
+    Walker->>Worker2: Dispatch aws_subnet.b
+    Worker2->>Cloud: POST /subnets (AZ 2)
+  end
+  Worker1-->>Walker: Subnet A completed
+  Worker2-->>Walker: Subnet B completed
+  Note over Walker: VM in-degree reaches 0 - dispatch VM
+    </div>
+    <figcaption>Parallel graph execution sequence. Independent sibling nodes execute concurrently on separate goroutines.
+    <b>Downstream vertices are unblocked the instant all upstream parents report completion.</b></figcaption>
+  </figure>
+
+  <h2>3. The concurrent DAG walker</h2>
+  <p>In <code>terraform/dag/walk.go</code>, the graph walker executes using an event-driven channel architecture:</p>
+
+  <pre><code>// Pattern from terraform/dag/walk.go
+type Walker struct {
+	Callback WalkFunc
+	Reverse  bool
+
+	// Semaphore limits concurrent cloud API requests
+	Semaphore *semaphore.Weighted
+
+	graph *Graph
+	deps  map[Vertex]int // Pending upstream dependency count
+	mu    sync.Mutex
+}
+
+func (w *Walker) Walk() error {
+	ready := make(chan Vertex, len(w.graph.Vertices()))
+
+	// 1. Enqueue all initial root vertices (in-degree == 0)
+	for _, v := range w.graph.Vertices() {
+		if w.deps[v] == 0 {
+			ready <- v
+		}
+	}
+
+	// 2. Worker pool consumes ready vertices
+	for v := range ready {
+		go func(vertex Vertex) {
+			_ = w.Semaphore.Acquire(context.Background(), 1)
+			defer w.Semaphore.Release(1)
+
+			// Execute cloud resource creation
+			w.Callback(vertex)
+
+			// Decrement dependencies for all outgoing targets
+			w.notifyDownstream(vertex, ready)
+		}(v)
+	}
+	return nil
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Blocked: Initial vertex creation
+  Blocked --> Ready: All upstream dependencies complete (deps == 0)
+  Ready --> Executing: Worker goroutine acquires semaphore
+  Executing --> Completed: Cloud API provisioning returns success
+  Executing --> Failed: Cloud API returns error (e.g. QuotaExceeded)
+  Failed --> [*]: Cancel downstream vertices via context
+  Completed --> [*]: Signal downstream edges and decrement counters
+    </div>
+    <figcaption>Vertex lifecycle during graph execution. Atomic counter decrements and error cancellation.
+    <b>Failures cancel downstream dependents while allowing independent subtrees to finish.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does Terraform build a Directed Acyclic Graph before provisioning resources?</div>
+      <button class="q-opt">To discover independent resources and apply in parallel</button>
+      <button class="q-opt">To compile HCL configuration blocks into Linux binaries</button>
+      <button class="q-opt">To encrypt state file outputs with Shamir secret keys</button>
+      <button class="q-opt">To bypass rate limits enforced by cloud service APIs</button>
+      <div class="q-fb">Building a DAG enables Terraform to identify which resources depend on others and which are completely independent, allowing safe parallel execution across multiple goroutines.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What role does transitive reduction play during Terraform graph compilation?</div>
+      <button class="q-opt">It compresses raw YAML files using gzip decompression</button>
+      <button class="q-opt">It removes redundant edge paths to minimize wait locks</button>
+      <button class="q-opt">It terminates inactive cloud virtual machine instances</button>
+      <button class="q-opt">It converts floating point attributes into 64-bit keys</button>
+      <div class="q-fb">Transitive reduction prunes indirect duplicate edges (if A->B and B->C, a direct A->C edge is redundant), simplifying the execution graph and eliminating unnecessary synchronization locks.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does Terraform's graph walker know when a resource is ready to provision?</div>
+      <button class="q-opt">When the human administrator types a confirmation line</button>
+      <button class="q-opt">When the cloud provider emits an HTTP webhook ping call</button>
+      <button class="q-opt">When all upstream dependency vertices report completion</button>
+      <button class="q-opt">When the operating system scheduler yields CPU threads</button>
+      <div class="q-fb">A vertex is ready for execution as soon as its remaining in-degree (pending upstream dependencies) reaches zero, triggering dispatch to the worker goroutine pool.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Whenever you have complex multi-step workflows with interdependencies, avoid hardcoded procedural loops. Build a lightweight DAG package in Go with topological sorting and worker semaphores; it turns slow sequential tasks into highly optimized concurrent pipelines.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the DAG implementation in <a href="https://github.com/hashicorp/terraform/tree/main/internal/dag">terraform/internal/dag</a> and inspect graph walking algorithms in <a href="https://github.com/hashicorp/terraform/tree/main/internal/terraform/graph.go">terraform/internal/terraform/graph.go</a>.</p>
+
+  <div class="pager">
+    <a href="0403-helm-chart-rendering-and-kubernetes-storage-drivers.html"><span class="dir">&larr; Lesson 0403</span><span class="ttl">Helm chart rendering and the three-way strategic merge</span></a>
+    <a class="nxt" href="0501-terraform-and-vault-the-go-plugin-subsystem.html"><span class="dir">Next &rarr;</span><span class="ttl">Terraform, Vault, and the go-plugin IPC subsystem</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0500 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

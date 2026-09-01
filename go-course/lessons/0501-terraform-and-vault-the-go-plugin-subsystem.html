@@ -1,0 +1,201 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terraform, Vault, and the go-plugin IPC subsystem - Systems Engineering in Go</title>
+<meta name="description" content="How HashiCorp Terraform and Vault isolate extensible plugins across process boundaries using go-plugin, UNIX socket gRPC, and mutual TLS handshakes.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 05 &middot; Infrastructure as Code &middot; Lesson 0501</div>
+  <h1>HashiCorp isolates extensible plugins across process boundaries using go-plugin, UNIX socket gRPC, and mTLS handshakes</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Plugin architecture inside Terraform, Vault, and Packer &middot;
+    <a href="https://github.com/hashicorp/go-plugin">hashicorp/go-plugin</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Go's standard <code>plugin</code> package is notoriously fragile: it requires identical compiler versions, identical dependency trees, cannot unload libraries, and panics crash the entire host.</li>
+      <li>HashiCorp's <b><code>go-plugin</code></b> executes plugins as separate OS child processes communicating over <b>UNIX domain sockets</b> via <b>gRPC</b>, providing bulletproof failure isolation.</li>
+      <li>Startup uses a strict handshake: the child outputs a formatted line to stdout (<code>"1|5|unix|/tmp/plugin.sock|grpc|"</code>) protected by a secret <b>Magic Cookie</b> environment variable.</li>
+      <li>All IPC traffic is secured using automatically generated ephemeral <b>mutual TLS (mTLS)</b> certificates, preventing any unauthorized process on the local machine from spoofing or snooping RPC calls.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Host["Host Process (e.g. Terraform Core / Vault)"] -->|"os/exec with MAGIC_COOKIE env"| Child["Plugin Binary (e.g. terraform-provider-aws)"]
+  Child -->|"1. Prints handshake line to stdout"| Handshake["Handshake: Core version + UNIX socket path"]
+  Handshake --> Host
+  Host <-->|"2. Ephemeral mTLS certificate exchange"| Child
+  subgraph IPCPipeline["High-Performance Local IPC"]
+    direction LR
+    gRPCClient["Host gRPC Client Stub"] <-->|"UNIX Domain Socket (/tmp/plugin.sock)"| gRPCServer["Child gRPC Server Handler"]
+  end
+  Host --> gRPCClient
+  Child --> gRPCServer
+  Child -.->|"If child panics or segfaults"| Isolation["Host catches broken pipe - remains healthy"]
+    </div>
+    <figcaption>Where this sits. The out-of-process RPC architecture of HashiCorp go-plugin.
+    <b>Plugins execute in separate process spaces, safeguarding the host against third-party crashes.</b></figcaption>
+  </figure>
+
+  <h2>1. Why in-process Go plugins fail</h2>
+  <p>The Go standard library added <code>plugin.Open()</code> in Go 1.8, but major open-source projects like Terraform and Vault refuse to use it. In-process shared libraries (<code>.so</code> files) impose severe architectural penalties:</p>
+
+  <ul>
+    <li><b>Cgo Requirement:</b> Standard Go plugins require Cgo, eliminating pure-Go cross-compilation.</li>
+    <li><b>ABI Brittleness:</b> If Terraform was built with Go 1.22.1 and a plugin was built with Go 1.22.2, or if they share a dependency with a single byte difference in struct layout, loading fails instantly.</li>
+    <li><b>Fatal Crashes:</b> If a third-party AWS or Azure provider dereferences a nil pointer or segfaults, the entire Terraform host process crashes immediately, risking state file corruption.</li>
+  </ul>
+
+  <p>HashiCorp solved this by designing <a href="https://github.com/hashicorp/go-plugin">hashicorp/go-plugin</a>: plugins are standalone binaries compiled by anyone, anywhere, executed as isolated child processes.</p>
+
+  <h2>2. The handshake and Magic Cookie</h2>
+  <p>How does the host know when the child plugin is ready, and which socket to connect to? The child process cannot open a hardcoded port without risking port collisions.</p>
+
+  <p>The startup sequence uses an elegant stdout stream handshake:</p>
+
+  <ol>
+    <li>The host sets an environment variable: <code>MAGIC_COOKIE_KEY="TF_PLUGIN_MAGIC_COOKIE"</code>. The child process validates this key on launch; if missing, it exits, preventing users from accidentally double-clicking plugin binaries.</li>
+    <li>The child opens a temporary UNIX domain socket (or localhost TCP on Windows) with random naming.</li>
+    <li>The child writes a single formatted text line to its <code>stdout</code> descriptor:</li>
+  </ol>
+
+  <pre><code>// Format: CoreProtocolVersion|AppProtocolVersion|NetworkType|SocketPath|ProtocolType
+1|5|unix|/var/folders/24/plugin-10492.sock|grpc|</code></pre>
+
+  <p>The host reads this single line from the child's stdout pipe, parses the socket path, and immediately closes the stdout reader, transitioning all subsequent communication to gRPC.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Host as Terraform Host
+  participant OS as Linux Kernel
+  participant Child as Provider Process
+  Host->>OS: exec.Command("terraform-provider-aws", Env=[COOKIE=valid])
+  OS->>Child: Spawn child process PID 4920
+  Child->>Child: Bind UNIX socket: /tmp/p-4920.sock
+  Child->>Host: stdout: "1|5|unix|/tmp/p-4920.sock|grpc|"
+  Host->>Child: Connect /tmp/p-4920.sock
+  Note over Host,Child: Ephemeral TLS handshake with 2048-bit keys
+  Host->>Child: gRPC: ConfigureProvider(req)
+  Child-->>Host: gRPC: ConfigureResponse{Success: true}
+  Note over Child: Child experiences fatal panic
+  OS-->>Host: SIGCHLD / EOF on socket
+  Note over Host: Host catches EOF cleanly without crashing
+    </div>
+    <figcaption>Handshake, mTLS negotiation, and fault isolation sequence.
+    <b>Ephemeral TLS prevents unprivileged users from intercepting socket traffic on shared hosts.</b></figcaption>
+  </figure>
+
+  <h2>3. High-performance gRPC over UNIX sockets</h2>
+  <p>Early versions of <code>go-plugin</code> used Go's standard <code>net/rpc</code> with Gob encoding. Modern <code>go-plugin</code> standardizes on <b>gRPC over UNIX domain sockets</b>.</p>
+
+  <p>Because communication stays inside kernel memory (zero TCP packet overhead, zero IP checksums, zero network interface routing), UNIX domain sockets achieve microsecond latency and hundreds of thousands of RPC calls per second.</p>
+
+  <pre><code>// Server pattern inside terraform-provider-aws
+func main() {
+	plugin.Serve(&plugin.ServeConfig{
+		HandshakeConfig: plugin.HandshakeConfig{
+			ProtocolVersion:  1,
+			MagicCookieKey:   "TF_PLUGIN_MAGIC_COOKIE",
+			MagicCookieValue: "d602bf8f3c1e",
+		},
+		Plugins: map[string]plugin.Plugin{
+			"provider": &tfplugin6.GRPCProviderPlugin{
+				GRPCProvider: func() tfplugin6.ProviderServer {
+					return &AWSProviderServer{}
+				},
+			},
+		},
+		GRPCServer: plugin.DefaultGRPCServer,
+	})
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Spawning: Host executes exec.Command()
+  Spawning --> Handshaking: Child verifies Cookie and prints socket
+  Handshaking --> Connected: Ephemeral mTLS handshake established
+  Connected --> Connected: High-speed gRPC method execution
+  Connected --> CrashedIsolated: Child segfaults or panics
+  CrashedIsolated --> [*]: Host catches EOF error and aborts transaction safely
+  Connected --> GracefulShutdown: Host sends Close() signal
+  GracefulShutdown --> [*]: Child unlinks socket and exits PID
+    </div>
+    <figcaption>Plugin lifecycle state machine. From spawn through graceful teardown or panic containment.
+    <b>Broken pipes trigger graceful host recovery instead of terminating the orchestrator.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does HashiCorp go-plugin execute plugins as child processes instead of Go plugins?</div>
+      <button class="q-opt">Separate processes avoid kernel memory paging penalties</button>
+      <button class="q-opt">Process isolation prevents plugin panics from killing host</button>
+      <button class="q-opt">The Linux operating system prohibits shared library loading</button>
+      <button class="q-opt">Child processes compress gRPC protobuf streams into blocks</button>
+      <div class="q-fb">By isolating plugins in separate child processes, third-party provider panics or memory corruption cannot crash the parent Terraform or Vault host process.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does the host discover the plugin's listening socket address during boot?</div>
+      <button class="q-opt">By querying a central consul gossip discovery registry</button>
+      <button class="q-opt">By scanning all open network ports between 8000 and 9000</button>
+      <button class="q-opt">The child writes a formatted handshake line to its stdout</button>
+      <button class="q-opt">The kernel kernel sets an environmental variable in root</button>
+      <div class="q-fb">Upon startup, the child process opens a random UNIX socket and prints a single-line handshake string to stdout containing the protocol version and socket path.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">What role does ephemeral mutual TLS play in go-plugin communication?</div>
+      <button class="q-opt">It stops other local machine processes from spoofing IPC</button>
+      <button class="q-opt">It encrypts disk files stored in the host cache folder</button>
+      <button class="q-opt">It verifies client credit card credentials during plans</button>
+      <button class="q-opt">It routes incoming HTTP internet requests across subnets</button>
+      <div class="q-fb">Ephemeral mTLS ensures that even on multi-user systems with shared filesystem permissions, untrusted local processes cannot connect to the UNIX socket or tamper with gRPC calls.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The <code>go-plugin</code> pattern is the premier design for building safe, long-lived plugin ecosystems in Go. Whenever you allow third-party developers to extend your system, never load their code into your process memory. Run them out-of-process over gRPC.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the core architecture in <a href="https://github.com/hashicorp/go-plugin">hashicorp/go-plugin</a> and study Terraform's provider protocol specification at <a href="https://github.com/hashicorp/terraform/tree/main/internal/plugin6">terraform/internal/plugin6</a>.</p>
+
+  <div class="pager">
+    <a href="0500-terraform-dag-construction-and-graph-walking.html"><span class="dir">&larr; Lesson 0500</span><span class="ttl">Terraform DAG construction and concurrent graph walking</span></a>
+    <a class="nxt" href="0502-vault-barrier-encryption-and-shamir-secret-sharing.html"><span class="dir">Next &rarr;</span><span class="ttl">Vault barrier encryption and Shamir secret sharing</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0501 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
