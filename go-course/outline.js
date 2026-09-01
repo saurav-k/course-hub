@@ -37,6 +37,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0202-content-addressable-storage-and-snapshotters.html"
         }
       ]
+    },
+    {
+      "n": "03",
+      "title": "Distributed Consensus",
+      "lessons": [
+        {
+          "title": "etcd and the zero-I/O Raft consensus engine",
+          "href": "lessons/0300-etcd-the-zero-io-raft-engine.html"
+        },
+        {
+          "title": "etcd write-ahead logs and bbolt MVCC storage",
+          "href": "lessons/0301-etcd-write-ahead-log-and-mvcc-bbolt.html"
+        },
+        {
+          "title": "Consul and the SWIM gossip protocol in memberlist",
+          "href": "lessons/0302-consul-swim-gossip-with-memberlist.html"
+        },
+        {
+          "title": "CockroachDB Multi-Raft and the Pebble LSM-tree",
+          "href": "lessons/0303-cockroachdb-multi-raft-and-pebble-lsm.html"
+        }
+      ]
     }
   ],
   "extras": [
