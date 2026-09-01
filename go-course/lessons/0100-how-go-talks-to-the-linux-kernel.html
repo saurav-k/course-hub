@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>How Go talks to the Linux kernel - Systems Engineering in Go</title>
+<meta name="description" content="How Docker, containerd, and runc configure Linux namespaces, control groups, and syscalls directly through Go os/exec and sys/unix before container execution.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; Kernel Primitives &middot; Lesson 0100</div>
+  <h1>Go manipulates Linux namespaces, cgroups, and syscalls directly through os/exec and sys/unix</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    The substrate under Docker, containerd, and runc &middot;
+    <a href="https://github.com/moby/moby">moby/moby</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Containers do not exist as kernel entities; a container is an ordinary Linux process wrapped in <b>namespaces</b> for visibility and <b>cgroups</b> for resource quotas.</li>
+      <li>In Go, process isolation begins before `execve` by configuring <code>syscall.SysProcAttr</code> with clone flags like <code>CLONE_NEWPID</code>, <code>CLONE_NEWNS</code>, and <code>CLONE_NEWNET</code>.</li>
+      <li>Control groups (cgroups v1 and v2) are not managed via custom syscalls; Go daemons read and write plain text files in the virtual <code>/sys/fs/cgroup</code> filesystem tree.</li>
+      <li>The Go runtime’s multi-threaded scheduler creates a severe obstacle for namespace manipulation: Go threads share kernel state, forcing tools like runc and containerd to use Cgo constructors or re-exec binaries before the Go runtime fully initializes.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart LR
+  subgraph HostOS["Host Linux Kernel"]
+    direction TB
+    K1["Process Tree - PID 1"]
+    K2["Host Network Stack"]
+    K3["Root Filesystem"]
+    K4["CFS Scheduler and Memory"]
+  end
+  subgraph Isolation["Isolation Layer in Go"]
+    direction TB
+    G1["syscall.SysProcAttr - Cloneflags"]
+    G2["sys/unix.Mount - pivot_root"]
+    G3["/sys/fs/cgroup filesystem writes"]
+  end
+  subgraph ContainerProc["Container Process"]
+    direction TB
+    C1["Isolated PID Namespace - PID 1"]
+    C2["Virtual Veth Network Pair"]
+    C3["Mounted Rootfs Overlay"]
+    C4["Cgroup Resource Limits"]
+  end
+  HostOS --> Isolation --> ContainerProc
+    </div>
+    <figcaption>Where this sits. Linux namespaces and cgroups partition host resources before any Go runtime code executes.
+    <b>A container is an isolated Linux process; the kernel provides the isolation and Go sets the flags.</b></figcaption>
+  </figure>
+
+  <h2>1. The illusion of the container</h2>
+  <p>There is no Linux system call named <code>create_container()</code>. Every container running under Docker, Kubernetes, or containerd is an ordinary Linux process spawned by the Linux kernel via <code>clone()</code>. What makes a process look and feel like an independent virtual machine is the selective restriction of what that process can see and what resources it can consume.</p>
+
+  <p>Visibility is governed by <b>namespaces</b>. Resource consumption is governed by <b>control groups (cgroups)</b>. File system hierarchy is governed by <b>mount namespaces and pivot_root</b>. In the Go ecosystem, systems like Docker (Moby) and containerd do not rely on heavy hypervisors; they orchestrate these exact kernel primitives directly through Go's <code>os/exec</code>, <code>syscall</code>, and <code>golang.org/x/sys/unix</code> packages.</p>
+
+  <h2>2. Configuring namespaces via SysProcAttr</h2>
+  <p>When launching a child process in Go using the standard library's <code>os/exec.Command</code>, you can supply low-level operating system attributes via the <code>SysProcAttr</code> struct. On Linux systems, this struct exposes <code>Cloneflags</code>, which maps directly to the flags accepted by the <code>clone(2)</code> system call.</p>
+
+  <pre><code>package main
+
+import (
+	"os"
+	"os/exec"
+	"syscall"
+)
+
+func createIsolatedProcess() *exec.Cmd {
+	cmd := exec.Command("/bin/sh")
+	cmd.SysProcAttr = &syscall.SysProcAttr{
+		Cloneflags: syscall.CLONE_NEWUTS | // Hostname isolation
+			syscall.CLONE_NEWPID |  // Process ID tree isolation
+			syscall.CLONE_NEWNS |   // Mount namespace isolation
+			syscall.CLONE_NEWNET |  // Network devices and routes
+			syscall.CLONE_NEWIPC,   // System V IPC and POSIX message queues
+	}
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd
+}</code></pre>
+
+  <p>When the kernel creates the process, <code>CLONE_NEWPID</code> causes the child to become PID 1 inside its own private process tree. Outside on the host system, the process receives an ordinary PID (e.g. PID 48210). If the child calls <code>ps aux</code>, however, it will still see host processes until its mount namespace is populated with a fresh <code>/proc</code> filesystem mount.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Daemon as Go Daemon - containerd
+  participant Kernel as Linux Kernel
+  participant Child as Container Child Process
+  Daemon->>Kernel: clone with CLONE_NEWPID, CLONE_NEWNS, CLONE_NEWNET
+  Kernel->>Child: Allocate new namespace descriptors
+  Kernel->>Child: Spawn child as PID 1 in new namespace
+  Daemon->>Kernel: Write cgroup limits to /sys/fs/cgroup/container-id
+  Kernel->>Child: Enforce memory and CPU quotas
+  Child->>Kernel: pivot_root to switch root filesystem
+  Child->>Kernel: execve target container command
+    </div>
+    <figcaption>Process cloning flow. Go launches containerized child processes using clone system call flags.
+    <b>Namespaces isolate visibility while cgroups enforce resource boundaries.</b></figcaption>
+  </figure>
+
+  <h2>3. Managing cgroups through the filesystem tree</h2>
+  <p>While namespaces partition what a process can see, control groups (cgroups) dictate how much CPU time, physical memory, and I/O bandwidth that process is permitted to consume. Linux implements cgroups as a pseudo-filesystem mounted at <code>/sys/fs/cgroup</code>.</p>
+
+  <p>To place a process into a cgroup, a Go daemon does not invoke an esoteric system call. Instead, it interacts with standard file I/O: creating directories and writing process IDs into control files. In modern cgroups v2, assigning limits is purely a matter of file manipulation:</p>
+
+  <pre><code>package main
+
+import (
+	"os"
+	"path/filepath"
+	"strconv"
+)
+
+func attachProcessToCgroup(cgroupPath string, pid int, memoryLimitBytes int64) error {
+	// Create cgroup hierarchy directory
+	if err := os.MkdirAll(cgroupPath, 0755); err != nil {
+		return err
+	}
+	// Set memory high water mark (e.g. 512 MB)
+	memFile := filepath.Join(cgroupPath, "memory.max")
+	if err := os.WriteFile(memFile, []byte(strconv.FormatInt(memoryLimitBytes, 10)), 0644); err != nil {
+		return err
+	}
+	// Attach the process by writing its PID to cgroup.procs
+	procsFile := filepath.Join(cgroupPath, "cgroup.procs")
+	return os.WriteFile(procsFile, []byte(strconv.Itoa(pid)), 0644)
+}</code></pre>
+
+  <p>Once a process ID is appended to <code>cgroup.procs</code>, all future child threads and spawned processes automatically inherit membership in that control group. If the process exceeds its memory quota, the kernel's Out-Of-Memory (OOM) killer terminates the process group without destabilizing the host.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TB
+  P1["Process executes on CPU"] --> P2{"Period elapsed - 100ms"}
+  P2 -- "Quota remaining" --> P1
+  P2 -- "Quota exhausted" --> P3["Throttle process execution"]
+  P3 --> P4["Wait for next CFS period start"]
+  P4 --> P5["Replenish CPU bandwidth quota"]
+  P5 --> P1
+    </div>
+    <figcaption>Cgroup accounting loop. The Completely Fair Scheduler (CFS) throttles CPU bandwidth when quota runs out.
+    <b>CFS quotas pause process execution without terminating threads.</b></figcaption>
+  </figure>
+
+  <h2>4. The fork/exec dilemma in multi-threaded Go</h2>
+  <p>In standard C, setting up a container follows a clean sequence: call <code>fork()</code>, configure namespaces and mounts in the child process, and then call <code>execve()</code>. In Go, this pattern presents a notorious design challenge.</p>
+
+  <p>The Go runtime is inherently multi-threaded. It launches background OS threads for the garbage collector, network poller, and G-M-P work-stealing scheduler. Linux system calls like <code>setns()</code> and <code>unshare()</code> operate on the calling <b>OS thread</b>, not on the process as a whole. If a goroutine calls <code>setns()</code> on OS thread M1, and the Go scheduler later moves that goroutine to OS thread M2, the goroutine loses its namespace context!</p>
+
+  <p>Furthermore, executing raw <code>fork()</code> in a multi-threaded process is dangerous in POSIX: only the calling thread is duplicated, leaving locks held by other threads permanently deadlocked in the child. To solve this, low-level container runtimes written in Go (such as <code>runc</code>) employ a specialized architecture:</p>
+
+  <ul>
+    <li><b>Cgo constructor hooks:</b> <code>runc</code> embeds a C constructor (<code>__attribute__((constructor)) void init(void)</code>) in package <code>libcontainer/nsenter</code>. This C code executes before the Go runtime boots, while the process is still single-threaded, safely calling <code>setns()</code> and <code>clone()</code>.</li>
+    <li><b>Self-re-exec:</b> The Go process re-executes its own binary (<code>/proc/self/exe</code>) with special environment variables, jumping directly into container setup before the full Go runtime scheduler starts competing for OS threads.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> HostProcess: os exec Command
+  HostProcess --> CloneSyscall: Pass SysProcAttr
+  CloneSyscall --> UnshareNamespaces: Kernel clone flags
+  UnshareNamespaces --> PivotRoot: Detach host rootfs
+  PivotRoot --> CgroupAttach: Write PID to cgroup procs
+  CgroupAttach --> ExecveTarget: Replace image binary
+  ExecveTarget --> [*]
+    </div>
+    <figcaption>Container lifecycle state progression. The kernel moves the process through isolated namespace and mount transitions.
+    <b>Isolation happens in discrete kernel stages before the container binary runs.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why can a Go goroutine not safely call setns to switch namespaces during runtime?</div>
+      <button class="q-opt">The Go runtime scheduler will deadlock all channel locks</button>
+      <button class="q-opt">The scheduler can migrate the goroutine to another thread</button>
+      <button class="q-opt">Linux namespaces do not support multi-threaded processes</button>
+      <button class="q-opt">The Linux kernel blocks setns when cgroups are enabled</button>
+      <div class="q-fb">Linux namespaces are thread-bound kernel objects; because Go's G-M-P scheduler can transparently migrate a goroutine to a different OS thread (M), the goroutine will silently lose the namespace context of the original thread.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does containerd write resource limits to cgroups v2 on modern Linux hosts?</div>
+      <button class="q-opt">Writing numeric strings to pseudo-files in sys fs cgroup</button>
+      <button class="q-opt">Calling special kernel ioctl functions on the proc root</button>
+      <button class="q-opt">Executing unshare syscalls with memory quota clone flags</button>
+      <button class="q-opt">Setting CPU scheduling limits in the ELF binary headers</button>
+      <div class="q-fb">Cgroups are exposed to userspace as a virtual filesystem mounted at /sys/fs/cgroup; limits like memory.max and cpu.max are configured by opening and writing plain text numeric values to those files.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What role does the OCI runc Cgo constructor play during container startup?</div>
+      <button class="q-opt">It compiles container source code into static binaries</button>
+      <button class="q-opt">It mounts remote overlayfs storage over the host network</button>
+      <button class="q-opt">It calls setns and clone before the Go runtime starts</button>
+      <button class="q-opt">It allocates TCP socket pairs for all container processes</button>
+      <div class="q-fb">runc uses a C constructor function (__attribute__((constructor))) in libcontainer/nsenter to execute namespace configuration before the multi-threaded Go runtime boots.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Every container abstraction you interact with in Kubernetes or Docker is ultimately a series of file descriptor manipulations and clone flags in Go. When debugging container startup latency or OOM kills, look directly at <code>/sys/fs/cgroup</code> and the process's <code>/proc/[pid]/ns</code> links rather than searching through abstraction layers.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>To inspect the production implementation of these concepts, explore <a href="https://github.com/moby/moby">moby/moby</a> (Docker engine daemon) and <a href="https://github.com/opencontainers/runc/tree/main/libcontainer">opencontainers/runc/libcontainer</a>, which implements container process initialization and cgroup tree abstraction in Go.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0100 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
