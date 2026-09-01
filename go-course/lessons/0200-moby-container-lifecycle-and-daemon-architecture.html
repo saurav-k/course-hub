@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Moby container lifecycle and daemon architecture - Systems Engineering in Go</title>
+<meta name="description" content="Inside Docker's Moby engine: client-server daemon separation, container state machines, TTY hijacking via stdcopy, and containerd integration.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Container Runtimes &middot; Lesson 0200</div>
+  <h1>The Docker daemon decouples client commands from process execution through an asynchronous multiplexed stream engine</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Inside the Moby engine architecture &middot;
+    <a href="https://github.com/moby/moby">moby/moby</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The Docker CLI does not manage containers directly; it is a thin REST client communicating over a Unix domain socket (<code>/var/run/docker.sock</code>) with <b>dockerd</b>.</li>
+      <li>Container state is tracked in memory through a strictly synchronized state machine protecting transitions between <code>Created</code>, <code>Running</code>, <code>Paused</code>, and <code>Exited</code>.</li>
+      <li>Interactive terminal sessions (`docker run -it` or `docker exec -it`) use <b>HTTP hijacking</b>: upgrading the HTTP connection into a raw bidirectional TCP stream multiplexed with an 8-byte binary framing header (`stdcopy`).</li>
+      <li>The daemon does not supervise container processes itself; it delegates runtime execution to <b>containerd</b> and detached <b>shim processes</b>, ensuring daemon crashes or restarts do not kill active workloads.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  CLI["Docker CLI client"] -->|"REST API over /var/run/docker.sock"| Daemon["Docker Daemon dockerd"]
+  subgraph MobyDaemon["Moby Engine Internal Architecture"]
+    direction TB
+    Router["HTTP Server & Gorilla Mux Router"]
+    ContainerManager["Container State & Volume Manager"]
+    ImageBackend["OCI Layer & Graphdriver Backend"]
+    Router --> ContainerManager
+    Router --> ImageBackend
+  end
+  Daemon --> MobyDaemon
+  ContainerManager -->|"gRPC API /run/containerd/containerd.sock"| Containerd["containerd supervisor daemon"]
+  Containerd -->|"Forks detached child"| Shim["containerd-shim-runc-v2"]
+  Shim -->|"Executes OCI spec"| Runc["runc container runtime"]
+  Runc -->|"spawns isolated process"| Container["Target Container Application"]
+    </div>
+    <figcaption>Where this sits. The execution hierarchy separating user CLI commands from low-level container processes.
+    <b>Docker coordinates user intent; containerd and runc manage process execution.</b></figcaption>
+  </figure>
+
+  <h2>1. Client-server separation in Moby</h2>
+  <p>When you type <code>docker run -d nginx</code>, your terminal process does not fork a web server. The <code>docker</code> binary is a command-line client built in Go that packages your command flags into a JSON payload and makes an HTTP POST request to <code>/containers/create</code> followed by <code>/containers/{id}/start</code>.</p>
+
+  <p>The server daemon, <code>dockerd</code> (maintained in the open-source <a href="https://github.com/moby/moby">moby/moby</a> repository), listens on a local Unix socket. It handles image pulling, network interface creation, volume attachment, and state persistence, before delegating the physical process creation to <code>containerd</code> via gRPC.</p>
+
+  <h2>2. The container lifecycle state machine</h2>
+  <p>Inside <code>moby/moby/daemon/container.go</code>, each container is represented by a <code>Container</code> struct wrapped with a mutual exclusion lock (<code>sync.Mutex</code>) and a dedicated <code>State</code> object. Containers transition through discrete states, and invalid transitions return immediate errors.</p>
+
+  <pre><code>// Simplified excerpt from moby/moby/container/state.go
+type State struct {
+	sync.Mutex
+	Running           bool
+	Paused            bool
+	Restarting        bool
+	OOMKilled         bool
+	Dead              bool
+	Pid               int
+	ExitCode          int
+	Error             string
+	StartedAt         time.Time
+	FinishedAt        time.Time
+	Health            *Health
+}
+
+func (s *State) SetRunning(pid int, initial bool) {
+	s.Lock()
+	defer s.Unlock()
+	s.Running = true
+	s.Paused = false
+	s.Restarting = false
+	s.ExitCode = 0
+	s.Pid = pid
+	if initial {
+		s.StartedAt = time.Now().UTC()
+	}
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Created: docker create
+  Created --> Running: docker start
+  Running --> Paused: docker pause
+  Paused --> Running: docker unpause
+  Running --> Restarting: crash with restart policy
+  Restarting --> Running: backoff retry succeeds
+  Running --> Exited: process terminates or docker stop
+  Exited --> Running: docker restart
+  Exited --> Dead: teardown or unmount failure
+  Exited --> [*]: docker rm
+  Dead --> [*]: docker rm -f
+    </div>
+    <figcaption>Container lifecycle state progression. Transitions are enforced by atomic state locks in the Moby daemon.
+    <b>A container cannot enter running state without an allocated OS process ID.</b></figcaption>
+  </figure>
+
+  <h2>3. TTY hijacking and the stdcopy framing protocol</h2>
+  <p>One of the most elegant systems patterns in Docker is how interactive sessions work without running SSH daemons inside containers. When you execute <code>docker run -it ubuntu bash</code>, the client needs a full bidirectional terminal connection capable of passing keyboard strokes to standard input while separating output text into standard out and standard error.</p>
+
+  <p>Standard HTTP request/response semantics cannot support streaming full-duplex byte streams. To solve this, Docker implements <b>HTTP Hijacking</b> using Go's <code>http.Hijacker</code> interface. Once the HTTP headers are validated, the server extracts the raw underlying <code>net.Conn</code> TCP socket from the HTTP server:</p>
+
+  <pre><code>// Upgrading an HTTP connection to a raw hijacked byte stream
+hijacker, ok := w.(http.Hijacker)
+if !ok {
+    http.Error(w, "hijack not supported", http.StatusInternalServerError)
+    return
+}
+conn, bufrw, err := hijacker.Hijack()
+if err != nil {
+    http.Error(w, err.Error(), http.StatusInternalServerError)
+    return
+}
+// Respond with HTTP 101 Switching Protocols
+bufrw.WriteString("HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\n\r\n")
+bufrw.Flush()</code></pre>
+
+  <p>Because stdout and stderr share this single hijacked TCP connection, Docker frames all downstream packets using the <code>pkg/stdcopy</code> protocol. Every chunk is prefixed with an 8-byte binary header:</p>
+
+  <ul>
+    <li><b>Byte 0:</b> Stream type indicator (<code>0x00</code> for stdin, <code>0x01</code> for stdout, <code>0x02</code> for stderr).</li>
+    <li><b>Bytes 1–3:</b> Reserved zeros.</li>
+    <li><b>Bytes 4–7:</b> Big-endian 32-bit unsigned integer stating the exact byte length of the payload that follows.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as Docker CLI client
+  participant Socket as Unix Domain Socket
+  participant Daemon as dockerd HTTP Engine
+  participant Stdcopy as pkg/stdcopy Demuxer
+  Client->>Socket: POST /containers/{id}/attach?stdin=1&stdout=1&stream=1
+  Socket->>Daemon: Route request to attach handler
+  Daemon->>Client: HTTP/1.1 101 UPGRADED (Connection Hijacked)
+  Note over Client,Daemon: Raw full-duplex socket active
+  Client->>Daemon: Raw keystroke bytes (stdin)
+  Daemon->>Stdcopy: Intercept child process output
+  Stdcopy->>Client: [0x01][0x00 0x00 0x00][0x00 0x00 0x00 0x18] + 24 bytes stdout
+  Stdcopy->>Client: [0x02][0x00 0x00 0x00][0x00 0x00 0x00 0x0E] + 14 bytes stderr
+  Client->>Client: Separate and render to terminal console
+    </div>
+    <figcaption>HTTP hijacking and stdcopy framing sequence. Multiplexing stdout and stderr across a single hijacked TCP connection.
+    <b>The 8-byte header prevents interleaving corruption between standard output and errors.</b></figcaption>
+  </figure>
+
+  <h2>4. Why dockerd does not supervise processes</h2>
+  <p>In early versions of Docker (0.x to 1.10), the Docker daemon was a monolithic parent process that owned all container child processes directly. This created a critical production vulnerability: if the Docker daemon crashed, threw a panic, or was restarted during an operating system upgrade, the kernel terminated every running container on the host.</p>
+
+  <p>To eliminate this single point of failure, Docker re-architected its execution model around <b>containerd</b> and detached <b>shim processes</b>. When <code>dockerd</code> starts a container, it requests <code>containerd</code> to spawn an independent process called <code>containerd-shim-runc-v2</code>. The shim acts as the container's parent, holding open its pseudo-terminal file descriptors and exit status pipes.</p>
+
+  <p>If <code>dockerd</code> restarts, the containers continue executing undisturbed. When <code>dockerd</code> comes back online, it reconnects to containerd over gRPC and re-attaches to the running shims without losing state.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does the Docker daemon use an 8-byte header for multiplexed terminal output?</div>
+      <button class="q-opt">It separates stdout and stderr across a single stream</button>
+      <button class="q-opt">It compresses terminal escape sequences using gzip code</button>
+      <button class="q-opt">It encrypts container standard input with AES Galois key</button>
+      <button class="q-opt">It computes CRC64 packet checksums for network TCP links</button>
+      <div class="q-fb">The stdcopy 8-byte header specifies stream type (stdin, stdout, stderr) and payload size, allowing both output streams to flow over a single hijacked TCP connection without collision.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does Docker's REST engine maintain an interactive terminal session with a container?</div>
+      <button class="q-opt">It polls the container log file every fifty millisecs</button>
+      <button class="q-opt">It hijacks the raw TCP socket for bidirectional data</button>
+      <button class="q-opt">It transmits base64 encoded strings through REST POST</button>
+      <button class="q-opt">It tunnels SSH sessions over unix domain socket pipes</button>
+      <div class="q-fb">The Docker daemon uses the Go http.Hijacker interface to take ownership of the underlying TCP/Unix socket, upgrading HTTP into a persistent full-duplex byte stream.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">What architectural component supervises a container process when Docker daemon restarts?</div>
+      <button class="q-opt">The host systemd unit manager supervising all nodes</button>
+      <button class="q-opt">The Linux kernel out of memory killer monitor thread</button>
+      <button class="q-opt">The decoupled containerd shim process for the task</button>
+      <button class="q-opt">The client CLI executable maintaining a socket link</button>
+      <div class="q-fb">Each container is parented by an isolated containerd-shim process that holds file descriptors and exit codes, surviving Docker daemon crashes and upgrades.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> The separation of client, daemon, supervisor (containerd), and runtime (runc) is the blueprint for modern cloud-native systems. When debugging Docker issues, isolating whether a failure is an API problem (dockerd), an execution problem (containerd), or a kernel isolation problem (runc) saves hours of troubleshooting.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Inspect the open-source implementation in <a href="https://github.com/moby/moby">moby/moby</a>: review the HTTP hijacking handler in <code>api/server/httputils/write_json.go</code> and the demultiplexing protocol in <code>pkg/stdcopy/stdcopy.go</code>.</p>
+
+  <div class="pager">
+    <a href="0101-the-anatomy-of-a-zero-allocation-network-loop.html"><span class="dir">&larr; Lesson 0101</span><span class="ttl">The anatomy of a zero-allocation network loop</span></a>
+    <a class="nxt" href="0201-containerd-the-shim-pattern-and-event-bus.html"><span class="dir">Next &rarr;</span><span class="ttl">containerd, the shim pattern, and the topic event bus</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0200 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

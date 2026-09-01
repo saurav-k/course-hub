@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CockroachDB Multi-Raft and the Pebble LSM-tree - Systems Engineering in Go</title>
+<meta name="description" content="How CockroachDB scales distributed SQL using Multi-Raft ranges, range leases for zero-network reads, and the pure-Go Pebble LSM-tree storage engine.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Distributed Consensus &middot; Lesson 0303</div>
+  <h1>CockroachDB scales distributed SQL across thousands of consensus groups using Multi-Raft, range leases, and the pure-Go Pebble LSM engine</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Distributed storage architecture in CockroachDB &middot;
+    <a href="https://github.com/cockroachdb/cockroach">cockroachdb/cockroach</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Single-Raft systems (like etcd) cannot scale horizontally beyond a single leader; <b>CockroachDB</b> divides its entire key-value keyspace into 64 MB chunks called <b>Ranges</b>, each managed by its own independent Raft group (<b>Multi-Raft</b>).</li>
+      <li>To avoid paying network round-trip latencies for read queries, CockroachDB introduces <b>Range Leases</b>: a time-bounded lease held by one replica that serves linearizable reads locally from disk without consensus RPCs.</li>
+      <li>Early CockroachDB versions used C++ RocksDB via Cgo, but Cgo transitions (stack switching, pointer pinning, and scheduler contention) severely degraded tail latencies.</li>
+      <li>Cockroach Labs engineered <b>Pebble</b>, a pure-Go Log-Structured Merge-tree (LSM) storage engine that eliminated Cgo overhead, improved write throughput, and integrated natively with Go tooling.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph ClusterFleet["Multi-Raft Node Topologies"]
+    direction TB
+    Node1["Node 1\nRange 1 (Leader)\nRange 2 (Follower)"]
+    Node2["Node 2\nRange 1 (Follower)\nRange 2 (Leader)"]
+    Node3["Node 3\nRange 1 (Follower)\nRange 2 (Follower)"]
+  end
+  subgraph Keyspace["Monolithic Ordered Keyspace"]
+    R1["Range 1: [/table/users/0 - /table/users/5000)"]
+    R2["Range 2: [/table/users/5000 - /table/users/10000)"]
+  end
+  R1 -.->|"Replicated via Raft Group 1"| Node1
+  R1 -.->|"Replicated via Raft Group 1"| Node2
+  R1 -.->|"Replicated via Raft Group 1"| Node3
+  R2 -.->|"Replicated via Raft Group 2"| Node1
+  R2 -.->|"Replicated via Raft Group 2"| Node2
+  R2 -.->|"Replicated via Raft Group 2"| Node3
+  subgraph NodeStorage["Local Storage Node"]
+    Lease["Range Leaseholder Check"]
+    Pebble["Pure-Go Pebble LSM-Tree"]
+    Lease -->|"Local Read Hit"| Pebble
+  end
+  Node1 --> NodeStorage
+    </div>
+    <figcaption>Where this sits. Multi-Raft range distribution and local Pebble storage engine architecture.
+    <b>Each 64 MB range is an autonomous Raft group; each physical node hosts thousands of consensus groups.</b></figcaption>
+  </figure>
+
+  <h2>1. Multi-Raft: breaking the single-leader bottleneck</h2>
+  <p>In standard Raft implementations like etcd, every proposal in the entire database must pass through a single Raft leader node. While this works beautifully for configuration stores and Kubernetes control planes, it cannot scale to petabyte-scale relational databases processing hundreds of thousands of transactions per second.</p>
+
+  <p>CockroachDB solves this by partitioning its ordered global keyspace into contiguous 64 MB blocks called <b>Ranges</b>. Each range is independently replicated across 3 or 5 nodes using a dedicated instance of <code>go.etcd.io/raft</code>.</p>
+
+  <p>On a single physical CockroachDB server, a single Go process may manage 50,000 active Raft groups. Heartbeats and messages for all co-located ranges are coalesced and multiplexed across persistent gRPC stream connections, keeping CPU utilization and socket overhead low.</p>
+
+  <h2>2. Range leases: zero-network consistent reads</h2>
+  <p>Under textbook Raft, reading data requires either proposing a dummy log entry or executing a round of heartbeats (ReadIndex) to verify that the current leader has not been deposed by a network partition. In read-heavy workloads, this network tax cripples throughput.</p>
+
+  <p>CockroachDB bypasses this with <b>Range Leases</b>. At any given moment, each range has exactly one <b>Leaseholder</b> (typically the Raft leader):</p>
+
+  <ul>
+    <li>The lease is granted through a special Raft log entry with a duration (e.g. 9 seconds).</li>
+    <li>While the lease is active, the Raft protocol guarantees that no other node can be granted a lease or commit overlapping writes.</li>
+    <li>Therefore, when a client issues a <code>SELECT</code> query, the Leaseholder can read the data directly from its local storage engine with <b>zero network communication</b>, while strictly guaranteeing linearizability.</li>
+  </ul>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Client as SQL Client
+  participant LH as Range Leaseholder (Node 1)
+  participant Follower as Replica (Node 2)
+  participant Pebble as Local Pebble Engine
+  Note over LH: Node 1 holds active Range Lease
+  Client->>LH: SELECT * FROM users WHERE id = 42
+  LH->>LH: Verify lease is unexpired
+  LH->>Pebble: Read key directly from local LSM
+  Pebble-->>LH: Return row bytes
+  LH-->>Client: Return query result (Zero network RPC)
+  Note over Client,LH: Client issues write mutation
+  Client->>LH: UPDATE users SET score = 100 WHERE id = 42
+  LH->>Follower: Propose Raft Entry (Quorum replication)
+  Follower-->>LH: Replicated Ack
+  LH->>Pebble: Commit write to local Pebble
+  LH-->>Client: Transaction Committed
+    </div>
+    <figcaption>Range lease read vs write sequence. Leaseholders serve consistent reads without quorum network overhead.
+    <b>Reads execute locally in sub-millisecond time; writes replicate through Raft consensus.</b></figcaption>
+  </figure>
+
+  <h2>3. Why Pebble replaced RocksDB: the Cgo tax</h2>
+  <p>When CockroachDB was first built, it used Facebook's C++ RocksDB through Go's Cgo bridge. While RocksDB is an exceptional storage engine, the friction between the Go runtime and C++ became CockroachDB's primary operational ceiling.</p>
+
+  <p>The penalties of Cgo in high-concurrency systems are severe:</p>
+  <ul>
+    <li><b>Goroutine stack switching:</b> A goroutine calling a C function must transition from its dynamic 2 KB stack to a full 2 MB pthread stack, forcing CPU cache invalidations.</li>
+    <li><b>Pointer passing overhead:</b> Go's garbage collector verifies that pointers passed across Cgo boundaries do not violate memory pinning rules (<code>runtime.cgoCheckPointer</code>).</li>
+    <li><b>Profiler blindness:</b> Standard Go tools like <code>pprof</code>, trace, and race detectors cannot peer into C++ memory or threads.</li>
+  </ul>
+
+  <p>To break through this ceiling, Cockroach Labs built <a href="https://github.com/cockroachdb/pebble">Pebble</a>, an LSM-tree database written in 100% pure Go. Pebble matched RocksDB's performance while completely eliminating Cgo call overhead, reducing memory fragmentation, and allowing Go's work-stealing scheduler to coordinate CPU threads seamlessly.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Write["Write Batch"] --> WAL["Pebble Write-Ahead Log"]
+  Write --> Memtable["In-Memory Skiplist Memtable"]
+  Memtable -->|"Flushed when 64MB full"| L0["Level 0 SSTables (Disk)"]
+  subgraph LSMTree["Pebble LSM Compaction Hierarchy"]
+    direction TB
+    L0 -->|"Compacted"| L1["Level 1 SSTables (Key partitioned)"]
+    L1 -->|"Compacted"| L2["Level 2 SSTables (10x size)"]
+    L2 -->|"Compacted"| L6["Level 6 SSTables (Base storage)"]
+  end
+    </div>
+    <figcaption>Pebble LSM-tree write and compaction hierarchy. Log-Structured Merge organization in pure Go.
+    <b>Writes append sequentially to memtables and compact background SSTables without Cgo hops.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why did Cockroach Labs replace C++ RocksDB with pure-Go Pebble?</div>
+      <button class="q-opt">RocksDB does not support solid-state drive hardware</button>
+      <button class="q-opt">Cgo calls incurred severe stack switching overheads</button>
+      <button class="q-opt">The Linux kernel removed C++ shared library support</button>
+      <button class="q-opt">Pebble executes SQL parsing queries inside the GPU</button>
+      <div class="q-fb">Cgo context switches between Go goroutine stacks and C pthread stacks introduced substantial CPU latency, and prevented native Go profiling tools from inspecting storage internals.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does a Range Leaseholder in CockroachDB serve linearizable reads without Raft RPCs?</div>
+      <button class="q-opt">By estimating key values from in-memory cache blocks</button>
+      <button class="q-opt">By broadcasting UDP datagrams to all replica machines</button>
+      <button class="q-opt">The lease guarantees no other leader can commit data</button>
+      <button class="q-opt">The kernel disables write system calls on disk drives</button>
+      <div class="q-fb">Because the time-bounded lease guarantees that no conflicting write can be committed elsewhere during the lease duration, the leaseholder can safely return data directly from local storage.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">In CockroachDB's Multi-Raft architecture, what represents a single Raft consensus group?</div>
+      <button class="q-opt">A continuous range of ordered keys up to 64 megabytes</button>
+      <button class="q-opt">An entire physical bare-metal server machine node</button>
+      <button class="q-opt">A single table column definition in the SQL schema</button>
+      <button class="q-opt">A distinct TCP connection pool managed by the kernel</button>
+      <div class="q-fb">The keyspace is partitioned into independent 64 MB contiguous ranges; each range runs its own distinct Raft consensus instance replicated across cluster nodes.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> Writing system software in Go often tempts teams to reach for mature C/C++ libraries via Cgo. While convenient initially, high-throughput systems always run into Cgo scheduling overheads. CockroachDB's transition to Pebble proves that pure-Go implementations designed with mechanical sympathy frequently surpass Cgo-wrapped alternatives.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Explore CockroachDB's Multi-Raft implementation in <a href="https://github.com/cockroachdb/cockroach/tree/master/pkg/kv/kvserver">pkg/kv/kvserver</a> and inspect the pure-Go LSM engine at <a href="https://github.com/cockroachdb/pebble">cockroachdb/pebble</a>.</p>
+
+  <div class="pager">
+    <a href="0302-consul-swim-gossip-with-memberlist.html"><span class="dir">&larr; Lesson 0302</span><span class="ttl">Consul and the SWIM gossip protocol in memberlist</span></a>
+    <a class="nxt" href="0400-kubernetes-the-declarative-reconciliation-loop.html"><span class="dir">Next &rarr;</span><span class="ttl">Kubernetes and the declarative reconciliation loop</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0303 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

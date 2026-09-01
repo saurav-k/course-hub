@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Consul and the SWIM gossip protocol in memberlist - Systems Engineering in Go</title>
+<meta name="description" content="How HashiCorp Consul uses the SWIM gossip protocol in memberlist to detect node failures and synchronize cluster topology with O(1) network overhead in Go.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Distributed Consensus &middot; Lesson 0302</div>
+  <h1>Consul detects cluster node failures and syncs topology in O(1) local bandwidth through the SWIM gossip protocol and memberlist</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    Decentralized cluster membership inside HashiCorp Consul &middot;
+    <a href="https://github.com/hashicorp/consul">hashicorp/consul</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Centralized heartbeat monitoring scales poorly: at 10,000 servers, polling every node from a master coordinator saturates network links and CPU cores ($O(N^2)$ traffic).</li>
+      <li>HashiCorp's <b>memberlist</b> library implements <b>SWIM</b> (Structured Weakly-Consistent Infection-Style Process Group Membership Protocol), guaranteeing that each node consumes constant ($O(1)$) bandwidth regardless of cluster size.</li>
+      <li>Failure detection uses a two-phase probe: if a direct UDP <code>ping</code> times out, the node sends <code>ping-req</code> to $k$ random peers to probe the target indirectly, eliminating false alarms caused by localized network route flaps.</li>
+      <li>Topology updates (joins, leaves, suspicions, and health changes) are <b>piggybacked</b> onto outbound UDP ping packets, spreading knowledge across thousands of nodes in logarithmic time ($O(\log N)$).</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  subgraph DirectProbe["Phase 1: Direct Probe"]
+    NodeA["Node A (Prober)"] -->|"UDP ping"| NodeB["Node B (Target)"]
+    NodeB -.->|"Packet dropped or timed out"| NodeA
+  end
+  subgraph IndirectProbe["Phase 2: Indirect Probe (k=3)"]
+    direction TB
+    NodeA -->|"ping-req(Target B)"| Peer1["Peer 1"]
+    NodeA -->|"ping-req(Target B)"| Peer2["Peer 2"]
+    NodeA -->|"ping-req(Target B)"| Peer3["Peer 3"]
+    Peer1 -->|"probe"| NodeB
+    Peer2 -->|"probe"| NodeB
+    Peer3 -->|"probe"| NodeB
+  end
+  DirectProbe -->|"Direct timeout"| IndirectProbe
+  IndirectProbe -->|"All k indirect probes fail"| Suspect["Mark Target B as Suspect"]
+  Suspect -->|"Broadcast over Gossip"| Gossip["Cluster Dissemination"]
+    </div>
+    <figcaption>Where this sits. The two-tier SWIM failure detector in Consul's memberlist engine.
+    <b>Indirect probes prevent localized network routing flaps from falsely marking healthy nodes dead.</b></figcaption>
+  </figure>
+
+  <h2>1. The scalability wall of centralized heartbeats</h2>
+  <p>In classical architectures, a centralized cluster manager sends health checks to every registered node. As the fleet grows from 100 to 10,000 nodes, the manager must process millions of heartbeats per second, creating a massive single point of failure and network bottleneck.</p>
+
+  <p>Consul eliminates the coordinator entirely for node discovery. Instead, every agent runs <a href="https://github.com/hashicorp/memberlist">hashicorp/memberlist</a>, a pure Go implementation of the SWIM protocol. In SWIM, every node performs periodic probes against a tiny random sample of peers. The bandwidth consumed by each node is strictly constant ($O(1)$), whether the cluster contains 10 nodes or 10,000 nodes.</p>
+
+  <h2>2. Two-phase failure detection: direct vs indirect</h2>
+  <p>Detecting machine crashes over untrusted networks is fraught with false positives. A brief router buffer drop between Node A and Node B does not mean Node B has crashed. To avoid flapping, memberlist implements a multi-stage probe:</p>
+
+  <ol>
+    <li><b>Direct probe:</b> Every probe period (e.g. 1 second), Node A selects a random peer (Node B) from its local memberlist and sends a UDP ping. If Node B replies with an ack within the deadline (e.g. 200 ms), the check succeeds.</li>
+    <li><b>Indirect probe:</b> If direct ping times out, Node A selects $k$ random members (typically $k=3$) and sends a <code>ping-req</code> message containing Node B's address. These $k$ peers immediately attempt to ping Node B from their own network perspectives.</li>
+    <li><b>Suspicion state:</b> If all $k$ indirect probes time out, Node A does not declare Node B dead. It transitions Node B to the <b>Suspect</b> state and broadcasts a suspicion notice across the gossip network.</li>
+  </ol>
+
+  <pre><code>// Simplified probe pattern from hashicorp/memberlist/state.go
+func (m *Memberlist) probeNode(node *nodeState) {
+	// 1. Direct Ping
+	addr := node.Address()
+	if err := m.encodeAndSendPing(addr); err == nil {
+		if m.waitForAck(node, m.config.ProbeTimeout) {
+			return // Node is healthy
+		}
+	}
+
+	// 2. Indirect Ping via k random peers
+	peers := m.kRandomNodes(m.config.IndirectChecks, node)
+	ackCh := make(chan struct{}, len(peers))
+
+	for _, peer := range peers {
+		go func(p *nodeState) {
+			if m.sendPingReq(p.Address(), addr) {
+				select {
+				case ackCh <- struct{}{}:
+				default:
+				}
+			}
+		}(peer)
+	}
+
+	// Wait for any indirect peer to succeed
+	select {
+	case <-ackCh:
+		return // Reached via alternative network route
+	case <-time.After(m.config.ProbeTimeout):
+		// 3. Mark suspect with incremented incarnation
+		m.suspectNode(node)
+	}
+}</code></pre>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant A as Probing Node A
+  participant B as Target Node B
+  participant P as Indirect Peer C
+  participant Net as Gossip Network
+  A->>B: Direct UDP Ping
+  Note over A,B: Direct link dropped by switch
+  A->>A: Probe timeout expired
+  A->>P: UDP ping-req(Target B)
+  P->>B: Secondary UDP Ping
+  Note over P,B: Target B is truly down
+  P-->>A: ping-req timeout
+  A->>Net: Broadcast Suspect(B, incarnation=1)
+  Note over Net: Suspicion timer ticks (e.g. 5 seconds)
+  Note over B: B has not refuted suspicion
+  A->>Net: Broadcast Dead(B)
+    </div>
+    <figcaption>Two-phase probe and suspicion lifecycle. Preventing false node ejections under packet loss.
+    <b>A node is declared suspect before dead, giving healthy nodes time to refute false alarms.</b></figcaption>
+  </figure>
+
+  <h2>3. Lifeguard suspicion and incarnation refutation</h2>
+  <p>What happens if Node B is not dead, but was temporarily unresponsive due to a major Go garbage collection pause? When Node B awakens and learns that the cluster suspects it of being dead, it immediately refutes the suspicion.</p>
+
+  <p>Refutation uses <b>incarnation numbers</b>. Each node maintains a monotonically increasing incarnation counter. If Node B receives a gossip packet claiming <code>Node B is Suspect (Incarnation 1)</code>, it increments its incarnation to 2 and broadcasts <code>Node B is Alive (Incarnation 2)</code>.</p>
+
+  <p>In gossip consensus, higher incarnation numbers strictly override lower incarnation numbers. The new alive message travels through the cluster, canceling the suspicion timers across all peers before any node marks Node B dead.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Alive: Node joins cluster
+  Alive --> Suspect: Direct and indirect pings fail
+  Suspect --> Alive: Node receives gossip and refutes with Incarnation+1
+  Suspect --> Dead: Suspicion timer expires without refutation
+  Alive --> Left: Graceful departure via memberlist.Leave()
+  Dead --> [*]: Reaped after tombstone retention period
+  Left --> [*]
+    </div>
+    <figcaption>Node membership state machine. Dynamic transitions between alive, suspect, dead, and left.
+    <b>Incarnation numbers ensure that fresh refutations supersede stale suspicion messages.</b></figcaption>
+  </figure>
+
+  <h2>4. Piggybacked gossip dissemination</h2>
+  <p>Broadcasting state changes by opening fresh TCP connections to every server would violate the $O(1)$ bandwidth guarantee. Instead, memberlist uses <b>piggybacking</b>.</p>
+
+  <p>Whenever an event occurs (a node joins, is suspected, or refutes a claim), memberlist enqueues the message in a priority queue. When periodic UDP pings are prepared, memberlist appends queued messages to the payload until reaching the maximum transmission unit (MTU, typically 1,400 bytes). Information spreads epidemics-style ("infection-style") across the entire cluster in $O(\log N)$ network rounds without generating dedicated broadcast traffic.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does Consul's SWIM protocol use indirect ping-req before marking a node suspect?</div>
+      <button class="q-opt">To elect a new Raft consensus leader on the remote node</button>
+      <button class="q-opt">To compress UDP datagram payloads before network routing</button>
+      <button class="q-opt">To rule out localized link route drops between two nodes</button>
+      <button class="q-opt">To synchronize bbolt database revisions across the fleet</button>
+      <div class="q-fb">If the direct path between two nodes is impaired, indirect pings routed through other peers verify whether the node is truly unreachable or just experiencing localized packet loss.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">How does the SWIM gossip protocol achieve O(1) network bandwidth per node?</div>
+      <button class="q-opt">Each node probes a fixed number of random peers per tick</button>
+      <button class="q-opt">Nodes broadcast packet streams to every node in parallel</button>
+      <button class="q-opt">The cluster coordinator routes all messages in sequence</button>
+      <button class="q-opt">TCP connections are kept open to every server in the net</button>
+      <div class="q-fb">Because each node communicates only with a constant number of randomly chosen peers during each time period, the bandwidth consumed per machine remains constant regardless of cluster size.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">What mechanism allows a falsely suspected node to clear its suspect status?</div>
+      <button class="q-opt">Issuing a full hardware cluster reboot command sequence</button>
+      <button class="q-opt">Emitting an alive message with incremented incarnation</button>
+      <button class="q-opt">Restoring a disk snapshot from an external S3 bucket</button>
+      <button class="q-opt">Requesting a new IP address from the host DHCP daemon</button>
+      <div class="q-fb">When a healthy node discovers it is suspected, it increments its incarnation counter and broadcasts an alive message, which overrides the lower-incarnation suspicion across the cluster.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> While etcd's Raft provides strong consistency ($CP$ in CAP) for small clusters, Consul combines Raft for server state with SWIM gossip for client agents ($AP$). This hybrid architecture allows Consul to scale to tens of thousands of client nodes without overwhelming the Raft leader.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the open-source library at <a href="https://github.com/hashicorp/memberlist">hashicorp/memberlist</a> and read Das, Gupta & Motivala's foundational paper: <a href="https://www.cs.cornell.edu/projects/Quicksilver/public_pdfs/SWIM.pdf">SWIM: A Robust Sub-graph Protocol for Weakly-Consistent Distributed Failure Detectors</a>.</p>
+
+  <div class="pager">
+    <a href="0301-etcd-write-ahead-log-and-mvcc-bbolt.html"><span class="dir">&larr; Lesson 0301</span><span class="ttl">etcd write-ahead logs and bbolt MVCC storage</span></a>
+    <a class="nxt" href="0303-cockroachdb-multi-raft-and-pebble-lsm.html"><span class="dir">Next &rarr;</span><span class="ttl">CockroachDB Multi-Raft and the Pebble LSM-tree</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0302 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>
