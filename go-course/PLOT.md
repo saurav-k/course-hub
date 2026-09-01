@@ -35,9 +35,9 @@ Status marks used below:
 | 17 | `lessons/0600-coredns-zero-allocation-dns-pipeline.html` | written | Plugin chain pattern, `plugin.Handler`, `miekg/dns` wire packet parsing |
 | 18 | `lessons/0601-traefik-dynamic-configuration-and-reactive-providers.html` | written | Atomic configuration swapping, provider event listeners, middleware chains |
 | 19 | `lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html` | written | Caddy module lifecycle, `certmagic` automated ACME TLS, socket file descriptor handovers |
-| 20 | `lessons/0700-prometheus-tsdb-architecture-and-chunk-compression.html` | reserved | Head block, inverted index posting lists, Gorilla float64 XOR encoding, mmap |
-| 21 | `lessons/0701-prometheus-concurrent-scraping-and-promql-engine.html` | reserved | Scrape loop jitter, atomic append, PromQL AST and vectorized execution |
-| 22 | `lessons/0702-grafana-backend-routing-and-streaming-channels.html` | reserved | Go backend architecture, service registry, WebSocket/SSE live channels |
+| 20 | `lessons/0700-prometheus-tsdb-architecture-and-chunk-compression.html` | written | Head block, inverted index posting lists, Gorilla float64 XOR encoding, mmap |
+| 21 | `lessons/0701-prometheus-concurrent-scraping-and-promql-engine.html` | written | Scrape loop jitter, atomic append, PromQL AST and vectorized execution |
+| 22 | `lessons/0702-grafana-backend-routing-and-streaming-channels.html` | written | Go backend architecture, service registry, WebSocket/SSE live channels |
 | 23 | `lessons/0800-minio-simd-erasure-coding-and-bitrot-protection.html` | reserved | Reed-Solomon erasure coding in assembly/Go, HighwayHash bitrot detection, disk I/O quorum |
 | 24 | `lessons/0801-hugo-high-throughput-parallel-pipelines.html` | reserved | Worker pools, `sync.Pool` byte buffer reuse, deduplicated asset caches |
 | 25 | `lessons/0900-concurrency-patterns-across-17-codebases.html` | reserved | Channel idioms, cancellation contexts, worker pools, graceful shutdown trees |

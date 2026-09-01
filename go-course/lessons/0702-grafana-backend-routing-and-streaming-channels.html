@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Grafana backend routing and streaming channels - Systems Engineering in Go</title>
+<meta name="description" content="How Grafana multiplexes enterprise telemetry and streams real-time data using Go background service registries and non-blocking streaming channels.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">SYSTEMS IN GO</a>
+  <a href="../index.html">Course map</a>
+  <a href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Observability &middot; Lesson 0702</div>
+  <h1>Grafana multiplexes data sources and pushes real-time telemetry through modular service registries and non-blocking streaming channels</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">12 min</span>
+    High-concurrency visualization backends &middot;
+    <a href="https://github.com/grafana/grafana">grafana/grafana</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Grafana transitioned from a client-side JavaScript dashboard into a massively concurrent <b>Go backend engine</b> capable of managing complex enterprise telemetry pipelines.</li>
+      <li>Internal subsystems (alerting, authentication, plugin brokers, query routing) are managed via a centralized <b>Service Registry</b> that resolves dependencies and orchestrates ordered startup and teardown.</li>
+      <li>To stream live metrics and logs to tens of thousands of browser tabs without polling, <b>Grafana Live</b> implements WebSocket and Server-Sent Events (SSE) streaming channels.</li>
+      <li>To protect server memory during high-frequency data spikes, live channels use <b>non-blocking fan-out</b>: if a slow consumer's client buffer fills, new frames are dropped rather than allowing server queues to balloon.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="mermaid">
+flowchart TD
+  Client["Browser Dashboards (WebSockets / SSE)"] --> Gateway["HTTP / WS Transport Gateway"]
+  Gateway --> ServiceRegistry["Unified Service Registry"]
+  subgraph BackgroundServices["Orchestrated Background Services"]
+    direction TB
+    Auth["pkg/services/auth"]
+    Alerts["pkg/services/ngalert (Alerting Engine)"]
+    PluginMgr["pkg/plugins (gRPC Plugin Broker)"]
+    LiveHub["pkg/services/live (Live Streaming Hub)"]
+  end
+  ServiceRegistry --> BackgroundServices
+  PluginMgr --> ExternalPlugins["Out-of-Process Data Source Plugins (gRPC)"]
+  LiveHub --> ChannelMultiplexer["Non-Blocking Channel Multiplexer"]
+  ChannelMultiplexer -->|"Real-Time Push"| Client
+    </div>
+    <figcaption>Where this sits. The Grafana Go backend service architecture and live streaming hub.
+    <b>Background services run concurrently; live channels push streaming data directly to browsers.</b></figcaption>
+  </figure>
+
+  <h2>1. The unified service registry</h2>
+  <p>Modern Go monoliths often suffer from messy global variables and disordered startup routines. In Grafana, all core capabilities implement the <code>BackgroundService</code> interface in <code>pkg/registry/registry.go</code>:</p>
+
+  <pre><code>// The core service contract from grafana/pkg/registry
+type BackgroundService interface {
+	Run(ctx context.Context) error
+}
+
+type IsDisabledService interface {
+	IsDisabled() bool
+}
+
+type ServiceRegistry struct {
+	services []BackgroundService
+}
+
+func (r *ServiceRegistry) Register(svc BackgroundService) {
+	r.services = append(r.services, svc)
+}
+
+func (r *ServiceRegistry) StartAll(ctx context.Context) error {
+	var g errgroup.Group
+	for _, svc := range r.services {
+		s := svc
+		g.Go(func() error {
+			return s.Run(ctx)
+		})
+	}
+	return g.Wait()
+}</code></pre>
+
+  <p>By leveraging <code>golang.org/x/sync/errgroup</code>, Grafana launches all background services concurrently while guaranteeing that if any critical service encounters a fatal error, the entire server initiates an orderly, graceful shutdown.</p>
+
+  <h2>2. Non-blocking streaming fan-out</h2>
+  <p>When telemetry streams from high-throughput log systems (like Loki) at 10,000 events/second, pushing these messages across 500 connected WebSocket clients poses a severe backpressure challenge. If one user is on a slow 3G mobile connection, a blocking channel write would halt the entire broadcast loop!</p>
+
+  <p>Grafana Live avoids this using <b>non-blocking select drops</b>:</p>
+
+  <pre><code>// Pattern from pkg/services/live/channel.go
+type Subscriber struct {
+	msgChan chan []byte
+}
+
+func (s *Subscriber) Send(payload []byte) bool {
+	select {
+	case s.msgChan &lt;- payload:
+		return true // Delivered successfully to client buffer
+	default:
+		// Client buffer is full! Drop frame to protect server RAM
+		metrics.LiveClientDroppedFramesTotal.Inc()
+		return false
+	}
+}</code></pre>
+
+  <p>In monitoring dashboards, showing a slightly dropped sample of a high-rate live chart is far preferable to running out of server memory and crashing the cluster.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant Browser as Browser Client
+  participant Gateway as WebSocket Gateway
+  participant Live as Grafana Live Hub
+  participant Source as Telemetry Data Source
+  Browser->>Gateway: WS Connect: /api/live/ws
+  Gateway->>Live: Subscribe("stream/telem/cpu")
+  Live-->>Gateway: Channel Subscription Active
+  Source->>Live: Push Frame 1 (100 events/sec)
+  Live->>Gateway: Non-blocking write to client buffer
+  Gateway-->>Browser: WS Frame 1 Delivered
+  Note over Browser: Browser CPU freezes (Tab backgrounded)
+  Source->>Live: Push Frame 2
+  Live->>Live: Client buffer full! Drop frame and increment metric
+  Note over Live: Server memory remains completely bounded
+  Browser->>Browser: Tab foregrounded - drain socket
+  Source->>Live: Push Frame 3
+  Live->>Gateway: Buffer has space - frame sent
+  Gateway-->>Browser: WS Frame 3 Delivered
+    </div>
+    <figcaption>Grafana Live streaming sequence with backpressure handling.
+    <b>Non-blocking channel drops protect server health against stalled consumer sockets.</b></figcaption>
+  </figure>
+
+  <h2>3. gRPC data source plugin routing</h2>
+  <p>Grafana connects to hundreds of data sources: PostgreSQL, Prometheus, Datadog, BigQuery. To allow third-party developers to write plugins in any language without compromising security, Grafana uses gRPC over loopback connections:</p>
+
+  <pre><code>// Pattern from pkg/plugins/backendplugin/client.go
+type DataPluginClient interface {
+	QueryData(ctx context.Context, req *backend.QueryDataRequest) (*backend.QueryDataResponse, error)
+	CheckHealth(ctx context.Context, req *backend.CheckHealthRequest) (*backend.CheckHealthResult, error)
+}</code></pre>
+
+  <p>The core server acts as a high-speed router: incoming HTTP queries from dashboards are translated into Protobuf requests, forwarded to the plugin subprocess, and rendered back as arrow data frames.</p>
+
+  <figure class="diagram">
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Registered: Subsystem added to ServiceRegistry
+  Registered --> Injected: Dependencies linked via constructors
+  Injected --> Running: errgroup.Go launches Run(context.Context)
+  Running --> Running: Processing queries and multiplexing channels
+  Running --> ShuttingDown: Context cancelled by OS signal
+  ShuttingDown --> Stopped: Listeners closed and pools flushed
+  Stopped --> [*]
+    </div>
+    <figcaption>Service registry lifecycle state machine. Ordered startup to clean shutdown.
+    <b>Context propagation guarantees clean termination of all goroutines on SIGTERM.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">How does Grafana initialize and order its hundreds of background services?</div>
+      <button class="q-opt">By compiling each service into an isolated Linux process</button>
+      <button class="q-opt">By invoking bash scripts located in root system bin dirs</button>
+      <button class="q-opt">By resolving dependency graphs inside a service registry</button>
+      <button class="q-opt">By polling an external SQLite database table for status</button>
+      <div class="q-fb">Grafana uses a unified ServiceRegistry where all subsystems register as BackgroundService instances, managed concurrently via errgroup and context cancellation.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why does Grafana Live drop frames when browser clients lag behind?</div>
+      <button class="q-opt">To prevent lagging websocket clients from exhausting memory</button>
+      <button class="q-opt">Because web browsers reject out-of-order network datagrams</button>
+      <button class="q-opt">The Linux kernel TCP stack terminates slow consumer sockets</button>
+      <button class="q-opt">Grafana requires all dashboard frames to be acknowledged ok</button>
+      <div class="q-fb">If slow or frozen browser tabs caused channel writes to block, memory buffers would grow unbounded; non-blocking select drops protect the central server's stability.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">How does Grafana communicate with custom backend data source plugins?</div>
+      <button class="q-opt">Through dynamic C shared libraries loaded using dlopen calls</button>
+      <button class="q-opt">Through gRPC over local UNIX sockets or loopback TCP ports</button>
+      <button class="q-opt">Through direct SQL queries against local SQLite disk tables</button>
+      <button class="q-opt">Through raw UDP datagram packets broadcast over the network</button>
+      <div class="q-fb">Grafana isolates backend data source plugins in separate child processes communicating over gRPC, preventing faulty plugin code from crashing the main dashboard server.</div>
+    </div>
+  </div>
+
+  <div class="teacher-note">
+    <b>Systems insight.</b> When building streaming systems in Go, never assume clients consume messages at the rate you produce them. Always implement explicit backpressure policies: either bounded buffers with drop semantics, or producer throttling. An unbounded channel is a memory leak waiting to explode.
+  </div>
+
+  <h2 class="h-label">Primary sources to go deeper</h2>
+  <p>Review the service registry in <a href="https://github.com/grafana/grafana/tree/main/pkg/registry">grafana/pkg/registry</a> and study the live streaming architecture in <a href="https://github.com/grafana/grafana/tree/main/pkg/services/live">grafana/pkg/services/live</a>.</p>
+
+  <div class="pager">
+    <a href="0701-prometheus-concurrent-scraping-and-promql-engine.html"><span class="dir">&larr; Lesson 0701</span><span class="ttl">Prometheus concurrent scraping and the PromQL engine</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Course map &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer>
+    <p>Systems Engineering in Go &middot; Lesson 0702 &middot; <a href="../reference/glossary.html">Glossary</a> &middot; <a href="../index.html">Course map</a></p>
+  </footer>
+</main>
+</body>
+</html>

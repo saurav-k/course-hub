@@ -117,6 +117,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0602-caddy-modular-architecture-and-zero-downtime-reloads.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Observability & Time-Series",
+      "lessons": [
+        {
+          "title": "Prometheus TSDB architecture and Gorilla chunk compression",
+          "href": "lessons/0700-prometheus-tsdb-architecture-and-chunk-compression.html"
+        },
+        {
+          "title": "Prometheus concurrent scraping and the PromQL engine",
+          "href": "lessons/0701-prometheus-concurrent-scraping-and-promql-engine.html"
+        },
+        {
+          "title": "Grafana backend routing and streaming channels",
+          "href": "lessons/0702-grafana-backend-routing-and-streaming-channels.html"
+        }
+      ]
     }
   ],
   "extras": [
