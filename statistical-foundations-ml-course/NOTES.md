@@ -89,4 +89,4 @@ Lecture 6 carries five more, all named on its hub page 0077:
 
 - Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4, 5 and 6. Keep one per lecture rather than growing a single sheet that nobody prints. The Lecture 2 sheet is still linked only from its own lessons, not from the course map.
+- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4, 5 and 6. Keep one per lecture rather than growing a single sheet that nobody prints.
