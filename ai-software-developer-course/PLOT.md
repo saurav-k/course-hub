@@ -46,42 +46,42 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 |---|---|---|---|
 | 0000 | You are already running one | **written** | The on-ramp. The ten-module map, what this course is not, the capstone opened, and the promise that everything here is done at a keyboard. |
 | | **Module 01 - The internals of coding agents** | | Foundation. The machine, made visible. |
-| 0100 | What the model actually receives | reserved | A request is a system prompt, a tool schema, a history and your words, concatenated by a program you can read. |
-| 0110 | The loop in one picture | reserved | An agent is a while-loop around one API call, and every capability you notice is a tool the loop dispatched. |
-| 0120 | The core four tools | reserved | Read, list, edit and bash are enough, because a filesystem plus a shell is a universal interface. |
-| 0130 | Reading a tool-call trace | reserved | The trace answers "why did it do that" faster than any prompt change. |
-| 0140 | How a system prompt is assembled | reserved | A production system prompt is assembled from parts at run time, and the parts have precedence. |
-| 0150 | A tool definition is a contract | reserved | The description is behaviour, not documentation. |
-| 0160 | Two hundred lines | reserved | The whole loop fits on one screen. **Split by purpose** from `coding-harness-course/lessons/0270-build-a-harness.html`; each page links the other in its first paragraph. |
-| 0170 | What a shipped harness does that yours does not | reserved | Context assembly, permission and recovery, named so the reader knows what to go and read. |
+| 0100 | What the model actually receives | **written** | A request is a system prompt, a tool schema, a history and your words, concatenated by a program you can read. |
+| 0110 | The loop in one picture | **written** | An agent is a while-loop around one API call, and every capability you notice is a tool the loop dispatched. |
+| 0120 | The core four tools | **written** | Read, list, edit and bash are enough, because a filesystem plus a shell is a universal interface. |
+| 0130 | Reading a tool-call trace | **written** | The trace answers "why did it do that" faster than any prompt change. |
+| 0140 | How a system prompt is assembled | **written** | A production system prompt is assembled from parts at run time, and the parts have precedence. |
+| 0150 | A tool definition is a contract | **written** | The description is behaviour, not documentation. |
+| 0160 | Two hundred lines | **written** | The whole loop fits on one screen. **Split by purpose** from `coding-harness-course/lessons/0270-build-a-harness.html`; each page links the other in its first paragraph. |
+| 0170 | What a shipped harness does that yours does not | **written** | Context assembly, permission and recovery, named so the reader knows what to go and read. |
 | 1100 | The capstone: pick your repository | reserved | **Read here**, after module 1. A repository chosen, a baseline trace recorded, three tasks to measure. |
 | | **Module 02 - Advanced context engineering** | | Foundation. The budget, and how to spend it. |
-| 0200 | The window is a budget | reserved | Context is a budget with an eviction policy. |
-| 0210 | Which prompting technique, when | reserved | Techniques are not a ranking; naming the failure picks the technique. |
-| 0220 | RePPIT, the five moves | reserved | Research, Propose, Plan, Implement, Test puts the expensive decision before the expensive tokens. |
-| 0230 | Spec-driven development | reserved | The spec becomes the unit of work rather than the diff. |
-| 0240 | MCP in one page | reserved | A client, a server and a transport; the model only ever sees the tool schema. |
-| 0250 | Write your first MCP server | reserved | One useful tool is about forty lines, and mounting it changes what the model plans. |
-| 0260 | Tools are designed for a reader who cannot ask | reserved | A tool description is executed, not read. |
-| 0270 | When not to add a tool | reserved | Every tool you mount is permanent context. Carries the per-turn tool-context arithmetic, and links **both ways** with `0900`. |
+| 0200 | The window is a budget | **written** | Context is a budget with an eviction policy. |
+| 0210 | Which prompting technique, when | **written** | Techniques are not a ranking; naming the failure picks the technique. |
+| 0220 | RePPIT, the five moves | **written** | Research, Propose, Plan, Implement, Test puts the expensive decision before the expensive tokens. |
+| 0230 | Spec-driven development | **written** | The spec becomes the unit of work rather than the diff. |
+| 0240 | MCP in one page | **written** | A client, a server and a transport; the model only ever sees the tool schema. |
+| 0250 | Write your first MCP server | **written** | One useful tool is about forty lines, and mounting it changes what the model plans. |
+| 0260 | Tools are designed for a reader who cannot ask | **written** | A tool description is executed, not read. |
+| 0270 | When not to add a tool | **written** | Every tool you mount is permanent context. Carries the per-turn tool-context arithmetic and the module assignment. It names `0900` and its measurement in prose but carries **no `href` yet**, because `0900` is unwritten and a link to a missing file fails the validator: the writer of `0900` adds both halves. |
 | | **Module 03 - Agent skills and the CLI** | | Working. The smallest artefact you write for yourself. |
-| 0300 | What a skill is | reserved | A folder the agent reads only when the task matches its description. |
-| 0310 | Writing your first skill | reserved | The frontmatter is the whole contract. |
-| 0320 | Progressive disclosure, and scripts | reserved | What the agent does not need every time belongs in `references/` or `scripts/`. |
-| 0330 | Where skills live | reserved | Four agents, one folder shape, four precedence rules. |
-| 0340 | Web skills | reserved | A skill that reaches past the repository turns a context problem into a permission problem. |
-| 0350 | The agent in a pipeline | reserved | An ordinary unix filter: stdin in, chosen format out, exit code you can branch on. |
-| 0360 | Session control from the CLI | reserved | A non-interactive run still leaves a session behind. |
-| 0370 | In the field: Cursor | reserved | Public primary material only. |
+| 0300 | What a skill is | **written** | A folder the agent reads only when the task matches its description. Carries the measured metadata-against-bodies arithmetic over the nineteen published skills. |
+| 0310 | Writing your first skill | **written** | The frontmatter is the whole contract. Carries `internal-comms` verbatim and the measured finding that one published description is 1,068 characters against the standard's 1,024. |
+| 0320 | Progressive disclosure, and scripts | **written** | What the agent does not need every time belongs in `references/` or `scripts/`. Carries this repository's own `course-authoring` skill as the shape at scale. |
+| 0330 | Where skills live | **written** | Four agents, four precedence rules, and Claude Code and Gemini CLI resolve the same clash in opposite directions. The portable answer is `.agents/skills/` plus a symlink. |
+| 0340 | Web skills | **written** | A skill that reaches past the repository turns a context problem into a permission problem. Carries `webapp-testing` and its script complete. Home of the taint figure in this module. |
+| 0350 | The agent in a pipeline | **written** | An ordinary unix filter: stdin in, chosen format out, exit code you can branch on. Carries the 10MB pipe cap against six real inputs measured in this repository. |
+| 0360 | Session control from the CLI | **written** | A non-interactive run still leaves a session behind. Every flag verified at source, including that Codex has no `--full-auto` at the pinned commit. |
+| 0370 | In the field: Cursor | **written** | Public primary material only. Cursor's four answers to the four questions, and the module assignment, which feeds the capstone's first committed agent configuration. |
 | | **Module 04 - Customizing your agent and repository** | | Working. The file a team argues about. |
-| 0400 | One file, two readers | reserved | Write `AGENTS.md`, then make Claude Code read it with one line. Module entry point. |
-| 0410 | What belongs in the file | reserved | The instruction file is a context budget. Carries this repository's own 770-line `AGENTS.md` against the documented "under 200 lines". |
-| 0420 | The loading hierarchy | reserved | Nothing overrides anything - the files are concatenated. |
-| 0430 | Hooks are the enforcement layer | reserved | An instruction asks; a hook decides. |
-| 0440 | Writing a blocking hook | reserved | Exit 2 with stderr, or exit 0 with decision JSON. One per hook, never both. |
-| 0450 | The Stop hook closes the loop | reserved | The difference between a session you watch and one you walk away from. |
-| 0460 | Planner, implementer, reviewer | reserved | A fresh context is the reviewer's entire advantage. |
-| 0470 | In the field: Claude Code | reserved | Public primary material only. |
+| 0400 | One file, two readers | **written** | Write `AGENTS.md`, then make Claude Code read it with one line. Module entry point. |
+| 0410 | What belongs in the file | **written** | The instruction file is a context budget. Carries this repository's own root `AGENTS.md`, measured with `wc -l`, against the documented "under 200 lines". |
+| 0420 | The loading hierarchy | **written** | Nothing overrides anything - the files are concatenated. |
+| 0430 | Hooks are the enforcement layer | **written** | An instruction asks; a hook decides. |
+| 0440 | Writing a blocking hook | **written** | Exit 2 with stderr, or exit 0 with decision JSON. One per hook, never both. |
+| 0450 | The Stop hook closes the loop | **written** | The difference between a session you watch and one you walk away from. |
+| 0460 | Planner, implementer, reviewer | **written** | A fresh context is the reviewer's entire advantage. |
+| 0470 | In the field: Claude Code | **written** | Public primary material only. |
 | 1110 | The capstone: write the contract | reserved | **Read here**, after module 4. `AGENTS.md`, one skill, one hook gate, committed and tested. |
 | | **Module 05 - Agent-ready codebases** | | Working. Nothing in this hub covers it. |
 | 0500 | What agent-ready means | **written** | The agent can close its own loop: set up, change, prove, without asking a human. |
@@ -112,31 +112,31 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0760 | Triage and auto-fix | **written** | The model's job is deciding whether a finding matters and drafting the fix. |
 | 0770 | In the field: Semgrep | **written** | Public primary material only. |
 | | **Module 08 - Background agents** | | Working. |
-| 0800 | What a background agent is | reserved | Where it runs, what it can reach, and how you find out what it did. |
-| 0810 | The six cloud agents | reserved | **Written on the mechanism axis** - where the sandbox is, what triggers it, what it may write - with the six as evidence. |
-| 0820 | Triggers | reserved | A contract about who may start an agent, on what, with what permissions. |
-| 0830 | Issue to pull request | reserved | The pipeline is the product; the agent is one stage in it. |
-| 0840 | Running a fleet | reserved | Ten agents contend for one branch, one working tree and one merge target. |
-| 0850 | What you owe a background agent | reserved | It cannot ask you a question, so everything it would have asked is in the repository first. |
-| 0860 | In the field: Cloudflare | reserved | Public primary material only. |
+| 0800 | What a background agent is | **written** | Where it runs, what it can reach, and how you find out what it did. |
+| 0810 | The six cloud agents | **written** | **Written on the mechanism axis** - where the sandbox is, what triggers it, what it may write - with the six as evidence. |
+| 0820 | Triggers | **written** | A contract about who may start an agent, on what, with what permissions. |
+| 0830 | Issue to pull request | **written** | The pipeline is the product; the agent is one stage in it. |
+| 0840 | Running a fleet | **written** | Ten agents contend for one branch, one working tree and one merge target. |
+| 0850 | What you owe a background agent | **written** | It cannot ask you a question, so everything it would have asked is in the repository first. |
+| 0860 | In the field: Cloudflare | **written** | Public primary material only. |
 | 1130 | The capstone: let it run | reserved | **Read here**, after module 8. One unattended pipeline with a ceiling, plus module 7's security pass, plus the open-source contribution track. |
 | | **Module 09 - Building an AI-native team** | | Frontier. |
-| 0900 | One door for every tool | reserved | Governance moves from the server to the endpoint in front of them. Links **both ways** with `0270`. |
-| 0910 | Who is this token for? | reserved | Every token names exactly one MCP server, and no server passes a token onward. |
-| 0920 | Granting and taking away | reserved | A policy file you can review, and a log of individual tool calls. |
-| 0930 | One place the model bill is paid | reserved | A gateway moves the provider credential off developer machines. |
-| 0940 | What a token actually costs | reserved | Arithmetic you can do in your head: which model, and how much of the context is a cache read. |
-| 0950 | Making the good setup the default one | reserved | The good configuration arrives on the machine rather than being copied. |
-| 0960 | Measuring adoption honestly | reserved | Every available metric measures activity; the number nobody can move is releases. |
-| 0970 | In the field: Replit | reserved | Public primary material only. |
+| 0900 | One door for every tool | **written** | Governance moves from the server to the endpoint in front of them. Links **both ways** with `0270`. |
+| 0910 | Who is this token for? | **written** | Every token names exactly one MCP server, and no server passes a token onward. |
+| 0920 | Granting and taking away | **written** | A policy file you can review, and a log of individual tool calls. |
+| 0930 | One place the model bill is paid | **written** | A gateway moves the provider credential off developer machines. |
+| 0940 | What a token actually costs | **written** | Arithmetic you can do in your head: which model, and how much of the context is a cache read. |
+| 0950 | Making the good setup the default one | **written** | The good configuration arrives on the machine rather than being copied. |
+| 0960 | Measuring adoption honestly | **written** | Every available metric measures activity; the number nobody can move is releases. |
+| 0970 | In the field: Replit | **written** | Public primary material only. |
 | | **Module 10 - The software factory and the future** | | Frontier. |
-| 1000 | The loop that closes | reserved | The ordinary delivery loop with agents on some arcs and a human on exactly one gate. |
-| 1010 | What starts an agent when nobody is there | reserved | Each trigger has a different trust story. |
-| 1020 | Making a correction survive the session | reserved | A rule, a memory or a failing eval has to outlive the run. |
-| 1030 | Give every agent one job and one key | reserved | An agent is a principal, and its own credential is what contains it. |
-| 1040 | Watching the factory | reserved | Log everything, sample by risk, keep a switch that stops it all. |
-| 1050 | Reading the trend lines | reserved | Three measurements point the same way on capability and the opposite way on delivery. Owes a chart with real data. |
-| 1060 | What you do next | reserved | Four habits the reader can start this week. |
+| 1000 | The loop that closes | **written** | The ordinary delivery loop with agents on some arcs and a human on exactly one gate. |
+| 1010 | What starts an agent when nobody is there | **written** | Each trigger has a different trust story. |
+| 1020 | Making a correction survive the session | **written** | A rule, a memory or a failing eval has to outlive the run. |
+| 1030 | Give every agent one job and one key | **written** | An agent is a principal, and its own credential is what contains it. |
+| 1040 | Watching the factory | **written** | Log everything, sample by risk, keep a switch that stops it all. |
+| 1050 | Reading the trend lines | **written** | Three measurements point the same way on capability and the opposite way on delivery. Owes a chart with real data. |
+| 1060 | What you do next | **written** | Four habits the reader can start this week. |
 
 ## Reference sheets
 
@@ -144,7 +144,9 @@ Read alongside, not positions in the sequence.
 
 | Path | Status | Notes |
 |---|---|---|
-| `reference/glossary.html` | **written**, 19 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written** | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written**, 26 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written**, 62 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
 | `reference/samples.html` | reserved | The samples gallery: a complete, runnable, licensed example of each artefact the course teaches. Written last, because it collects from every module. |
 | `reference/readiness.html` | reserved | The readiness scorecard as a standalone printable page, lifted from `0550`. Written last. |
 
@@ -152,7 +154,9 @@ Read alongside, not positions in the sequence.
 
 Two pairs are load-bearing in both directions and are recorded here so a later edit cannot silently drop one half.
 
+- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other. **State today:** `0270` is written and carries the measurement, Cloudflare's own source, and `0900`'s number and title in prose, with no `href`, because linking an unwritten page fails `validate_site.py`. Whoever writes `0900` adds the `href` in `0270` and the link back, in the same pull request.
 - **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other.
+  **Half of this pair is outstanding.** `0900` is written and names `0270` in prose, by number and title, in its section "The bill is paid in context, not in requests"; it carries no `href`, because `0270` does not exist yet and `validate_site.py` fails a link to a page that is not there. Whoever writes module 2 owes both halves: the forward link from `0270`, and turning that sentence in `0900` into a link. It is one edit and it is easy to lose.
 - **`0160` and `coding-harness-course/lessons/0270-build-a-harness.html`.** The split by purpose. Each page states in its first paragraph what the other build is for.
 
 The remaining out-of-course links are one-way and belong to the pages that carry them; `BUILDER-SPEC.md` names the rule for making one.

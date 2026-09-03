@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Writing a blocking hook - AI Software Developer</title>
+<meta name="description" content="A hook reads JSON on stdin and answers in one of two ways: exit 2 with a reason on stderr, or exit 0 with decision JSON on stdout. Choose one per hook, and know what each can express.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; Customizing your agent &middot; Lesson 0440</div>
+  <h1>Exit 2 with a reason, or exit 0 with decision JSON - one per hook, never both</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Both protocols and the precedence order are from Anthropic's hooks reference and guide.
+    &middot; <a href="https://code.claude.com/docs/en/hooks-guide">Hooks guide</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A hook is an ordinary program. It reads <b>JSON on stdin</b>, and for a Bash tool call that JSON carries <code>tool_name</code>, <code>tool_input.command</code>, <code>session_id</code> and <code>cwd</code>.</li>
+      <li><b>Exit 2</b> blocks and your stderr becomes the reason. <b>Exit 0 with decision JSON</b> gives you four outcomes instead of one.</li>
+      <li>The documentation's rule is one line: <b>"Choose one approach per hook."</b></li>
+      <li>Every matching hook runs <b>in parallel to completion</b>, and the most restrictive answer wins: <b>deny, defer, ask, allow</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Knowing a hook can refuse is not knowing how to make one refuse.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;where a hook stands in the loop"] --> T["THIS PAGE&lt;br/&gt;the two ways to answer"]
+  T --> N["What it enables&lt;br/&gt;a gate on the whole turn"]
+  W["Module 04&lt;br/&gt;the files a team argues about"] -.- T
+    </div>
+    <figcaption>Lesson 0430 put a program between the model asking and your machine acting. This page is the program: what arrives on its stdin, and the two shapes its answer may take.
+    <b>The contract is small enough to hold in your head, and its edges are where hooks silently fail.</b></figcaption>
+  </figure>
+
+  <h2 id="the-input">1. What arrives on stdin</h2>
+  <p>Every event delivers a JSON object to your script's standard input. For a <code>PreToolUse</code> hook watching Bash, the useful fields are the tool name and the command itself.</p>
+
+  <div class="code-cap">hook input &middot; code.claude.com/docs/en/hooks-guide &middot; Anthropic documentation &middot; reproduced verbatim, complete</div>
+  <pre><code>{
+  "session_id": "abc123",
+  "cwd": "/Users/sarah/myproject",
+  "hook_event_name": "PreToolUse",
+  "tool_name": "Bash",
+  "tool_input": {
+    "command": "npm test"
+  }
+}
+</code></pre>
+
+  <p>Note <code>cwd</code>, because it is the answer to a trap. Scripts are usually referenced with <code>${CLAUDE_PROJECT_DIR}</code> so the path works wherever the session starts, and that variable stays fixed at the project directory. When your hook needs to know where the agent actually <i>is</i> - a git worktree, a monorepo package - read the <code>cwd</code> field rather than the variable.</p>
+
+  <h2 id="two-paths">2. Two answers, and they are not equal</h2>
+  <p>The first path is an exit code, and it is six lines. Write the reason to standard error and exit 2.</p>
+
+  <div class="code-cap">a PreToolUse hook &middot; code.claude.com/docs/en/hooks-guide &middot; Anthropic documentation &middot; reproduced verbatim, complete</div>
+  <pre><code>#!/bin/bash
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command')
+
+if echo "$COMMAND" | grep -q "drop table"; then
+  echo "Blocked: dropping tables is not allowed" &gt;&amp;2  # stderr becomes Claude's feedback
+  exit 2                                               # exit 2 = block the action
+fi
+
+exit 0  # exit 0 = no decision; the normal permission flow applies
+</code></pre>
+
+  <p>The last line is the one people misread. <b>Exit 0 is not an approval.</b> The documentation is explicit that for a <code>PreToolUse</code> hook it "doesn't approve the tool call: the normal permission flow still applies". Silence means you have no opinion, not that you said yes.</p>
+  <p>The second path is structured output. Exit 0 and print a decision object, which buys you four outcomes rather than one.</p>
+
+  <div class="code-cap">PreToolUse decision output &middot; code.claude.com/docs/en/hooks-guide &middot; Anthropic documentation &middot; reproduced verbatim, complete</div>
+  <pre><code>{
+  "hookSpecificOutput": {
+    "hookEventName": "PreToolUse",
+    "permissionDecision": "deny",
+    "permissionDecisionReason": "Use rg instead of grep for better performance"
+  }
+}
+</code></pre>
+
+  <p><code>"allow"</code> skips the interactive prompt but does not make the action unconditional: deny and ask rules, including enterprise managed deny lists, still apply. <code>"deny"</code> cancels the call and sends your reason to the model. <code>"ask"</code> shows the prompt as normal. <code>"defer"</code> is the fourth, available only in a non-interactive <code>-p</code> run, and it exits with the tool call preserved so a wrapper can collect an answer and resume.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each path can say</div>
+    <div class="fig-claim">Decision JSON expresses twice the outcomes and two controls the exit code has none of.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A grouped bar chart comparing the two hook answer protocols. On outcomes expressible, the exit code path scores 2 and the decision JSON path scores 4. On further documented controls for PreToolUse, the exit code path scores 0 and the decision JSON path scores 2.">
+      <line class="grid" x1="110" y1="70" x2="600" y2="70"/>
+      <line class="grid" x1="110" y1="130" x2="600" y2="130"/>
+      <line class="grid" x1="110" y1="190" x2="600" y2="190"/>
+      <line class="axis" x1="110" y1="250" x2="600" y2="250"/>
+      <text class="lbl-sm" x="102" y="74" text-anchor="end">6</text>
+      <text class="lbl-sm" x="102" y="134" text-anchor="end">4</text>
+      <text class="lbl-sm" x="102" y="194" text-anchor="end">2</text>
+      <text class="lbl-sm" x="102" y="254" text-anchor="end">0</text>
+
+      <rect class="m-noise" x="160" y="190" width="64" height="60"/>
+      <rect class="m-stat"  x="236" y="130" width="64" height="120"/>
+      <rect class="m-noise" x="410" y="249" width="64" height="1"/>
+      <rect class="m-stat"  x="486" y="190" width="64" height="60"/>
+
+      <text class="lbl-sm" x="192" y="182" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="268" y="122" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="442" y="244" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="518" y="182" text-anchor="middle">2</text>
+
+      <text class="lbl-sm" x="230" y="272" text-anchor="middle">outcomes it can express</text>
+      <text class="lbl-sm" x="480" y="272" text-anchor="middle">further documented controls</text>
+      <text class="ttl" x="110" y="42">what a PreToolUse hook can say, by protocol</text>
+      <text class="lbl-sm" x="110" y="292">block or stay silent, against allow, deny, ask and defer</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>exit code</span><span><i class="sw-stat"></i>decision JSON</span></div>
+    <figcaption>The two further controls are <code>updatedInput</code>, which rewrites the tool's arguments before it runs, and <code>additionalContext</code>, which adds text alongside the result. Neither has any spelling in the exit-code protocol, which is why a hook that only ever blocks is fine as six lines and a hook that has to explain itself is not.
+    <b>Pick the protocol from what you need to say, then never mix the two in one script.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="fig-cap">One tool call, four ends</div>
+    <div class="fig-claim">A tool call reaches exactly one of four terminal states.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Proposed: the model emits a tool_use block
+  Proposed --> Evaluated: every matching hook runs in parallel
+  Evaluated --> Denied: exit 2 - or a deny decision
+  Evaluated --> Deferred: defer - only in a -p run
+  Evaluated --> Asked: ask - or no decision at all
+  Evaluated --> Allowed: allow - the prompt is skipped
+  Asked --> Allowed: you approve it
+  Asked --> Denied: you refuse it
+  Allowed --> Executed: your machine runs it
+  Denied --> [*]: the reason goes back to the model
+  Executed --> [*]: the result goes back to the model
+    </div>
+    <figcaption>Both refusals - yours and the hook's - leave by the same door, and the model is told why in both cases. The route through <b>Asked</b> is what a hook that stays silent produces, which is the normal permission flow rather than a failure.
+    <b>A denial is a tool result, so the model always learns that something was stopped.</b></figcaption>
+  </figure>
+
+  <h2 id="several-hooks">3. Several hooks, one event, and the most restrictive answer wins</h2>
+  <p>Hooks are not a chain and there is no first-one-wins. Every matching handler runs, in parallel, to completion. Then the answers are combined: <b>"For <code>PreToolUse</code> permission decisions, the most restrictive answer applies, in the order <code>deny</code>, <code>defer</code>, <code>ask</code>, <code>allow</code>."</b></p>
+  <p>The consequence the guide draws out is the useful one. Put a logging hook and a guardrail hook on the same event and the guardrail denies: the command is blocked, and <b>the log entry is still written</b>, because the logging hook already ran. Side effects are not rolled back by somebody else's refusal.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four answers, one order</div>
+    <div class="fig-claim">The strictest answer any hook gives is the one the tool call receives.</div>
+    <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="Four answer boxes in a row from most restrictive to least: deny, defer, ask and allow, with a connector running left to right underneath labelled strictest wins. Above them, three hooks are drawn: a logging hook returning nothing, a guardrail hook returning deny and a convenience hook returning allow. A connector runs from the guardrail hook down to the deny box, which is highlighted as the answer that applies.">
+      <rect class="d-box" x="20" y="26" width="170" height="34" rx="4"/>
+      <text class="d-mono" x="34" y="48">logging hook - no decision</text>
+      <rect class="d-box" x="212" y="26" width="196" height="34" rx="4"/>
+      <text class="d-mono" x="226" y="48">guardrail hook - says deny</text>
+      <rect class="d-box" x="430" y="26" width="190" height="34" rx="4"/>
+      <text class="d-mono" x="444" y="48">convenience hook - allow</text>
+      <text class="d-mono" x="320" y="82" text-anchor="middle">all three run, in parallel, to completion</text>
+
+      <path class="d-flow s-alarm" d="M310 62 C 260 96, 160 108, 106 130"/>
+      <path class="d-flow ref" d="M525 62 C 560 96, 552 110, 545 130"/>
+
+      <rect class="d-drop"   x="30"  y="134" width="130" height="44" rx="4"/>
+      <text class="lbl-b" x="95" y="161" text-anchor="middle">deny</text>
+      <rect class="d-box"    x="176" y="134" width="130" height="44" rx="4"/>
+      <text class="lbl-b" x="241" y="161" text-anchor="middle">defer</text>
+      <rect class="d-box"    x="322" y="134" width="130" height="44" rx="4"/>
+      <text class="lbl-b" x="387" y="161" text-anchor="middle">ask</text>
+      <rect class="d-ghost"  x="468" y="134" width="130" height="44" rx="4"/>
+      <text class="lbl-b" x="533" y="161" text-anchor="middle">allow</text>
+
+      <path class="d-flow" d="M30 196 L598 196"/>
+      <text class="d-mono" x="40" y="216">most restrictive</text>
+      <text class="d-mono" x="588" y="216" text-anchor="end">least restrictive</text>
+      <text class="read" x="320" y="240" text-anchor="middle">The allow was returned and had no effect, and nothing tells the hook that wrote it.</text>
+    </svg>
+    <figcaption>The <code>allow</code> box is drawn faint because the convenience hook's answer was overruled, and the dashed connector into it says the same thing. Its script still ran and any side effect it had still happened.
+    <b>Combination is by strictness, so a permissive hook can never loosen a strict one.</b></figcaption>
+  </figure>
+
+  <h2 id="build-one">4. A gate you can commit</h2>
+  <p>Here is a working guardrail, built out of four parts. Untick <b>scope it to commits</b> and you have written a hook that runs your linter before every <code>ls</code>; untick <b>run the check</b> and you have written one that refuses every commit unconditionally. Both are real mistakes and both look reasonable in a diff.</p>
+
+  <figure class="diagram assembler" id="lint-gate-builder">
+    <div class="fig-cap">Build a lint gate</div>
+    <div class="fig-claim">Four parts, and removing either middle one produces a plausible broken hook.</div>
+
+    <div class="build-controls">
+      <label><input type="checkbox" data-part="read" checked> read the command from stdin</label>
+      <label><input type="checkbox" data-part="scope" checked> scope it to commits</label>
+      <label><input type="checkbox" data-part="check" checked> run the check</label>
+      <label><input type="checkbox" data-part="deny" checked> deny, with the reason</label>
+    </div>
+
+    <div class="asm-out">
+      <div class="code-cap">.claude/hooks/lint-gate.sh &middot; written for this course, from the documented protocol &middot; assembled from the boxes above</div>
+      <pre><code>#!/usr/bin/env bash
+# .claude/hooks/lint-gate.sh - refuse a commit while the linter is failing.
+set -euo pipefail
+
+INPUT=$(cat)
+COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')
+
+case "$COMMAND" in
+  git\ commit*) ;;
+  *) exit 0 ;;
+esac
+
+if OUTPUT=$(npm run --silent lint 2&gt;&amp;1); then
+  exit 0
+fi
+
+REASON=$(printf 'Commit blocked: lint failed.\n%s' "${OUTPUT:-no output}" | tail -c 4000)
+jq -n --arg reason "$REASON" '{
+  hookSpecificOutput: {
+    hookEventName: "PreToolUse",
+    permissionDecision: "deny",
+    permissionDecisionReason: $reason
+  }
+}'
+</code></pre>
+    </div>
+
+    <template data-part="read">
+      #!/usr/bin/env bash
+      # .claude/hooks/lint-gate.sh - refuse a commit while the linter is failing.
+      set -euo pipefail
+
+      INPUT=$(cat)
+      COMMAND=$(printf '%s' "$INPUT" | jq -r '.tool_input.command // empty')</template>
+    <template data-part="scope">
+      case "$COMMAND" in
+        git\ commit*) ;;
+        *) exit 0 ;;
+      esac</template>
+    <template data-part="check">
+      if OUTPUT=$(npm run --silent lint 2&gt;&amp;1); then
+        exit 0
+      fi</template>
+    <template data-part="deny">
+      REASON=$(printf 'Commit blocked: lint failed.\n%s' "${OUTPUT:-no output}" | tail -c 4000)
+      jq -n --arg reason "$REASON" '{
+        hookSpecificOutput: {
+          hookEventName: "PreToolUse",
+          permissionDecision: "deny",
+          permissionDecisionReason: $reason
+        }
+      }'</template>
+
+    <div class="build-readout">
+      <span><b data-asm-out="lines">24</b> lines, <b data-asm-out="parts">4</b> of 4 parts</span>
+      <span>about <b data-asm-out="tokens">144</b> tokens of script - none of it in the window</span>
+    </div>
+    <figcaption>Two details earn their place. The <code>case</code> arm is what stops the linter running before every unrelated command, and <code>tail -c 4000</code> is what stops a forty-thousand-character lint failure eating the context the fix needs.
+    <b>A hook script costs no context at all, which is the one budget this module has not been spending.</b></figcaption>
+  </figure>
+
+  <p>The settings block that registers it is three levels, exactly as lesson 0430 described.</p>
+
+  <div class="code-cap">.claude/settings.json &middot; written for this course, from the documented schema &middot; complete, registers the script above</div>
+  <pre><code>{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/lint-gate.sh"
+          }
+        ]
+      }
+    ]
+  }
+}
+</code></pre>
+
+  <div class="callout warn">
+    <code>chmod +x .claude/hooks/lint-gate.sh</code> is a numbered step in the documentation because it is the most common reason a hook silently does nothing. A non-executable script is not an error you will see: the gate is simply absent, and the first time you notice is when something it was supposed to stop gets through.
+  </div>
+
+  <h2 id="cursor">5. The same idea with a different contract</h2>
+  <p>Cursor's hooks answer the same question and shape the answer differently, and the three differences are each a design decision worth recognising. It names the field <code>permission</code>, with <code>allow</code>, <code>deny</code> and <code>ask</code>, at the top level rather than nested under a <code>hookSpecificOutput</code> object. It carries a <code>failClosed</code> flag, defaulting to false, so you choose whether a crashed or timed-out hook blocks the action or waves it through. And it splits the message in two, <code>user_message</code> and <code>agent_message</code>, so the human and the model can be told different things.</p>
+  <p>The <code>failClosed</code> flag is the one to think about. Claude Code's protocol has no equivalent switch, so a hook that crashes is a non-blocking error and the action proceeds. If your gate must hold even when your own script is broken, the deny rule in <code>permissions.deny</code> is the belt to the hook's braces, and that is why the module keeps putting them in the same file.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Two hooks match one Bash call. One returns <code>allow</code>, the other exits 2. What happens?</div>
+      <button class="q-opt">The allow wins, since it was an explicit decision</button>
+      <button class="q-opt">The call is blocked, and the allow has no effect</button>
+      <button class="q-opt">The two cancel out and you get the usual prompt</button>
+      <button class="q-opt">The first hook to finish decides, so it is a race</button>
+      <div class="q-fb">Answers combine by strictness in the order deny, defer, ask, allow, and exit 2 blocks whether or not JSON was printed. The first option inverts the rule. The third describes a resolution that would make a guardrail depend on nobody else writing a permissive hook. The fourth is the reasonable guess for parallel work and is explicitly not how this combines - order of completion does not matter, only strictness.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Your <code>PreToolUse</code> hook exits 0 and prints nothing. What did you just say?</div>
+      <button class="q-opt">Allow it - the tool call proceeds without a prompt</button>
+      <button class="q-opt">Deny it, because no decision reads as a refusal</button>
+      <button class="q-opt">Nothing - the normal permission flow still applies</button>
+      <button class="q-opt">Ask me, because the missing output escalates it</button>
+      <div class="q-fb">Exit 0 with no decision reports no objection through the exit code, and the permission flow runs as though your hook were not there. The first option is the most common misreading and turns a silent hook into an accidental approval in the reader's mental model. The second would make a broken script a denial of everything. The fourth would make it a prompt for everything, and neither escalation is in the protocol.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 25 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Write one hook for your capstone repository and prove it does both things a gate must do: <b>fire</b>, and <b>block</b>.</p>
+      <p>Pick the rule you classified as "must hold" in lesson 0430. Write the script, register it, make it executable, and then produce two transcripts: one where the hook runs and allows, and one where you deliberately break the condition and it refuses with your own reason text visible.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Test the script before you involve the agent at all. It reads JSON on stdin, so you can feed it a hand-written object and read the exit code: <code>echo '{"tool_input":{"command":"git commit -m x"}}' | .claude/hooks/lint-gate.sh; echo $?</code>. If that does not print 2 or a decision object, no amount of settings-file debugging will help.</p></details>
+
+    <details class="solution"><summary>Show the four things a finished answer has</summary>
+      <ol class="worked">
+        <li><b>The script, tested off-line.</b> Piped a fake input object in, read the exit code out. Two runs: one where the check passes and it exits 0, one where it fails and it exits 2 or prints a deny.</li>
+        <li><b>The registration, proved.</b> <code>/hooks</code> lists it, under the right event, with the right matcher. A hook that is not in that list is not installed, whatever the file says.</li>
+        <li><b>The firing transcript.</b> The condition holds, the agent does the thing, and the hook allowed it by staying silent. This one is boring and is the one people skip.</li>
+        <li><b>The blocking transcript.</b> The condition is broken on purpose, the agent tries anyway, and your own reason text appears in the conversation. If the model then works around the block by a different route, that is a finding about your matcher, and it is the finding worth having.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Two transcripts, and your reason text appearing word for word in the second. If you cannot find your own sentence in the blocking transcript, the block came from somewhere else - the permission flow, or a deny rule - and your hook may not be running at all.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Hand your agent your hook script and ask it to name every command that would reach the check and every command that would slip past the matcher. The second list is the useful one, and it is usually longer than you expect.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The worked hooks, the exit-code table and the combination rule are in the <a href="https://code.claude.com/docs/en/hooks-guide">Hooks guide</a>, under <b>Read input and return output</b> and <b>Combine results from multiple hooks</b>. The per-field schemas behind them, including every value <code>permissionDecision</code> takes, are in the <a href="https://code.claude.com/docs/en/hooks">Hooks reference</a>. For the second contract this page compares against, see <a href="https://cursor.com/docs/agent/hooks">Cursor's hooks documentation</a>.</p>
+
+  <div class="pager">
+    <a href="0430-hooks-are-the-enforcement-layer.html"><span class="dir">&larr; Previous</span><span class="ttl">Hooks are the enforcement layer</span></a>
+    <a class="nxt" href="0450-the-stop-hook-closes-the-loop.html"><span class="dir">Next &rarr;</span><span class="ttl">The Stop hook closes the loop</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0440 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
