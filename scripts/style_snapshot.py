@@ -768,11 +768,40 @@ CONTRACT = """
     };
   }
 
+  function agree(before, after) {
+    for (var key in before) {
+      if (before[key] !== after[key]) return false;
+    }
+    return true;
+  }
+
+  /* Two animation frames is not a settle, it is a guess. Setting or removing
+     `data-course` triggers a style recalculation over every rule the sheet
+     declares, and that recalculation gets longer as the sheet does, so the
+     frame budget that is generous on a laptop is not one on a shared runner.
+     A3 read a page's *rotated* accent as its `no course` state on CI: the
+     attribute removal had not landed by the second frame, the assertion
+     compared a rotated accent against an unrotated one, and the job was red on
+     a race rather than on a style regression.
+
+     So settle on a stable read instead of on a frame count: read, wait, read
+     again, and take the value only once two consecutive reads agree. The bound
+     is the SWITCH helper's, for the same reason SWITCH carries one - a page
+     that never stops moving has to fail loudly rather than hang - and the loop
+     returns on its first comparison in the ordinary case, so a settled page
+     pays one extra frame pair. */
   async function underCourse(name) {
     if (name === null) root.removeAttribute('data-course');
     else root.setAttribute('data-course', name);
     await settle();
-    return readState();
+    var previous = readState();
+    for (var i = 0; i < 240; i++) {
+      await settle();
+      var current = readState();
+      if (agree(previous, current)) return current;
+      previous = current;
+    }
+    return previous;
   }
 
   var states = {};
