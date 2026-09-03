@@ -37,6 +37,7 @@ The capstone pages are numbered `1100` to `1130` because nothing published may b
 | `1130-the-capstone-let-it-run.html` | Module 8 |
 
 `index.html` places each capstone card at the foot of the module it follows, which is the course map carrying teaching order while the file numbers carry permanence.
+The pagers carry the same order: `0170` goes next to `1100` and `1100` goes next to `0200`, and the same at `0470`, `0670` and `0860`. That is the one place in this course where the pager chain and the file numbers disagree, and it is deliberate.
 The open-source contribution track rides on `1130` and gets no pages of its own: the reader's unattended pipeline runs against a repository that is not theirs, which is where module 7 stops being theoretical.
 Lesson `0000` opens the capstone by naming it, so nobody meets it for the first time at `1100`.
 
@@ -54,7 +55,7 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0150 | A tool definition is a contract | **written** | The description is behaviour, not documentation. |
 | 0160 | Two hundred lines | **written** | The whole loop fits on one screen. **Split by purpose** from `coding-harness-course/lessons/0270-build-a-harness.html`; each page links the other in its first paragraph. |
 | 0170 | What a shipped harness does that yours does not | **written** | Context assembly, permission and recovery, named so the reader knows what to go and read. |
-| 1100 | The capstone: pick your repository | reserved | **Read here**, after module 1. A repository chosen, a baseline trace recorded, three tasks to measure. |
+| 1100 | The capstone: pick your repository | **written** | **Read here**, after module 1. Four properties that make a repository able to contradict you, three baseline tasks of three shapes, four numbers per task. |
 | | **Module 02 - Advanced context engineering** | | Foundation. The budget, and how to spend it. |
 | 0200 | The window is a budget | **written** | Context is a budget with an eviction policy. |
 | 0210 | Which prompting technique, when | **written** | Techniques are not a ranking; naming the failure picks the technique. |
@@ -82,7 +83,7 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0450 | The Stop hook closes the loop | **written** | The difference between a session you watch and one you walk away from. |
 | 0460 | Planner, implementer, reviewer | **written** | A fresh context is the reviewer's entire advantage. |
 | 0470 | In the field: Claude Code | **written** | Public primary material only. |
-| 1110 | The capstone: write the contract | reserved | **Read here**, after module 4. `AGENTS.md`, one skill, one hook gate, committed and tested. |
+| 1110 | The capstone: write the contract | **written** | **Read here**, after module 4. `AGENTS.md`, one skill, one hook gate - and the three different proofs, because reading all three the same way is how this stop fails. |
 | | **Module 05 - Agent-ready codebases** | | Working. Nothing in this hub covers it. |
 | 0500 | What agent-ready means | **written** | The agent can close its own loop: set up, change, prove, without asking a human. |
 | 0510 | The nine pillars and five levels | **written** | Readiness is a maturity ladder with named rungs. |
@@ -101,7 +102,7 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0650 | Wiring review into the pull request | **written** | Trigger, volume and authority are three separate settings. |
 | 0660 | Measuring your reviewer | **written** | Acceptance rate is the only number that survives contact with your own codebase. |
 | 0670 | In the field: Cognition | **written** | Public primary material only. |
-| 1120 | The capstone: close the gaps | reserved | **Read here**, after module 6. A readiness score before and after, and review running on their pull requests. |
+| 1120 | The capstone: close the gaps | **written** | **Read here**, after module 6. A readiness score before and after, and an advisory reviewer measured on comments the reader classified. |
 | | **Module 07 - Security** | | Working, except `0770`, which is frontier. |
 | 0700 | The three scanners | **written** | Three scanners answer three different questions. |
 | 0710 | Writing a rule | **written** | A scanner rule is a small program you can read. |
@@ -119,7 +120,7 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0840 | Running a fleet | **written** | Ten agents contend for one branch, one working tree and one merge target. |
 | 0850 | What you owe a background agent | **written** | It cannot ask you a question, so everything it would have asked is in the repository first. |
 | 0860 | In the field: Cloudflare | **written** | Public primary material only. |
-| 1130 | The capstone: let it run | reserved | **Read here**, after module 8. One unattended pipeline with a ceiling, plus module 7's security pass, plus the open-source contribution track. |
+| 1130 | The capstone: let it run | **written** | **Read here**, after module 8. A four-term ceiling, module 7's sandbox pass, and the open-source track on QEMU, LLVM and curl's own policies. |
 | | **Module 09 - Building an AI-native team** | | Frontier. |
 | 0900 | One door for every tool | **written** | Governance moves from the server to the endpoint in front of them. Links **both ways** with `0270`. |
 | 0910 | Who is this token for? | **written** | Every token names exactly one MCP server, and no server passes a token onward. |
@@ -144,26 +145,23 @@ Read alongside, not positions in the sequence.
 
 | Path | Status | Notes |
 |---|---|---|
-| `reference/glossary.html` | **written** | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
-| `reference/glossary.html` | **written**, 26 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
-| `reference/glossary.html` | **written**, 62 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
-| `reference/samples.html` | reserved | The samples gallery: a complete, runnable, licensed example of each artefact the course teaches. Written last, because it collects from every module. |
-| `reference/readiness.html` | reserved | The readiness scorecard as a standalone printable page, lifted from `0550`. Written last. |
+| `reference/glossary.html` | **written** | Every term the course introduces, one definition each, linked to the lesson that develops it. **Each pull request adds its own terms**, alphabetically, and corrects the count in the page's own pill. One row, not one per pull request: three parallel branches each appended a row here and every copy was stale the moment the next one merged. |
+| `reference/samples.html` | **written** | The samples gallery: `AGENTS.md`, `CLAUDE.md`, a hooks configuration, a `SKILL.md` with its script, and a minimal MCP server, each complete and each carrying source, licence and verdict. Collected from the lessons rather than written fresh, so a sample has one owner. |
+| `reference/readiness.html` | **written** | The ten-dimension scorecard as a standalone printable page, lifted from `0550` with the widget copied rather than re-typed, plus the band table and the honest limit. |
 
 ## The one-way links that must not be lost
 
 Two pairs are load-bearing in both directions and are recorded here so a later edit cannot silently drop one half.
 
-- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other. **State today:** `0270` is written and carries the measurement, Cloudflare's own source, and `0900`'s number and title in prose, with no `href`, because linking an unwritten page fails `validate_site.py`. Whoever writes `0900` adds the `href` in `0270` and the link back, in the same pull request.
-- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other.
-  **Half of this pair is outstanding.** `0900` is written and names `0270` in prose, by number and title, in its section "The bill is paid in context, not in requests"; it carries no `href`, because `0270` does not exist yet and `validate_site.py` fails a link to a page that is not there. Whoever writes module 2 owes both halves: the forward link from `0270`, and turning that sentence in `0900` into a link. It is one edit and it is easy to lose.
+- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. **Both halves are links now**, the forward one in `0270`'s callout and the back one in `0900`'s section "The bill is paid in context, not in requests". Each half sat in prose with no `href` for as long as the other page was unwritten, which is the correct thing to do and is also how a pair like this gets lost: neither page was broken and neither reader ever arrived at the other. Do not let either half fall back to prose.
 - **`0160` and `coding-harness-course/lessons/0270-build-a-harness.html`.** The split by purpose. Each page states in its first paragraph what the other build is for.
 
 The remaining out-of-course links are one-way and belong to the pages that carry them; `BUILDER-SPEC.md` names the rule for making one.
 
 ## Planned but unwritten
 
-Everything above marked `reserved`. The position is held and nothing else may take it.
+**Nothing.** Every row above is written: 83 lessons and three reference sheets, which is the 86 pages `MISSION.md` sized the course at.
+The section stays because the next thing added to this course goes here first, with its position held and nothing else allowed to take it.
 The full map - one row per page, with the report and lesson entry that carries its beats, figures and samples - is the frozen course map that this course was scaffolded from, and it is working material rather than a file in this repository.
 
 ## Adding a lesson to this course

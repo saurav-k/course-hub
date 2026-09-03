@@ -4344,7 +4344,13 @@
 
   function mountAssemblers() {
     Array.prototype.forEach.call(document.querySelectorAll('figure.assembler'), function (figure) {
-      var target = figure.querySelector('.asm-out code');
+      /* Named through the `pre`, because `.asm-out code` is the first `code`
+         in the block and a `.code-cap` is allowed to name its file in one.
+         Written that way the assembled file was written into the caption, the
+         `<pre>` never moved from what the page committed, and the readout
+         updated correctly beside both - so every check passed and the figure
+         was wrong on first paint. */
+      var target = figure.querySelector('.asm-out pre code');
       if (!target) return;
       var boxes = Array.prototype.slice.call(
         figure.querySelectorAll('input[type="checkbox"][data-part]')
