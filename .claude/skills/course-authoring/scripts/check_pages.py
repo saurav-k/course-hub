@@ -76,7 +76,9 @@ MAX_FIG_CLAIM_WORDS: int = 15
 # course opts into them by name rather than inheriting them silently and turning
 # every legacy page red. Joining this set is the last step of a retrofit under
 # `retrofit.md`, not the first.
-EXTENDED_BAR_COURSES: frozenset[str] = frozenset({"math-for-ml-course", "staff-ai-course", "llm-efficiency-course"})
+EXTENDED_BAR_COURSES: frozenset[str] = frozenset(
+    {"math-for-ml-course", "staff-ai-course", "llm-efficiency-course", "ai-engineering-course"}
+)
 MIN_PRACTICE_PER_PAGE: int = 1
 MIN_CHARTS_PER_PAGE: int = 1
 
