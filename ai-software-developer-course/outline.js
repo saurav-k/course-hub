@@ -93,6 +93,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Agent skills and the CLI",
+      "lessons": [
+        {
+          "title": "What a skill is",
+          "href": "lessons/0300-what-a-skill-is.html"
+        },
+        {
+          "title": "Writing your first skill",
+          "href": "lessons/0310-writing-your-first-skill.html"
+        },
+        {
+          "title": "Progressive disclosure, and scripts",
+          "href": "lessons/0320-progressive-disclosure-and-scripts.html"
+        },
+        {
+          "title": "Where skills live",
+          "href": "lessons/0330-where-skills-live.html"
+        },
+        {
+          "title": "Web skills",
+          "href": "lessons/0340-web-skills.html"
+        },
+        {
+          "title": "The agent in a pipeline",
+          "href": "lessons/0350-the-agent-in-a-pipeline.html"
+        },
+        {
+          "title": "Session control from the CLI",
+          "href": "lessons/0360-session-control-from-the-cli.html"
+        },
+        {
+          "title": "In the field: Cursor",
+          "href": "lessons/0370-in-the-field-cursor.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Agent-ready codebases",
       "lessons": [
