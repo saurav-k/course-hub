@@ -55,6 +55,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "02",
+      "title": "Advanced context engineering",
+      "lessons": [
+        {
+          "title": "The window is a budget",
+          "href": "lessons/0200-the-window-is-a-budget.html"
+        },
+        {
+          "title": "Which prompting technique, when",
+          "href": "lessons/0210-which-prompting-technique-when.html"
+        },
+        {
+          "title": "RePPIT, the five moves",
+          "href": "lessons/0220-reppit-the-five-moves.html"
+        },
+        {
+          "title": "Spec-driven development",
+          "href": "lessons/0230-spec-driven-development.html"
+        },
+        {
+          "title": "MCP in one page",
+          "href": "lessons/0240-mcp-in-one-page.html"
+        },
+        {
+          "title": "Write your first MCP server",
+          "href": "lessons/0250-write-your-first-mcp-server.html"
+        },
+        {
+          "title": "Tools are designed for a reader who cannot ask",
+          "href": "lessons/0260-tools-are-designed-for-a-reader-who-cannot-ask.html"
+        },
+        {
+          "title": "When not to add a tool",
+          "href": "lessons/0270-when-not-to-add-a-tool.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Agent-ready codebases",
       "lessons": [

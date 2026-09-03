@@ -84,6 +84,16 @@ Nothing in this repository can catch that. Read every drawing for what its roles
 **A roadmap entry that became a link fails the validator.**
 Every unwritten lesson in `index.html` is plain text inside `.roadmap`. This course carries more unwritten pages than written ones for most of its life, so this will bite repeatedly.
 
+**A Mermaid `timeline` overflows the reading column and hides its last period.**
+Mermaid lays a timeline out at a fixed width per period regardless of how short the labels are, so five periods render about 1390px wide inside an 856px figure.
+It scrolls rather than shrinking, which is correct behaviour and is also the trap: the reader arrives with the rightmost period off-screen, and on a revision history that period is the current one and the whole point of the drawing.
+Shortening the event text does not help. Draw it by hand instead, where you control the width and can make the break structural - `0240` puts the four older MCP revisions inside a `d-bound` and the current one outside it, which says more than a timeline could.
+
+**A 360px check cannot be done by resizing, in this environment.**
+`chrome-devtools-axi resize` clamps the window to a 500px minimum, so the narrowest reachable viewport is 500px. That is still below the 720px breakpoint, so the small-screen arm is exercised and body overflow is genuinely testable.
+The part 500px cannot reach is text clipped at a hand-drawn figure's `viewBox` edge - and that check does not need a narrow viewport at all, because `getBBox` returns user units.
+Sweep every `<text>` in every `svg.chart` and flag any whose box starts below 0 or ends past the `viewBox` width. It found two clipped labels in this module that no checker and no screenshot would have caught.
+
 **A lesson linked from below the last module appears in the rail under the wrong heading.**
 `gen_outline.py` slices the course map at each `.module-h` and runs the last slice to the end of the file, so an `href="lessons/..."` in a footer is collected as an extra lesson of the final module.
 Link a lesson from the hero or from a card, never from below the last module. It renders, every link resolves, and `validate_site.py` stays green.
