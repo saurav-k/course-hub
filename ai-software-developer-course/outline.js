@@ -131,6 +131,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "04",
+      "title": "Customizing your agent and repository",
+      "lessons": [
+        {
+          "title": "One file, two readers",
+          "href": "lessons/0400-one-file-two-readers.html"
+        },
+        {
+          "title": "What belongs in the file",
+          "href": "lessons/0410-what-belongs-in-the-file.html"
+        },
+        {
+          "title": "The loading hierarchy",
+          "href": "lessons/0420-the-loading-hierarchy.html"
+        },
+        {
+          "title": "Hooks are the enforcement layer",
+          "href": "lessons/0430-hooks-are-the-enforcement-layer.html"
+        },
+        {
+          "title": "Writing a blocking hook",
+          "href": "lessons/0440-writing-a-blocking-hook.html"
+        },
+        {
+          "title": "The Stop hook closes the loop",
+          "href": "lessons/0450-the-stop-hook-closes-the-loop.html"
+        },
+        {
+          "title": "Planner, implementer, reviewer",
+          "href": "lessons/0460-planner-implementer-reviewer.html"
+        },
+        {
+          "title": "In the field: Claude Code",
+          "href": "lessons/0470-in-the-field-claude-code.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Agent-ready codebases",
       "lessons": [
