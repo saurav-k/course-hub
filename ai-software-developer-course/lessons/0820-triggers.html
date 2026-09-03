@@ -1,0 +1,335 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Triggers - AI Software Developer</title>
+<meta name="description" content="A trigger is a contract about who may start an agent, on what, and with what permissions. Four families, two actor checks, and the reason a comment cannot become arbitrary code execution.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 08 &middot; Background agents &middot; Lesson 0820</div>
+  <h1>A trigger is an authorisation decision wearing an integration's clothes</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Read from the published trigger contracts of a code host, a chat integration and an issue tracker.
+    &middot; <a href="https://code.claude.com/docs/en/github-actions">Claude Code GitHub Actions</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Four trigger families cover almost everything: a <b>code-host event</b>, a <b>chat mention</b>, a <b>tracker delegation</b>, and a <b>schedule</b>.</li>
+      <li>The question a trigger answers is not "how do I start an agent" but <b>who may start one, on what, with what permissions</b>.</li>
+      <li>Two checks run before the agent does: the triggering user needs write access, and <b>a bot actor is rejected</b> unless you allowlist it. The second is what stops a loop.</li>
+      <li>The trigger also decides what text reaches the model. An issue body written by a stranger is a trigger input, and it arrives in the same flat prompt as your instructions.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The entry arrow from the previous page becomes a rule you write.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;six ways into one sandbox"] --> T["THIS PAGE&lt;br/&gt;the trigger as a permission contract"]
+  T --> N["What it enables&lt;br/&gt;an issue-to-pull-request pipeline"]
+  W["Module 08&lt;br/&gt;running agents nobody is watching"] -.- T
+    </div>
+    <figcaption>Lesson 0810 counted the ways in. This page turns one of them into a checked-in file and reads the two checks that run before it starts.
+    <b>Every trigger you enable is a person, or a robot, you have granted the right to spend your budget in your repository.</b></figcaption>
+  </figure>
+
+  <h2 id="four-families">1. Four families, and what each one carries</h2>
+  <p>A trigger family is defined by where the event comes from, because that decides both the authorisation check available to you and the text the agent will read.</p>
+
+  <table>
+    <thead><tr><th>Family</th><th>Who can fire it</th><th>What context it carries</th><th>The authorisation check</th></tr></thead>
+    <tbody>
+      <tr><td>Code-host event</td><td>anyone who can open an issue or comment</td><td>the issue or pull request, its body, its diff</td><td>repository write access, plus your own <code>if:</code> guard</td></tr>
+      <tr><td>Chat mention</td><td>anyone in the channel</td><td>the thread, and recent channel messages</td><td>channel membership, and whose account the session runs under</td></tr>
+      <tr><td>Tracker delegation</td><td>anyone who can edit the issue</td><td>the issue, the comment, the project</td><td>the app install, and the scopes it was granted</td></tr>
+      <tr><td>Schedule</td><td>nobody, at run time</td><td>only what the prompt names</td><td>none at run time, so all of it is in the file</td></tr>
+    </tbody>
+  </table>
+
+  <p>Read the last column downwards. The check gets weaker as you go down and the surface gets quieter, which is the opposite of the intuition that an automated trigger is the safest one.</p>
+
+  <h2 id="the-file">2. The file, read line by line</h2>
+  <p>The smallest real example of a code-host trigger is the workflow the vendor ships. Every line in it is either an event, a guard, or a permission, and there is nothing else in the file.</p>
+
+  <div class="code-cap">.github/workflows/claude.yml &middot; anthropics/claude-code-action, examples/claude.yml &middot; MIT &middot; reproduced verbatim</div>
+  <pre><code>name: Claude Code
+
+on:
+  issue_comment:
+    types: [created]
+  pull_request_review_comment:
+    types: [created]
+  issues:
+    types: [opened, assigned]
+  pull_request_review:
+    types: [submitted]
+
+jobs:
+  claude:
+    if: |
+      (github.event_name == 'issue_comment' &amp;&amp; contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review_comment' &amp;&amp; contains(github.event.comment.body, '@claude')) ||
+      (github.event_name == 'pull_request_review' &amp;&amp; contains(github.event.review.body, '@claude')) ||
+      (github.event_name == 'issues' &amp;&amp; (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      id-token: write
+      actions: read # Required for Claude to read CI results on PRs
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+
+      - name: Run Claude Code
+        id: claude
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+</code></pre>
+
+  <p>Four things in that file are worth more than the rest of it put together.</p>
+  <p>The <code>on:</code> block is the trigger surface, and it is four events wide. The <code>if:</code> block is a guard whose job is not correctness but cost: the action checks the trigger phrase itself, and the guard exists so a runner never starts on a comment that does not mention the agent. <code>id-token: write</code> is required for the action's default GitHub App authentication, so it is not optional even though it looks like an extra. And <code>permissions:</code> is the whole blast radius of a run, written down in five lines that a reviewer can argue with.</p>
+
+  <p><b>Interactive mode</b> is what that file selects, because it supplies no <code>prompt</code>. Add a <code>prompt</code> input and the same action switches to <b>automation mode</b>, which "runs without waiting for a mention, subject only to the checks on who can trigger runs" and can therefore hang off any GitHub event at all, including a cron schedule.</p>
+
+  <h2 id="two-checks">3. The two checks that run before the agent</h2>
+  <p>This is the part that turns an integration into an authorisation contract, and it is the part nobody reads.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two gates, then the loop</div>
+    <div class="fig-claim">Rejecting a bot actor is what stops an agent triggering itself.</div>
+    <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="An event enters from the left and passes through two gates before reaching the agent. The first gate checks that the triggering user has repository write access and rejects the event otherwise. The second gate rejects any bot actor unless it is listed in an allowlist. Only after both gates does the event reach the agent loop, which pushes a branch. A dashed return arrow from the branch back to the event is stopped at the second gate.">
+      <rect class="d-box" x="16" y="70" width="112" height="40" rx="4"/>
+      <text class="lbl-sm" x="72" y="94" text-anchor="middle">an event</text>
+
+      <path class="d-flow s-signal" d="M130 90 L172 90"/>
+
+      <rect class="d-bound" x="176" y="60" width="130" height="60" rx="6"/>
+      <text class="lbl-sm" x="241" y="84" text-anchor="middle">write access</text>
+      <text class="d-mono" x="241" y="104" text-anchor="middle">gate 1</text>
+
+      <path class="d-flow s-signal" d="M308 90 L350 90"/>
+
+      <rect class="d-bound" x="354" y="60" width="130" height="60" rx="6"/>
+      <text class="lbl-sm" x="419" y="84" text-anchor="middle">human actor</text>
+      <text class="d-mono" x="419" y="104" text-anchor="middle">gate 2</text>
+
+      <path class="d-flow s-signal" d="M486 90 L528 90"/>
+      <rect class="d-focus" x="532" y="70" width="92" height="40" rx="4"/>
+      <text class="lbl-b" x="578" y="94" text-anchor="middle">the loop</text>
+
+      <rect class="d-box" x="546" y="160" width="78" height="36" rx="4"/>
+      <text class="lbl-sm" x="585" y="182" text-anchor="middle">a branch</text>
+      <path class="d-flow s-signal" d="M585 114 L585 156"/>
+
+      <path class="d-flow ref s-alarm" d="M542 178 L424 178 L420 126"/>
+      <text class="d-mono" x="536" y="170" text-anchor="end">the bot comments again</text>
+      <text class="t-alarm lbl-sm" x="352" y="150" text-anchor="end">gate 2 rejects it here</text>
+
+      <text class="read" x="320" y="232" text-anchor="middle">A trigger with no second gate is a loop with no exit.</text>
+    </svg>
+    <figcaption>The dashed red arrow is the loop everyone builds by accident: the agent's own comment or commit fires the same trigger again. The second gate is what stops it, and it is on by default rather than something you add.
+    <b>A trigger is not finished until you can say what stops it firing on its own output.</b></figcaption>
+  </figure>
+
+  <p>The documentation states both checks plainly. On write access: "on issue and pull request events, the triggering user must have write access to the repository", with <code>allowed_non_write_users</code> as the deliberate exception you take when a stranger's issue is the whole point. On the second: the action "rejects a bot actor unless you list it in <code>allowed_bots</code>, which keeps bots from triggering Claude in a loop". Scheduled runs skip the first check, because no user authored the event, and are still subject to the second.</p>
+
+  <h2 id="delegation">4. Delegation, which is a different verb</h2>
+  <p>An issue tracker adds a trigger family with its own vocabulary, and the vocabulary is the teaching. In Linear's agent model an issue is <b>assigned</b> to a human and <b>delegated</b> to an agent: the app "sets the app as the delegate, not the assignee", so ownership stays with a person while the action moves. Two scopes are what make an app an agent rather than an integration.</p>
+
+  <div class="code-cap">OAuth authorization URL &middot; composed from the parameters at linear.app/developers/agents &middot; this course, CC BY 4.0 &middot; reproduced verbatim</div>
+  <pre><code>https://linear.app/oauth/authorize
+  ?client_id=&lt;your client id&gt;
+  &amp;redirect_uri=&lt;your redirect uri&gt;
+  &amp;response_type=code
+  &amp;scope=read,write,app:assignable,app:mentionable
+  &amp;actor=app
+</code></pre>
+
+  <p><code>app:assignable</code> is documented as "Allow the app to be assigned as a delegate on issues and made a member of projects" and <code>app:mentionable</code> as "Allow the app to be mentioned in issues, documents, and other editor surfaces". The ceiling is worth pointing at: an integration installed this way is "not able to also request <code>admin</code> scope". The delegation model has a deliberate limit written into the grant.</p>
+  <p>The lifecycle has one number in it that shapes how you build. A delegation fires a <code>created</code> session webhook, and the agent must "Emit a <code>thought</code> activity within 10 seconds to acknowledge the session has begun". Ten seconds is not enough to plan, so the acknowledgement and the work are two different things, and your integration has to answer before it knows what it is going to do.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One session, six states</div>
+    <div class="fig-claim">Awaiting input is the state a background agent cannot leave alone.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Triggered
+  Triggered --> Provisioning: gates passed
+  Triggered --> [*]: gate rejected the actor
+  Provisioning --> Working: clone and setup finished
+  Provisioning --> Failed: setup script exited non-zero
+  Working --> AwaitingInput: it needs an answer
+  AwaitingInput --> Working: somebody replies
+  AwaitingInput --> Expired: nobody replies
+  Working --> Complete: a branch is pushed
+  Expired --> [*]
+  Failed --> [*]
+  Complete --> [*]
+    </div>
+    <figcaption>Every trigger family produces the same six states, and the two that cost you are on the right. A session in <code>AwaitingInput</code> is burning wall-clock time on a question that lesson 0850 argues should have been answered in the repository.
+    <b>The states you must design for are the ones that end without a branch.</b></figcaption>
+  </figure>
+
+  <h2 id="what-arrives">5. A trigger also decides what text arrives</h2>
+  <p>A chat trigger makes this concrete. A mention in Slack creates a session under the mentioning user's own account, "using your connected repositories and your plan limits", which makes channel membership the real access control rather than anything in a settings page. And the documentation carries its own warning: "Claude may follow directions from other messages in the context, so users should make sure to only use Claude in trusted Slack conversations."</p>
+  <p>That is the general shape. A trigger is not only an authorisation decision about who starts the run, it is also a decision about whose words are in the first turn.</p>
+
+  <figure class="diagram taint" id="trigger-origins">
+    <div class="fig-cap">One triggered turn</div>
+    <div class="fig-claim">Two of these four blocks were written by somebody who is not you.</div>
+
+    <div class="taint-turn">
+      <p class="taint-part" data-origin="repo">The workflow file: run on <code>issues: [labeled]</code>, with <code>contents: write</code>.
+        <span class="taint-can">You wrote it, it was reviewed, and it decides everything below.</span></p>
+      <p class="taint-part" data-origin="repo">Your <code>CLAUDE.md</code>: the project's conventions and the commands that prove a change.
+        <span class="taint-can">Read as an instruction, which is what it is, and reviewed like code.</span></p>
+      <p class="taint-part" data-origin="foreign">The issue body, filed by somebody with no write access to this repository.
+        <span class="taint-can">Reaches every tool the run was granted, including the shell.</span></p>
+      <p class="taint-part" data-origin="foreign">A comment further down the same issue, added after you read it.
+        <span class="taint-can">Arrives in the same turn, with no marker saying it came later.</span></p>
+    </div>
+
+    <div class="build-controls">
+      <label><input type="checkbox" data-taint="foreign" checked> show what you did not write</label>
+      <label><input type="checkbox" data-taint="capability"> show what the agent may do with it</label>
+    </div>
+    <div class="build-readout">
+      <span><b data-taint-out="foreign">2</b> of <b data-taint-out="total">4</b> blocks are foreign</span>
+    </div>
+    <figcaption>Untick the first box: all four arrive as one flat prompt, and that is the model's view of the turn. Then tick the second and read what the third block is allowed to reach.
+    <b>The model cannot tell your workflow file from a stranger's issue, so the boundary has to be the permissions block.</b></figcaption>
+  </figure>
+
+  <p>The full treatment of untrusted text entering a turn is module 7's, and the general case - data crossing into an instruction position - is stated in <a href="../../production-systems-course/lessons/0010-security.html">Production Systems</a>. What belongs here is narrower and specific to this module: the trigger you choose determines which foreign text is in the turn, before any prompt is written.</p>
+
+  <h2 id="schedules">6. Schedules, the quietest family</h2>
+  <p>A scheduled trigger has no actor, no context beyond its prompt, and nobody watching the first run that fails. It also has two documented behaviours that surprise people: "GitHub runs scheduled workflows only from the default branch and, in public repositories, disables the schedule after 60 days without repository activity."</p>
+
+  <div class="callout warn">
+    Both of those fail silently. A schedule you develop on a branch never runs, and a schedule on a quiet public repository stops after sixty days without telling you.
+    If you build anything on a schedule, build the check that it ran: a job that has produced no output in a week is indistinguishable from a job that has produced nothing to report.
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Documented ways in</div>
+    <div class="fig-claim">A trigger surface of six or eight entries is normal, not unusual.</div>
+    <svg class="chart" viewBox="0 0 640 280" role="img" aria-label="A bar chart of the number of documented entry points for four cloud coding agents, counted from each vendor's own list: six for Claude Code cloud sessions, six for the GitHub Copilot cloud agent, seven for Codex cloud and eight for Cursor cloud agents. A dashed reference line marks four, the number of trigger families this lesson names.">
+      <line class="grid" x1="150" y1="60" x2="610" y2="60"/>
+      <line class="grid" x1="150" y1="110" x2="610" y2="110"/>
+      <line class="grid" x1="150" y1="160" x2="610" y2="160"/>
+      <line class="axis" x1="150" y1="210" x2="610" y2="210"/>
+      <text class="lbl-sm" x="142" y="64" text-anchor="end">9</text>
+      <text class="lbl-sm" x="142" y="114" text-anchor="end">6</text>
+      <text class="lbl-sm" x="142" y="164" text-anchor="end">3</text>
+      <text class="lbl-sm" x="142" y="214" text-anchor="end">0</text>
+
+      <rect class="m-stat" x="180" y="110" width="70" height="100"/>
+      <rect class="m-stat" x="290" y="110" width="70" height="100"/>
+      <rect class="m-stat" x="400" y="93" width="70" height="117"/>
+      <rect class="m-alarm" x="510" y="77" width="70" height="133"/>
+
+      <text class="lbl-sm" x="215" y="103" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="325" y="103" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="435" y="86" text-anchor="middle">7</text>
+      <text class="lbl-sm" x="545" y="70" text-anchor="middle">8</text>
+
+      <text class="lbl-sm" x="215" y="230" text-anchor="middle">Claude Code</text>
+      <text class="lbl-sm" x="325" y="230" text-anchor="middle">Copilot</text>
+      <text class="lbl-sm" x="435" y="230" text-anchor="middle">Codex</text>
+      <text class="lbl-sm" x="545" y="230" text-anchor="middle">Cursor</text>
+
+      <line class="s-signal ref" x1="178" y1="143" x2="610" y2="143"/>
+      <text class="t-signal lbl-sm" x="172" y="139" text-anchor="end">4 families</text>
+      <text class="ttl" x="150" y="266">documented entry points, counted from each vendor's own list</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>documented entry points</span><span><i class="sw-alarm"></i>the widest surface counted</span></div>
+    <figcaption>Counted by this page from the entry points each vendor lists on its own documentation, so it is a count of what is offered rather than of what you enabled. Four of the entries on every product fall into the four families above, and the rest are variations on a chat mention.
+    <b>You will not use eight of these, so the first decision is which ones to leave switched off.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your agent opens a pull request, and its own comment on that pull request matches your trigger. What prevents an endless loop?</div>
+      <button class="q-opt">The check that rejects a bot actor unless it is allowlisted</button>
+      <button class="q-opt">The workflow-level timeout, which ends the second run</button>
+      <button class="q-opt">The trigger phrase guard in the workflow's if: block</button>
+      <button class="q-opt">GitHub's own limit on how many workflows may queue</button>
+      <div class="q-fb">The human-actor check runs on every event and rejects a bot unless it is listed, which is documented as existing for exactly this reason. The second option ends one run and does nothing about the next one. The third is a cost guard rather than a loop guard, and it happily matches a mention written by a bot. The fourth is real but is a capacity control, so it would let the loop run and then be throttled rather than stopping it.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which trigger family gives you the weakest authorisation check at the moment it fires?</div>
+      <button class="q-opt">A comment on a pull request, from a repository member</button>
+      <button class="q-opt">A tracker delegation made by an issue editor</button>
+      <button class="q-opt">A cron schedule, which has no actor to check at all</button>
+      <button class="q-opt">A chat mention inside a private, invite-only channel</button>
+      <div class="q-fb">A schedule has no triggering user, so the write-access check is skipped and the whole contract is whatever the file says. The other three all have a person behind them at the moment of firing, and therefore a check the platform can run. The fourth is the strongest of the four in practice, because channel membership is the access control - which is also why an invite is a grant.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 25 minutes, with a repository you own</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Write the trigger contract for your capstone repository before you write any workflow. Four sentences, one per row of the table below, and no YAML yet.</p>
+      <p><b>Who</b> may start an agent here? <b>On what</b> may they start it? <b>With what permissions</b> does it run? <b>What stops it</b> firing on its own output?</p>
+      <p><b>Then</b> translate each sentence into the line of a workflow file that enforces it, and mark the sentences that no line can enforce. Those are the ones that need a human process instead.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Three of the four have a direct spelling in a workflow file: the <code>on:</code> block, the <code>permissions:</code> block, and the actor checks the action performs for you. The fourth - "on what" - is usually a mix of the event type and your own <code>if:</code> guard, and it is the one people write loosest.</p></details>
+
+    <details class="solution"><summary>Show a worked contract</summary>
+      <ol class="worked">
+        <li><b>Who.</b> "Anyone with write access to this repository." That is the platform's default and needs no line at all. If you want anyone who can file an issue, that is <code>allowed_non_write_users</code>, and it is a deliberate widening rather than a convenience.</li>
+        <li><b>On what.</b> "An issue carrying the label <code>agent:implement</code>." In a file that is <code>on: issues: types: [labeled]</code> plus a guard on the label name. Labels are a good choice here because applying one already requires write access on most repositories, so the label is doing authorisation work as well as selection.</li>
+        <li><b>With what permissions.</b> "Write to contents and pull requests, read Actions, and nothing else." That is the <code>permissions:</code> block, and every entry in it should be one you can justify out loud. <code>id-token: write</code> is the exception you keep without arguing, because the action's authentication needs it.</li>
+        <li><b>What stops it.</b> "The bot-actor check, which is on by default." Write it down anyway: the sentence is what you will check against the day somebody adds <code>allowed_bots</code> to make an integration work.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If your permissions block has <code>write</code> against something the agent never touches, the contract is wider than the work. A run that only triages issues needs <code>contents: read</code>, not <code>contents: write</code>, and the shipped triage example is exactly that shape.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Paste your workflow file to your agent and ask it, for each line, which of the four contract questions that line answers. Any line that answers none of them is either boilerplate or a permission nobody decided on, and the second kind is worth finding.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The trigger contract in full, including the two actor checks quoted above and the schedule behaviour: <a href="https://code.claude.com/docs/en/github-actions">Claude Code GitHub Actions</a>. Read the "Who can trigger runs" section twice; it is four sentences and it is the whole security model of a code-host trigger.</p>
+
+  <div class="pager">
+    <a href="0810-the-six-cloud-agents.html"><span class="dir">&larr; Previous</span><span class="ttl">The six cloud agents</span></a>
+    <a class="nxt" href="0830-issue-to-pr.html"><span class="dir">Next &rarr;</span><span class="ttl">Issue to pull request</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0820 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

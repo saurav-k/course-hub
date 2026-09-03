@@ -112,13 +112,13 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0760 | Triage and auto-fix | **written** | The model's job is deciding whether a finding matters and drafting the fix. |
 | 0770 | In the field: Semgrep | **written** | Public primary material only. |
 | | **Module 08 - Background agents** | | Working. |
-| 0800 | What a background agent is | reserved | Where it runs, what it can reach, and how you find out what it did. |
-| 0810 | The six cloud agents | reserved | **Written on the mechanism axis** - where the sandbox is, what triggers it, what it may write - with the six as evidence. |
-| 0820 | Triggers | reserved | A contract about who may start an agent, on what, with what permissions. |
-| 0830 | Issue to pull request | reserved | The pipeline is the product; the agent is one stage in it. |
-| 0840 | Running a fleet | reserved | Ten agents contend for one branch, one working tree and one merge target. |
-| 0850 | What you owe a background agent | reserved | It cannot ask you a question, so everything it would have asked is in the repository first. |
-| 0860 | In the field: Cloudflare | reserved | Public primary material only. |
+| 0800 | What a background agent is | **written** | Where it runs, what it can reach, and how you find out what it did. |
+| 0810 | The six cloud agents | **written** | **Written on the mechanism axis** - where the sandbox is, what triggers it, what it may write - with the six as evidence. |
+| 0820 | Triggers | **written** | A contract about who may start an agent, on what, with what permissions. |
+| 0830 | Issue to pull request | **written** | The pipeline is the product; the agent is one stage in it. |
+| 0840 | Running a fleet | **written** | Ten agents contend for one branch, one working tree and one merge target. |
+| 0850 | What you owe a background agent | **written** | It cannot ask you a question, so everything it would have asked is in the repository first. |
+| 0860 | In the field: Cloudflare | **written** | Public primary material only. |
 | 1130 | The capstone: let it run | reserved | **Read here**, after module 8. One unattended pipeline with a ceiling, plus module 7's security pass, plus the open-source contribution track. |
 | | **Module 09 - Building an AI-native team** | | Frontier. |
 | 0900 | One door for every tool | reserved | Governance moves from the server to the endpoint in front of them. Links **both ways** with `0270`. |
@@ -145,6 +145,7 @@ Read alongside, not positions in the sequence.
 | Path | Status | Notes |
 |---|---|---|
 | `reference/glossary.html` | **written** | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written**, 26 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
 | `reference/samples.html` | reserved | The samples gallery: a complete, runnable, licensed example of each artefact the course teaches. Written last, because it collects from every module. |
 | `reference/readiness.html` | reserved | The readiness scorecard as a standalone printable page, lifted from `0550`. Written last. |
 
