@@ -61,7 +61,12 @@ Cited once or twice, by module.
 - [Claude Code - subagents](https://code.claude.com/docs/en/sub-agents) and [best practices](https://code.claude.com/docs/en/best-practices) - `0460`.
 - [Cursor - hooks](https://cursor.com/docs/agent/hooks) - the second hook contract `0440` compares against.
 - [Anthropic - multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) - the orchestrator-worker architecture and its published numbers. `0460`.
-- Real `AGENTS.md` files: [`cloudflare/agents`](https://github.com/cloudflare/agents) (MIT), [`sst/opencode`](https://github.com/sst/opencode) (MIT), [`openai/codex`](https://github.com/openai/codex) (Apache-2.0), and this repository's own, which is CC BY 4.0 content and MIT code and may be quoted in full.
+- [`agents.md`](https://agents.md/) - the format itself: what it is, who stewards it, the nesting rule, the compatible-tool list and the twelve-line example. `0400`.
+- [Claude Code - permissions](https://code.claude.com/docs/en/permissions) - rule syntax, list merging, and the trust table that says what a repository still supplies in an untrusted folder. `0430`.
+- [Claude Code - settings example](https://code.claude.com/docs/en/settings-example) - the team settings file that carries permissions, hooks and a sandbox together. `0430`.
+- [Anthropic - building effective agents](https://www.anthropic.com/engineering/building-effective-agents) - the workflow taxonomy, and orchestrator-workers with its stated difference from parallelization. `0460`.
+- [Anthropic - how Anthropic teams use Claude Code](https://claude.com/blog/how-anthropic-teams-use-claude-code) - eight named teams and their self-reported time savings. Every number in it is a claim rather than a measurement, and `0470` says so on the page.
+- Real `AGENTS.md` files: [`cloudflare/agents`](https://github.com/cloudflare/agents) (MIT), [`sst/opencode`](https://github.com/sst/opencode) (MIT), [`openai/codex`](https://github.com/openai/codex) (Apache-2.0), [`vercel/next.js`](https://github.com/vercel/next.js) (MIT), and this repository's own, which is CC BY 4.0 content and MIT code and may be quoted in full. Measured with `wc -l` for `0410`'s size chart.
 
 ### Module 05 - Agent-ready codebases
 

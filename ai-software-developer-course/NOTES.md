@@ -81,6 +81,17 @@ Agent-loop diagrams are exactly this shape. Turn the direction, or cut the row t
 The `d-*` classes make fill mean something, so a `d-ghost` box with a live `d-flow` into it says "removed" and "busy" at once.
 Nothing in this repository can catch that. Read every drawing for what its roles claim, at 360px and at full width, and read the longest line of text in it: SVG text neither wraps nor is bounded by the `viewBox`.
 
+**An assembler's committed `<pre>` disagrees with what the script renders, and the numbers in its readout are all wrong.**
+`hub.js` dedents a `<template>` by the smallest indent of any non-blank line, so a template whose first line sits flush against the opening tag has a common indent of zero and nothing is stripped at all.
+Every later line keeps the indentation the page needed, the assembled file is wrong, and the token and character readouts are wrong with it - while a page with no script shows the correct committed text, so the two states disagree.
+Put a newline after `<template data-part="...">` and indent every line of the body equally.
+Verify it rather than reading it: open the page and compare the rendered `.asm-out code` text against the committed `<pre>`, and check the readout against the numbers you computed.
+
+**A verification pass reports on somebody else's page.**
+`chrome-devtools-axi` shares one browser on one port across every agent that does not name a session, so with several writers working at once a page you just opened can be navigated away by another lane between the `open` and the `eval`.
+The symptom is figure labels you never wrote in your own results.
+Set `CHROME_DEVTOOLS_AXI_SESSION` to your lane's name before the first command, and add a cache-busting query to every URL: `python3 -m http.server` sends a `Last-Modified` that Chrome will happily trust after you have edited the file.
+
 **A roadmap entry that became a link fails the validator.**
 Every unwritten lesson in `index.html` is plain text inside `.roadmap`. This course carries more unwritten pages than written ones for most of its life, so this will bite repeatedly.
 
@@ -101,5 +112,7 @@ Lesson `0000` carries the third, which is about the course rather than about a c
 
 - The five interactive figure shapes have landed in the shared design system, ahead of any writer. Lesson `0000` deliberately depends on none of them, which is why the scaffold could land first; every module page after it should reach for one where it fits. `BUILDER-SPEC.md` carries the markup rule that bites first.
 - Whether this course should join `EXTENDED_BAR_COURSES` in `check_pages.py` - one practice problem and one hand-drawn `svg.chart` per page. Not at the start; joining is the last step of a retrofit. Lesson `0000` already clears both, so it is worth re-asking once a module is written.
-- Whether the "in the field" pages are worth reading under the public-material-only rule. `MISSION.md` says revisit after module 4, which is the first real test.
+- **Answered: the "in the field" pages are worth reading under the public-material-only rule.** `MISSION.md` asked for this to be revisited after module 4, and `0470` is the test.
+  It works because the constraint forced a page about *evidence* rather than about a product: the vendor's own material splits cleanly into documented contracts you can test yourself, measurements on a named system, and self-reported outcomes with no method, and sorting the eight numeric claims into those three piles is the page's own figure.
+  The rule to carry forward is that the page must have a question of its own that the company's material happens to answer. A page organised as "what this company published" would have been a link list; a page organised as "how do you read what a vendor publishes about its own tool" survives the company changing anything.
 - The `go-course` / `gcp-course` hue collision at absolute 200, found while choosing this course's hue and recorded in `learning-records/0001-choosing-the-hue.md`. Not this course's to repair.

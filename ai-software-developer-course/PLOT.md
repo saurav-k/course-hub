@@ -74,14 +74,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0360 | Session control from the CLI | reserved | A non-interactive run still leaves a session behind. |
 | 0370 | In the field: Cursor | reserved | Public primary material only. |
 | | **Module 04 - Customizing your agent and repository** | | Working. The file a team argues about. |
-| 0400 | One file, two readers | reserved | Write `AGENTS.md`, then make Claude Code read it with one line. Module entry point. |
-| 0410 | What belongs in the file | reserved | The instruction file is a context budget. Carries this repository's own 770-line `AGENTS.md` against the documented "under 200 lines". |
-| 0420 | The loading hierarchy | reserved | Nothing overrides anything - the files are concatenated. |
-| 0430 | Hooks are the enforcement layer | reserved | An instruction asks; a hook decides. |
-| 0440 | Writing a blocking hook | reserved | Exit 2 with stderr, or exit 0 with decision JSON. One per hook, never both. |
-| 0450 | The Stop hook closes the loop | reserved | The difference between a session you watch and one you walk away from. |
-| 0460 | Planner, implementer, reviewer | reserved | A fresh context is the reviewer's entire advantage. |
-| 0470 | In the field: Claude Code | reserved | Public primary material only. |
+| 0400 | One file, two readers | **written** | Write `AGENTS.md`, then make Claude Code read it with one line. Module entry point. |
+| 0410 | What belongs in the file | **written** | The instruction file is a context budget. Carries this repository's own root `AGENTS.md`, measured with `wc -l`, against the documented "under 200 lines". |
+| 0420 | The loading hierarchy | **written** | Nothing overrides anything - the files are concatenated. |
+| 0430 | Hooks are the enforcement layer | **written** | An instruction asks; a hook decides. |
+| 0440 | Writing a blocking hook | **written** | Exit 2 with stderr, or exit 0 with decision JSON. One per hook, never both. |
+| 0450 | The Stop hook closes the loop | **written** | The difference between a session you watch and one you walk away from. |
+| 0460 | Planner, implementer, reviewer | **written** | A fresh context is the reviewer's entire advantage. |
+| 0470 | In the field: Claude Code | **written** | Public primary material only. |
 | 1110 | The capstone: write the contract | reserved | **Read here**, after module 4. `AGENTS.md`, one skill, one hook gate, committed and tested. |
 | | **Module 05 - Agent-ready codebases** | | Working. Nothing in this hub covers it. |
 | 0500 | What agent-ready means | **written** | The agent can close its own loop: set up, change, prove, without asking a human. |
