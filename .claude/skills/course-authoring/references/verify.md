@@ -16,15 +16,15 @@ It checks registration, links, that no page links a local `.md` file, and that e
 On a routed course it also checks the route manifest, every committed pager against its owning route, and the living-document metadata.
 
 `check_pages.py` checks the house standard: the design-system links, the Mermaid traps, widget shapes, the orientation figure, the word ceilings, the diagram and quiz counts, the answer-index distribution, and the rung and reading-time pills.
+Both green before you open the pull request.
+A warning from `check_pages.py` is a decision you must be able to defend in the pull request body, not a line to scroll past.
 
-One of its warnings is an estimate rather than a reading, and it is worth knowing which.
+One of those warnings is an estimate rather than a reading, and it is worth knowing which.
 **The label-edge warning** measures where each `<text>` in a hand-drawn `svg.chart` ends and says so when the estimate puts it outside the figure's own `viewBox`, which is where the browser cuts it.
 It is an approximation of a font metric the script does not have: the width of a string is estimated from the character count, the size the class is painted at, and one advance per face - `.d-mono` is JetBrains Mono at exactly .6em a glyph, everything else is Inter at the .4739em `hub.css` measures, rounded down so a proportional label is under-stated.
 So it is a WARN and it under-reports on purpose.
 A label it names is a figure to open and read at full width, not a coordinate to nudge until the warning stops.
 Nothing it stays quiet about is proven safe: the browser pass below is still the check.
-Both green before you open the pull request.
-A warning from `check_pages.py` is a decision you must be able to defend in the pull request body, not a line to scroll past.
 
 Neither script checks arithmetic, whether a claim matches its source, or whether a diagram renders.
 Those are layers two and three, and they are where the real defects live.
