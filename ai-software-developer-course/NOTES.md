@@ -99,7 +99,7 @@ Lesson `0000` carries the third, which is about the course rather than about a c
 
 ## Open threads
 
-- The five interactive figure shapes land in their own pull request before any writer uses them. Lesson `0000` deliberately depends on none of them, so the scaffold could land first.
+- The five interactive figure shapes have landed in the shared design system, ahead of any writer. Lesson `0000` deliberately depends on none of them, which is why the scaffold could land first; every module page after it should reach for one where it fits. `BUILDER-SPEC.md` carries the markup rule that bites first.
 - Whether this course should join `EXTENDED_BAR_COURSES` in `check_pages.py` - one practice problem and one hand-drawn `svg.chart` per page. Not at the start; joining is the last step of a retrofit. Lesson `0000` already clears both, so it is worth re-asking once a module is written.
 - Whether the "in the field" pages are worth reading under the public-material-only rule. `MISSION.md` says revisit after module 4, which is the first real test.
 - The `go-course` / `gcp-course` hue collision at absolute 200, found while choosing this course's hue and recorded in `learning-records/0001-choosing-the-hue.md`. Not this course's to repair.

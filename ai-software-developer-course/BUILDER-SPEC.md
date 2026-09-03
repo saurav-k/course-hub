@@ -99,7 +99,12 @@ Two rules on top of that.
 
 ### The five interactive shapes
 
-Five figure shapes ship with this course and are documented in the widget reference like every other widget: a stepper, an assembler, a calculator, a scorecard and a taint tracer.
+Five figure shapes a reader operates live are in the **shared** design system, available to every course with no course script: a stepper, an assembler, a calculator, a scorecard and a taint map.
+They arrived for this course's sake, and this course does not own them. The reference is `.claude/skills/course-authoring/references/widgets.md`, "Five figures a reader operates", and `design-system/index.html` renders all five live with the markup beneath each.
+
+**Each wears `.diagram` plus its own class** - `class="diagram stepper"`, never `class="stepper"` alone. A shape class on its own is a figure with no frame and an unstyled label, and `validate_site.py` check 19 fails it. The audit-era shorthand `figure.stepper` names the shape, not the markup.
+
+Their data is markup: a step, a part, a row and a block is an element you wrote, so each one prints, is searchable, and is read by a screen reader before `hub.js` runs. Nothing persists.
 
 They are the reason this course is lesson pages rather than chapters, so use them where they fit and **do not invent a sixth**.
 A shape the vocabulary does not have is added to `assets/hub.css`, documented in `references/widgets.md`, and used, all in one pull request - which is the house rule, and it applies here with the extra weight that a hand-rolled widget in this course will look like one of the five and behave like none of them.
