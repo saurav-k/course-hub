@@ -56,14 +56,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0170 | What a shipped harness does that yours does not | reserved | Context assembly, permission and recovery, named so the reader knows what to go and read. |
 | 1100 | The capstone: pick your repository | reserved | **Read here**, after module 1. A repository chosen, a baseline trace recorded, three tasks to measure. |
 | | **Module 02 - Advanced context engineering** | | Foundation. The budget, and how to spend it. |
-| 0200 | The window is a budget | reserved | Context is a budget with an eviction policy. |
-| 0210 | Which prompting technique, when | reserved | Techniques are not a ranking; naming the failure picks the technique. |
-| 0220 | RePPIT, the five moves | reserved | Research, Propose, Plan, Implement, Test puts the expensive decision before the expensive tokens. |
-| 0230 | Spec-driven development | reserved | The spec becomes the unit of work rather than the diff. |
-| 0240 | MCP in one page | reserved | A client, a server and a transport; the model only ever sees the tool schema. |
-| 0250 | Write your first MCP server | reserved | One useful tool is about forty lines, and mounting it changes what the model plans. |
-| 0260 | Tools are designed for a reader who cannot ask | reserved | A tool description is executed, not read. |
-| 0270 | When not to add a tool | reserved | Every tool you mount is permanent context. Carries the per-turn tool-context arithmetic, and links **both ways** with `0900`. |
+| 0200 | The window is a budget | **written** | Context is a budget with an eviction policy. |
+| 0210 | Which prompting technique, when | **written** | Techniques are not a ranking; naming the failure picks the technique. |
+| 0220 | RePPIT, the five moves | **written** | Research, Propose, Plan, Implement, Test puts the expensive decision before the expensive tokens. |
+| 0230 | Spec-driven development | **written** | The spec becomes the unit of work rather than the diff. |
+| 0240 | MCP in one page | **written** | A client, a server and a transport; the model only ever sees the tool schema. |
+| 0250 | Write your first MCP server | **written** | One useful tool is about forty lines, and mounting it changes what the model plans. |
+| 0260 | Tools are designed for a reader who cannot ask | **written** | A tool description is executed, not read. |
+| 0270 | When not to add a tool | **written** | Every tool you mount is permanent context. Carries the per-turn tool-context arithmetic and the module assignment. It names `0900` and its measurement in prose but carries **no `href` yet**, because `0900` is unwritten and a link to a missing file fails the validator: the writer of `0900` adds both halves. |
 | | **Module 03 - Agent skills and the CLI** | | Working. The smallest artefact you write for yourself. |
 | 0300 | What a skill is | reserved | A folder the agent reads only when the task matches its description. |
 | 0310 | Writing your first skill | reserved | The frontmatter is the whole contract. |
@@ -152,7 +152,7 @@ Read alongside, not positions in the sequence.
 
 Two pairs are load-bearing in both directions and are recorded here so a later edit cannot silently drop one half.
 
-- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other.
+- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other. **State today:** `0270` is written and carries the measurement, Cloudflare's own source, and `0900`'s number and title in prose, with no `href`, because linking an unwritten page fails `validate_site.py`. Whoever writes `0900` adds the `href` in `0270` and the link back, in the same pull request.
 - **`0160` and `coding-harness-course/lessons/0270-build-a-harness.html`.** The split by purpose. Each page states in its first paragraph what the other build is for.
 
 The remaining out-of-course links are one-way and belong to the pages that carry them; `BUILDER-SPEC.md` names the rule for making one.
