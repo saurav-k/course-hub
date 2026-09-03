@@ -1,0 +1,375 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Writing a rule - AI Software Developer</title>
+<meta name="description" content="A scanner rule is a small program you can read. Six lines of pattern matching, then dataflow with sources, sinks and sanitizers, and what a CodeQL query buys for its extra cost.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Security &middot; Lesson 0710</div>
+  <h1>A scanner rule is a small program, and you can read it</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Written against Semgrep's published rule syntax and one MIT-licensed CodeQL query.
+    &middot; <a href="https://docs.semgrep.dev/writing-rules/rule-syntax">Semgrep rule syntax</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A working Semgrep rule is <b>six lines</b>: an id, a language, a message, a severity and one pattern.</li>
+      <li>A pattern matches <b>shape, not text</b>. <code>$METAVAR</code> stands for an unknown value and <code>...</code> for an arbitrary sequence.</li>
+      <li>Shape alone cannot say where a value <i>came from</i>, so <b><code>mode: taint</code></b> adds sources, sinks and sanitizers.</li>
+      <li>A CodeQL query reaches further and costs more: its <b>metadata block is the contract</b> with the code-scanning UI, and its power comes from libraries it imports rather than from the file you wrote.</li>
+      <li>The reason to read one is control. A rule you can read is a scanner <b>you can steer</b>; a rule you cannot is a vendor's opinion running on your pull requests.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Naming the three scanners is useless until you can change what one looks for.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;three scanners and three questions"] --> T["THIS PAGE&lt;br/&gt;a rule you write and read"]
+  T --> N["What it enables&lt;br/&gt;a CI gate that fails on your own rule"]
+  W["Module 07&lt;br/&gt;findings you can act on"] -.- T
+    </div>
+    <figcaption>The previous page ended on a rule of thumb: a finding you cannot act on costs more than none. This page is where you get the lever, because the rule is the only place your team's own opinion about danger can be written down.
+    <b>Reading one rule is what turns a scanner from a black box into a tool with a steering wheel.</b></figcaption>
+  </figure>
+
+  <h2 id="smallest">1. The smallest rule that works</h2>
+  <p>Semgrep's own documentation opens with a rule you can hold in your head. Every top-level field here is required: <code>id</code>, <code>message</code>, <code>severity</code>, <code>languages</code>, and exactly one pattern operator.</p>
+
+  <div class="code-cap">A Semgrep rule &middot; docs.semgrep.dev/writing-rules/rule-syntax &middot; Semgrep documentation example &middot; quoted with attribution</div>
+  <pre><code class="language-yaml">rules:
+  - id: md5-usage
+    languages: [python]
+    message: Found md5 usage
+    pattern: hashlib.md5(...)
+    severity: HIGH
+</code></pre>
+
+  <p>Run that and you get every call to <code>hashlib.md5</code> in the tree, whatever its arguments. The <code>...</code> is doing the work: it matches an arbitrary sequence, so one line covers a call with no arguments, three arguments, or a keyword argument you have never seen.</p>
+  <p>The other half of the pattern language is the <b>metavariable</b>. A name written <code>$LIKE_THIS</code> matches an unknown value and, within a single logical AND, the same metavariable has to match the same thing everywhere it appears. That constraint is what makes patterns behave like a small program rather than a fuzzy search.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A pattern with holes</div>
+    <div class="fig-claim">A pattern is your code with two kinds of hole punched in it.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="A call expression drawn as four adjacent cells reading subprocess dot run, an open bracket, an argument list and a closing bracket. Above it, the same expression is drawn as a pattern in which the function name cell is replaced by a dollar FUNC hole and the argument list cell by an ellipsis hole. Two connectors run from each hole down to the concrete cell it matches, and a third connector shows a second call matching the same pattern.">
+      <text class="d-mono" x="20" y="34">the pattern you write</text>
+      <rect class="d-focus" x="20" y="44" width="130" height="34" rx="4"/>
+      <text class="d-mono" x="85" y="66" text-anchor="middle">subprocess.</text>
+      <rect class="d-absent" x="154" y="44" width="86" height="34" rx="4"/>
+      <text class="d-mono" x="197" y="66" text-anchor="middle">$FUNC</text>
+      <rect class="d-focus" x="244" y="44" width="26" height="34" rx="4"/>
+      <text class="d-mono" x="257" y="66" text-anchor="middle">(</text>
+      <rect class="d-absent" x="274" y="44" width="76" height="34" rx="4"/>
+      <text class="d-mono" x="312" y="66" text-anchor="middle">...</text>
+      <rect class="d-focus" x="354" y="44" width="26" height="34" rx="4"/>
+      <text class="d-mono" x="367" y="66" text-anchor="middle">)</text>
+      <text class="d-mono" x="398" y="66">two holes, one shape</text>
+
+      <path class="d-flow s-signal" d="M197 82 L197 128"/>
+      <path class="d-flow s-signal" d="M312 82 L312 128"/>
+
+      <text class="d-mono" x="20" y="150">two calls in your tree</text>
+      <rect class="d-keep" x="20" y="132" width="360" height="34" rx="4"/>
+      <text class="d-mono" x="200" y="154" text-anchor="middle">subprocess.run(cmd, shell=True)</text>
+      <rect class="d-keep" x="20" y="176" width="360" height="34" rx="4"/>
+      <text class="d-mono" x="200" y="198" text-anchor="middle">subprocess.Popen(["ls", "-l"])</text>
+      <text class="d-mono" x="398" y="154">$FUNC binds to run</text>
+      <text class="d-mono" x="398" y="198">$FUNC binds to Popen</text>
+
+      <text class="read" x="320" y="238" text-anchor="middle">A regex over this text would have to enumerate every spelling. A pattern describes the shape once.</text>
+    </svg>
+    <figcaption>The two shaded holes are the only parts of the pattern that are not literal code. Everything else is written exactly as you would write the call, which is why a rule stays readable to somebody who has never seen the rule language.
+    <b>You write a pattern by writing the bad code and then deleting the parts you do not care about.</b></figcaption>
+  </figure>
+
+  <h2 id="operators">2. Four operators, and they are boolean</h2>
+  <p>One pattern is rarely enough, so the operators combine them. <code>patterns</code> is a logical AND over its children and <code>pattern-either</code> is a logical OR. <code>pattern-not</code> subtracts a case you have decided is fine. <code>pattern-inside</code> keeps only findings that sit within some larger shape - a route handler, a class, a <code>with</code> block - which is how a rule is scoped without listing filenames.</p>
+  <p>The documentation's second example is the shape almost every real rule ends up in: find the dangerous call, then subtract the safe spelling of it.</p>
+
+  <div class="code-cap">A rule with an exclusion &middot; docs.semgrep.dev/writing-rules/rule-syntax &middot; Semgrep documentation example &middot; quoted with attribution</div>
+  <pre><code class="language-yaml">rules:
+  - id: unverified-db-query
+    patterns:
+      - pattern: db_query(...)
+      - pattern-not: db_query(..., verify=True, ...)
+    message: Found unverified db query
+    severity: HIGH
+    languages: [python]
+</code></pre>
+
+  <p>Read the two children as one sentence: every <code>db_query</code> call, minus the ones that pass <code>verify=True</code>. That subtraction is where a scanner stops arguing with your team. If your codebase has a blessed wrapper, the <code>pattern-not</code> naming it is the shortest honest way to say so, and it lives in version control where the argument can be reviewed like any other change.</p>
+
+  <h2 id="taint">3. Shape cannot see where a value came from</h2>
+  <p>Here is the wall. <code>subprocess.run(cmd, shell=True)</code> is a dangerous shape, but only if <code>cmd</code> can hold something an outsider chose. A pattern sees the call; it cannot see the twelve lines above it.</p>
+  <p><b>Taint mode</b> is the answer, and it changes what the rule is about. With <code>mode: taint</code> you stop describing one expression and start describing a flow: <code>pattern-sources</code> marks where untrusted data enters, <code>pattern-sinks</code> marks where it must not arrive, and <code>pattern-sanitizers</code> marks the code that makes it safe on the way. Semgrep notes one asymmetry worth remembering: sinks default to exact matching, sources do not.</p>
+  <p>A fourth operator, <code>pattern-propagators</code>, says how taint crosses a function you did not write. The documentation's example is the clearest one-liner in the whole rule language.</p>
+
+  <div class="code-cap">A taint propagator &middot; docs.semgrep.dev/writing-rules/data-flow/taint-mode &middot; Semgrep documentation example &middot; quoted with attribution</div>
+  <pre><code class="language-yaml">pattern-propagators:
+- pattern: strcpy($DST, $SRC)
+  from: $SRC
+  to: $DST
+</code></pre>
+
+  <figure class="diagram">
+    <div class="fig-cap">One value, four stations</div>
+    <div class="fig-claim">A sanitizer ends the trace, so one path reports and the other does not.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant S as Source
+  participant V as Local variable
+  participant Z as Sanitizer
+  participant K as Sink
+  S->>V: request.args.get("path") - value is now tainted
+  V->>K: passed straight through - REPORTED
+  Note over V,K: shape is identical on both paths
+  V->>Z: shlex.quote(value)
+  Z-->>V: taint cleared here
+  V->>K: passed after cleaning - not reported
+    </div>
+    <figcaption>Both arrows into the sink are the same call with the same shape. The only difference is what happened to the value beforehand, which is the entire reason taint mode exists.
+    <b>A taint rule reports a path, not a line, which is why its finding tells you where to look rather than only what to look at.</b></figcaption>
+  </figure>
+
+  <h2 id="ours">4. A taint rule of our own</h2>
+  <p>Semgrep ships a large registry of rules for exactly this class of bug. We are not reproducing one: <code>semgrep/semgrep-rules</code> carries a bespoke <a href="https://semgrep.dev/legal/rules-license">Semgrep Rules License v1.0</a> rather than a standard open-source licence, and a licence you have not read is not a licence you may publish under. The shipped Python and Flask rule for this bug is <a href="https://github.com/semgrep/semgrep-rules/blob/develop/python/flask/security/injection/subprocess-injection.yaml">worth reading in place</a>, and it is considerably longer than what follows, because it enumerates every accessor Flask offers and every safe spelling of a <code>subprocess</code> call.</p>
+  <p>The rule below is this course's own, written against the documented syntax. It is deliberately small enough to read in one pass, and small enough to be wrong in ways you can name - which is the point of the practice problem at the foot of the page.</p>
+
+  <figure class="diagram assembler" id="taint-rule-builder">
+    <div class="fig-cap">Build the taint rule</div>
+    <div class="fig-claim">A taint rule needs three of these four parts before it can report anything.</div>
+
+    <div class="build-controls">
+      <label><input type="checkbox" data-part="head" checked> the required fields, plus mode</label>
+      <label><input type="checkbox" data-part="sources" checked> where untrusted data enters</label>
+      <label><input type="checkbox" data-part="sinks" checked> where it must not arrive</label>
+      <label><input type="checkbox" data-part="san"> what makes it safe</label>
+    </div>
+
+    <div class="asm-out">
+      <div class="code-cap">rules/request-into-subprocess.yaml &middot; ours, written against the documented syntax &middot; hub content, CC BY 4.0 &middot; reproduce freely</div>
+      <pre><code class="language-yaml">rules:
+  - id: request-into-subprocess
+    languages: [python]
+    severity: ERROR
+    message: A request value reaches a shell-interpreted subprocess call.
+    mode: taint
+
+# where untrusted data enters
+    pattern-sources:
+      - pattern: flask.request.args.get(...)
+      - pattern: flask.request.form.get(...)
+      - pattern: flask.request.json
+
+# where it must never arrive
+    pattern-sinks:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)
+</code></pre>
+    </div>
+
+    <template data-part="head">rules:
+  - id: request-into-subprocess
+    languages: [python]
+    severity: ERROR
+    message: A request value reaches a shell-interpreted subprocess call.
+    mode: taint</template>
+    <template data-part="sources"># where untrusted data enters
+    pattern-sources:
+      - pattern: flask.request.args.get(...)
+      - pattern: flask.request.form.get(...)
+      - pattern: flask.request.json</template>
+    <template data-part="sinks"># where it must never arrive
+    pattern-sinks:
+      - pattern: subprocess.run(..., shell=True, ...)
+      - pattern: subprocess.Popen(..., shell=True, ...)</template>
+    <template data-part="san"># what clears the taint on the way
+    pattern-sanitizers:
+      - pattern: shlex.quote(...)</template>
+
+    <div class="build-readout">
+      <span><b data-asm-out="parts">3</b> of 4 parts</span>
+      <span><b data-asm-out="lines">17</b> lines to read</span>
+    </div>
+    <figcaption>Untick the sinks and the rule stops reporting entirely - a taint rule with no destination has nothing to say. Tick the sanitizer and the call that goes through <code>shlex.quote</code> drops out of the results while the dangerous one stays.
+    <b>Three parts make a rule that fires; the fourth is what stops it firing at your own safe wrapper.</b></figcaption>
+  </figure>
+
+  <div class="callout"><span class="tag">Read it as a claim</span>
+    Every line of that rule is an assertion about your codebase that somebody can disagree with in review. <code>shell=True</code> is the only sink spelling listed, so a call that builds a list and passes it to a shell interpreter walks straight past. That is a real gap and it is visible precisely because the rule is short.</div>
+
+  <h2 id="codeql">5. What a CodeQL query buys, and what it costs</h2>
+  <p>The other family of rule is a query over a database built from your code. GitHub's JavaScript SQL-injection query is MIT-licensed and short enough to read whole. Read the comment block first: it is not documentation, it is the contract with the code-scanning interface, and every field in it drives something visible.</p>
+
+  <div class="code-cap">SqlInjection.ql &middot; github/codeql &middot; MIT &middot; reproduced verbatim</div>
+  <pre><code class="language-ql">/**
+ * @name Database query built from user-controlled sources
+ * @description Building a database query from user-controlled sources is vulnerable to insertion of
+ *              malicious code by the user.
+ * @kind path-problem
+ * @problem.severity error
+ * @security-severity 8.8
+ * @precision high
+ * @id js/sql-injection
+ * @tags security
+ *       external/cwe/cwe-089
+ *       external/cwe/cwe-090
+ *       external/cwe/cwe-943
+ */
+
+import javascript
+import semmle.javascript.security.dataflow.SqlInjectionQuery as Sql
+import semmle.javascript.security.dataflow.NosqlInjectionQuery as Nosql
+
+module Merged =
+  DataFlow::MergePathGraph&lt;Sql::SqlInjectionFlow::PathNode, Nosql::NosqlInjectionFlow::PathNode,
+    Sql::SqlInjectionFlow::PathGraph, Nosql::NosqlInjectionFlow::PathGraph&gt;;
+
+import DataFlow::DeduplicatePathGraph&lt;Merged::PathNode, Merged::PathGraph&gt;
+
+from PathNode source, PathNode sink, string type
+where
+  Sql::SqlInjectionFlow::flowPath(source.getAnOriginalPathNode().asPathNode1(),
+    sink.getAnOriginalPathNode().asPathNode1()) and
+  type = "string"
+  or
+  Nosql::NosqlInjectionFlow::flowPath(source.getAnOriginalPathNode().asPathNode2(),
+    sink.getAnOriginalPathNode().asPathNode2()) and
+  type = "object"
+select sink.getNode(), source, sink, "This query " + type + " depends on a $@.", source.getNode(),
+  "user-provided value"
+</code></pre>
+
+  <p><code>@kind path-problem</code> is why the interface can show you the whole path rather than one line. <code>@security-severity 8.8</code> is the number a branch protection rule can be set against. <code>@id js/sql-injection</code> is how the alert is identified for the rest of its life, including by the auto-fix machinery in <a href="0760-triage-and-auto-fix.html">lesson 0760</a>.</p>
+  <p>Then look at what the body actually does. It defines no sources and no sinks. It imports two library modules that already know what a SQL sink is in every JavaScript database driver anybody uses, merges their two path graphs, and selects from the result. <b>The file is 36 lines and four of them are imports</b>, which is the honest picture of the trade: your rule is short because somebody else's model of the language is long.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Lines you actually write</div>
+    <div class="fig-claim">A CodeQL query is short only because its imported libraries are not.</div>
+    <svg class="chart" viewBox="0 0 640 280" role="img" aria-label="A horizontal bar chart of the length of three rules shown on this page: the Semgrep md5 pattern rule at six lines, the course's own Semgrep taint rule at twenty-one lines, and the MIT-licensed CodeQL SQL injection query at thirty-six lines of which four are imports, with the imported library modules drawn as an unmeasured bar beyond the axis.">
+      <line class="axis" x1="180" y1="40" x2="180" y2="210"/>
+      <line class="grid" x1="290" y1="40" x2="290" y2="210"/>
+      <line class="grid" x1="400" y1="40" x2="400" y2="210"/>
+      <line class="grid" x1="510" y1="40" x2="510" y2="210"/>
+      <text class="lbl-sm" x="180" y="228" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="290" y="228" text-anchor="middle">12</text>
+      <text class="lbl-sm" x="400" y="228" text-anchor="middle">24</text>
+      <text class="lbl-sm" x="510" y="228" text-anchor="middle">36</text>
+
+      <rect class="m-stat" x="180" y="54" width="55" height="34"/>
+      <text class="lbl-sm" x="245" y="76">6</text>
+      <text class="lbl-sm" x="172" y="76" text-anchor="end">md5 pattern rule</text>
+
+      <rect class="m-stat" x="180" y="104" width="193" height="34"/>
+      <text class="lbl-sm" x="383" y="126">21</text>
+      <text class="lbl-sm" x="172" y="126" text-anchor="end">our taint rule, all four parts</text>
+
+      <rect class="m-alarm" x="180" y="154" width="330" height="34"/>
+      <text class="lbl-sm" x="520" y="176">36</text>
+      <text class="lbl-sm" x="172" y="176" text-anchor="end">CodeQL query</text>
+      <rect class="d-ghost" x="514" y="154" width="112" height="34" rx="3"/>
+      <text class="d-mono" x="570" y="176" text-anchor="middle">libraries</text>
+
+      <text class="read" x="320" y="256" text-anchor="middle">Four of the CodeQL query's lines are imports, and the ghosted bar is what they pull in.</text>
+      <text class="ttl" x="180" y="26">lines in the rule file, counted from the three files on this page</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>Semgrep YAML</span><span><i class="sw-alarm"></i>CodeQL query</span></div>
+    <figcaption>Counted directly from the three artefacts above, so you can check every bar by scrolling up. The ghosted extension is deliberately unmeasured: the two imported dataflow modules are thousands of lines that nobody on your team maintains.
+    <b>Authoring cost and reach are the same axis, and where you want to sit on it depends on whether the rule encodes your opinion or the language's.</b></figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>Axis</th><th>Semgrep rule</th><th>CodeQL query</th></tr></thead>
+    <tbody>
+      <tr><td>What you write</td><td>YAML, patterns that look like the code</td><td>a query language over a database of the code</td></tr>
+      <tr><td>Time to a first working rule</td><td>minutes</td><td>hours, and a build of the database first</td></tr>
+      <tr><td>Dataflow reach</td><td>sources, sinks and sanitizers you list</td><td>a maintained model of the language and its libraries</td></tr>
+      <tr><td>Metadata</td><td>id, message, severity</td><td>a metadata block the code-scanning UI reads</td></tr>
+      <tr><td>Who can review it</td><td>anybody who reads the language it matches</td><td>somebody who has learned the query language</td></tr>
+    </tbody>
+  </table>
+
+  <p>The choice is not which is better. It is which rule is <i>yours</i>. A team standard - never call this helper without that flag - is a Semgrep rule and takes ten minutes. A general model of injection across every ORM in an ecosystem is not a thing you should be writing at all, and importing it is the whole point.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Your rule flags every call to a helper, including the safe calls that pass a validated argument. Which operator is the correct fix?</div>
+      <button class="q-opt">Switch the rule to <code>mode: taint</code> and add a source</button>
+      <button class="q-opt">Add a <code>pattern-not</code> for the safe spelling here</button>
+      <button class="q-opt">Raise the severity so the noisy findings sort low</button>
+      <button class="q-opt">Wrap the pattern in <code>pattern-either</code> twice</button>
+      <div class="q-fb">Subtraction is exactly what <code>pattern-not</code> is for, and putting it in the rule puts the team's decision in version control. Taint mode is the right answer to a different complaint - not knowing where a value came from - and it costs you a source list you may not need. Severity changes the label on a finding and nothing about which findings exist. <code>pattern-either</code> is a logical OR, so listing the same pattern twice under it matches exactly what it matched before.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">You are reading a CodeQL query and want to know why its alerts show a full path in the interface rather than a single line. Where does that come from?</div>
+      <button class="q-opt">The <code>@precision high</code> field in the metadata</button>
+      <button class="q-opt">The <code>select</code> clause naming a source and a sink</button>
+      <button class="q-opt">The <code>@security-severity</code> score being above 8</button>
+      <button class="q-opt">The <code>@kind path-problem</code> line in the metadata</button>
+      <div class="q-fb">The kind is what tells the interface that each result is a path with a source and a sink rather than one location. Precision is a confidence label used for filtering and query-suite membership, not a display mode. The select clause supplies the nodes the path is drawn from, but nothing renders them as a path unless the kind says so - which is why the metadata block is a contract rather than a comment. The severity score drives gating, not layout.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Plant one vulnerability and catch it with a rule you wrote, not one you downloaded.</p>
+      <p>In your capstone repository, add a route that takes a query parameter and passes it into a shell-interpreted subprocess call. Then write your own rule file, in the shape of the one above, and run <code>semgrep --config ./rules/ .</code> until it reports <b>exactly one</b> finding.</p>
+      <p><b>Then break it deliberately.</b> Rewrite the planted call so it still passes attacker input to a shell but no longer matches your rule, and record what you had to change. That second half is the exercise.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The easiest way to walk past a shape rule is to change the shape without changing the danger: assign the call to a variable first, take a different route through the same library, or hand the shell a list rather than a string.</p></details>
+
+    <details class="solution"><summary>Show the shapes that walk past a small rule</summary>
+      <ol class="worked">
+        <li><b>Rename the import.</b> <code>import subprocess as sp</code> and the pattern that spells out <code>subprocess.run</code> stops matching. Semgrep's own symbolic propagation option exists for exactly this class of evasion, which tells you the class is common.</li>
+        <li><b>Change the sink spelling.</b> <code>subprocess.run(["sh", "-c", cmd])</code> hands the same string to the same shell and never writes <code>shell=True</code>. This is why the shipped registry rule enumerates interpreter names in a <code>metavariable-regex</code> rather than trusting one keyword.</li>
+        <li><b>Change the source spelling.</b> A route argument bound by the decorator - <code>@app.route("/x/&lt;name&gt;")</code> - is attacker-controlled and is not any <code>flask.request</code> accessor at all, so no source in our rule matches it.</li>
+        <li><b>Add the missing case you found</b> to your own rule, and re-run. One of the three is enough; the habit is what matters.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your first run should report one finding, not zero and not four. Zero usually means the source and the sink are in different functions with nothing joining them, and four usually means you wrote a shape rule when you meant a taint rule and are now flagging every subprocess call in the repository.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Paste your rule to your agent and ask it for three code samples that are dangerous and do not match. Then ask which of the three you should actually add, and why the others are somebody else's problem - a rule that tries to catch everything is the vendor registry you already have.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The taint-mode page is the one to read next, because it carries the parts this page compressed: label-based taint, the exactness asymmetry between sources and sinks, and what a propagator can and cannot express: <a href="https://docs.semgrep.dev/writing-rules/data-flow/taint-mode">Taint mode</a>. Read it with your own rule open beside it.</p>
+
+  <div class="pager">
+    <a href="0700-the-three-scanners.html"><span class="dir">&larr; Previous</span><span class="ttl">The three scanners</span></a>
+    <a class="nxt" href="0720-the-agent-attack-surface.html"><span class="dir">Next &rarr;</span><span class="ttl">The agent attack surface</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0710 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

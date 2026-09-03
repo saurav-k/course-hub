@@ -101,6 +101,18 @@ Cited once or twice, by module.
 - [Claude Code - sandboxing](https://code.claude.com/docs/en/sandboxing), [security](https://code.claude.com/docs/en/security), [permissions](https://code.claude.com/docs/en/permissions) - `0730` and `0740`.
 - [MCP - security best practices](https://modelcontextprotocol.io/specification/2026-07-28/basic/security_best_practices), [Invariant Labs - tool poisoning](https://invariantlabs.ai/blog/mcp-security-notification-tool-poisoning-attacks), [Trail of Bits - line jumping](https://blog.trailofbits.com/2025/04/21/jumping-the-line-how-mcp-servers-can-attack-you-before-you-ever-use-them/) - the named attack classes in `0720`.
 - [Design patterns for securing LLM agents against prompt injection](https://arxiv.org/abs/2506.08837) - `0730`.
+- [Semgrep - introduction](https://docs.semgrep.dev/introduction) - the product family in Semgrep's own words, and the "over 30 programming languages" figure. `0700`, `0770`.
+- [Semgrep - the MCP server](https://github.com/semgrep/mcp) (MIT) - seven tools, one prompt and two resources, and the turn from scanning in CI to scanning inside the loop. `0770`.
+- [Semgrep - a security engineer's guide to MCP](https://semgrep.dev/blog/2025/a-security-engineers-guide-to-mcp/) - their own MCP threat model, and the path traversal they found in their own server. `0720`, `0770`.
+- [Semgrep - Cursor hooks and the MCP server](https://semgrep.dev/blog/2025/cursor-hooks-mcp-server/) - the `afterFileEdit` plus `stop` hook pattern, quoted. `0770`.
+- [Semgrep Rules License v1.0](https://semgrep.dev/legal/rules-license) - why `semgrep/semgrep-rules` is linked rather than reproduced. `0710`.
+- [GitHub - responsible use of Copilot Autofix](https://docs.github.com/en/code-security/code-scanning/managing-code-scanning-alerts/responsible-use-autofix-code-scanning) - the documented inputs, the non-determinism sentence, the 2,300-alert test corpus, and five named failure modes. `0760`.
+- [GitHub - about push protection](https://docs.github.com/en/code-security/secret-scanning/introduction/about-push-protection) - what it blocks, and its bypass. `0750`.
+- [GitHub - Dependabot configuration options](https://docs.github.com/en/code-security/dependabot/dependabot-version-updates/configuration-options-for-the-dependabot.yml-file) - the five-pull-request default and grouping. GitHub Docs code samples are MIT ([`LICENSE-CODE`](https://github.com/github/docs/blob/main/LICENSE-CODE)). `0750`.
+- [OSV-Scanner - the GitHub Action](https://google.github.io/osv-scanner/github-action/) - the reusable workflow and the `security-events: write` scope SARIF upload needs. `0750`.
+- [Claude Code - permission modes](https://code.claude.com/docs/en/permission-modes) - the six modes, and the two rules about `bypassPermissions`. `0730`.
+- [Claude Code - hooks](https://code.claude.com/docs/en/hooks) - the `PreToolUse` input schema, the exit-code contract and `permissionDecision`. `0740`.
+- [bubblewrap](https://github.com/containers/bubblewrap) and [gitignore pattern syntax](https://git-scm.com/docs/gitignore) - the two external mechanisms the sandbox and the file rules rest on. `0730`, `0740`.
 
 ### Module 08 - Background agents
 
@@ -154,4 +166,5 @@ Claims this course would like to make and cannot source.
 - **Concurrency and rate limits for five of the six cloud agents.** Only one publishes them. `0810` is written on the mechanism axis for this reason, and the absence is itself worth stating on the page.
 - **Whether agent-readiness scores predict anything.** The rubric in `0550` is a teaching instrument. No published study relates a readiness score to an outcome, and the page must not imply one.
 - **A licence for the open review benchmark.** The repository ships no LICENSE file. Numbers may be cited, method may be described, nothing may be reproduced.
+- **What model-assisted triage is worth on your own repository.** Semgrep publishes "over 95% accurate" for categorising false positives with no method, corpus or evaluation set; GitHub publishes the size of its auto-fix test corpus and no aggregate fix rate. `0760` states both as published and neither as evidence, and its calculator asks the reader for the number instead.
 - **Adoption figures that measure delivery rather than activity.** Every available metric measures activity. `0960` says so rather than substituting a proxy.
