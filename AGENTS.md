@@ -575,6 +575,25 @@ exists because the licence is real: a figure whose roles contradict each other -
 live `d-flow` into it - renders, validates, reaches no console, and teaches the wrong thing. Nothing in
 this repository can catch it.
 
+**Five figures a reader operates live in the shared system, and their one hard rule is that the data
+is markup.** A stepper, an assembler, a calculator, a scorecard and a taint map, all in `hub.css` and
+`hub.js`, available to every course with no course script. A step, a part, a row and a block is an
+element the author wrote, so each one prints, is searchable, and is read by a screen reader before
+`hub.js` runs; `figure.cmatrix` is the one widget that earned an external data file and it took 191
+rows. **Each wears `.diagram` plus its own class** - `class="diagram stepper"` - so the frame, the
+shadow and the caption pair keep one owner and `figure.diagram > .fig-cap` still selects the label;
+a shape class alone is a figure with no frame and an unstyled label, which check 19 fails.
+`.build-controls` and `.build-readout` are reused rather than reinvented, for the reason `makePanel`
+won. **Every rule that hides part of one is keyed on an attribute only `hub.js` writes** -
+`[data-state]`, `[data-lit]`, `[data-can]` - so a page with no script is a complete document, and
+`openFigures` / `closeFigures` take that state off before the printed sheet and put it back after,
+riding `toPaper` / `offPaper` for the Safari media-query path. **A control that cannot act carries
+`aria-disabled`, never `disabled`**: a disabled button leaves the tab order under the reader's
+finger. Nothing persists, and the calculator has two named operations and no expression language,
+because a formula parser in the shared runtime is a maintenance surface nobody asked for. The
+author-facing statement is `.claude/skills/course-authoring/references/widgets.md`, "Five figures a
+reader operates". Do not restate it here.
+
 The Cloud Architecture category adds one data-driven widget to the shared system: the capability
 matrix (`figure.cmatrix`), rendered by `hub.js` from `cloud-comparison-course/matrix.js`, which is
 the single committed home of the capability taxonomy. `validate_site.py` gates that file - row
