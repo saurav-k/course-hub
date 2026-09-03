@@ -91,6 +91,40 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0770-in-the-field-semgrep.html"
         }
       ]
+    },
+    {
+      "n": "10",
+      "title": "The software factory and the future",
+      "lessons": [
+        {
+          "title": "The loop that closes",
+          "href": "lessons/1000-the-factory-loop.html"
+        },
+        {
+          "title": "What starts an agent when nobody is there",
+          "href": "lessons/1010-triggers-and-schedules.html"
+        },
+        {
+          "title": "Making a correction survive the session",
+          "href": "lessons/1020-the-agent-that-improves-itself.html"
+        },
+        {
+          "title": "Give every agent one job and one key",
+          "href": "lessons/1030-agent-identity-and-least-privilege.html"
+        },
+        {
+          "title": "Watching the factory",
+          "href": "lessons/1040-watching-the-factory.html"
+        },
+        {
+          "title": "Reading the trend lines",
+          "href": "lessons/1050-reading-the-trend-lines.html"
+        },
+        {
+          "title": "What you do next",
+          "href": "lessons/1060-what-you-do-next.html"
+        }
+      ]
     }
   ],
   "extras": [

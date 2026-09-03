@@ -130,13 +130,13 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0960 | Measuring adoption honestly | reserved | Every available metric measures activity; the number nobody can move is releases. |
 | 0970 | In the field: Replit | reserved | Public primary material only. |
 | | **Module 10 - The software factory and the future** | | Frontier. |
-| 1000 | The loop that closes | reserved | The ordinary delivery loop with agents on some arcs and a human on exactly one gate. |
-| 1010 | What starts an agent when nobody is there | reserved | Each trigger has a different trust story. |
-| 1020 | Making a correction survive the session | reserved | A rule, a memory or a failing eval has to outlive the run. |
-| 1030 | Give every agent one job and one key | reserved | An agent is a principal, and its own credential is what contains it. |
-| 1040 | Watching the factory | reserved | Log everything, sample by risk, keep a switch that stops it all. |
-| 1050 | Reading the trend lines | reserved | Three measurements point the same way on capability and the opposite way on delivery. Owes a chart with real data. |
-| 1060 | What you do next | reserved | Four habits the reader can start this week. |
+| 1000 | The loop that closes | **written** | The ordinary delivery loop with agents on some arcs and a human on exactly one gate. |
+| 1010 | What starts an agent when nobody is there | **written** | Each trigger has a different trust story. |
+| 1020 | Making a correction survive the session | **written** | A rule, a memory or a failing eval has to outlive the run. |
+| 1030 | Give every agent one job and one key | **written** | An agent is a principal, and its own credential is what contains it. |
+| 1040 | Watching the factory | **written** | Log everything, sample by risk, keep a switch that stops it all. |
+| 1050 | Reading the trend lines | **written** | Three measurements point the same way on capability and the opposite way on delivery. Owes a chart with real data. |
+| 1060 | What you do next | **written** | Four habits the reader can start this week. |
 
 ## Reference sheets
 
