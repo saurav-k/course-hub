@@ -345,6 +345,22 @@ Draw it by hand instead.
 
 A page whose figures are all the same instrument has probably not asked what the reader is actually confused about.
 
+**Those three instruments draw. Five more are figures the reader operates.**
+A drawing answers a question the reader has already asked; an interactive figure answers one they have not, because they have to move something before the answer appears.
+Reach for one when the claim is a *consequence* rather than a fact: the thing that changes when you change something else.
+
+| Shape | The question it answers | Reach for it when |
+|---|---|---|
+| a **stepper** (`figure.stepper`) | *what happens next, and what it cost* | a trace, a protocol exchange, a loop, a pipeline: anything with a real order and a running total |
+| an **assembler** (`figure.assembler`) | *what goes in the file* | a config, a memory file, a prompt, a manifest, where the lesson is which parts belong and what each one costs |
+| a **calculator** (`figure.calc`) | *how much, at your numbers* | a cost, a budget, a rate, a fleet: an arithmetic claim the reader should test against their own scale |
+| a **scorecard** (`figure.scorecard`) | *where do I stand* | a readiness check, an audit, a maturity question, where the teaching is the list of fixes rather than the number |
+| a **taint map** (`figure.taint`) | *who wrote this* | a trust boundary: which parts of one turn, one request or one document came from somebody who is not the reader |
+
+The five sections at the end of this file carry the markup for each, character for character.
+**A figure a reader can operate is not a substitute for a drawing.**
+A page whose only figure is a slider has not shown the reader the shape of the thing; the interactive shapes sit beside the three instruments above rather than in place of them.
+
 ### Mermaid, for structure
 
 ```html
@@ -630,6 +646,232 @@ Build script rules (the full contract lives in that course's `BUILDER-SPEC.md`):
   ```
 
 - Print hides the controls (inert on paper) and keeps stage, readout and caption. A build whose dark rendering would be unusable on white paper adds a `beforeprint` listener that redraws print-safe ink, restoring on `afterprint`; at minimum say in the caption what the printed figure shows.
+
+## Five figures a reader operates
+
+A stepper, an assembler, a calculator, a scorecard and a taint map.
+Each one is a figure the reader operates rather than reads, each is built into `assets/hub.css` and `assets/hub.js`, and no course writes a line of JavaScript to use one.
+`design-system/index.html` renders all five live, under "Five figures a reader operates", with the markup beneath each.
+
+Five properties hold across all five, and each one is a rule rather than a habit.
+
+1. **The data is markup.** A step, a part, a row and a block is an element you wrote. Nothing here reads a data file, so the figure prints, is searchable, is read by a screen reader before `hub.js` runs, and cannot fall out of step with a second file. The capability matrix below is the one widget that earned an external data file, and it took 191 rows to earn it.
+2. **Script blocked is a complete page.** Every rule that hides part of one of these is keyed on an attribute only `hub.js` writes, so a page with no script shows every step, every fix and every block. The assembler goes furthest: you commit the assembled file into its `<pre>`, and the script's first act is to render it again from the boxes.
+3. **Controls are native elements inside a `<label>`.** Buttons, checkboxes, radios and ranges, exactly as `.build-controls` already requires. Keyboard behaviour, focus rings and accessible names come from the platform; do not rebuild them.
+4. **The frame is `.diagram` and the two service rows are `.build-controls` and `.build-readout`.** A figure wears `.diagram` plus its own class - `class="diagram stepper"` - so the frame, the shadow and the caption pair keep one owner, and `figure.diagram > .fig-cap` still selects the label. Never give one of these a frame of its own.
+5. **Nothing persists.** No reader's answer outlives the page. If one of these ever needs to remember something it goes through `setChecked` / `dropChecked`, never `set` / `drop`, for the reason the study notes panel carries.
+
+The caption pair and the `figcaption` are not optional here.
+A figure a reader can operate still has to say what it is, what it proves, and what they should have noticed.
+
+**What `scripts/check_pages.py` makes of one.**
+An interactive figure is a `<figure>`, so it counts toward the page's diagram floor and toward the
+words-per-figure ceiling, and it is held to the same caption bar: a `figcaption` with a bolded
+takeaway, and a well-formed caption pair above it.
+It contributes **no diagram kind**, because it draws nothing.
+A page whose only figures are these will pass the count and warn on the kind floor, which is the
+right answer: the interactive shapes sit beside a chart, a hand-drawn diagram or a Mermaid graph
+rather than in place of one.
+
+### The stepper, for a trace with an order and a cost
+
+Plays an ordered list of turns one at a time.
+Reach for it when the claim is a *sequence*: a tool-call loop, a protocol exchange, a pipeline, a review that goes round twice.
+
+```html
+<figure class="diagram stepper" id="loop-trace">
+  <div class="fig-cap">One task through the loop</div>
+  <div class="fig-claim">Two model calls and one tool result answer one sentence.</div>
+
+  <ol class="step-list">
+    <li class="step" data-actor="user" data-cost="34">
+      <span class="step-role">prompt</span>
+      <span class="step-body">Rename <code>parse()</code> to <code>parseHeader()</code> everywhere.</span>
+    </li>
+    <li class="step" data-actor="model" data-cost="1842">
+      <span class="step-role">model call</span>
+      <span class="step-body">Emits a <code>tool_use</code> block: grep the tree for <code>parse(</code>.</span>
+    </li>
+    <li class="step" data-actor="tool" data-cost="410">
+      <span class="step-role">tool result</span>
+      <span class="step-body">Seven hits across four files, handed back as text nobody has read yet.</span>
+    </li>
+  </ol>
+
+  <div class="build-readout">
+    <span>step <b data-step-out="index">1</b> of <b data-step-out="total">3</b></span>
+    <span>context <b data-step-out="cost">34</b> tokens</span>
+  </div>
+  <figcaption>Play it once through and watch the token count rather than the prose.
+  <b>Every capability you notice is a tool the loop dispatched, not a thing the model did.</b></figcaption>
+</figure>
+```
+
+- **`data-actor`** is the only styling hook and it takes four values: `user` is `--accent-2`, `model` is `--accent`, `tool` is `--ok`, `error` is `--warn`. The colour rides the left rule and the role chip together, never the colour alone.
+- **`data-cost`** is optional and is summed over everything played so far. A step with none counts zero.
+- **`.step-role`** is two or three words, lower case; the stylesheet upper-cases it. **`.step-body`** is one sentence.
+- **The step number is a CSS counter**, so inserting a turn in the middle renumbers the rest for free. Never type one.
+- **`hub.js` injects Back, Next and Restart** into a `.build-controls` row above the readout. You write no controls.
+- **`[data-step-out]`** takes `index`, `total`, `cost` and `left`. Commit the value each one has at step one, because that is what a page with no script shows.
+- The step ahead of the reader keeps its row and loses its body, so the figure never jumps and the reader can see how much trace is left.
+
+### The assembler, for a file built out of choices
+
+Concatenates the ticked parts into a real file.
+Reach for it when the lesson is *what belongs in something* and what each part costs: a memory file, a config, a system prompt, a manifest.
+
+```html
+<figure class="diagram assembler" id="agents-md-builder">
+  <div class="fig-cap">What belongs in the file</div>
+  <div class="fig-claim">Every line you add is prepended to every request you ever send.</div>
+
+  <div class="build-controls">
+    <label><input type="checkbox" data-part="build" checked> build and test commands</label>
+    <label><input type="checkbox" data-part="layout"> where things go</label>
+  </div>
+
+  <div class="asm-out">
+    <div class="code-cap">AGENTS.md &middot; assembled from the boxes above</div>
+    <pre><code># Commands
+
+npm test        # the whole suite, about 40 seconds
+
+# Layout
+
+src/      one module per directory, no index barrels
+</code></pre>
+  </div>
+
+  <template data-part="build"># Commands
+
+npm test        # the whole suite, about 40 seconds</template>
+  <template data-part="layout"># Layout
+
+src/      one module per directory, no index barrels</template>
+
+  <div class="build-readout">
+    <span>about <b data-asm-out="tokens">28</b> tokens, on every turn</span>
+    <span><b data-asm-out="parts">2</b> of 2 sections</span>
+  </div>
+  <figcaption>Tick only what the repository cannot show the agent itself.
+  <b>A memory file is a per-turn cost, not a wiki.</b></figcaption>
+</figure>
+```
+
+- **One `<template data-part="...">` per part**, and one checkbox carrying the same `data-part`. The parts assemble in the order the *checkboxes* are written, not the order the templates are.
+- **The `<pre><code>` ships assembled**, holding every part joined by a blank line. That is what a page with no script shows and what prints, so it has to be right by hand: it is the one place in these five where a committed default can drift. The templates are the source of truth; make the `<pre>` match them.
+- **A template's body is dedented** before it is written out, so you may indent it to sit in the page.
+- **`[data-asm-out]`** takes `tokens`, `chars`, `lines` and `parts`. The token count is characters divided by four and is an estimate: say "about" wherever you print one, because no tokeniser ships in `hub.js` and none is going to.
+- **`hub.js` appends a `.asm-cost` chip to each label** showing what that part costs. You write no chip.
+- The copy button on the `<pre>` is the one `hub.js` puts on every `<pre>`, so it needs no code here.
+
+### The calculator, for an arithmetic claim at the reader's own numbers
+
+Sliders in, two derived numbers out.
+Reach for it when a claim is *linear in something the reader can name*: a bill, a budget, a rate, a fleet.
+
+```html
+<figure class="diagram calc" id="fleet-bill">
+  <div class="fig-cap">What the fleet costs</div>
+  <div class="fig-claim">Cost is linear in agents and in turns.</div>
+
+  <div class="build-controls">
+    <label>agents <input type="range" data-var="a" min="1" max="20" step="1" value="4"></label>
+    <label>turns per task <input type="range" data-var="t" min="4" max="60" step="2" value="18"></label>
+    <label>tokens per turn <input type="range" data-var="k" min="2000" max="60000" step="1000" value="14000"></label>
+  </div>
+
+  <div class="build-readout">
+    <span>tokens per hour <b data-calc="product" data-of="a t k">1,008,000</b></span>
+    <span>at $3 per Mtok <b data-calc="scale" data-of="a t k" data-by="0.000003" data-decimals="2" data-prefix="$">$3.02</b></span>
+  </div>
+  <figcaption>Move the middle slider first and watch which number moves with it.
+  <b>Turns per task is the only term you can actually change.</b></figcaption>
+</figure>
+```
+
+- **Two operations, and there is no third.** `product` multiplies the variables `data-of` names; `scale` multiplies that product by the constant in `data-by`. **There is no expression language and no `eval`**, and a page that needs a third operation adds a named one to the closed set in the same three-part pull request every widget change takes.
+- **`data-var`** names a variable; `data-of` is a space-separated list of those names. An unknown name writes nothing at all, so the figure keeps its committed default rather than showing a reader `NaN`.
+- **`data-decimals`, `data-prefix` and `data-suffix`** are optional and format the output. Thousands are grouped for you.
+- **Commit the correct value** for the defaults you shipped. A page with no script shows exactly those numbers, so a wrong one is a wrong lesson on paper.
+- **`hub.js` injects a `.calc-val` output beside each range**, because a slider whose number the reader cannot see is a control they are guessing at. You write no output.
+- A `data-decimals` on a range formats that slider's own readout.
+
+### The scorecard, for a weighted readiness check
+
+Radios in, a weighted total, a meter and a band out.
+Reach for it when the teaching is the *list of fixes* rather than the number: an audit, a readiness check, a maturity question.
+
+```html
+<figure class="diagram scorecard" id="agent-ready-score" data-bands="0.5 0.8" data-band-names="not started|under way|agent-ready">
+  <div class="fig-cap">Is this repository agent-ready</div>
+  <div class="fig-claim">Every point maps to one change you could make this week.</div>
+
+  <ol class="score-rows">
+    <li class="score-row" data-weight="3">
+      <span class="score-q">One documented command runs the whole test suite.</span>
+      <span class="score-opts">
+        <label><input type="radio" name="ar-1" value="0"> no</label>
+        <label><input type="radio" name="ar-1" value="1"> partly</label>
+        <label><input type="radio" name="ar-1" value="2"> yes</label>
+      </span>
+      <span class="score-fix">Put it in <code>AGENTS.md</code> and make it the only one.</span>
+    </li>
+  </ol>
+
+  <div class="build-readout">
+    <span>score <b data-score-out="points">0</b> of <b data-score-out="max">6</b></span>
+    <span><b data-score-out="band">not started</b></span>
+  </div>
+  <figcaption>Answer for a repository you actually own, not for the one you wish you had.
+  <b>The blockers are boring, repeatable, and none of them is the model.</b></figcaption>
+</figure>
+```
+
+- **The score is each radio's `value` times its row's `data-weight`**, and the maximum is the highest option on each row times the same weight. A row with no `data-weight` counts once.
+- **Every row needs its own `name`.** Two rows sharing one is one question with six options, and nothing warns you.
+- **`data-bands`** is two fractions of the maximum and **`data-band-names`** is three names separated by `|`. Both are optional and default to `0.5 0.8` and `not started|under way|ready`.
+- **`[data-score-out]`** takes `points`, `max`, `percent`, `answered`, `rows` and `band`.
+- **`.score-fix` is always visible and is always your own words.** It is the teaching, and revealing it only on a low score would make the widget a quiz. It is also what makes the printed figure a usable checklist, which is why the fix text is never generated.
+- **`hub.js` injects the `.score-meter`, its `.score-fill` and a `.score-weight` chip** on each question. You write none of them.
+
+### The taint map, for a trust boundary inside one turn
+
+Splits one turn by who wrote each block.
+Reach for it when the confusion is *provenance*: which parts of a request, a document or a context window came from somebody who is not the reader.
+
+```html
+<figure class="diagram taint" id="where-injection-enters">
+  <div class="fig-cap">One turn, by origin</div>
+  <div class="fig-claim">Three of these five blocks were written by somebody who is not you.</div>
+
+  <div class="taint-turn">
+    <p class="taint-part" data-origin="you">Fix the failing test in <code>parser_test.go</code>.
+      <span class="taint-can">The only block in the turn you actually authored.</span></p>
+    <p class="taint-part" data-origin="repo">AGENTS.md: run <code>go test ./...</code> before any commit.
+      <span class="taint-can">Read as an instruction, which is what it is, and reviewed like code.</span></p>
+    <p class="taint-part" data-origin="foreign">Issue body, opened this morning by an outside contributor.
+      <span class="taint-can">Reaches every tool this turn holds, the shell included.</span></p>
+  </div>
+
+  <div class="build-controls">
+    <label><input type="checkbox" data-taint="foreign" checked> show what you did not write</label>
+    <label><input type="checkbox" data-taint="capability"> show what the agent may do with it</label>
+  </div>
+  <div class="build-readout">
+    <span><b data-taint-out="foreign">1</b> of <b data-taint-out="total">3</b> blocks are foreign</span>
+  </div>
+  <figcaption>Untick the first box: all three arrive as one flat prompt, and that is the model's view of the turn.
+  <b>The model has no way to tell them apart, so the boundary has to be a permission.</b></figcaption>
+</figure>
+```
+
+- **`data-origin`** takes three values and three existing tokens: `you` is `--accent-2`, `repo` is `--ink-faint`, `foreign` is `--warn`. There is no fourth, and adding one is a change to the shared sheet rather than to a page.
+- **The origin word is generated from the attribute**, so a block can never be labelled one thing and coloured another, and no page can misspell it. Write no chip.
+- **`.taint-can` is optional, one per block, and is yours to write.** What an agent may do with a block is a claim about a real system and belongs where a reviewer can argue with it.
+- **`data-taint="foreign"`** toggles the origin colouring and **`data-taint="capability"`** toggles the `.taint-can` lines. Ship the first checked and the second unchecked, which is what the committed page shows.
+- **`[data-taint-out]`** takes `you`, `repo`, `foreign` and `total`.
+- **The state that teaches is the one with the first box unticked**, where every block looks identical. That is the model's view of the turn, and the figcaption should say so.
 
 ## The capability matrix
 

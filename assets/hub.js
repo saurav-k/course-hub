@@ -984,6 +984,7 @@
 
   function toPaper() {
     revealSolutions();
+    openFigures();
     if (!printCopies || onPaper) return;
     onPaper = new Map();
     printCopies.forEach(function (svg, node) {
@@ -995,6 +996,7 @@
 
   function offPaper() {
     restoreSolutions();
+    closeFigures();
     if (!onPaper) return;
     onPaper.forEach(function (svg, node) { node.innerHTML = svg; });
     onPaper = null;
@@ -4144,6 +4146,538 @@
   }
 
   /* ============================================================
+     FIVE INTERACTIVE FIGURE SHAPES
+     A stepper, an assembler, a calculator, a scorecard and a taint map:
+     figures a reader operates rather than reads. Each wears `.diagram` for
+     the frame and the caption pair plus its own class, reuses
+     `.build-controls` for the control row and `.build-readout` for the
+     numeric line, and is documented in
+     .claude/skills/course-authoring/references/widgets.md.
+
+     Five properties hold across all five and each is load-bearing.
+
+     THE DATA IS MARKUP. A step, a part, a row and a block are elements the
+     author wrote. Nothing here reads a JSON blob, so the figure prints, is
+     searchable, is read by a screen reader before this file runs, and cannot
+     fall out of step with a second file. `figure.cmatrix` above is the one
+     widget that earned an external data file, and it took 191 rows.
+
+     SCRIPT BLOCKED IS A COMPLETE PAGE. Every rule in `hub.css` that hides
+     part of one of these is keyed on an attribute written only here -
+     `[data-state]`, `[data-lit]`, `[data-can]` - so a page with no script
+     shows every step, every fix and every block. The assembler goes further:
+     its `<pre>` ships with every part already rendered into it and the first
+     act of `mountAssemblers` is to render it again from the boxes.
+
+     CONTROLS ARE NATIVE. Buttons, checkboxes, radios and ranges inside a
+     `<label>`, so keyboard behaviour, focus rings and accessible names come
+     from the platform. `scripts/focus_walk.py` presses real Tab keys.
+
+     A CONTROL THAT CANNOT ACT SAYS SO WITH `aria-disabled`, NEVER `disabled`.
+     A `disabled` button drops out of the tab order under the reader's finger:
+     press Next onto the last step and focus falls to the document. Every
+     no-op here stays focusable, announces its state, and does nothing.
+
+     NOTHING PERSISTS. No `localStorage` in any of these, so no reader's
+     answer outlives the page and none of them owes the save-state promise the
+     notes and highlights panels make.
+
+     None of the five paints into a canvas, so a mode or palette change needs
+     no re-render: the DOM is painted by `hub.css` from tokens and follows the
+     switch on its own.
+     ============================================================ */
+
+  // A figure's readout is the accessible status line for whatever moved, so
+  // the count, the total and the band all arrive at a screen reader without
+  // taking focus off the control the reader is still holding.
+  function speakingReadout(figure) {
+    var readout = figure.querySelector('.build-readout');
+    if (readout) readout.setAttribute('aria-live', 'polite');
+    return readout;
+  }
+
+  // The control row goes directly above the readout, because that is the order
+  // the reader needs: act, then read what moved. A figure with no readout puts
+  // it above the caption, and one with neither appends.
+  function mountControlRow(figure, buttons) {
+    var row = el('div', 'build-controls');
+    buttons.forEach(function (button) { row.appendChild(button); });
+    var before = figure.querySelector('.build-readout') || figure.querySelector('figcaption');
+    if (before) figure.insertBefore(row, before);
+    else figure.appendChild(row);
+    return row;
+  }
+
+  function actionButton(label) {
+    var button = el('button', null, label);
+    button.type = 'button';
+    return button;
+  }
+
+  function canAct(button, allowed) {
+    button.setAttribute('aria-disabled', allowed ? 'false' : 'true');
+  }
+
+  // Grouping separators, always en-US, because the hub is written in English
+  // and a figure's committed default value has to be the value the script
+  // computes: a reader whose locale grouped differently would see the number
+  // change on load for no reason they could name.
+  function figureNumber(value, decimals) {
+    if (!isFinite(value)) return '--';
+    var places = isFinite(decimals) ? decimals : 0;
+    return Number(value).toLocaleString('en-US', {
+      minimumFractionDigits: places,
+      maximumFractionDigits: places
+    });
+  }
+
+  function figureOutputs(figure, attribute) {
+    return Array.prototype.slice.call(figure.querySelectorAll('[' + attribute + ']'));
+  }
+
+  function writeOutputs(outputs, attribute, values) {
+    outputs.forEach(function (node) {
+      var role = node.getAttribute(attribute);
+      if (Object.prototype.hasOwnProperty.call(values, role)) node.textContent = values[role];
+    });
+  }
+
+  // `aria-controls` needs an id, and a figure that carries one can lend it.
+  function nameRegion(figure, node, suffix) {
+    if (!figure.id || node.id) return node.id || '';
+    node.id = figure.id + '-' + suffix;
+    return node.id;
+  }
+
+  /* ---------- the stepper ----------
+     Plays an ordered list of turns. The step ahead of the reader keeps its
+     row and loses its body, so the trace never jumps and the reader can see
+     how much of it is left without seeing what is in it. `data-cost` is
+     summed over everything played so far, which is what makes the figure
+     about context growth rather than about clicking. */
+  function stepCost(step) {
+    var stated = parseFloat(step.getAttribute('data-cost'));
+    return isFinite(stated) ? stated : 0;
+  }
+
+  function mountSteppers() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure.stepper'), function (figure) {
+      var steps = Array.prototype.slice.call(figure.querySelectorAll('.step'));
+      if (!steps.length) return;
+      var outputs = figureOutputs(figure, 'data-step-out');
+      speakingReadout(figure);
+
+      var list = figure.querySelector('.step-list');
+      var region = list ? nameRegion(figure, list, 'trace') : '';
+
+      var back = actionButton('← Back');
+      var next = actionButton('Next →');
+      var restart = actionButton('Restart');
+      [back, next, restart].forEach(function (button) {
+        if (region) button.setAttribute('aria-controls', region);
+      });
+      mountControlRow(figure, [back, next, restart]);
+
+      var at = 1;
+
+      function render() {
+        var carried = 0;
+        steps.forEach(function (step, index) {
+          var place = index + 1 < at ? 'done' : (index + 1 === at ? 'now' : 'ahead');
+          step.setAttribute('data-state', place);
+          if (index + 1 <= at) carried += stepCost(step);
+        });
+        writeOutputs(outputs, 'data-step-out', {
+          index: figureNumber(at),
+          total: figureNumber(steps.length),
+          cost: figureNumber(carried),
+          left: figureNumber(steps.length - at)
+        });
+        canAct(back, at > 1);
+        canAct(next, at < steps.length);
+        canAct(restart, at > 1);
+      }
+
+      function go(to) {
+        var wanted = Math.min(steps.length, Math.max(1, to));
+        if (wanted === at) return;
+        at = wanted;
+        render();
+      }
+
+      back.addEventListener('click', function () { go(at - 1); });
+      next.addEventListener('click', function () { go(at + 1); });
+      restart.addEventListener('click', function () { go(1); });
+      render();
+    });
+  }
+
+  /* ---------- the assembler ----------
+     Concatenates the checked `<template>` parts into the figure's own
+     `<pre><code>`, in the order the boxes are written. The copy button
+     `wireCopyButtons` already put on that `<pre>` then works with no extra
+     code at all.
+
+     A template's body is indented to sit inside the page's markup, so the
+     common indent comes off before it is written out: what the reader copies
+     has to be the file, not the file plus four spaces a page needed. */
+  function dedent(text) {
+    var lines = String(text).replace(/\t/g, '  ').split('\n');
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    var common = null;
+    lines.forEach(function (line) {
+      if (!line.trim()) return;
+      var indent = line.match(/^ */)[0].length;
+      if (common === null || indent < common) common = indent;
+    });
+    if (!common) return lines.join('\n');
+    return lines.map(function (line) { return line.slice(common); }).join('\n');
+  }
+
+  // A token is about four characters of English prose. The widget says
+  // "about" wherever it prints one, because this is an estimate and never a
+  // measurement: no tokeniser ships in this file and none is going to.
+  function tokenEstimate(text) {
+    return Math.ceil(text.length / 4);
+  }
+
+  function mountAssemblers() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure.assembler'), function (figure) {
+      var target = figure.querySelector('.asm-out code');
+      if (!target) return;
+      var boxes = Array.prototype.slice.call(
+        figure.querySelectorAll('input[type="checkbox"][data-part]')
+      );
+      var templates = Array.prototype.slice.call(figure.querySelectorAll('template[data-part]'));
+      if (!boxes.length || !templates.length) return;
+      var outputs = figureOutputs(figure, 'data-asm-out');
+      speakingReadout(figure);
+
+      var region = nameRegion(figure, figure.querySelector('.asm-out'), 'file');
+
+      // Matched in script rather than with an attribute selector: a part name
+      // is author text and would need escaping before it could be a selector.
+      function bodyOf(name) {
+        for (var i = 0; i < templates.length; i++) {
+          if (templates[i].getAttribute('data-part') === name) {
+            return dedent(templates[i].content.textContent);
+          }
+        }
+        return '';
+      }
+
+      function render() {
+        var chosen = boxes.filter(function (box) { return box.checked; });
+        var text = chosen
+          .map(function (box) { return bodyOf(box.getAttribute('data-part')); })
+          .filter(function (body) { return body; })
+          .join('\n\n');
+        target.textContent = text;
+        writeOutputs(outputs, 'data-asm-out', {
+          tokens: figureNumber(tokenEstimate(text)),
+          chars: figureNumber(text.length),
+          lines: figureNumber(text ? text.split('\n').length : 0),
+          parts: figureNumber(chosen.length)
+        });
+      }
+
+      boxes.forEach(function (box) {
+        var label = box.closest('label');
+        if (label) {
+          label.appendChild(el(
+            'span',
+            'asm-cost',
+            '+' + figureNumber(tokenEstimate(bodyOf(box.getAttribute('data-part')))) + ' tok'
+          ));
+        }
+        if (region) box.setAttribute('aria-controls', region);
+        box.addEventListener('change', render);
+      });
+      render();
+    });
+  }
+
+  /* ---------- the calculator ----------
+     Two operations and no more. `product` multiplies the named variables,
+     `scale` multiplies that product by a constant the figure states. There is
+     no expression language and no `eval` here, and there is not going to be:
+     a formula parser in the shared runtime is a maintenance surface nobody
+     asked for, and a page needing a third operation adds a named one to this
+     closed set in the same three-part pull request every widget change takes.
+
+     An unknown operation writes nothing, so the figure keeps the committed
+     default it shipped with rather than showing the reader a NaN. */
+  function calcValue(node, variables) {
+    var names = (node.getAttribute('data-of') || '').split(/\s+/).filter(Boolean);
+    var total = 1;
+    for (var i = 0; i < names.length; i++) {
+      if (!isFinite(variables[names[i]])) return NaN;
+      total *= variables[names[i]];
+    }
+    if (node.getAttribute('data-calc') === 'scale') {
+      var by = parseFloat(node.getAttribute('data-by'));
+      if (!isFinite(by)) return NaN;
+      total *= by;
+    }
+    return total;
+  }
+
+  function mountCalcs() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure.calc'), function (figure) {
+      var fields = Array.prototype.slice.call(figure.querySelectorAll('[data-var]'));
+      if (!fields.length) return;
+      var outputs = figureOutputs(figure, 'data-calc').filter(function (node) {
+        var operation = node.getAttribute('data-calc');
+        return operation === 'product' || operation === 'scale';
+      });
+      speakingReadout(figure);
+
+      // A range whose number the reader cannot see is a control they are
+      // guessing at, so each one gets an `<output>` beside it. It is injected
+      // rather than authored because it can only ever restate the input.
+      // `aria-hidden` because a range control already announces its own value:
+      // an `<output>` is a live region by default, so without it every drag
+      // would be read out twice, and a third time by the readout below.
+      var live = fields.map(function (field) {
+        var value = el('output', 'calc-val');
+        value.setAttribute('aria-hidden', 'true');
+        if (field.id) value.setAttribute('for', field.id);
+        if (field.parentNode) field.parentNode.insertBefore(value, field.nextSibling);
+        return value;
+      });
+
+      function render() {
+        var variables = {};
+        fields.forEach(function (field, index) {
+          var read = parseFloat(field.value);
+          variables[field.getAttribute('data-var')] = read;
+          live[index].textContent = figureNumber(read, parseInt(field.getAttribute('data-decimals'), 10));
+        });
+        outputs.forEach(function (node) {
+          var value = calcValue(node, variables);
+          if (!isFinite(value)) return;
+          node.textContent =
+            (node.getAttribute('data-prefix') || '') +
+            figureNumber(value, parseInt(node.getAttribute('data-decimals'), 10)) +
+            (node.getAttribute('data-suffix') || '');
+        });
+      }
+
+      fields.forEach(function (field) {
+        field.addEventListener('input', render);
+        field.addEventListener('change', render);
+      });
+      render();
+    });
+  }
+
+  /* ---------- the scorecard ----------
+     Sums `value` times the row's `data-weight`, and picks a band from the two
+     thresholds the figure states. `.score-fix` is the author's own words and
+     is never hidden: it is the teaching, and revealing it only on a low score
+     would make the widget a quiz. That is also what makes the printed figure a
+     usable checklist. */
+  var SCORE_BANDS = [0.5, 0.8];
+  var SCORE_NAMES = ['not started', 'under way', 'ready'];
+
+  function scoreThresholds(figure) {
+    var stated = (figure.getAttribute('data-bands') || '').split(/\s+/).map(parseFloat)
+      .filter(function (value) { return isFinite(value); });
+    return stated.length === 2 ? stated : SCORE_BANDS;
+  }
+
+  function scoreNames(figure) {
+    var stated = (figure.getAttribute('data-band-names') || '').split('|')
+      .map(function (name) { return name.trim(); })
+      .filter(function (name) { return name; });
+    return stated.length === 3 ? stated : SCORE_NAMES;
+  }
+
+  function rowWeight(row) {
+    var stated = parseFloat(row.getAttribute('data-weight'));
+    return isFinite(stated) && stated > 0 ? stated : 1;
+  }
+
+  function rowCeiling(row) {
+    var best = 0;
+    Array.prototype.forEach.call(row.querySelectorAll('input[type="radio"]'), function (option) {
+      var value = parseFloat(option.value);
+      if (isFinite(value) && value > best) best = value;
+    });
+    return best;
+  }
+
+  function mountScorecards() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure.scorecard'), function (figure) {
+      var rows = Array.prototype.slice.call(figure.querySelectorAll('.score-row'));
+      if (!rows.length) return;
+      var outputs = figureOutputs(figure, 'data-score-out');
+      var thresholds = scoreThresholds(figure);
+      var names = scoreNames(figure);
+      speakingReadout(figure);
+
+      // The weight is a scoring detail rather than teaching, so it is written
+      // here and not into the page: a reader with no script gets every
+      // question, every option and every fix, which is the document that
+      // matters, and loses only the multiplier.
+      rows.forEach(function (row) {
+        var stem = row.querySelector('.score-q');
+        if (!stem) return;
+        // The glyph and the words, exactly as the quiz marks an option: a
+        // multiplication sign is read as anything from "times" to nothing at
+        // all, and the weight is the reason one question outranks another.
+        var chip = el('span', 'score-weight', '×' + rowWeight(row));
+        chip.setAttribute('aria-hidden', 'true');
+        stem.appendChild(chip);
+        stem.appendChild(el('span', 'sr-only', ' worth ' + rowWeight(row) + ' points.'));
+      });
+
+      var meter = el('div', 'score-meter');
+      var fill = el('span', 'score-fill');
+      meter.appendChild(fill);
+      meter.setAttribute('role', 'progressbar');
+      meter.setAttribute('aria-valuemin', '0');
+      var before = figure.querySelector('.build-readout') || figure.querySelector('figcaption');
+      if (before) figure.insertBefore(meter, before); else figure.appendChild(meter);
+
+      function render() {
+        var points = 0;
+        var ceiling = 0;
+        var answered = 0;
+        rows.forEach(function (row) {
+          var picked = row.querySelector('input[type="radio"]:checked');
+          ceiling += rowCeiling(row) * rowWeight(row);
+          if (picked) {
+            points += (parseFloat(picked.value) || 0) * rowWeight(row);
+            answered += 1;
+          }
+          row.setAttribute('data-answered', picked ? 'yes' : 'no');
+        });
+        var share = ceiling > 0 ? points / ceiling : 0;
+        var band = share >= thresholds[1] ? 2 : (share >= thresholds[0] ? 1 : 0);
+        fill.style.width = (share * 100).toFixed(1) + '%';
+        fill.setAttribute('data-band', String(band));
+        meter.setAttribute('aria-valuenow', String(points));
+        meter.setAttribute('aria-valuemax', String(ceiling));
+        meter.setAttribute('aria-valuetext', points + ' of ' + ceiling + ', ' + names[band]);
+        writeOutputs(outputs, 'data-score-out', {
+          points: figureNumber(points),
+          max: figureNumber(ceiling),
+          percent: figureNumber(share * 100),
+          answered: figureNumber(answered),
+          rows: figureNumber(rows.length),
+          band: names[band]
+        });
+      }
+
+      Array.prototype.forEach.call(figure.querySelectorAll('input[type="radio"]'), function (option) {
+        option.addEventListener('change', render);
+      });
+      render();
+    });
+  }
+
+  /* ---------- the taint map ----------
+     One turn, split by who wrote each block. The state that teaches is the one
+     with the origins turned OFF: five blocks that look identical, which is
+     exactly what the model is handed. The default is on, because that is the
+     more useful static document and it is what a page with no script shows.
+
+     The capability line is the author's own `.taint-can`, hidden until the
+     second box is ticked. Generating it was never an option: what an agent may
+     do with a block is a claim about a real system and belongs in the page,
+     where a reviewer can argue with it. */
+  var TAINT_ORIGINS = ['you', 'repo', 'foreign'];
+
+  function mountTaints() {
+    Array.prototype.forEach.call(document.querySelectorAll('figure.taint'), function (figure) {
+      var parts = Array.prototype.slice.call(figure.querySelectorAll('.taint-part'));
+      if (!parts.length) return;
+      var outputs = figureOutputs(figure, 'data-taint-out');
+      var boxes = Array.prototype.slice.call(figure.querySelectorAll('input[type="checkbox"][data-taint]'));
+      speakingReadout(figure);
+
+      var turn = figure.querySelector('.taint-turn');
+      var region = turn ? nameRegion(figure, turn, 'turn') : '';
+      boxes.forEach(function (box) {
+        if (region) box.setAttribute('aria-controls', region);
+        box.addEventListener('change', render);
+      });
+
+      function boxFor(role) {
+        for (var i = 0; i < boxes.length; i++) {
+          if (boxes[i].getAttribute('data-taint') === role) return boxes[i];
+        }
+        return null;
+      }
+
+      function render() {
+        var lit = boxFor('foreign');
+        var can = boxFor('capability');
+        figure.setAttribute('data-lit', !lit || lit.checked ? 'on' : 'off');
+        figure.setAttribute('data-can', can && !can.checked ? 'off' : 'on');
+        var tally = { total: parts.length };
+        TAINT_ORIGINS.forEach(function (origin) { tally[origin] = 0; });
+        parts.forEach(function (part) {
+          var origin = part.getAttribute('data-origin');
+          if (Object.prototype.hasOwnProperty.call(tally, origin)) tally[origin] += 1;
+        });
+        writeOutputs(outputs, 'data-taint-out', {
+          you: figureNumber(tally.you),
+          repo: figureNumber(tally.repo),
+          foreign: figureNumber(tally.foreign),
+          total: figureNumber(tally.total)
+        });
+      }
+
+      render();
+    });
+  }
+
+  function mountInteractiveFigures() {
+    mountSteppers();
+    mountAssemblers();
+    mountCalcs();
+    mountScorecards();
+    mountTaints();
+  }
+
+  /* ---------- and what all five do on paper ----------
+     Paper has no reader behind it, so a figure held at step two of nine would
+     print seven blank rows and a taint map with the origins switched off would
+     print five identical blocks and no claim. Every played state comes off
+     before the sheet and goes back after, exactly as the practice disclosures
+     do, and riding on `toPaper` / `offPaper` is what gets this the Safari
+     media-query path as well.
+
+     The controls themselves need nothing here: `.build-controls` is in the
+     print block's hide list already. */
+  var figuresOnPaper = null;
+
+  function openFigures() {
+    if (figuresOnPaper) return;
+    figuresOnPaper = [];
+    Array.prototype.forEach.call(document.querySelectorAll('.step[data-state]'), function (step) {
+      figuresOnPaper.push([step, 'data-state', step.getAttribute('data-state')]);
+      step.removeAttribute('data-state');
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('figure.taint'), function (figure) {
+      ['data-lit', 'data-can'].forEach(function (name) {
+        if (!figure.hasAttribute(name)) return;
+        figuresOnPaper.push([figure, name, figure.getAttribute(name)]);
+        figure.setAttribute(name, 'on');
+      });
+    });
+  }
+
+  function closeFigures() {
+    if (!figuresOnPaper) return;
+    figuresOnPaper.forEach(function (held) { held[0].setAttribute(held[1], held[2]); });
+    figuresOnPaper = null;
+  }
+
+  /* ============================================================
      THE CAPABILITY MATRIX
      One row per capability key, one column per cloud, rendered from
      window.CLOUD_CAPABILITY_MATRIX (the data file beside the comparison
@@ -4446,6 +4980,7 @@
     mountStageFlag();
     wireQuizzes();
     wireCopyButtons();
+    mountInteractiveFigures();
     wireMatrix();
     whenFontsReady(renderMermaid);
     syncSettings();
