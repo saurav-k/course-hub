@@ -93,14 +93,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0560 | The gaps that block agents | **written** | The gaps are boringly consistent and each has a named artefact that closes it. |
 | 0570 | In the field: Factory | **written** | Public primary material only. |
 | | **Module 06 - Agentic code review** | | Working, except `0670`, which is frontier. |
-| 0600 | What review is actually for | reserved | Review has four jobs and an AI reviewer can do two. |
-| 0610 | What AI review catches | reserved | The findings a machine can reach at all. **Adjacent pair with `0620`; neither may be merged back.** |
-| 0620 | What AI review misses | reserved | No open reviewer found more than 62 of every 100 real bugs, and precision spread four times wider than recall. |
-| 0630 | Review architectures | reserved | What a reviewer may look at is the ceiling; the prompt is only the ladder. |
-| 0640 | Rules you write down | reserved | Write the standard once, in the repository. |
-| 0650 | Wiring review into the pull request | reserved | Trigger, volume and authority are three separate settings. |
-| 0660 | Measuring your reviewer | reserved | Acceptance rate is the only number that survives contact with your own codebase. |
-| 0670 | In the field: Cognition | reserved | Public primary material only. |
+| 0600 | What review is actually for | **written** | Review has four jobs and an AI reviewer can do two. |
+| 0610 | What AI review catches | **written** | The findings a machine can reach at all. **Adjacent pair with `0620`; neither may be merged back.** |
+| 0620 | What AI review misses | **written** | No open reviewer found more than 62 of every 100 real bugs, recall did not rise with severity, and the benchmark's publisher competes in it. |
+| 0630 | Review architectures | **written** | What a reviewer may look at is the ceiling; the prompt is only the ladder. |
+| 0640 | Rules you write down | **written** | Write the standard once, in the repository. |
+| 0650 | Wiring review into the pull request | **written** | Trigger, volume and authority are three separate settings. |
+| 0660 | Measuring your reviewer | **written** | Acceptance rate is the only number that survives contact with your own codebase. |
+| 0670 | In the field: Cognition | **written** | Public primary material only. |
 | 1120 | The capstone: close the gaps | reserved | **Read here**, after module 6. A readiness score before and after, and review running on their pull requests. |
 | | **Module 07 - Security** | | Working, except `0770`, which is frontier. |
 | 0700 | The three scanners | **written** | Three scanners answer three different questions. |
@@ -144,7 +144,7 @@ Read alongside, not positions in the sequence.
 
 | Path | Status | Notes |
 |---|---|---|
-| `reference/glossary.html` | **written**, empty | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written**, 19 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
 | `reference/samples.html` | reserved | The samples gallery: a complete, runnable, licensed example of each artefact the course teaches. Written last, because it collects from every module. |
 | `reference/readiness.html` | reserved | The readiness scorecard as a standalone printable page, lifted from `0550`. Written last. |
 
