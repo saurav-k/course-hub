@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Granting and taking away - AI Software Developer</title>
+<meta name="description" content="A team grants tool access by writing a policy file it can review, and audits it by reading a log of individual tool calls - and the same policy is also a context budget.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Building an AI-native team &middot; Lesson 0920</div>
+  <h1>A grant is a file somebody reviewed, and an audit is a log of single calls</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">8 min</span>
+    Every key shown is documented in the Claude Code MCP and managed-settings references.
+    &middot; <a href="https://code.claude.com/docs/en/mcp">MCP in Claude Code</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A project <code>.mcp.json</code> is a <b>proposal</b>. Managed settings are the <b>decision</b>, and nothing a developer writes overrides them.</li>
+      <li>Control comes at two grains: whole servers by name or URL, and single tools set to <code>blocked</code> or <code>ask</code>.</li>
+      <li><code>blocked</code> is stronger than a refusal: the tool is <b>filtered out before Claude sees it</b>, so it costs nothing and is never planned against.</li>
+      <li>One string names a tool everywhere - <code>mcp__server__tool</code> - in permission rules, skill allow-lists, subagent tool lists and hook matchers.</li>
+      <li>The audit is per call: time, status, server, capability, duration. The honest limit is that <b>a hidden tool is not an unreachable server</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">From lock to list</div>
+    <div class="fig-claim">You have one door and a valid token; now decide who may pass.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What you have now&lt;br/&gt;one endpoint and a token bound to it"] --> T["THIS PAGE&lt;br/&gt;the policy file and the call log"]
+  T --> N["What it enables&lt;br/&gt;one place the model bill is paid"]
+  M["Module 4&lt;br/&gt;settings, hooks and precedence"] -.- T
+    </div>
+    <figcaption>Modules 4 taught the settings ladder for one machine. This page is the same ladder used by somebody who is not sitting at the machine.
+    <b>Access becomes reviewable at the moment it stops living in a developer's home directory.</b></figcaption>
+  </figure>
+
+  <h2 id="proposal-and-decision">1. A proposal, and a decision</h2>
+  <p>A repository can ship an MCP server configuration, and it should: a project <code>.mcp.json</code> is how a team says "this server is part of working here". Every field in it is documented, and three of them are the ones that make it safe to commit.</p>
+
+  <div class="code-cap">.mcp.json &middot; code.claude.com/docs/en/mcp &middot; Anthropic documentation &middot; reproduced verbatim with attribution</div>
+  <pre><code>{
+  "mcpServers": {
+    "api-server": {
+      "type": "http",
+      "url": "${API_BASE_URL:-https://api.example.com}/mcp",
+      "headers": {
+        "Authorization": "Bearer ${API_KEY}"
+      },
+      "oauth": {
+        "scopes": "channels:read chat:write search:read"
+      }
+    },
+    "internal-api": {
+      "type": "http",
+      "url": "https://mcp.internal.example.com",
+      "headersHelper": "/opt/bin/get-mcp-auth-headers.sh"
+    }
+  }
+}
+</code></pre>
+
+  <p><code>${VAR}</code> and <code>${VAR:-default}</code> expansion is what lets the file be committed without a secret in it. <code>headersHelper</code> goes further and names a program that prints the headers, so a rotating credential never lands in the file at all. And <code>oauth.scopes</code> is scope minimisation moved to the client: the server may be willing to grant more, and this line says what your agent is allowed to ask for. That is the same least-privilege discipline the previous page's step-up flow assumes.</p>
+  <p>What the file cannot do is bind anybody. It sits in the repository, at a scope a developer can edit, and a developer who wants a different server writes one. The decision lives one level up, in the managed settings your organisation deploys, where two lists answer the question of which servers may load at all.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One call, four questions</div>
+    <div class="fig-claim">A denial from any source wins before an allow is considered.</div>
+    <div class="mermaid">
+flowchart TB
+  C["a tool call the model asked for"] --> D{"named by a deny rule&lt;br/&gt;or a denied server?"}
+  D -- yes --> X["refused, and the&lt;br/&gt;model is told"]
+  D -- no --> B{"blocked in tool controls?"}
+  B -- yes --> H["never in the list&lt;br/&gt;the model saw"]
+  B -- no --> A{"ask rule or ask control?"}
+  A -- yes --> P["prompt, with your&lt;br/&gt;organisation's reason"]
+  A -- no --> L{"allowed by a rule?"}
+  L -- yes --> R["runs"]
+  L -- no --> M["the session's permission&lt;br/&gt;mode decides"]
+    </div>
+    <figcaption>Read the second branch carefully: a blocked tool is not refused at call time, it is absent from the list the model was given, so the call in this diagram never happens. The other three branches are the ordinary permission ladder from module 4.
+    <b>The strongest control is the one that removes the option rather than the one that argues with it.</b></figcaption>
+  </figure>
+
+  <h2 id="tool-grain">2. Tool grain, and the string that names a tool</h2>
+  <p>Denying a whole server is blunt: most servers carry one destructive tool and a dozen harmless ones. The tool-level control is a small block with two verbs.</p>
+
+  <div class="code-cap">managed-settings.json &middot; code.claude.com/docs/en/mcp &middot; Anthropic documentation &middot; reproduced verbatim with attribution</div>
+  <pre><code>{
+  "mcpConnectorToolControls": {
+    "claude.ai Slack": {
+      "tools": {
+        "send_message": "blocked",
+        "read_channel": "ask"
+      }
+    }
+  }
+}
+</code></pre>
+
+  <p>The two verbs do genuinely different things. <code>blocked</code> filters the tool out before Claude sees it. <code>ask</code> leaves it in place and prompts on every call, with the reason shown as "Your organization requires approval for this tool". So <code>ask</code> is a speed bump for a tool you want used carefully, and <code>blocked</code> is for a tool you do not want planned around.</p>
+  <p>Elsewhere, a tool is named by one string: <code>mcp__&lt;server-name&gt;__&lt;tool-name&gt;</code>, and for a server a plugin brought with it, <code>mcp__plugin_&lt;plugin-name&gt;_&lt;server-name&gt;__&lt;tool-name&gt;</code>. The same string is used in permission rules, in a skill's <code>allowed-tools</code>, in a subagent's <code>tools</code> field and in hook matchers, which is why getting server names consistent across a fleet is a governance decision rather than a naming preference. A team whose servers are called <code>github</code> on some machines and <code>gh</code> on others cannot write one policy about them.</p>
+
+  <table>
+    <thead><tr><th>Way to stop a server</th><th>What it actually prevents</th><th>What it leaves</th></tr></thead>
+    <tbody>
+      <tr><td><code>deniedMcpServers</code> in managed settings</td><td>the server loading in Claude Code at all</td><td>the server itself, still online</td></tr>
+      <tr><td><code>disabledMcpjsonServers</code></td><td>one server from a project <code>.mcp.json</code> being accepted</td><td>the same server added by another route</td></tr>
+      <tr><td><code>mcpConnectorToolControls</code> set to <code>blocked</code></td><td>one tool from ever appearing in the model's list</td><td>every other tool on that server</td></tr>
+      <tr><td>a portal access policy</td><td>this person reaching the server through the portal</td><td>the server's own URL, unless separately secured</td></tr>
+      <tr><td>revoking the upstream credential</td><td>the server doing anything useful for anyone</td><td>nothing, which is why it is a last resort</td></tr>
+    </tbody>
+  </table>
+
+  <div class="callout warn">
+    None of the five rows stops a determined developer who can reach the server directly and has a token for it. A tool policy is a control over <b>your agent's</b> behaviour, not over your network. If the tool would be dangerous in a shell as well as in an agent, the control belongs at the server or at the identity provider, and this file is a convenience on top of it.
+  </div>
+
+  <h2 id="policy-is-budget">3. The policy is also a context budget</h2>
+  <p>Because <code>blocked</code> removes a tool from the list rather than refusing it later, a tool policy and a context budget are the same decision written once. Cloudflare's published pair gives the exchange rate: 52 tool definitions cost roughly 9,400 tokens, which is about <span class="keynum">181</span> tokens for one definition. Every tool you take out of a persona's catalogue is that much off every turn they take.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Tokens per tool, measured</div>
+    <div class="fig-claim">Two published points fix the rate at about 181 tokens each.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A scatter and line chart of tool-definition context cost against the number of tool definitions. Two measured points are plotted: two tools at six hundred tokens, and fifty-two tools at nine thousand four hundred tokens. A dashed line through the origin at one hundred and eighty-one tokens per definition passes through both, and a marked reading shows a curated twenty-tool catalogue at about three thousand six hundred tokens.">
+      <line class="grid" x1="110" y1="40" x2="614" y2="40"/>
+      <line class="grid" x1="110" y1="93" x2="614" y2="93"/>
+      <line class="grid" x1="110" y1="145" x2="614" y2="145"/>
+      <line class="grid" x1="110" y1="198" x2="614" y2="198"/>
+      <line class="axis" x1="110" y1="250" x2="614" y2="250"/>
+      <text class="lbl-sm" x="102" y="44" text-anchor="end">10,000</text>
+      <text class="lbl-sm" x="102" y="97" text-anchor="end">7,500</text>
+      <text class="lbl-sm" x="102" y="149" text-anchor="end">5,000</text>
+      <text class="lbl-sm" x="102" y="202" text-anchor="end">2,500</text>
+      <text class="lbl-sm" x="102" y="254" text-anchor="end">0</text>
+
+      <line class="tick" x1="110" y1="250" x2="110" y2="256"/>
+      <line class="tick" x1="277" y1="250" x2="277" y2="256"/>
+      <line class="tick" x1="443" y1="250" x2="443" y2="256"/>
+      <line class="tick" x1="610" y1="250" x2="610" y2="256"/>
+      <text class="lbl-sm" x="110" y="270" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="277" y="270" text-anchor="middle">20</text>
+      <text class="lbl-sm" x="443" y="270" text-anchor="middle">40</text>
+      <text class="lbl-sm" x="610" y="270" text-anchor="middle">60</text>
+
+      <line class="s-noise ref" x1="110" y1="250" x2="568" y2="41"/>
+      <text class="lbl-sm" x="330" y="130">about 181 tokens per definition</text>
+
+      <circle class="m-stat" cx="127" cy="237" r="6"/>
+      <text class="lbl-sm" x="140" y="232">2 tools, 600</text>
+      <circle class="m-stat" cx="543" cy="53" r="6"/>
+      <text class="lbl-sm" x="536" y="46" text-anchor="end">52 tools, 9,400</text>
+
+      <line class="s-alarm" x1="277" y1="174" x2="277" y2="250"/>
+      <circle class="m-alarm" cx="277" cy="174" r="6"/>
+      <text class="t-alarm lbl-sm" x="288" y="170">a curated 20, about 3,600</text>
+
+      <text class="ttl" x="110" y="290">tokens of tool definitions carried on every turn, against catalogue size</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>Cloudflare's two published measurements</span><span><i class="sw-alarm"></i>a reading taken off the rate</span></div>
+    <figcaption>The two circles are measured and published; the dashed line is the rate they imply and the red reading is arithmetic on that rate rather than a second measurement. A definition's real size varies with its schema, so read the line as an order of magnitude.
+    <b>Blocking a tool buys a permission and about 181 tokens a turn, from one line of policy.</b></figcaption>
+  </figure>
+
+  <h2 id="the-audit">4. The audit is a log of single calls</h2>
+  <p>A grant you cannot check is a hope. The unit that makes an audit useful is not the session and not the server: it is the individual tool call. Cloudflare's portal logs record <b>time, status, server name, capability</b> - which is the tool that ran - <b>and duration in milliseconds</b>, and those five fields are enough to answer the questions a review actually asks. Which people called the deploy tool this month. Which calls failed, and did anybody notice. Which server accounts for the tail of slow turns.</p>
+  <p>On the client side the equivalent surface is OpenTelemetry, which the next two lessons use for cost. It is worth knowing now that the two are different evidence: the portal log proves what reached the server, and the client telemetry proves what your fleet did. A gap between them is not a discrepancy to reconcile, it is the shape of everything that went around the door.</p>
+
+  <figure class="diagram scorecard" id="tool-access-audit" data-bands="0.5 0.8" data-band-names="unreviewable|partly written down|reviewable">
+    <div class="fig-cap">Is your tool access reviewable</div>
+    <div class="fig-claim">Every point here is a file you could write this week.</div>
+
+    <ol class="score-rows">
+      <li class="score-row" data-weight="3">
+        <span class="score-q">You can name every MCP server your team's agents can reach, from a file rather than from memory.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="ta-1" value="0"> no</label>
+          <label><input type="radio" name="ta-1" value="1"> partly</label>
+          <label><input type="radio" name="ta-1" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Write <code>allowedMcpServers</code> in managed settings and treat anything absent from it as unapproved.</span>
+      </li>
+      <li class="score-row" data-weight="3">
+        <span class="score-q">The most destructive tool on each server is <code>blocked</code> or <code>ask</code>, by name.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="ta-2" value="0"> no</label>
+          <label><input type="radio" name="ta-2" value="1"> partly</label>
+          <label><input type="radio" name="ta-2" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Add one <code>mcpConnectorToolControls</code> block per server and start with the tool you would not want in a transcript.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">Server names are the same on every machine, so one rule matches everywhere.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="ta-3" value="0"> no</label>
+          <label><input type="radio" name="ta-3" value="1"> partly</label>
+          <label><input type="radio" name="ta-3" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Fix the names before writing rules: <code>mcp__server__tool</code> is matched literally in four different places.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">A committed <code>.mcp.json</code> contains no secret, because expansion or a headers helper supplies it.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="ta-4" value="0"> no</label>
+          <label><input type="radio" name="ta-4" value="1"> partly</label>
+          <label><input type="radio" name="ta-4" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Replace the literal with <code>${API_KEY}</code>, or point <code>headersHelper</code> at a script that prints the header.</span>
+      </li>
+      <li class="score-row" data-weight="3">
+        <span class="score-q">You can produce, for last month, the list of individual tool calls made against one named server.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="ta-5" value="0"> no</label>
+          <label><input type="radio" name="ta-5" value="1"> partly</label>
+          <label><input type="radio" name="ta-5" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Turn on the portal's own logging and ship it somewhere queryable before you need it for an incident.</span>
+      </li>
+      <li class="score-row" data-weight="1">
+        <span class="score-q">Every server your policy allows is also unreachable at its own URL without the same identity check.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="ta-6" value="0"> no</label>
+          <label><input type="radio" name="ta-6" value="1"> partly</label>
+          <label><input type="radio" name="ta-6" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Put the server behind the same identity provider as the door, then re-test the direct URL from a denied account.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>score <b data-score-out="points">0</b> of <b data-score-out="max">28</b></span>
+      <span><b data-score-out="band">unreviewable</b></span>
+    </div>
+    <figcaption>Answer for the team you actually have, not for the policy you intend to write. The last row carries the smallest weight and is the one most teams fail, which is a comment on how the row was reached rather than on how much it matters.
+    <b>Every fix here is a file, and none of them is a conversation.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">You set a tool to <code>blocked</code> rather than <code>ask</code>. What changes in the request the model receives?</div>
+      <button class="q-opt">The tool's definition is absent, so its tokens are not sent</button>
+      <button class="q-opt">The definition is sent with a note saying it is blocked</button>
+      <button class="q-opt">Nothing changes until the model tries to call the tool</button>
+      <button class="q-opt">The tool is renamed so that no permission rule matches</button>
+      <div class="q-fb">A blocked tool is filtered out before Claude sees it, so it costs no context and is never planned against. The second and third options describe <code>ask</code>, where the definition is present and the interception happens at call time. The fourth invents a mechanism, and renaming would break every rule that names the tool rather than protecting anything.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A repository commits a <code>.mcp.json</code> adding a server your policy denies. What happens?</div>
+      <button class="q-opt">The project file wins, since it is closest to the work here</button>
+      <button class="q-opt">The two are merged and the server loads in read-only mode</button>
+      <button class="q-opt">The denial holds, since nothing below managed overrides it</button>
+      <button class="q-opt">The developer is prompted once and their answer is remembered</button>
+      <div class="q-fb">Managed settings sit above the command line, project and user levels, and the documented exceptions all let a <i>stricter</i> lower value count rather than a looser one. The first option is the closest-wins rule for instruction files, which is a different mechanism in a different place. The second and fourth invent behaviour: there is no partial load and no remembered override.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, in a repository you own</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>Turn one server you already use into something a reviewer could sign off.</p>
+      <p><b>Write</b> a project <code>.mcp.json</code> for it with no literal secret in the file, using expansion or a headers helper, and an <code>oauth.scopes</code> line naming the narrowest set of scopes that still lets your usual task finish.</p>
+      <p><b>Then write</b> the managed-settings half: an <code>allowedMcpServers</code> entry for that server, and an <code>mcpConnectorToolControls</code> block setting its most destructive tool to <code>blocked</code>.</p>
+      <p><b>Finally</b>, run your usual task and record what broke. Something usually does, and what broke tells you which scope or which tool was load-bearing.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Start from the scopes the server asked for on first connection, then remove one at a time. The tool to block is the one whose name you would not want to read out at an incident review.</p></details>
+
+    <details class="solution"><summary>Show a worked example</summary>
+      <ol class="worked">
+        <li><b>Start too narrow on purpose.</b> Ask for <code>channels:read</code> alone. The first search fails, and the failure names the scope it wanted, which is faster than reading the server's documentation.</li>
+        <li><b>Widen once.</b> Add exactly the challenged scope to the set you already had. That is the union rule from lesson 0910, applied by hand rather than by the client.</li>
+        <li><b>Block, then measure.</b> Block the write tool and run <code>/context</code> again. The definitions figure should fall by roughly 180 tokens for each tool removed, which is the rate the chart above fixes.</li>
+        <li><b>Check the file is publishable.</b> Search the finished <code>.mcp.json</code> for anything that looks like a key. If your answer is "the helper prints it", the file is ready to commit.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If nothing at all broke when you narrowed the scopes, you have not narrowed them: the server was probably granting a fixed set and ignoring your request, which is a finding worth writing down rather than a pass.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the difference between the two grains still blurs, ask your agent to list every MCP tool it can currently see and mark each one as "would be fine in a transcript" or not. If the audit half feels theoretical, ask it to write the query you would run against your call log to answer "who used the deploy tool last month", and notice whether you have anywhere to run it.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The MCP reference for Claude Code, which carries every key on this page plus the tool-search behaviour that decides whether definitions are sent at all: <a href="https://code.claude.com/docs/en/mcp">MCP in Claude Code</a>. Read it beside the <a href="https://code.claude.com/docs/en/settings">settings reference</a>, which is where the precedence claim and its exceptions are stated.</p>
+
+  <div class="pager">
+    <a href="0910-mcp-authorization-in-practice.html"><span class="dir">&larr; Previous</span><span class="ttl">Who is this token for?</span></a>
+    <a class="nxt" href="0930-the-llm-gateway.html"><span class="dir">Next &rarr;</span><span class="ttl">One place the model bill is paid</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0920 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
