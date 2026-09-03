@@ -55,6 +55,7 @@ Do not cross-link for completeness: a link that only says "this exists elsewhere
 **Block numbering stepping by ten**, so a lesson added later inside a module never forces file order to disagree with teaching order. `PLOT.md` states the rule and the reason.
 
 **The capstone is a track, not a tail.** Four pages numbered `11xx` for permanence, read at the end of the modules that supply them. `PLOT.md` is where that disagreement is written down, because it is the one place the house standard allows it.
+The pagers carry the reading order rather than the file order, so `0170` goes next to `1100` and `1100` goes next to `0200`, and the same at `0470`, `0670` and `0860`. Eight pagers on six pages: forget the four "previous" halves and the chain still walks forwards and breaks backwards, which nothing checks.
 
 **Not routed.** Rejected explicitly: there is one order, the syllabus states it, and a routed course costs a hand-written manifest, a committed pager per page and a generator that refuses to run.
 
@@ -110,6 +111,12 @@ Shortening the event text does not help. Draw it by hand instead, where you cont
 The part 500px cannot reach is text clipped at a hand-drawn figure's `viewBox` edge - and that check does not need a narrow viewport at all, because `getBBox` returns user units.
 Sweep every `<text>` in every `svg.chart` and flag any whose box starts below 0 or ends past the `viewBox` width. It found two clipped labels in this module that no checker and no screenshot would have caught.
 
+**The reading-time pill drifts, and it drifts by whole modules rather than by pages.**
+The formula is in the skill's `pedagogy.md` - prose words divided by 200, plus half a minute per figure and per quiz, rounded - and it is not checked by anything.
+Three modules landed three to six minutes over it because their writers counted code-reading time, which is defensible per page and incoherent across a course: a 717-word page claimed 12 minutes beside a 1,291-word page claiming 10.
+The page pill and the course-map card pill are one fact written twice, so they move together.
+Recompute rather than eyeball, with `check_pages.prose(check_pages.reading_column(src))`, and only touch a page more than two minutes out - the rest of the hub sits inside that rounding latitude.
+
 **A lesson linked from below the last module appears in the rail under the wrong heading.**
 `gen_outline.py` slices the course map at each `.module-h` and runs the last slice to the end of the file, so an `href="lessons/..."` in a footer is collected as an extra lesson of the final module.
 Link a lesson from the hero or from a card, never from below the last module. It renders, every link resolves, and `validate_site.py` stays green.
@@ -126,7 +133,7 @@ Lesson `0000` carries the third, which is about the course rather than about a c
 ## Open threads
 
 - The five interactive figure shapes have landed in the shared design system, ahead of any writer. Lesson `0000` deliberately depends on none of them, which is why the scaffold could land first; every module page after it should reach for one where it fits. `BUILDER-SPEC.md` carries the markup rule that bites first.
-- Whether this course should join `EXTENDED_BAR_COURSES` in `check_pages.py` - one practice problem and one hand-drawn `svg.chart` per page. Not at the start; joining is the last step of a retrofit. Lesson `0000` already clears both, so it is worth re-asking once a module is written.
+- **Whether this course should join `EXTENDED_BAR_COURSES` in `check_pages.py`** - one practice problem and one hand-drawn `svg.chart` per page. Every one of the 83 lessons now carries a practice block, and the course draws with six diagram kinds. Measure the `svg.chart` floor across all 83 before proposing it; that is the only bar left in doubt, and joining is one line plus whatever it turns red.
 - **Answered: the "in the field" pages are worth reading under the public-material-only rule.** `MISSION.md` asked for this to be revisited after module 4, and `0470` is the test.
   It works because the constraint forced a page about *evidence* rather than about a product: the vendor's own material splits cleanly into documented contracts you can test yourself, measurements on a named system, and self-reported outcomes with no method, and sorting the eight numeric claims into those three piles is the page's own figure.
   The rule to carry forward is that the page must have a question of its own that the company's material happens to answer. A page organised as "what this company published" would have been a link list; a page organised as "how do you read what a vendor publishes about its own tool" survives the company changing anything.
