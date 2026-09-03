@@ -51,6 +51,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "What a shipped harness does that yours does not",
           "href": "lessons/0170-what-your-agent-does-that-yours-does-not.html"
+        },
+        {
+          "title": "The capstone: pick your repository",
+          "href": "lessons/1100-the-capstone-pick-your-repository.html"
         }
       ]
     },
@@ -165,6 +169,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "In the field: Claude Code",
           "href": "lessons/0470-in-the-field-claude-code.html"
+        },
+        {
+          "title": "The capstone: write the contract",
+          "href": "lessons/1110-the-capstone-write-the-contract.html"
         }
       ]
     },
@@ -241,6 +249,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "In the field: Cognition",
           "href": "lessons/0670-in-the-field-cognition.html"
+        },
+        {
+          "title": "The capstone: close the gaps",
+          "href": "lessons/1120-the-capstone-close-the-gaps.html"
         }
       ]
     },
@@ -313,6 +325,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "In the field: Cloudflare",
           "href": "lessons/0860-in-the-field-cloudflare.html"
+        },
+        {
+          "title": "The capstone: let it run",
+          "href": "lessons/1130-the-capstone-let-it-run.html"
         }
       ]
     },
@@ -393,6 +409,14 @@ window.COURSE_OUTLINE = {
     {
       "title": "Glossary",
       "href": "reference/glossary.html"
+    },
+    {
+      "title": "Samples",
+      "href": "reference/samples.html"
+    },
+    {
+      "title": "Readiness",
+      "href": "reference/readiness.html"
     }
   ]
 };
