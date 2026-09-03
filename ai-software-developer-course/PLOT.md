@@ -121,14 +121,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0860 | In the field: Cloudflare | **written** | Public primary material only. |
 | 1130 | The capstone: let it run | reserved | **Read here**, after module 8. One unattended pipeline with a ceiling, plus module 7's security pass, plus the open-source contribution track. |
 | | **Module 09 - Building an AI-native team** | | Frontier. |
-| 0900 | One door for every tool | reserved | Governance moves from the server to the endpoint in front of them. Links **both ways** with `0270`. |
-| 0910 | Who is this token for? | reserved | Every token names exactly one MCP server, and no server passes a token onward. |
-| 0920 | Granting and taking away | reserved | A policy file you can review, and a log of individual tool calls. |
-| 0930 | One place the model bill is paid | reserved | A gateway moves the provider credential off developer machines. |
-| 0940 | What a token actually costs | reserved | Arithmetic you can do in your head: which model, and how much of the context is a cache read. |
-| 0950 | Making the good setup the default one | reserved | The good configuration arrives on the machine rather than being copied. |
-| 0960 | Measuring adoption honestly | reserved | Every available metric measures activity; the number nobody can move is releases. |
-| 0970 | In the field: Replit | reserved | Public primary material only. |
+| 0900 | One door for every tool | **written** | Governance moves from the server to the endpoint in front of them. Links **both ways** with `0270`. |
+| 0910 | Who is this token for? | **written** | Every token names exactly one MCP server, and no server passes a token onward. |
+| 0920 | Granting and taking away | **written** | A policy file you can review, and a log of individual tool calls. |
+| 0930 | One place the model bill is paid | **written** | A gateway moves the provider credential off developer machines. |
+| 0940 | What a token actually costs | **written** | Arithmetic you can do in your head: which model, and how much of the context is a cache read. |
+| 0950 | Making the good setup the default one | **written** | The good configuration arrives on the machine rather than being copied. |
+| 0960 | Measuring adoption honestly | **written** | Every available metric measures activity; the number nobody can move is releases. |
+| 0970 | In the field: Replit | **written** | Public primary material only. |
 | | **Module 10 - The software factory and the future** | | Frontier. |
 | 1000 | The loop that closes | reserved | The ordinary delivery loop with agents on some arcs and a human on exactly one gate. |
 | 1010 | What starts an agent when nobody is there | reserved | Each trigger has a different trust story. |
@@ -146,6 +146,7 @@ Read alongside, not positions in the sequence.
 |---|---|---|
 | `reference/glossary.html` | **written** | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
 | `reference/glossary.html` | **written**, 26 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written**, 62 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
 | `reference/samples.html` | reserved | The samples gallery: a complete, runnable, licensed example of each artefact the course teaches. Written last, because it collects from every module. |
 | `reference/readiness.html` | reserved | The readiness scorecard as a standalone printable page, lifted from `0550`. Written last. |
 
@@ -154,6 +155,8 @@ Read alongside, not positions in the sequence.
 Two pairs are load-bearing in both directions and are recorded here so a later edit cannot silently drop one half.
 
 - **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other. **State today:** `0270` is written and carries the measurement, Cloudflare's own source, and `0900`'s number and title in prose, with no `href`, because linking an unwritten page fails `validate_site.py`. Whoever writes `0900` adds the `href` in `0270` and the link back, in the same pull request.
+- **`0270` and `0900`.** The measurement that four MCP servers and 52 tools cost roughly 9,400 tokens of definitions, collapsing to two tools and about 600 tokens under progressive disclosure, is module 9's strongest single argument and module 2's budget lesson is where the reader learned to care. Each page links the other.
+  **Half of this pair is outstanding.** `0900` is written and names `0270` in prose, by number and title, in its section "The bill is paid in context, not in requests"; it carries no `href`, because `0270` does not exist yet and `validate_site.py` fails a link to a page that is not there. Whoever writes module 2 owes both halves: the forward link from `0270`, and turning that sentence in `0900` into a link. It is one edit and it is easy to lose.
 - **`0160` and `coding-harness-course/lessons/0270-build-a-harness.html`.** The split by purpose. Each page states in its first paragraph what the other build is for.
 
 The remaining out-of-course links are one-way and belong to the pages that carry them; `BUILDER-SPEC.md` names the rule for making one.

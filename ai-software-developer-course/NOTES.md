@@ -91,6 +91,11 @@ Verify it rather than reading it: open the page and compare the rendered `.asm-o
 `chrome-devtools-axi` shares one browser on one port across every agent that does not name a session, so with several writers working at once a page you just opened can be navigated away by another lane between the `open` and the `eval`.
 The symptom is figure labels you never wrote in your own results.
 Set `CHROME_DEVTOOLS_AXI_SESSION` to your lane's name before the first command, and add a cache-busting query to every URL: `python3 -m http.server` sends a `Last-Modified` that Chrome will happily trust after you have edited the file.
+**A cross-module link fails the validator, and this course is written by parallel writers.**
+`validate_site.py` resolves every relative `href` and fails on a file that is not there, so a page in module 9 cannot link a page in module 2 until module 2 is merged.
+Name the lesson in prose by its number and its title, record the debt in `PLOT.md`, and let whoever writes the other half turn it into an `href` in their pull request.
+`0900` carries exactly this, for the `0270` half of the pair `PLOT.md` calls load-bearing in both directions.
+The same rule decides a module's outer pagers: the first lesson's "previous" and the last lesson's "next" point at `../index.html` until the neighbouring module exists.
 
 **A roadmap entry that became a link fails the validator.**
 Every unwritten lesson in `index.html` is plain text inside `.roadmap`. This course carries more unwritten pages than written ones for most of its life, so this will bite repeatedly.
