@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Scanners in CI - AI Software Developer</title>
+<meta name="description" content="A scanner on your laptop protects nobody. One workflow, three jobs, SARIF into one tab, a gate on the delta rather than the total, and permissions tight enough that the gate cannot be edited by what it is gating.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Security &middot; Lesson 0750</div>
+  <h1>The gate is the pull request, not your laptop</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Assembled from the three vendors' own published CI configurations.
+    &middot; <a href="https://docs.semgrep.dev/semgrep-ci/sample-ci-configs">Semgrep sample CI configs</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>One workflow, <b>three jobs</b>, one place to read the result. Each job answers its own question and fails for its own reason.</li>
+      <li><b>Diff-aware scanning</b> is what makes the gate usable: on a pull request the scanner reads the change, not the history of every decision your team ever made.</li>
+      <li><b>SARIF</b> is the format that puts a finding on a line in the code-hosting interface, and uploading it needs <code>security-events: write</code>.</li>
+      <li>Dependabot is the <b>write side</b> of SCA: it opens the pull request that fixes what the scanner reported, up to a default of five at a time.</li>
+      <li><b>Push protection is the only control here that prevents rather than reports</b>, and it is the one with a bypass button, which tells you what it costs.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">A rule nobody runs on the change is a rule nobody has.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;rules, and a boundary that holds"] --> T["THIS PAGE&lt;br/&gt;the gate on every change"]
+  T --> N["What it enables&lt;br/&gt;a queue worth triaging"]
+  W["Module 07&lt;br/&gt;findings that reach somebody"] -.- T
+    </div>
+    <figcaption>Lesson 0710 gave you a rule and lesson 0740 gave you a boundary. Both were local. This page is where they become a property of the repository instead of a property of your machine.
+    <b>Everything in this module before now protected one developer; this is the line where it protects the branch.</b></figcaption>
+  </figure>
+
+  <h2 id="three-jobs">1. One workflow, three jobs, one summary</h2>
+  <p>The shape is unglamorous and it is the whole design. Three independent jobs run on the same event, each reads its own input, and their results converge where a reviewer already looks. Nothing here is clever; what makes it work is that a human opening a pull request sees three named checks rather than one ambiguous red cross.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Three jobs, one tab</div>
+    <div class="fig-claim">Independent checks converge, and each names the question it failed on.</div>
+    <div class="mermaid">
+flowchart TB
+  E["A pull request is opened or updated"] --> A["sast - semgrep ci, diff-aware"]
+  E --> B["sca - osv-scanner, uploads SARIF"]
+  E --> C["secrets - full clone, verified results only"]
+  A --> S["Three named checks on the pull request"]
+  B --> S
+  B --> T["Security tab - the finding on a line"]
+  C --> S
+  S --> R["A reviewer who can tell which question failed"]
+    </div>
+    <figcaption>Only the SCA job here uploads SARIF, so only its findings land on a line in the Security tab. That asymmetry is worth designing around rather than discovering: a check that fails without saying where is a check people re-run rather than read.
+    <b>Three named checks beat one aggregate, because the name is what tells a reviewer which remedy to reach for.</b></figcaption>
+  </figure>
+
+  <p>Here is what one of those vendors publishes for its own job, quoted whole because the comments are half the teaching - note the four separate triggers, and the path filter that re-scans the branch only when the workflow itself changes.</p>
+
+  <div class="code-cap">.github/workflows/semgrep.yml &middot; docs.semgrep.dev/semgrep-ci/sample-ci-configs &middot; Semgrep documentation example &middot; quoted with attribution</div>
+  <pre><code class="language-yaml"># Name of this GitHub Actions workflow.
+name: Semgrep
+
+on:
+  # Scan changed files in PRs (diff-aware scanning):
+  pull_request: {}
+  # Scan on-demand through GitHub Actions interface:
+  workflow_dispatch: {}
+  # Scan mainline branches if there are changes to .github/workflows/semgrep.yml:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - .github/workflows/semgrep.yml
+  # Schedule the CI job (this method uses cron syntax):
+  schedule:
+    - cron: '20 17 * * *' # Sets Semgrep to scan every day at 17:20 UTC.
+    # It is recommended to change the schedule to a random time.
+
+permissions:
+  contents: read
+
+jobs:
+  semgrep:
+    # User definable name of this GitHub Actions job.
+    name: semgrep/ci
+    # If you are self-hosting, change the following `runs-on` value:
+    runs-on: ubuntu-latest
+
+    container:
+      # A Docker image with Semgrep installed. Do not change this.
+      image: semgrep/semgrep
+
+    # Skip any PR created by dependabot to avoid permission issues:
+    if: (github.actor != 'dependabot[bot]')
+
+    steps:
+      # Fetch project source with GitHub Actions Checkout. Use either v3 or v4.
+      - uses: actions/checkout@v6
+      # Run the "semgrep ci" command on the command line of the docker image.
+      - run: semgrep ci
+        env:
+          # Connect to Semgrep AppSec Platform through your SEMGREP_APP_TOKEN.
+          # Generate a token from Semgrep AppSec Platform > Settings
+          # and add it to your GitHub secrets.
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+</code></pre>
+
+  <p>Two lines in there are decisions rather than boilerplate. <code>permissions: contents: read</code> at the top of the file sets the floor for every job, so a job that needs more has to say so and a reviewer can see which one did. And the <code>if</code> that skips pull requests opened by the dependency bot is a hint about the whole class: a workflow triggered by somebody else's change is a different trust problem from a workflow triggered by yours.</p>
+
+  <h2 id="diff-aware">2. Diff-aware scanning is what makes a gate survivable</h2>
+  <p>Run any scanner over a repository older than a year and you get a wall. Semgrep's platform scans <a href="https://docs.semgrep.dev/semgrep-ci/sample-ci-configs">"only changes in files when running on a pull request or merge request"</a>, which "keeps the scan fast and reduces finding duplication". That single behaviour is the difference between a check people read and a check people re-run until it goes green by luck.</p>
+  <p>The general form of the idea outlives any one tool: <b>gate on the delta, not the total.</b> Record what the tree already fails, fail the build on anything new, and fail it again when a recorded failure stops happening so the record cannot rot. This repository does exactly that for its own page checker, and the mechanism is worth reading because it is fifty lines rather than a product.</p>
+
+  <div class="code-cap">scripts/check_pages_gate.py, the docstring &middot; this repository &middot; content CC BY 4.0, code MIT &middot; reproduced verbatim</div>
+  <pre><code class="language-text">It cannot simply be made a gate as it stands, because the hub carries failures
+it already reported before anyone was listening. A gate that is red on the day
+it lands teaches everyone to ignore it, so the failures that exist today are
+recorded in ``scripts/check-pages-baseline.txt`` and the gate is on the
+difference:
+
+* a failure that is not in the baseline fails the run - that is a regression,
+  and it is caught on the pull request that causes it;
+* a failure in the baseline that no longer happens also fails the run, with the
+  command to refresh the file - that is how the debt only ever gets smaller.
+</code></pre>
+
+  <p>Apply that to your scanners and the arithmetic of adoption changes. The backlog stops being a reason not to turn the check on, because the check is not about the backlog. It is about whether this branch made things worse.</p>
+
+  <h2 id="assemble">3. Assemble the workflow</h2>
+  <p>The composition below is ours; each job is written to the shape its vendor publishes. Untick a job to see what a partial gate looks like, and notice which permissions travel with which job.</p>
+
+  <figure class="diagram assembler" id="security-workflow-builder">
+    <div class="fig-cap">Build the security workflow</div>
+    <div class="fig-claim">Only the SCA job needs write access, and it declares it itself.</div>
+
+    <div class="build-controls">
+      <label><input type="checkbox" data-part="head" checked> triggers, and the permission floor</label>
+      <label><input type="checkbox" data-part="sast" checked> SAST - your rules and the registry</label>
+      <label><input type="checkbox" data-part="sca" checked> SCA - dependencies, with SARIF</label>
+      <label><input type="checkbox" data-part="secrets" checked> secrets - the full history</label>
+    </div>
+
+    <div class="asm-out">
+      <div class="code-cap">.github/workflows/security.yml &middot; ours, each job written to its vendor's published shape &middot; hub content, CC BY 4.0 &middot; reproduce freely</div>
+      <pre><code class="language-yaml">name: Security
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 12 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+
+# SAST - your own rules, over the changed files
+  sast:
+    name: semgrep/ci
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    if: (github.actor != 'dependabot[bot]')
+    steps:
+      - uses: actions/checkout@v6
+      - run: semgrep ci
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}
+
+# SCA - dependencies, and the only job that writes
+  sca:
+    name: osv-scanner
+    permissions:
+      actions: read
+      security-events: write
+      contents: read
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@v2.5.0"
+
+# secrets - the full history, verified results only
+  secrets:
+    name: trufflehog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Secret Scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --results=verified,unknown
+</code></pre>
+    </div>
+
+    <template data-part="head">name: Security
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  schedule:
+    - cron: "30 12 * * 1"
+
+permissions:
+  contents: read
+
+jobs:</template>
+    <template data-part="sast"># SAST - your own rules, over the changed files
+  sast:
+    name: semgrep/ci
+    runs-on: ubuntu-latest
+    container:
+      image: semgrep/semgrep
+    if: (github.actor != 'dependabot[bot]')
+    steps:
+      - uses: actions/checkout@v6
+      - run: semgrep ci
+        env:
+          SEMGREP_APP_TOKEN: ${{ secrets.SEMGREP_APP_TOKEN }}</template>
+    <template data-part="sca"># SCA - dependencies, and the only job that writes
+  sca:
+    name: osv-scanner
+    permissions:
+      actions: read
+      security-events: write
+      contents: read
+    uses: "google/osv-scanner-action/.github/workflows/osv-scanner-reusable-pr.yml@v2.5.0"</template>
+    <template data-part="secrets"># secrets - the full history, verified results only
+  secrets:
+    name: trufflehog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - name: Secret Scanning
+        uses: trufflesecurity/trufflehog@main
+        with:
+          extra_args: --results=verified,unknown</template>
+
+    <div class="build-readout">
+      <span><b data-asm-out="parts">4</b> of 4 jobs</span>
+      <span><b data-asm-out="lines">48</b> lines of workflow</span>
+    </div>
+    <figcaption>The two details that are not decoration: <code>fetch-depth: 0</code> on the secrets job, because a secret scanner reads history rather than the working tree, and the job-level <code>permissions</code> block on the SCA job, because uploading SARIF needs <code>security-events: write</code> and nothing else in this file does.
+    <b>Permissions belong on the job that needs them, so the file itself shows a reviewer which job can write.</b></figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th>Job</th><th>What it reads</th><th>Permissions it needs</th><th>What a failure means</th></tr></thead>
+    <tbody>
+      <tr><td>sast</td><td>changed files in the branch</td><td><code>contents: read</code></td><td>fix the code, or narrow the rule</td></tr>
+      <tr><td>sca</td><td>manifests and lockfiles</td><td>plus <code>security-events: write</code></td><td>bump the version, or record why not</td></tr>
+      <tr><td>secrets</td><td>the full git history</td><td><code>contents: read</code>, full clone</td><td>rotate first, then purge the history</td></tr>
+    </tbody>
+  </table>
+
+  <h2 id="write-side">4. The write side: something has to open the fix</h2>
+  <p>A scanner that only reports leaves every remedy to a human with a queue. Dependency updates are the one class where the fix is mechanical enough to automate, which is what Dependabot is: a bot that opens the pull request the SCA finding implies. Its published default is <b>five open version-update pull requests at a time</b>, and grouping combines several dependencies into one pull request instead of one each.</p>
+
+  <div class="code-cap">.github/dependabot.yml &middot; docs.github.com, Dependabot configuration options &middot; GitHub Docs code samples are MIT &middot; reproduced verbatim</div>
+  <pre><code class="language-yaml"># Basic `dependabot.yml` file with
+# minimum configuration for two package managers
+
+version: 2
+updates:
+  # Enable version updates for npm
+  - package-ecosystem: "npm"
+    # Look for `package.json` and `lock` files in the `root` directory
+    directory: "/"
+    # Check the npm registry for updates every day (weekdays)
+    schedule:
+      interval: "daily"
+
+  # Enable version updates for Docker
+  - package-ecosystem: "docker"
+    # Look for a `Dockerfile` in the `root` directory
+    directory: "/"
+    # Check for updates once a week
+    schedule:
+      interval: "weekly"
+</code></pre>
+
+  <figure class="diagram">
+    <div class="fig-cap">The update budget</div>
+    <div class="fig-claim">Grouping turns a default of five open pull requests into one.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="A bar chart comparing the number of open version-update pull requests under two configurations: five, the documented default limit, drawn as five separate segments, and one, the number when the same updates are combined by a group rule. A note records that security updates are not subject to the limit.">
+      <line class="grid" x1="200" y1="50" x2="200" y2="180"/>
+      <line class="grid" x1="290" y1="50" x2="290" y2="180"/>
+      <line class="grid" x1="380" y1="50" x2="380" y2="180"/>
+      <line class="grid" x1="470" y1="50" x2="470" y2="180"/>
+      <line class="grid" x1="560" y1="50" x2="560" y2="180"/>
+      <line class="axis" x1="200" y1="180" x2="200" y2="50"/>
+      <text class="lbl-sm" x="200" y="198" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="290" y="198" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="380" y="198" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="470" y="198" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="560" y="198" text-anchor="middle">5</text>
+
+      <rect class="m-alarm" x="200" y="62" width="70" height="30"/>
+      <rect class="m-alarm" x="274" y="62" width="70" height="30"/>
+      <rect class="m-alarm" x="348" y="62" width="70" height="30"/>
+      <rect class="m-alarm" x="422" y="62" width="70" height="30"/>
+      <rect class="m-alarm" x="496" y="62" width="70" height="30"/>
+      <text class="lbl-sm" x="576" y="82">5</text>
+      <text class="lbl-sm" x="192" y="82" text-anchor="end">default limit</text>
+
+      <rect class="m-stat" x="200" y="118" width="70" height="30"/>
+      <text class="lbl-sm" x="280" y="138">1</text>
+      <text class="lbl-sm" x="192" y="138" text-anchor="end">one group rule</text>
+
+      <text class="read" x="320" y="226" text-anchor="middle">The limit is a cap on open version updates. Security updates are not subject to it.</text>
+      <text class="ttl" x="20" y="34">open version-update pull requests, from the documented default</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>one pull request per dependency</span><span><i class="sw-stat"></i>combined by a group rule</span></div>
+    <figcaption>Both numbers are documented rather than measured: five is the published default for <code>open-pull-requests-limit</code>, and one is what a single group rule produces for the dependencies it covers.
+    <b>The write side has its own noise economy, and grouping is the same fix as diff-aware scanning wearing different clothes.</b></figcaption>
+  </figure>
+
+  <h2 id="prevent">5. One control here prevents rather than reports</h2>
+  <p>Every job in that workflow tells you about something that already happened. <b>Push protection</b> is different: it "blocks pushes that contain secrets <i>before</i> they reach your repository", across command-line pushes, edits in the web interface, uploads and API requests. When it fires, the developer gets a message explaining the block rather than an alert to triage later.</p>
+  <p>It also ships with a bypass, and the bypass is the honest part. Anyone with write access can push anyway by choosing a reason - it is a test, it is a false positive, they will fix it later - and organisations can delegate who may do that. Read that as a design statement rather than a weakness: a preventive control with no escape hatch gets turned off, and a bypass with a recorded reason is a control that survives contact with a deadline.</p>
+
+  <div class="callout warn">
+    The most dangerous workflow you can write in this module is one that runs <b>untrusted pull-request code with write permissions</b>. A fork's branch is somebody else's code, and a job that checks it out, runs its build, and holds a token that can push or comment has handed that person your token.
+    Keep <code>permissions: contents: read</code> at the file level, add write scopes on the single job that needs them, and never grant them to a job that executes code from the branch under test. This is also why the deny list in <a href="0730-permissions-are-the-defence.html">lesson 0730</a> includes <code>Edit(.github/workflows/**)</code>: an agent that can edit the gate is an agent that is not gated.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Your secrets job reports nothing, though you know a key was committed and later deleted. What is the most likely cause?</div>
+      <button class="q-opt">The key was rotated, so the scanner skipped it</button>
+      <button class="q-opt">The checkout was shallow, so history was not read</button>
+      <button class="q-opt">SARIF upload failed, so the finding never showed</button>
+      <button class="q-opt">The scanner only reads files listed in the diff</button>
+      <div class="q-fb">A secret scanner reads history, and a default checkout is shallow, which is why the published step sets <code>fetch-depth: 0</code>. Rotation changes whether a finding is <i>verified</i>, not whether the string is found, so the first option would still leave an unverified result. The third describes a real failure mode for the SCA job but this job posts a check result rather than SARIF. The fourth describes diff-aware SAST behaviour applied to the wrong scanner.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">A repository has 400 existing findings and your team refuses to turn the scanner on. Which change unblocks it?</div>
+      <button class="q-opt">Record the current failures and gate on new ones only</button>
+      <button class="q-opt">Set the severity threshold above every existing finding</button>
+      <button class="q-opt">Run the scan nightly rather than on the pull request</button>
+      <button class="q-opt">Turn the check on as advisory and never fail the build</button>
+      <div class="q-fb">Gating on the delta is the mechanism that lets a gate land green on a repository with a real backlog, and the second half - failing when a recorded failure stops happening - is what stops the record rotting. Raising a threshold hides the backlog and the new findings equally, and you never learn which. Moving the scan off the pull request removes the only moment somebody is looking at the change. An advisory check that can never fail is a report, and this whole page is about the difference.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a repository and a branch</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Land the gate on your capstone repository and make all three checks fail on purpose.</p>
+      <p>Add the workflow above. On a branch, plant three defects at once: a call your own rule from <a href="0710-writing-a-rule.html">lesson 0710</a> catches, a dependency with a published advisory, and a credential-shaped string in a new file. Open a pull request.</p>
+      <p><b>Record three things:</b> which check failed for which reason, whether the SCA finding appeared on a line in the Security tab, and how long the whole workflow took. Then fix all three and confirm green.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>For the dependency, pin a deliberately old version of something you already depend on and let the scanner tell you whether that version carries an advisory. For the credential, generate a random string in the shape of a key rather than using a real one - an unverified finding is still a finding.</p></details>
+
+    <details class="solution"><summary>Show what the three failures should look like</summary>
+      <ol class="worked">
+        <li><b>The SAST check fails with your rule's message.</b> If it fails with somebody else's rule id instead, your registry configuration is doing the work and you have not yet proved that your own rule runs in CI - point <code>semgrep</code> at your rules directory explicitly.</li>
+        <li><b>The SCA check fails and its finding is on a line.</b> If the check is red but the Security tab is empty, the job is missing <code>security-events: write</code>, which is the single most common cause of a finding that exists in the log and nowhere a reviewer looks.</li>
+        <li><b>The secrets check fails as unverified</b>, because a random string in the shape of a key cannot be confirmed against any service. That is the correct outcome, and it is a good moment to decide whether your gate should fail on unverified results at all.</li>
+        <li><b>Note the wall-clock time.</b> A gate that takes eleven minutes is a gate people push past by merging first, which is a process defect you can only see by measuring it.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Three separate red checks, not one. If you see a single failing job, you have written one job with three steps, and the first failing step will hide the other two - which is the exact ambiguity <a href="0700-the-three-scanners.html">lesson 0700</a> warned about.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to read your workflow file and list every job that can write to the repository, and what triggers each one. Then ask it which of those jobs runs code from the branch being tested. If the two lists overlap, you have found the thing to fix before anything else on this page.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Read the sample CI configurations in full, including the self-hosted and non-GitHub variants, and note how much of each file is trigger design rather than scanner configuration: <a href="https://docs.semgrep.dev/semgrep-ci/sample-ci-configs">Semgrep sample CI configs</a>. Then read <a href="https://google.github.io/osv-scanner/github-action/">the OSV-Scanner action</a> for the reusable-workflow pattern and the permissions it declares.</p>
+
+  <div class="pager">
+    <a href="0740-sandboxes-and-hooks.html"><span class="dir">&larr; Previous</span><span class="ttl">Sandboxes and hooks</span></a>
+    <a class="nxt" href="0760-triage-and-auto-fix.html"><span class="dir">Next &rarr;</span><span class="ttl">Triage and auto-fix</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0750 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

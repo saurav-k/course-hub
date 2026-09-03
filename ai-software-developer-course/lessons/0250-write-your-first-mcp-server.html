@@ -1,0 +1,514 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Write your first MCP server - AI Software Developer</title>
+<meta name="description" content="One useful tool is about forty lines. Two languages, both verified against a running server with raw JSON-RPC and no handshake, and both mounted from committed configuration.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Advanced context engineering &middot; Lesson 0250</div>
+  <h1>One useful tool is about forty lines, and mounting it changes what the model plans</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">13 min</span>
+    Both servers below were built and driven with raw JSON-RPC while this page was written.
+    &middot; <a href="https://modelcontextprotocol.io/docs/develop/build-server">Build an MCP server</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The same server - one tool, one resource, one prompt - is <span class="keynum">41</span> lines of Python and <span class="keynum">66</span> lines of TypeScript.</li>
+      <li>The two languages disagree about <b>where the contract comes from</b>: one derives the schema from type hints and a docstring, the other from a schema you write.</li>
+      <li><b>Drive it by hand before any client touches it.</b> Four requests over stdin and stdout, no handshake, and the wire stops being a mystery.</li>
+      <li>Mounting is one committed file, and in Claude Code a project-scoped server <b>waits for a human to approve it</b> before the model ever sees the schema.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">From reading to writing</div>
+    <div class="fig-claim">You have read the protocol - this is the smallest thing that speaks it.</div>
+    <div class="mermaid">
+flowchart LR
+  P["Lesson 0240&lt;br/&gt;three roles and a wire format"] --> T["THIS PAGE&lt;br/&gt;a server you can run today"]
+  T --> N["Lesson 0260&lt;br/&gt;making the tool worth calling"]
+  W["Your capstone repository&lt;br/&gt;the first thing it exposes"] -.- T
+    </div>
+    <figcaption>The previous page was the protocol from the outside. This is the smallest program that answers it, in two languages, with the real responses it gave.
+    <b>You do not understand a protocol until something you wrote has spoken it badly at least once.</b></figcaption>
+  </figure>
+
+  <h2 id="typescript">1. The server, in TypeScript</h2>
+  <p>Three files. The dependencies first, then the project shape, then the program.
+  The tool is deliberately dull: count the lines in a file, so an agent can decide whether reading the whole thing is worth the budget from <a href="0200-the-window-is-a-budget.html">lesson 0200</a>.</p>
+
+  <div class="code-cap">install &middot; the two packages the quickstart names &middot; run in an empty directory</div>
+  <pre><code>npm install @modelcontextprotocol/server zod
+npm install -D @types/node typescript
+</code></pre>
+
+  <div class="code-cap">package.json &middot; the shape the MCP quickstart prescribes &middot; written for this page &middot; CC BY 4.0 with the rest of this repository</div>
+  <pre><code>{
+  "name": "repo-facts",
+  "version": "1.0.0",
+  "type": "module",
+  "bin": { "repo-facts": "./build/index.js" },
+  "scripts": { "build": "tsc &amp;&amp; chmod 755 build/index.js" },
+  "files": ["build"],
+  "dependencies": {
+    "@modelcontextprotocol/server": "^2.0.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.4.1",
+    "typescript": "^7.0.2"
+  }
+}
+</code></pre>
+
+  <div class="code-cap">tsconfig.json &middot; MCP quickstart, Model Context Protocol documentation &middot; CC-BY-4.0 &middot; reproduced verbatim</div>
+  <pre><code>{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "Node16",
+    "moduleResolution": "Node16",
+    "types": ["node"],
+    "outDir": "./build",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules"]
+}</code></pre>
+
+  <div class="code-cap">src/index.ts &middot; written for this page, against @modelcontextprotocol/server 2.0.0 &middot; CC BY 4.0 with the rest of this repository &middot; compiles clean under strict</div>
+  <pre><code>#!/usr/bin/env node
+// A minimal MCP server: one tool, one resource, one prompt, over stdio.
+
+import { McpServer } from "@modelcontextprotocol/server";
+import { StdioServerTransport } from "@modelcontextprotocol/server/stdio";
+import { promises as fs } from "node:fs";
+import { z } from "zod";
+
+const server = new McpServer({ name: "repo-facts", version: "1.0.0" });
+
+server.registerTool(
+  "count_lines",
+  {
+    description:
+      "Count the lines in a UTF-8 text file and return the number. " +
+      "Use it to size a file before deciding whether to read the whole thing. " +
+      "It does not return the contents, and it fails on a file that is not UTF-8 text.",
+    inputSchema: z.object({
+      path: z.string().describe("Absolute path to the file to count"),
+    }),
+  },
+  async ({ path }) =&gt; {
+    try {
+      const text = await fs.readFile(path, "utf8");
+      const lines = text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
+      return { content: [{ type: "text", text: String(lines) }] };
+    } catch (err) {
+      return {
+        isError: true,
+        content: [{ type: "text", text: `cannot count ${path}: ${(err as Error).message}` }],
+      };
+    }
+  },
+);
+
+server.registerResource(
+  "conventions",
+  "repo://conventions",
+  { description: "The repository's coding conventions", mimeType: "text/markdown" },
+  async (uri) =&gt; ({
+    contents: [{ uri: uri.href, mimeType: "text/markdown", text: "# Conventions\n\n- One idea per commit.\n" }],
+  }),
+);
+
+server.registerPrompt(
+  "review_file",
+  {
+    description: "Ask for a focused review of one file",
+    argsSchema: z.object({ path: z.string().describe("File to review") }),
+  },
+  ({ path }) =&gt; ({
+    messages: [
+      { role: "user" as const, content: { type: "text" as const, text: `Review ${path}. Name defects only, most severe first.` } },
+    ],
+  }),
+);
+
+async function main(): Promise&lt;void&gt; {
+  await server.connect(new StdioServerTransport());
+  console.error("repo-facts MCP server running on stdio");
+}
+
+main().catch((err: unknown) =&gt; {
+  console.error("fatal:", err);
+  process.exit(1);
+});</code></pre>
+
+  <p>Build it with <code>npx tsc</code> and you have <code>build/index.js</code>. Nothing here is framework: <code>registerTool</code>, <code>registerResource</code> and <code>registerPrompt</code> are the three primitives from <a href="0240-mcp-in-one-page.html">lesson 0240</a>, one call each.</p>
+
+  <h2 id="python">2. The same server, in Python</h2>
+
+  <div class="code-cap">install &middot; the SDK, with the optional command-line extra</div>
+  <pre><code>pip install "mcp[cli]"      # or: uv add "mcp[cli]"
+</code></pre>
+
+  <div class="code-cap">repo_facts.py &middot; written for this page, against mcp 2.1.1 &middot; CC BY 4.0 with the rest of this repository &middot; run with raw JSON-RPC while writing it</div>
+  <pre><code>"""A minimal MCP server: one tool, one resource, one prompt, over stdio."""
+
+from pathlib import Path
+
+from mcp.server import MCPServer
+
+mcp = MCPServer("repo-facts")
+
+
+@mcp.tool()
+def count_lines(path: str) -&gt; str:
+    """Count the lines in a UTF-8 text file and return the number.
+
+    Use it to size a file before deciding whether to read the whole thing.
+    It does not return the contents, and it fails on a file that is not
+    UTF-8 text.
+
+    Args:
+        path: Absolute path to the file to count.
+    """
+    try:
+        text = Path(path).read_text(encoding="utf-8")
+    except (OSError, UnicodeDecodeError) as err:
+        return f"cannot count {path}: {err}"
+    return str(len(text.splitlines()))
+
+
+@mcp.resource("repo://conventions", mime_type="text/markdown")
+def conventions() -&gt; str:
+    """The repository's coding conventions."""
+    return "# Conventions\n\n- One idea per commit.\n"
+
+
+@mcp.prompt()
+def review_file(path: str) -&gt; str:
+    """Ask for a focused review of one file."""
+    return f"Review {path}. Name defects only, most severe first."
+
+
+if __name__ == "__main__":
+    mcp.run(transport="stdio")</code></pre>
+
+  <p>Twenty-five fewer lines, and none of the difference is terseness.
+  The Python SDK reads the type hints and the docstring and builds the schema and the description from them, so the contract is written where the function is.
+  The TypeScript SDK asks you for a Zod schema and a description string, so the contract is written beside the function.
+  Neither is better; they fail differently, and the next section shows how.</p>
+
+  <h2 id="the-probe">3. Drive it by hand, before a client touches it</h2>
+  <p>Both servers speak stdio: newline-delimited JSON-RPC on stdin and stdout.
+  So you can drive one from a script with no client, no editor and no model, which is the fastest way to find out whether your server works and the only way to see exactly what the model will be shown.
+  Under revision <code>2026-07-28</code> there is nothing to do first: the four requests below are the whole session.</p>
+
+  <figure class="diagram stepper" id="mcp-probe">
+    <div class="fig-cap">Four requests, no handshake</div>
+    <div class="fig-claim">Each request is self-contained and the order does not matter.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user">
+        <span class="step-role">request 1</span>
+        <span class="step-body"><code>tools/list</code>, carrying only <code>_meta</code>. The server answers with one tool, its description and its <code>inputSchema</code>.</span>
+      </li>
+      <li class="step" data-actor="tool">
+        <span class="step-role">what came back</span>
+        <span class="step-body">The TypeScript entry is 449 characters of JSON. The Python entry is 592, because it also carries a derived <code>outputSchema</code> and the whole docstring.</span>
+      </li>
+      <li class="step" data-actor="user">
+        <span class="step-role">request 2</span>
+        <span class="step-body"><code>tools/call</code> with <code>name</code> and <code>arguments</code>, against a file holding three lines. Both servers answered <code>3</code>.</span>
+      </li>
+      <li class="step" data-actor="tool">
+        <span class="step-role">the two results differ</span>
+        <span class="step-body">TypeScript returns <code>content</code> alone. Python returns <code>content</code>, <code>isError: false</code> and <code>structuredContent</code>, so a client must never assume the last one is present.</span>
+      </li>
+      <li class="step" data-actor="user">
+        <span class="step-role">requests 3 and 4</span>
+        <span class="step-body"><code>resources/list</code> and <code>prompts/list</code>, which return the resource URI and the prompt's argument list. Neither reaches the model unless the host chooses to use them.</span>
+      </li>
+      <li class="step" data-actor="error">
+        <span class="step-role">the failure to expect</span>
+        <span class="step-body">Any stray write to <code>stdout</code> - a debug <code>print</code>, a library banner - lands between two JSON messages and the client reports something unrelated. Logging goes to <code>stderr</code>.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">6</b></span>
+      <span><b data-step-out="left">5</b> still to play</span>
+    </div>
+    <figcaption>The exchange as it actually happened, driving each server as a subprocess with a twenty-line script. Nothing was sent before request 1 and nothing was kept between requests.
+    <b>Two SDKs, one protocol, and three differences in the response that a client cannot assume away.</b></figcaption>
+  </figure>
+
+  <div class="code-cap">tools/list, request and both answers &middot; captured while writing this page &middot; formatted for width, values unchanged</div>
+  <pre><code>&gt;&gt; {"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"_meta":{
+     "io.modelcontextprotocol/protocolVersion":"2026-07-28",
+     "io.modelcontextprotocol/clientInfo":{"name":"probe","version":"1.0.0"},
+     "io.modelcontextprotocol/clientCapabilities":{}}}}
+
+&lt;&lt; TypeScript
+{"result":{"tools":[{"name":"count_lines","description":"Count the lines in a
+ UTF-8 text file and return the number. Use it to size a file before deciding
+ whether to read the whole thing. It does not return the contents, and it fails
+ on a file that is not UTF-8 text.","inputSchema":{"type":"object",
+ "$schema":"https://json-schema.org/draft/2020-12/schema","properties":{"path":
+ {"type":"string","description":"Absolute path to the file to count"}},
+ "required":["path"]}}]},"jsonrpc":"2.0","id":1}
+
+&lt;&lt; Python
+{"jsonrpc":"2.0","id":1,"result":{"cacheScope":"private","resultType":"complete",
+ "tools":[{"description":"Count the lines in a UTF-8 text file and return the
+ number.\n\nUse it to size a file before deciding whether to read the whole
+ thing.\nIt does not return the contents, and it fails on a file that is not
+ \nUTF-8 text.\n\nArgs:\n    path: Absolute path to the file to count.\n",
+ "inputSchema":{"type":"object","properties":{"path":{"title":"Path",
+ "type":"string"}},"required":["path"],"title":"count_linesArguments"},
+ "name":"count_lines","outputSchema":{"properties":{"result":{"title":"Result",
+ "type":"string"}},"required":["result"],"title":"count_linesOutput",
+ "type":"object"}}],"ttlMs":0,"_meta":{"io.modelcontextprotocol/serverInfo":
+ {"name":"repo-facts","version":""}}}}
+</code></pre>
+
+  <figure class="diagram">
+    <div class="fig-cap">What the SDK generated</div>
+    <div class="fig-claim">Three fields the model reads were generated rather than written.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A diagram mapping four things the author wrote in the Python server onto the fields that appeared in the tools list response. The function name becomes the tool name, the docstring becomes the whole description including its Args block, the type hints become the input schema, and the return type becomes an output schema the author never wrote, which is drawn as the focus of the figure.">
+      <text class="d-mono" x="20" y="30">what you wrote</text>
+      <rect class="d-bound" x="16" y="38" width="252" height="182" rx="6"/>
+      <rect class="d-box" x="30" y="52" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="142" y="71" text-anchor="middle">def count_lines</text>
+      <rect class="d-box" x="30" y="90" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="142" y="109" text-anchor="middle">the docstring</text>
+      <rect class="d-box" x="30" y="128" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="142" y="147" text-anchor="middle">path: str</text>
+      <rect class="d-box" x="30" y="166" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="142" y="185" text-anchor="middle">-&gt; str</text>
+
+      <path class="d-flow s-signal" d="M270 67 L370 67"/>
+      <path class="d-flow s-signal" d="M270 105 L370 105"/>
+      <path class="d-flow s-signal" d="M270 143 L370 143"/>
+      <path class="d-flow s-alarm" d="M270 181 L370 181"/>
+
+      <text class="d-mono" x="376" y="30">what the model receives</text>
+      <rect class="d-bound" x="372" y="38" width="252" height="182" rx="6"/>
+      <rect class="d-box" x="386" y="52" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="498" y="71" text-anchor="middle">"name"</text>
+      <rect class="d-box" x="386" y="90" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="498" y="109" text-anchor="middle">"description", Args block and all</text>
+      <rect class="d-box" x="386" y="128" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="498" y="147" text-anchor="middle">"inputSchema"</text>
+      <rect class="d-focus" x="386" y="166" width="224" height="30" rx="4"/>
+      <text class="lbl-sm" x="498" y="185" text-anchor="middle">"outputSchema"</text>
+
+      <text class="read" x="320" y="248" text-anchor="middle">The bottom row is the one nobody expects - a return type became a schema in the prompt.</text>
+      <text class="d-mono" x="320" y="272" text-anchor="middle">so in Python the docstring is context you pay for, not documentation nobody reads</text>
+      <text class="d-mono" x="320" y="290" text-anchor="middle">TypeScript sends no outputSchema at all for the same tool</text>
+    </svg>
+    <figcaption>The mapping from the Python source to the JSON the model is handed. The accented box is the one field that exists because of a type annotation rather than because anybody decided the model should see it.
+    <b>In Python your docstring is a prompt, so write it for the model rather than for a code reviewer.</b></figcaption>
+  </figure>
+
+  <h2 id="the-inversion">4. Fewer lines, more prompt</h2>
+  <p>Put the two measurements side by side and they point in opposite directions, which is the thing worth knowing before you pick a language for this.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Source against schema</div>
+    <div class="fig-claim">The shorter server sends the longer tool definition.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two paired bar groups. On the left, source lines for the same server: 66 for TypeScript and 41 for Python. On the right, the size in characters of the single tool entry each one returned from tools slash list: 449 for TypeScript and 592 for Python. The two comparisons run in opposite directions.">
+      <line class="grid" x1="60" y1="70" x2="300" y2="70"/>
+      <line class="grid" x1="60" y1="130" x2="300" y2="130"/>
+      <line class="grid" x1="60" y1="190" x2="300" y2="190"/>
+      <line class="axis" x1="60" y1="240" x2="300" y2="240"/>
+      <text class="lbl-sm" x="52" y="74" text-anchor="end">75</text>
+      <text class="lbl-sm" x="52" y="134" text-anchor="end">50</text>
+      <text class="lbl-sm" x="52" y="194" text-anchor="end">25</text>
+      <text class="lbl-sm" x="52" y="244" text-anchor="end">0</text>
+      <rect class="m-stat" x="100" y="82" width="60" height="158"/>
+      <rect class="m-signal" x="200" y="142" width="60" height="98"/>
+      <text class="lbl-sm" x="130" y="74" text-anchor="middle">66</text>
+      <text class="lbl-sm" x="230" y="134" text-anchor="middle">41</text>
+      <text class="lbl-sm" x="130" y="260" text-anchor="middle">TypeScript</text>
+      <text class="lbl-sm" x="230" y="260" text-anchor="middle">Python</text>
+      <text class="ttl" x="60" y="286">source lines you maintain</text>
+
+      <line class="grid" x1="370" y1="70" x2="612" y2="70"/>
+      <line class="grid" x1="370" y1="130" x2="612" y2="130"/>
+      <line class="grid" x1="370" y1="190" x2="612" y2="190"/>
+      <line class="axis" x1="370" y1="240" x2="612" y2="240"/>
+      <text class="lbl-sm" x="362" y="74" text-anchor="end">750</text>
+      <text class="lbl-sm" x="362" y="134" text-anchor="end">500</text>
+      <text class="lbl-sm" x="362" y="194" text-anchor="end">250</text>
+      <text class="lbl-sm" x="362" y="244" text-anchor="end">0</text>
+      <rect class="m-stat" x="410" y="132" width="60" height="108"/>
+      <rect class="m-signal" x="510" y="98" width="60" height="142"/>
+      <text class="lbl-sm" x="440" y="124" text-anchor="middle">449</text>
+      <text class="lbl-sm" x="540" y="90" text-anchor="middle">592</text>
+      <text class="lbl-sm" x="440" y="260" text-anchor="middle">TypeScript</text>
+      <text class="lbl-sm" x="540" y="260" text-anchor="middle">Python</text>
+      <text class="ttl" x="370" y="286">characters of tool definition, per turn</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>TypeScript, schema written by hand</span><span><i class="sw-signal"></i>Python, schema derived</span></div>
+    <figcaption>Both figures were measured from the files and the captured responses on this page: <code>wc -l</code> for the left pair, the length of the single <code>tools</code> entry for the right pair. The derived schema is convenient to write and 32% larger on the wire.
+    <b>A convenience in your editor can be a permanent cost in the window, and the only way to see it is to read what your server actually sent.</b></figcaption>
+  </figure>
+
+  <table>
+    <thead><tr><th></th><th>TypeScript</th><th>Python</th></tr></thead>
+    <tbody>
+      <tr><td>Input schema</td><td>a Zod schema you write</td><td>derived from the type hints</td></tr>
+      <tr><td>Description</td><td>a separate string</td><td>the whole docstring, <code>Args:</code> block included</td></tr>
+      <tr><td>Output schema</td><td>none emitted</td><td>emitted from the return type</td></tr>
+      <tr><td>Parameter description</td><td>from <code>.describe()</code></td><td>absent from the schema</td></tr>
+      <tr><td>Result shape</td><td><code>content</code></td><td><code>content</code>, <code>isError</code> and <code>structuredContent</code></td></tr>
+      <tr><td>Error signal</td><td><code>isError: true</code> you set</td><td>a returned string, unless you raise</td></tr>
+    </tbody>
+  </table>
+  <p class="note-sm">Every row read from the two captured <code>tools/list</code> responses above rather than from either SDK's documentation.</p>
+
+  <h2 id="mount-it">5. Mount it, from a file you commit</h2>
+  <p>Both editors read a top-level <code>mcpServers</code> object, so a server moves between them with almost no edit.
+  Claude Code takes the file at <code>.mcp.json</code> in the repository root as the <b>project</b> scope, which is the one shared through version control.</p>
+
+  <div class="code-cap">.mcp.json &middot; Claude Code project scope &middot; Anthropic documentation, quoted with attribution &middot; reproduced verbatim in shape</div>
+  <pre><code>{
+  "mcpServers": {
+    "repo-facts": {
+      "type": "stdio",
+      "command": "node",
+      "args": ["./mcp-servers/repo-facts/build/index.js"]
+    }
+  }
+}
+</code></pre>
+
+  <div class="code-cap">.cursor/mcp.json &middot; Cursor project scope &middot; Cursor documentation, quoted with attribution &middot; documented rather than run</div>
+  <pre><code>{
+  "mcpServers": {
+    "repo-facts": {
+      "command": "node",
+      "args": ["./mcp-servers/repo-facts/build/index.js"]
+    }
+  }
+}
+</code></pre>
+
+  <p>Three differences are worth knowing before you copy one file to the other.
+  Claude Code requires an explicit <code>"type"</code> on a <code>url</code> entry, and reads a typeless entry as stdio: the failure is a skipped server and a message naming it, not a guess.
+  Cursor infers the transport from the presence of <code>url</code>.
+  And the two expand variables differently: Claude Code uses <code>${VAR}</code> and <code>${VAR:-default}</code> plus <code>${CLAUDE_PROJECT_DIR}</code>, while Cursor uses <code>${env:NAME}</code>, <code>${workspaceFolder}</code> and <code>${userHome}</code>.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">From file to prompt</div>
+    <div class="fig-claim">A human approves the server before the model ever sees a schema.</div>
+    <div class="mermaid">
+flowchart TB
+  F["you commit .mcp.json&lt;br/&gt;project scope, shared"] --> D["the client launches the server&lt;br/&gt;as a subprocess"]
+  D --> L["tools/list&lt;br/&gt;the client reads the schemas"]
+  L --> A["approval&lt;br/&gt;interactive sessions prompt first"]
+  A --> P["the schemas join the request&lt;br/&gt;and the model can call them"]
+  A -.- N["not approved&lt;br/&gt;the model never learns it exists"]
+    </div>
+    <figcaption>The mount path with the gate drawn where it actually is. Claude Code's documentation is explicit that "for security reasons, Claude Code prompts for approval in interactive sessions before using project-scoped servers from <code>.mcp.json</code> files", and that non-interactive runs load them without prompting.
+    <b>Committing a server config to a shared repository is a request for other people's trust, and in a headless run nobody is there to withhold it.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    Quoted from the same page: <b>"Verify you trust each server before connecting it. Servers that fetch external content can expose you to prompt injection risk."</b> A mounted server is a program running on your machine as you, and its tool descriptions are text that reaches the model. Module 7 owns that attack in full, in <a href="0720-the-agent-attack-surface.html">The agent attack surface</a>; the thing to hold from here is that the approval prompt is the last human gate and headless runs do not have it, so <code>disabledMcpjsonServers</code> and <code>--strict-mcp-config</code> exist for exactly that case.</div>
+
+  <h2 id="what-changed">6. What actually changed for the model</h2>
+  <p>Nothing, except that there is one more tool schema in the request.
+  No new capability arrived in the model, no protocol reached it, and the loop from module 1 runs exactly as it did before.
+  That is the payoff of <a href="0240-mcp-in-one-page.html">lesson 0240</a>'s layering and it is also the warning: you have just added a permanent per-turn cost to every task the agent does, useful or not.
+  <a href="0270-when-not-to-add-a-tool.html">Lesson 0270</a> is when not to.</p>
+  <p>For what a server must never do once other people depend on it - durable state, isolation, what it may reach - <a href="../../agent-engineering-course/lessons/0000-context-and-protocol.html">Context and Protocol, in Production Agent Engineering</a>, is the sibling that owns it, and this page deliberately stops short of it.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Your Python server works alone and every client call fails with a parse error. What do you check first?</div>
+      <button class="q-opt">Whether the client sent an initialize request</button>
+      <button class="q-opt">Whether anything printed to standard output</button>
+      <button class="q-opt">Whether the tool description is long enough</button>
+      <button class="q-opt">Whether the input schema names its own draft</button>
+      <div class="q-fb">On stdio the transport is the process's own standard output, and the rule is that nothing but a valid MCP message may go there, so one stray print corrupts the framing. The first option describes a handshake this revision does not have. The third and fourth are real quality questions about a tool definition and neither can produce a parse error, because both live inside a message that parses.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">You write the same tool in both SDKs. Which difference costs context on every turn?</div>
+      <button class="q-opt">Python needs no explicit schema written</button>
+      <button class="q-opt">TypeScript needs a build step to run</button>
+      <button class="q-opt">Python returns structured content as well</button>
+      <button class="q-opt">Python also sends a derived output schema</button>
+      <div class="q-fb">The output schema is part of the tool definition, so it is in the request on every turn whether or not the tool is called - which is why the Python entry measured 592 characters against 449. The first option is the convenience that produces it, not the cost. The second is a build-time difference the model never sees, and the third is in a result, so it is paid once per call rather than once per turn.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill easy">foundation</span></div>
+
+    <div class="p-stem">
+      <p>Write one MCP server exposing one tool your capstone repository actually wants: a test-runner summary, a schema lookup, a deploy-status check. Either language.</p>
+      <p><b>Drive it by hand first</b> with a script that writes JSON-RPC to its stdin and reads its stdout, exactly as the trace above does. Then <b>mount it from committed configuration</b> in two clients and confirm the approval gate fires before the tool is usable.</p>
+      <p><b>Measure the definition</b> your server sends: the length of its single <code>tools</code> entry, in characters. Divide by four for a rough token count.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Your probe script needs about twenty lines: spawn the server, write each request followed by a newline, and split the output on newlines. Give the process a moment before closing stdin, because a response can arrive out of order relative to the requests.</p></details>
+
+    <details class="solution"><summary>Show what a good pass looks like</summary>
+      <ol class="worked">
+        <li><b>Pick a tool with a real answer.</b> Something that returns a number or a short list. A tool that returns a whole file has spent your budget for you, which is the failure lesson 0260 opens with.</li>
+        <li><b>Probe before mounting.</b> Four requests, no handshake. If <code>tools/list</code> works from a script, every client failure after that is configuration rather than code.</li>
+        <li><b>Read the description that came back, not the one you wrote.</b> In Python they differ: the <code>Args:</code> block travels with it.</li>
+        <li><b>Mount in both clients from files in the repository</b>, not from a global config, so a colleague cloning the repository gets the same server.</li>
+        <li><b>Watch the approval prompt.</b> If it did not appear, you are in a non-interactive session or the choice is already remembered, and both are worth knowing about your own setup.</li>
+        <li><b>Divide the entry length by four.</b> That is roughly what this tool now costs on every turn of every task, forever.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> One tool with a four-sentence description and a single string parameter lands somewhere around 400 to 700 characters, so roughly 100 to 175 tokens per turn. If yours is over 2,000 characters the schema is carrying something that belongs in the tool result instead, and if it is under 150 the description is almost certainly too thin for the model to know when to use it.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the probe feels fiddly, ask your agent to write the twenty-line script for your language and then explain each line of the request it constructs. If you want to feel the difference the tool makes, ask the same agent the same question twice - once with the server mounted and once without - and compare how many tool calls each answer took.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The quickstart both servers here are written against, in six languages: <a href="https://modelcontextprotocol.io/docs/develop/build-server">Build an MCP server</a>. For mounting, read <a href="https://code.claude.com/docs/en/mcp">Claude Code's MCP page</a> for the three scopes and the approval rule, and <a href="https://cursor.com/docs/context/mcp">Cursor's</a> for the interpolation syntax that differs. The hub's survey of how thirteen harnesses adopted the protocol is <a href="../../coding-harness-course/lessons/0070-mcp-and-tools.html">MCP and the tool ecosystem</a>, whose wire diagram predates revision <code>2026-07-28</code>.</p>
+
+  <div class="pager">
+    <a href="0240-mcp-in-one-page.html"><span class="dir">&larr; Previous</span><span class="ttl">MCP in one page</span></a>
+    <a class="nxt" href="0260-tools-are-designed-for-a-reader-who-cannot-ask.html"><span class="dir">Next &rarr;</span><span class="ttl">Tools are designed for a reader who cannot ask</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0250 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

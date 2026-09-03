@@ -1,0 +1,344 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session control from the CLI - AI Software Developer</title>
+<meta name="description" content="A non-interactive run still leaves a session behind, and capturing its id is what turns a one-shot command into a multi-turn script.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Agent skills and the CLI &middot; Lesson 0360</div>
+  <h1>The one-shot run leaves a session behind, and that is your second turn</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">13 min</span>
+    Claude Code and Gemini CLI from their documentation; Codex read from Rust source at a pinned commit.
+    &middot; <a href="https://code.claude.com/docs/en/headless">Claude Code headless</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A <code>-p</code> run creates a resumable <b>session</b> like any other. <code>--continue</code> picks up the most recent one; <code>--resume &lt;id&gt;</code> picks up a named one.</li>
+      <li>Capture the id from the JSON payload and you have a <b>handle</b>: later invocations can run from a different directory and still find it.</li>
+      <li>Four command-line agents answer the same eight questions with different spellings. <b>Learn the questions, look up the spellings.</b></li>
+      <li>Look them up <b>each time</b>. At the commit read here, Codex has no <code>--full-auto</code>, and the flag is still widely printed.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One invocation is a filter; two invocations sharing an id are a program.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;one invocation, stdin in and a format out"] --> T["THIS PAGE&lt;br/&gt;several invocations sharing one session"]
+  T --> N["What it enables&lt;br/&gt;the same script against another vendor's CLI"]
+  W["The larger thing&lt;br/&gt;an agent driven by a program"] -.- T
+    </div>
+    <figcaption>The last page treated the agent as stateless, which is the honest starting point. This one is where the state you did not know you had turns into the thing that makes a two-stage script possible at all.
+    <b>You already produced a session on every run in the last lesson; this page is about picking it up.</b></figcaption>
+  </figure>
+
+  <h2 id="the-handle">1. The id is the handle</h2>
+  <p>With <code>--output-format json</code>, the payload carries a <code>session_id</code> beside the <code>result</code>. Pull it out with <code>jq</code> and every later invocation can name that conversation instead of starting a new one.</p>
+
+  <div class="code-cap">shell &middot; Claude Code headless documentation &middot; Anthropic documentation, licence unstated &middot; quoted, complete</div>
+  <pre><code>session_id=$(claude -p "Start a review" --output-format json | jq -r '.session_id')
+claude -p "Continue that review" --resume "$session_id"
+</code></pre>
+
+  <p>Those two commands may run from different directories: Claude Code finds a session by its id in any project on the machine. That is a recent behaviour rather than an old one, and it is the difference between a script that must <code>cd</code> and one that need not.</p>
+
+  <figure class="diagram stepper" id="session-across-runs">
+    <div class="fig-cap">Three runs, one conversation</div>
+    <div class="fig-claim">Only the first run starts a conversation; the other two join it.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user">
+        <span class="step-role">first run</span>
+        <span class="step-body"><code>claude -p "Start a review" --output-format json</code>, in the repository root.</span>
+      </li>
+      <li class="step" data-actor="tool">
+        <span class="step-role">capture</span>
+        <span class="step-body"><code>jq -r '.session_id'</code> pulls the handle out of the payload and into a shell variable.</span>
+      </li>
+      <li class="step" data-actor="model">
+        <span class="step-role">second run</span>
+        <span class="step-body"><code>--resume "$session_id"</code> continues it, with the whole first turn already in the history.</span>
+      </li>
+      <li class="step" data-actor="model">
+        <span class="step-role">third run, elsewhere</span>
+        <span class="step-body">The same id from a different directory. The session is found by id anywhere on the machine.</span>
+      </li>
+      <li class="step" data-actor="error">
+        <span class="step-role">what --continue would do</span>
+        <span class="step-body">Resumes whichever conversation was most recent, which on a busy machine is somebody else's job.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">5</b></span>
+      <span><b data-step-out="left">4</b> still to play</span>
+    </div>
+    <figcaption>The fifth step is drawn in the failure colour because it is a real hazard rather than a mistake in the script: <code>--continue</code> is defined as the most recent conversation, and two jobs on one machine race for that definition. It is fine at a keyboard and wrong in a pipeline.
+    <b>Capture the id whenever more than one thing on the machine could be running an agent.</b></figcaption>
+  </figure>
+
+  <p>Two related behaviours matter for anything unattended. A <code>-p</code> run persists a session unless you pass <code>--no-session-persistence</code>, so a long-lived script accumulates them. And if a supervisor stops a run with SIGTERM, Claude Code exits 143, leaves the turn unfinished, and continues that same turn when the session is resumed.</p>
+
+  <h2 id="the-baseline">2. Permission modes are the session's baseline</h2>
+  <p>A <a href="https://code.claude.com/docs/en/permission-modes">permission mode</a> is a property of the session rather than of a command, and in <code>-p</code> the starting mode is <b>Manual on every plan</b>, whatever your interactive sessions do. So a script that never passes one is running with the strictest baseline, and a script that passes the wrong one is running with the loosest.</p>
+
+  <table>
+    <thead><tr><th>Mode</th><th>What runs without asking</th><th>The case it is for</th></tr></thead>
+    <tbody>
+      <tr><td><code>default</code> (Manual)</td><td>Reads only</td><td>The <code>-p</code> starting mode. Anything else needs an allow rule.</td></tr>
+      <tr><td><code>acceptEdits</code></td><td>Reads, file edits, and common filesystem commands</td><td>Applying a mechanical change across files</td></tr>
+      <tr><td><code>plan</code></td><td>Reads, plus classifier-approved commands where auto mode is available</td><td>Exploring before changing anything</td></tr>
+      <tr><td><code>auto</code></td><td>Everything, with a classifier reviewing instead of you</td><td>Long interactive tasks; not a CI posture</td></tr>
+      <tr><td><code>dontAsk</code></td><td>Only pre-approved tools and the read-only command set</td><td><b>Locked-down CI.</b> Anything not allowlisted is denied rather than queued.</td></tr>
+      <tr><td><code>bypassPermissions</code></td><td>Everything</td><td>A container or VM, and nothing else</td></tr>
+    </tbody>
+  </table>
+
+  <p>For an unattended run <code>dontAsk</code> is the interesting one, because its failure mode is a denial you can see rather than a prompt nobody is there to answer.</p>
+
+  <h2 id="four-clis">3. The same eight questions, four times</h2>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each CLI answers</div>
+    <div class="fig-claim">Every gap here is a documented absence, not a flag somebody forgot to look up.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A matrix of eight session-control capabilities down the rows and four command-line agents across the columns: Claude Code, Codex, Gemini CLI and Cursor. A filled cell means the capability is documented and an empty dashed cell means it is not. Codex has no single JSON result object, Gemini CLI has no resume by session id and no output schema, and Cursor has no output schema. Every other cell is filled.">
+      <text class="lbl-sm" x="364" y="46" text-anchor="middle">Claude Code</text>
+      <text class="lbl-sm" x="439" y="46" text-anchor="middle">Codex</text>
+      <text class="lbl-sm" x="514" y="46" text-anchor="middle">Gemini</text>
+      <text class="lbl-sm" x="589" y="46" text-anchor="middle">Cursor</text>
+
+      <text class="lbl-sm" x="322" y="77" text-anchor="end">a one-shot print flag</text>
+      <rect class="d-keep" x="330" y="62" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="62" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="480" y="62" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="62" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="103" text-anchor="end">one JSON object holding the result</text>
+      <rect class="d-keep" x="330" y="88" width="68" height="22" rx="3"/>
+      <rect class="d-absent" x="405" y="88" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="480" y="88" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="88" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="129" text-anchor="end">a newline-delimited event stream</text>
+      <rect class="d-keep" x="330" y="114" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="114" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="480" y="114" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="114" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="155" text-anchor="end">resume the most recent run</text>
+      <rect class="d-keep" x="330" y="140" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="140" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="480" y="140" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="140" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="181" text-anchor="end">resume a named session by its id</text>
+      <rect class="d-keep" x="330" y="166" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="166" width="68" height="22" rx="3"/>
+      <rect class="d-absent" x="480" y="166" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="166" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="207" text-anchor="end">constrain the answer to a schema</text>
+      <rect class="d-keep" x="330" y="192" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="192" width="68" height="22" rx="3"/>
+      <rect class="d-absent" x="480" y="192" width="68" height="22" rx="3"/>
+      <rect class="d-absent" x="555" y="192" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="233" text-anchor="end">a named approval baseline</text>
+      <rect class="d-keep" x="330" y="218" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="218" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="480" y="218" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="218" width="68" height="22" rx="3"/>
+
+      <text class="lbl-sm" x="322" y="259" text-anchor="end">a flag that skips all of it</text>
+      <rect class="d-keep" x="330" y="244" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="405" y="244" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="480" y="244" width="68" height="22" rx="3"/>
+      <rect class="d-keep" x="555" y="244" width="68" height="22" rx="3"/>
+
+      <text class="read" x="320" y="290" text-anchor="middle">Twenty-eight of the thirty-two cells are filled, which is the argument.</text>
+    </svg>
+    <figcaption>Read from each tool's own reference in this session: Claude Code's headless and permission-mode pages, Cursor's CLI parameters page, Gemini CLI's <code>cli-reference.md</code> and <code>headless.md</code> at commit <code>55b495d</code>, and Codex's <code>exec/src/cli.rs</code> and <code>shared_options.rs</code> at commit <code>728cb12</code>. Codex's <code>--json</code> is an event stream rather than one object, and its <code>-o</code> writes the last message to a file instead.
+    <b>The four are the same instrument, so port a script by translating four flags rather than by redesigning it.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="fig-cap">How many of the eight</div>
+    <div class="fig-claim">The narrowest of the four still answers six of the eight questions.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A bar chart of how many of the eight session-control capabilities each agent's own documentation names. Claude Code eight, Codex seven, Gemini CLI six, Cursor seven. A dashed reference line marks eight out of eight.">
+      <line class="grid" x1="90" y1="115" x2="620" y2="115"/>
+      <line class="grid" x1="90" y1="160" x2="620" y2="160"/>
+      <line class="grid" x1="90" y1="205" x2="620" y2="205"/>
+      <line class="axis" x1="90" y1="250" x2="620" y2="250"/>
+      <text class="lbl-sm" x="82" y="74" text-anchor="end">8</text>
+      <text class="lbl-sm" x="82" y="119" text-anchor="end">6</text>
+      <text class="lbl-sm" x="82" y="164" text-anchor="end">4</text>
+      <text class="lbl-sm" x="82" y="209" text-anchor="end">2</text>
+      <text class="lbl-sm" x="82" y="254" text-anchor="end">0</text>
+
+      <rect class="m-stat" x="140" y="70" width="80" height="180"/>
+      <rect class="m-stat" x="260" y="93" width="80" height="157"/>
+      <rect class="m-stat" x="380" y="115" width="80" height="135"/>
+      <rect class="m-stat" x="500" y="93" width="80" height="157"/>
+
+      <text class="lbl-sm" x="180" y="62" text-anchor="middle">8</text>
+      <text class="lbl-sm" x="300" y="85" text-anchor="middle">7</text>
+      <text class="lbl-sm" x="420" y="107" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="540" y="85" text-anchor="middle">7</text>
+
+      <text class="lbl-sm" x="180" y="270" text-anchor="middle">Claude Code</text>
+      <text class="lbl-sm" x="300" y="270" text-anchor="middle">Codex</text>
+      <text class="lbl-sm" x="420" y="270" text-anchor="middle">Gemini CLI</text>
+      <text class="lbl-sm" x="540" y="270" text-anchor="middle">Cursor</text>
+
+      <line class="s-signal ref" x1="90" y1="70" x2="620" y2="70"/>
+      <text class="t-signal lbl-sm" x="620" y="62" text-anchor="end">all eight</text>
+      <text class="ttl" x="90" y="42">session-control capabilities each tool documents, out of eight</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>documented in that tool's own reference</span></div>
+    <figcaption>Counted from the matrix above. A tall bar is not a better agent: this measures whether a script can be ported without redesign, and the answer for all four is that it can, with the schema question being the one to check first.
+    <b>Bars this close together mean the shape is portable and only the spelling is not.</b></figcaption>
+  </figure>
+
+  <h2 id="the-spellings">4. The spellings, verified at source</h2>
+
+  <table>
+    <thead><tr><th></th><th>Print</th><th>Formats</th><th>Resume</th><th>Approval baseline</th><th>The danger flag</th></tr></thead>
+    <tbody>
+      <tr>
+        <td>Claude Code</td>
+        <td><code>-p</code>, <code>--print</code></td>
+        <td><code>--output-format text|json|stream-json</code></td>
+        <td><code>--continue</code>, <code>--resume &lt;id&gt;</code></td>
+        <td><code>--permission-mode</code></td>
+        <td><code>--dangerously-skip-permissions</code></td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/openai/codex">Codex</a></td>
+        <td><code>codex exec</code> with a positional prompt, or <code>-</code> for stdin</td>
+        <td><code>--json</code> for JSONL, <code>-o &lt;FILE&gt;</code> for the last message, <code>--output-schema &lt;FILE&gt;</code></td>
+        <td><code>codex resume &lt;id&gt;</code> or <code>--last</code>, and <code>codex fork</code></td>
+        <td><code>-s/--sandbox read-only|workspace-write|danger-full-access</code>, plus <code>--approve-for-me</code></td>
+        <td><code>--dangerously-bypass-approvals-and-sandbox</code>, alias <code>--yolo</code></td>
+      </tr>
+      <tr>
+        <td><a href="https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/cli-reference.md">Gemini CLI</a></td>
+        <td><code>-p</code>, and <code>-i</code> to continue interactively</td>
+        <td><code>-o text|json|stream-json</code></td>
+        <td><code>-r "latest"</code>, or an index such as <code>-r 5</code></td>
+        <td><code>--approval-mode default|auto_edit|yolo|plan</code></td>
+        <td><code>--approval-mode=yolo</code>; the old <code>-y</code> is deprecated</td>
+      </tr>
+      <tr>
+        <td><a href="https://cursor.com/docs/cli/reference/parameters">Cursor</a></td>
+        <td><code>agent -p</code></td>
+        <td><code>--output-format text|json|stream-json</code></td>
+        <td><code>--resume [chatId]</code>, <code>--continue</code></td>
+        <td><code>--mode plan|ask</code>, <code>--sandbox enabled|disabled</code></td>
+        <td><code>-f/--force</code>, alias <code>--yolo</code></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <p>Gemini CLI also publishes something the others do not: <a href="https://github.com/google-gemini/gemini-cli/blob/main/docs/cli/headless.md">distinct exit codes</a>. <code>0</code> is success, <code>1</code> a general error or API failure, <code>42</code> an input error, and <code>53</code> a turn limit exceeded. A wrapper script can tell "you asked wrong" from "it ran out of turns" without parsing anything.</p>
+
+  <div class="callout warn">
+    <b>The flags you have seen quoted online may not exist.</b> At commit <code>728cb12</code>, <code>--full-auto</code> appears in none of Codex's <code>shared_options.rs</code>, <code>exec/src/cli.rs</code> or <code>tui/src/cli.rs</code>, and <code>--ask-for-approval</code> is on the interactive command only, not on <code>codex exec</code>. Both are still widely printed in write-ups. This is not a criticism of Codex; it is the reason every flag on this page names where it was read and at which commit, and the reason a script that hard-codes a flag deserves a comment saying when somebody last checked it.
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">A session's life</div>
+    <div class="fig-claim">A session outlives the process that made it and is addressed by its id.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Running: claude -p starts a turn
+  Running --> Persisted: the process exits 0
+  Running --> Unfinished: SIGTERM - exit 143
+  Persisted --> Running: --resume with the captured id
+  Unfinished --> Running: --resume continues the same turn
+  Persisted --> [*]: --no-session-persistence, or you never come back
+    </div>
+    <figcaption>The interesting transition is the one on the left: a run killed by a supervisor does not lose its turn, it parks it, and resuming picks that turn up rather than starting a new one. That is what makes a timeout in a wrapper script recoverable rather than destructive.
+    <b>Send SIGTERM, not SIGKILL, and the work you interrupted is still there to resume.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Two scripted agent jobs run on one build machine. Why is <code>--continue</code> the wrong flag?</div>
+      <button class="q-opt">It starts a fresh conversation rather than resuming one</button>
+      <button class="q-opt">It cannot run outside the original working directory</button>
+      <button class="q-opt">It resumes the most recent session, whoever created it</button>
+      <button class="q-opt">It requires the JSON output format, which costs a flag</button>
+      <div class="q-fb">"Most recent" is a property of the machine, not of your job, so two concurrent jobs race for it. The first describes what happens with no flag at all. The second was true of <code>--resume</code> in older versions and is the strongest distractor because it is a real historical constraint. The fourth is backwards: capturing an id needs JSON, and <code>--continue</code> is the flag that does not.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">You are porting a script from Claude Code to <code>codex exec</code>. Which step needs redesign rather than translation?</div>
+      <button class="q-opt">Resuming a named session, which Codex addresses by id</button>
+      <button class="q-opt">Parsing one JSON object, since Codex emits an event stream</button>
+      <button class="q-opt">Constraining the answer, since Codex takes a schema file</button>
+      <button class="q-opt">Setting the approval baseline, which Codex spells sandbox</button>
+      <div class="q-fb">Codex's <code>--json</code> is newline-delimited events, and its <code>-o</code> writes only the last message to a file, so a caller expecting one object with a result and a session id has to be rewritten rather than re-spelled. The other three are all direct translations: <code>codex resume &lt;id&gt;</code>, <code>--output-schema &lt;FILE&gt;</code>, and <code>--sandbox</code>.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 25 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+    <div class="p-stem">
+      <p>Extend the wrapper script from the previous lesson into <b>two turns</b>: the first invokes your skill and captures the session id, the second resumes that session and asks a follow-up that only makes sense with the first turn's context.</p>
+      <p><b>Prove the session is real.</b> Run the second command from a different directory, and make the follow-up something the agent could not answer without the history, such as "which of the files you just listed was the largest".</p>
+      <p><b>Then port the first turn</b> to one other CLI you have installed, using the table above rather than your memory, and record which flags translated directly and which did not.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>If the follow-up answers correctly from a fresh session by accident, it was not a good follow-up. Ask about something the first turn produced and nothing on disk records.</p></details>
+
+    <details class="solution"><summary>Show what a working two-turn script proves</summary>
+      <ol class="worked">
+        <li><b>The id is a string in the payload.</b> If <code>jq -r '.session_id'</code> returns <code>null</code>, you asked for <code>text</code> output somewhere; only the JSON format carries it.</li>
+        <li><b>The follow-up succeeds from another directory.</b> That is the documented behaviour and it is what lets a CI job do stage two in a different checkout.</li>
+        <li><b>The follow-up fails against a fresh session.</b> Run it once without <code>--resume</code> as a control. If it still answers, your test question was answerable from the filesystem and proved nothing.</li>
+        <li><b>The port.</b> Print and format translate directly on all four. The two that usually do not are the schema and the exact resume spelling, and you should have hit at least one of them.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The captured id should be the same string in the second run's own JSON output. If it is different, you started a new session and the follow-up answered from general knowledge rather than from history, which reads exactly like success.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to print the <code>--help</code> of whichever CLI you are porting to and to tell you which flags in your script have <b>no</b> counterpart there. That list, rather than the list of matches, is the port.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The session model that all of this rests on, including what resume does with a turn that a signal left unfinished: <a href="https://code.claude.com/docs/en/headless">Run Claude Code programmatically</a>, "Continue conversations". For the comparison, read the flag reference of whichever second CLI you actually have installed, at the version you have installed, and not a summary of it.</p>
+
+  <div class="pager">
+    <a href="0350-the-agent-in-a-pipeline.html"><span class="dir">&larr; Previous</span><span class="ttl">The agent in a pipeline</span></a>
+    <a class="nxt" href="0370-in-the-field-cursor.html"><span class="dir">Next &rarr;</span><span class="ttl">In the field: Cursor</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0360 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

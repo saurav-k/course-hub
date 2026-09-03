@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Who is this token for? - AI Software Developer</title>
+<meta name="description" content="MCP authorization is ordinary OAuth 2.1 with one extra discipline: every token names exactly one MCP server, and no server may pass a token onward.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 09 &middot; Building an AI-native team &middot; Lesson 0910</div>
+  <h1>Every token names exactly one server, and no server passes one on</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">9 min</span>
+    Read against the Model Context Protocol authorization specification at revision <code>2026-07-28</code>, and its predecessor.
+    &middot; <a href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization">Authorization</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Nothing here is a new protocol. It is <b>OAuth 2.1</b> with a short list of things made mandatory that OAuth leaves optional.</li>
+      <li>The whole discipline is the <b>audience</b>. A client MUST send a <code>resource</code> parameter naming one server, and a server MUST reject a token that does not name it.</li>
+      <li>An MCP server that calls an upstream API gets its <b>own</b> token for that API. Passing yours on is the confused deputy, and the specification forbids it.</li>
+      <li>A <code>403 insufficient_scope</code> is a request, not a failure: re-authorize with the <b>union</b> of what you had and what was challenged.</li>
+      <li>Dynamic Client Registration is now <b>MAY and deprecated</b>. A tutorial that recommends it is describing the previous revision.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">From door to token</div>
+    <div class="fig-claim">The endpoint you centralised is where this flow terminates.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What you have now&lt;br/&gt;one endpoint in front of every server"] --> T["THIS PAGE&lt;br/&gt;who the token in front of it is for"]
+  T --> N["What it enables&lt;br/&gt;a policy naming servers and tools"]
+  S["The specification&lt;br/&gt;revision 2026-07-28"] -.- T
+    </div>
+    <figcaption>The previous page put one door in front of the servers. This page is the lock on it, and the next one is the list of who holds a key.
+    <b>An access policy is only as good as the token that arrives at the door.</b></figcaption>
+  </figure>
+
+  <h2 id="the-401">1. The 401 is a set of instructions</h2>
+  <p>An MCP client's first request carries no token, and the interesting part of the flow is the refusal. The server answers with a challenge that tells the client where to go next, and since the <code>2026-07-28</code> revision it also carries a hint about which scopes to ask for.</p>
+
+  <div class="code-cap">HTTP response &middot; MCP specification 2026-07-28, authorization &middot; MIT-licensed specification project &middot; reproduced verbatim with attribution</div>
+  <pre><code>HTTP/1.1 401 Unauthorized
+WWW-Authenticate: Bearer resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource",
+                         scope="files:read"
+</code></pre>
+
+  <p>Two fields, two jobs. <code>resource_metadata</code> is the address of the server's <b>Protected Resource Metadata</b> document, which RFC 9728 defines and which every MCP server MUST implement; the client MUST use it for discovery rather than guessing a well-known path. <code>scope</code> is the server saying which permissions this operation actually needs, and the specification is careful about how a client should treat it: clients "MUST treat the scopes provided in the challenge as authoritative for the current operation" and MUST NOT assume any set relationship between that list and the server's advertised <code>scopes_supported</code>.</p>
+  <p>Discovery then takes two hops. The client fetches protected-resource metadata from the server, which names one or more authorization servers, and then fetches that authorization server's own metadata. The server MUST offer at least one of RFC 8414 authorization-server metadata or OpenID Connect Discovery, and the client MUST support both, because it does not get to choose which one it meets.</p>
+
+  <figure class="diagram stepper" id="mcp-auth-flow">
+    <div class="fig-cap">One authorization, nine steps</div>
+    <div class="fig-claim">Three parties, and the token is bound at two separate hops.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user">
+        <span class="step-role">client</span>
+        <span class="step-body">Sends an MCP request with no <code>Authorization</code> header at all.</span>
+      </li>
+      <li class="step" data-actor="error">
+        <span class="step-role">401 challenge</span>
+        <span class="step-body">The server answers with <code>WWW-Authenticate</code>, carrying <code>resource_metadata</code> and a <code>scope</code> hint.</span>
+      </li>
+      <li class="step" data-actor="tool">
+        <span class="step-role">resource metadata</span>
+        <span class="step-body">The client fetches the RFC 9728 document and reads the <code>authorization_servers</code> it names.</span>
+      </li>
+      <li class="step" data-actor="model">
+        <span class="step-role">server metadata</span>
+        <span class="step-body">It fetches authorization-server metadata, trying the OAuth and OpenID Connect endpoints in priority order.</span>
+      </li>
+      <li class="step" data-actor="user">
+        <span class="step-role">client id</span>
+        <span class="step-body">It uses an HTTPS URL as its <code>client_id</code>, which the authorization server fetches and validates.</span>
+      </li>
+      <li class="step" data-actor="user">
+        <span class="step-role">authorize</span>
+        <span class="step-body">It records the expected issuer, then opens a browser with a PKCE challenge and the <code>resource</code> parameter.</span>
+      </li>
+      <li class="step" data-actor="model">
+        <span class="step-role">redirect back</span>
+        <span class="step-body">The authorization server redirects to the callback with an authorization code and an <code>iss</code> value.</span>
+      </li>
+      <li class="step" data-actor="user">
+        <span class="step-role">exchange</span>
+        <span class="step-body">The client compares <code>iss</code> to the recorded issuer, then trades the code, the verifier and <code>resource</code> for a token.</span>
+      </li>
+      <li class="step" data-actor="tool">
+        <span class="step-role">call</span>
+        <span class="step-body">The server validates that the token names it as the audience, and only then answers the request.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">9</b></span>
+      <span><b data-step-out="left">8</b> still ahead</span>
+    </div>
+    <figcaption>Play it once and watch where <code>resource</code> appears: at step six and again at step eight. It is sent twice on purpose, because the authorization request and the token request are separately attackable.
+    <b>Every step that matters is a step where somebody writes down which server this is for.</b></figcaption>
+  </figure>
+
+  <h2 id="the-audience">2. The audience is the whole idea</h2>
+  <p>Strip the flow back and one requirement is doing nearly all the work. A client MUST implement RFC 8707 resource indicators, and the <code>resource</code> parameter "MUST be included in both authorization requests and token requests", "MUST identify the MCP server that the client intends to use the token with", and MUST be the server's canonical URI. The specification adds the line that makes it a discipline rather than a feature: clients "MUST send this parameter regardless of whether authorization servers support it".</p>
+  <p>The server side is the mirror image. An MCP server MUST validate that a token was issued specifically for it, MUST only accept tokens valid for its own resources, and then the sentence the whole section exists for: <b>"MCP servers MUST NOT accept or transit any other tokens."</b></p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The token nobody validated</div>
+    <div class="fig-claim">Passing a token upstream makes the API trust a check nobody ran.</div>
+    <svg class="chart" viewBox="0 0 640 310" role="img" aria-label="Two rows comparing token handling. In the upper, forbidden row, a client sends a token to an MCP server which forwards the same token unchanged to an upstream API, drawn as a rejected path. In the lower, correct row, the client's token stops at the MCP server, which holds a second and separate token issued by the upstream API's own authorization server.">
+      <text class="d-mono" x="16" y="26">forbidden</text>
+      <rect class="d-box" x="16" y="36" width="112" height="40" rx="4"/>
+      <text class="lbl-sm" x="72" y="61" text-anchor="middle">MCP client</text>
+      <path class="d-flow s-alarm" d="M130 56 L212 56"/>
+      <text class="d-mono" x="142" y="46">token A</text>
+      <rect class="d-box" x="216" y="36" width="130" height="40" rx="4"/>
+      <text class="lbl-sm" x="281" y="61" text-anchor="middle">MCP server</text>
+      <path class="d-flow s-alarm" d="M348 56 L438 56"/>
+      <text class="d-mono" x="360" y="46">token A again</text>
+      <rect class="d-drop" x="442" y="36" width="130" height="40" rx="4"/>
+      <text class="lbl-sm" x="507" y="61" text-anchor="middle">upstream API</text>
+      <text class="t-alarm d-mono" x="507" y="96" text-anchor="middle">trusts a check that never ran</text>
+
+      <line class="grid" x1="16" y1="126" x2="624" y2="126"/>
+
+      <text class="d-mono" x="16" y="162">correct</text>
+      <rect class="d-box" x="16" y="172" width="112" height="40" rx="4"/>
+      <text class="lbl-sm" x="72" y="197" text-anchor="middle">MCP client</text>
+      <path class="d-flow s-signal" d="M130 192 L212 192"/>
+      <text class="d-mono" x="142" y="182">token A</text>
+      <rect class="d-focus" x="216" y="172" width="130" height="40" rx="4"/>
+      <text class="lbl-sm" x="281" y="197" text-anchor="middle">MCP server</text>
+      <text class="d-mono" x="281" y="228" text-anchor="middle">audience is me, or reject</text>
+      <path class="d-flow s-signal" d="M348 192 L438 192"/>
+      <text class="d-mono" x="360" y="182">token B</text>
+      <rect class="d-keep" x="442" y="172" width="130" height="40" rx="4"/>
+      <text class="lbl-sm" x="507" y="197" text-anchor="middle">upstream API</text>
+      <text class="d-mono" x="442" y="228">issued by its own server</text>
+
+      <text class="read" x="320" y="284" text-anchor="middle">Token A stops at the server it names. Token B is a second grant, to a second audience.</text>
+    </svg>
+    <figcaption>The specification's own words for the upper row: if the MCP server makes requests to upstream APIs it acts as an OAuth client to them, and the access token it uses there is a separate token issued by the upstream authorization server.
+    <b>Two audiences means two tokens, and any design with one token and two audiences is the confused deputy.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    This is the rule that a home-grown MCP server breaks first, and it breaks it for a good reason: forwarding the caller's token is the shortest path to a working prototype. It also means that anyone who can reach your MCP server can reach everything your callers can reach at the upstream API, with no record that your server was in the path. If you have written an MCP server that wraps an internal API, the question to answer today is whose token arrives at that API.
+  </div>
+
+  <h2 id="what-changed">3. Read the revision before you read the tutorial</h2>
+  <p>The authorization chapter moved substantially between the <code>2025-06-18</code> revision and <code>2026-07-28</code>, and the changes are the kind that make an old tutorial confidently wrong rather than merely incomplete.</p>
+
+  <table>
+    <thead><tr><th>Mechanism</th><th>Revision 2025-06-18</th><th>Revision 2026-07-28</th></tr></thead>
+    <tbody>
+      <tr><td>Dynamic Client Registration</td><td>clients and servers <b>SHOULD</b> support RFC 7591</td><td><b>MAY</b>, and deprecated, retained for backwards compatibility</td></tr>
+      <tr><td>Client ID Metadata Documents</td><td>absent</td><td><b>SHOULD</b> be supported, and the first mechanism to try</td></tr>
+      <tr><td>Authorization-server discovery</td><td>RFC 8414 metadata, which clients MUST use</td><td>RFC 8414 <b>or</b> OpenID Connect Discovery, and clients MUST support both</td></tr>
+      <tr><td>Issuer identification, RFC 9207</td><td>absent</td><td>servers SHOULD emit <code>iss</code>, clients MUST validate it against a recorded issuer</td></tr>
+      <tr><td>Scope challenges</td><td>a 403 is defined, with no flow</td><td>a step-up flow, with a scope hint on the 401 and a union rule on the 403</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="fig-cap">Standards named per revision</div>
+    <div class="fig-claim">The compliance list more than doubled in one revision.</div>
+    <svg class="chart" viewBox="0 0 640 280" role="img" aria-label="A bar chart of how many standards each revision of the MCP authorization specification names in its standards-compliance list: four for revision 2025-06-18 and ten for revision 2026-07-28.">
+      <line class="grid" x1="110" y1="60" x2="614" y2="60"/>
+      <line class="grid" x1="110" y1="105" x2="614" y2="105"/>
+      <line class="grid" x1="110" y1="150" x2="614" y2="150"/>
+      <line class="grid" x1="110" y1="195" x2="614" y2="195"/>
+      <line class="axis" x1="110" y1="240" x2="614" y2="240"/>
+      <text class="lbl-sm" x="102" y="64" text-anchor="end">8</text>
+      <text class="lbl-sm" x="102" y="109" text-anchor="end">6</text>
+      <text class="lbl-sm" x="102" y="154" text-anchor="end">4</text>
+      <text class="lbl-sm" x="102" y="199" text-anchor="end">2</text>
+      <text class="lbl-sm" x="102" y="244" text-anchor="end">0</text>
+
+      <rect class="m-noise" x="170" y="150" width="120" height="90"/>
+      <text class="lbl-sm" x="230" y="142" text-anchor="middle">4</text>
+      <rect class="m-stat" x="410" y="15" width="120" height="225"/>
+      <text class="lbl-on" x="470" y="34" text-anchor="middle">10</text>
+
+      <text class="lbl-sm" x="230" y="260" text-anchor="middle">2025-06-18</text>
+      <text class="lbl-sm" x="470" y="260" text-anchor="middle">2026-07-28</text>
+      <text class="ttl" x="110" y="274">standards named in the authorization chapter's compliance list</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>the superseded revision</span><span><i class="sw-stat"></i>the current revision</span></div>
+    <figcaption>Counted from the "Standards Compliance" list in each revision: four entries against ten, with RFC 6750, RFC 8707, RFC 9207, Client ID Metadata Documents and the two OpenID Connect specifications joining.
+    <b>A protocol whose compliance list doubles in one revision is one to read rather than to remember.</b></figcaption>
+  </figure>
+
+  <p>Two of the additions are worth knowing by name because they change client code. <b>Client ID Metadata Documents</b> let a client use an HTTPS URL as its <code>client_id</code>, which the authorization server fetches and validates, so a client no longer has to register itself with every authorization server it meets. That is what replaced Dynamic Client Registration, and it is why the deprecation was possible. <b>RFC 9207 issuer identification</b> makes the client record the issuer before it opens the browser and compare the <code>iss</code> that comes back, using simple string comparison with no normalisation, which is the defence against a mix-up attack where the response comes from an authorization server the client did not choose.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where the checks sit</div>
+    <div class="fig-claim">Three parties, and each check belongs to exactly one of them.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant C as MCP client
+  participant M as MCP server
+  participant A as Authorization server
+  C->>M: request with no token
+  M-->>C: 401 with resource_metadata and a scope hint
+  C->>M: fetch protected resource metadata
+  M-->>C: the authorization servers it trusts
+  C->>A: fetch authorization server metadata
+  Note over C: record the issuer&lt;br/&gt;generate the PKCE verifier
+  C->>A: authorize with code_challenge and resource
+  A-->>C: code plus iss
+  Note over C: compare iss to the recorded issuer
+  C->>A: token request with code_verifier and resource
+  A-->>C: access token bound to one audience
+  C->>M: request with the bearer token
+  Note over M: reject unless the audience is me
+  M-->>C: the answer
+    </div>
+    <figcaption>The same nine steps as the figure above, read as an order rather than as a list. Note that the client validates the issuer and the server validates the audience: neither can do the other's check.
+    <b>Two different parties each verify one half of "this token is for this server".</b></figcaption>
+  </figure>
+
+  <h2 id="step-up">4. A 403 is a request for more, not a refusal</h2>
+  <p>The last piece is the one that changes how an agent behaves at run time. When a token is valid but too narrow, the server SHOULD answer 403 with the scopes the operation needs.</p>
+
+  <div class="code-cap">HTTP response &middot; MCP specification 2026-07-28, authorization &middot; MIT-licensed specification project &middot; reproduced verbatim with attribution</div>
+  <pre><code>HTTP/1.1 403 Forbidden
+WWW-Authenticate: Bearer error="insufficient_scope",
+                         scope="files:write",
+                         resource_metadata="https://mcp.example.com/.well-known/oauth-protected-resource",
+                         error_description="File write permission required for this operation"
+</code></pre>
+
+  <p>The client's correct response is a step-up authorization, and step two of the documented flow is the part people get wrong: determine the required scopes "by computing the union of the client's previously requested scope set and the scopes from the current challenge". A client that re-authorizes with only the challenged scope silently drops permissions it already had, and the next operation fails for a reason nobody can see. The flow also states its own stopping rule: retry the original request "no more than a few times and treat this as a permanent authorization failure", with clients tracking scope-upgrade attempts per resource and operation so a misconfigured server cannot become an infinite consent loop.</p>
+  <p>Servers carry a matching duty. They SHOULD include every scope the current operation needs in a single challenge, because challenging incrementally forces a separate authorization round trip for each missing scope, and each round trip is a browser window in a developer's face.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Your MCP server wraps an internal REST API. Which token should reach that API?</div>
+      <button class="q-opt">The client's token, since the user already consented to it</button>
+      <button class="q-opt">A separate token the API's own server issued to you</button>
+      <button class="q-opt">The client's token, with the audience claim rewritten</button>
+      <button class="q-opt">No token, because the server is inside the trust boundary</button>
+      <div class="q-fb">The MCP server acts as an OAuth client to anything upstream, so it holds a second grant with a second audience. The first option is token passthrough, which the specification forbids by name. The third is worse, because rewriting an audience means the signature no longer verifies or you are minting tokens. The fourth confuses network position with authorization, which is the assumption that makes a flat internal network expensive.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A tool call returns 403 <code>insufficient_scope</code> naming <code>files:write</code>. What should the client request next?</div>
+      <button class="q-opt">Only <code>files:write</code>, because that is what was challenged</button>
+      <button class="q-opt">Every scope the server lists in <code>scopes_supported</code></button>
+      <button class="q-opt">Nothing, and it should surface the refusal to the user</button>
+      <button class="q-opt">The union of the scopes it held and the challenged one</button>
+      <div class="q-fb">The step-up flow says the union, so the permissions already granted survive a per-operation challenge. The first option is the common bug: it works for this call and quietly breaks the previous one. The second over-asks, against the least-privilege rule the same chapter states, and <code>scopes_supported</code> is described as a minimal set rather than a menu. The third is right only after the retry limit is reached.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 25 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>Read a real challenge rather than a documented one.</p>
+      <p><b>Pick</b> a remote MCP server you already use that requires authorization, and <b>send</b> it an unauthenticated request with <code>curl -i</code>. Read the <code>WWW-Authenticate</code> header it returns and write down two things: the <code>resource_metadata</code> URL, and whether a <code>scope</code> hint is present.</p>
+      <p><b>Then fetch</b> the protected-resource metadata document at that URL and answer three questions from it: which authorization servers does this server trust, what does it list in <code>scopes_supported</code>, and does the canonical resource identifier it publishes match the URL you connected to?</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p><code>curl -i https://server.example.com/mcp</code> is enough; you want the headers, not the body. If you get a 404 rather than a 401, you are talking to the wrong path, and the path matters because it is part of the canonical resource identifier.</p></details>
+
+    <details class="solution"><summary>Show what a good reading looks like</summary>
+      <ol class="worked">
+        <li><b>Confirm the challenge is well formed.</b> A 401 with no <code>resource_metadata</code> is a server that has not implemented RFC 9728, which the specification makes a MUST. You have found a bug rather than a configuration problem.</li>
+        <li><b>Check for the scope hint.</b> Its absence is legal, since it is a SHOULD. Its presence tells you the server was built against the current revision rather than the previous one, which is a faster answer than reading the vendor's changelog.</li>
+        <li><b>Compare the identifiers.</b> If you connected to <code>https://server.example.com/mcp</code> and the metadata publishes <code>https://server.example.com</code>, then the <code>resource</code> value your client must send is the published one, and a client sending the path form will be issued a token for an audience the server does not answer to.</li>
+        <li><b>Read <code>scopes_supported</code> as a floor.</b> It is described as the minimal set for basic functionality, so a server that lists everything it can do has misunderstood the field and will over-grant on first connection.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> You should end with one URL, one list of authorization servers and one canonical identifier, and the canonical identifier should have no fragment and no trailing slash. If it has either, the server is publishing an identifier the specification calls invalid, and that is worth an issue on their tracker.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two-hop discovery still feels like ceremony, ask your agent to trace one connection of yours and label each request with which document it fetched and why it could not have skipped it. If token passthrough still seems like a reasonable shortcut, ask it to write the incident report for the day the shortcut is discovered.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The authorization chapter itself, which is short enough to read end to end in twenty minutes and is the only place the MUST and SHOULD levels are authoritative: <a href="https://modelcontextprotocol.io/specification/2026-07-28/basic/authorization">MCP authorization, revision 2026-07-28</a>. Read the <a href="https://modelcontextprotocol.io/specification/2025-06-18/basic/authorization">previous revision</a> beside it once, so that you can date any tutorial you meet from its vocabulary alone.</p>
+
+  <div class="pager">
+    <a href="0900-one-door-for-every-tool.html"><span class="dir">&larr; Previous</span><span class="ttl">One door for every tool</span></a>
+    <a class="nxt" href="0920-granting-and-auditing-tool-access.html"><span class="dir">Next &rarr;</span><span class="ttl">Granting and taking away</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0910 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

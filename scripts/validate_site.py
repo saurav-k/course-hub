@@ -1827,7 +1827,13 @@ GRANDFATHERED_COURSE_SHEETS: frozenset[str] = frozenset(
 # is recorded here rather than repaired by a validator. Any new collision fails,
 # so this set can only shrink.
 ACCEPTED_HUE_COLLISIONS: frozenset[frozenset[str]] = frozenset(
-    {frozenset({"aws-course", "llm-efficiency-course"})}
+    {
+        frozenset({"aws-course", "llm-efficiency-course"}),
+        # -160 and +200 are one rotation apart: measured byte-identical in all
+        # seven palettes and both modes on 2026-09-03, and moving a shipped
+        # course's accent is a separate captain decision.
+        frozenset({"gcp-course", "go-course"}),
+    }
 )
 
 # Capitals read 9.53% to 19.01% slower than lowercase, so `--eyebrow-case:
@@ -2076,12 +2082,18 @@ def _registration_problems(source: str) -> list[Problem]:
 
 
 def _hue_problems(declared: dict[str, dict[str, str]]) -> list[Problem]:
-    """Two courses on one hue wear one accent, which is the thing the hue exists to prevent."""
-    by_hue: dict[str, list[str]] = {}
+    """Two courses on one hue wear one accent, which is the thing the hue exists to prevent.
+
+    The grouping is on the angle and never on the number an author wrote. Hue is
+    periodic, so -160 and +200 are one rotation apart and rotate the palette
+    accent to the same place; a check on the literal reads them as two hues and
+    sees nothing, which is how the second collision in this set shipped.
+    """
+    by_hue: dict[float, list[str]] = {}
     for course, tokens in declared.items():
         hue = tokens.get("--course-hue", "")
         if UNITLESS_NUMBER.match(hue):
-            by_hue.setdefault(str(float(hue)), []).append(course)
+            by_hue.setdefault(float(hue) % 360, []).append(course)
 
     problems: list[Problem] = []
     for hue, courses in sorted(by_hue.items()):
@@ -2089,9 +2101,10 @@ def _hue_problems(declared: dict[str, dict[str, str]]) -> list[Problem]:
             problems.append(
                 Problem(
                     "assets/hub.css",
-                    f"{' and '.join(sorted(courses))} both hold --course-hue {hue}, so they "
-                    f"wear the same accent in every palette and both modes. Split a gap on "
-                    f"the circle instead; the 25-degree grid is full",
+                    f"{' and '.join(sorted(courses))} rotate the accent to the same angle "
+                    f"({hue:g} degrees), so they wear the same accent in every palette and "
+                    f"both modes. Split a gap on the circle instead; the 25-degree grid is "
+                    f"full",
                 )
             )
     return problems
