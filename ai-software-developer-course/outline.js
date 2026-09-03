@@ -55,6 +55,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "06",
+      "title": "Agentic code review",
+      "lessons": [
+        {
+          "title": "What review is actually for",
+          "href": "lessons/0600-what-review-is-actually-for.html"
+        },
+        {
+          "title": "What AI review catches",
+          "href": "lessons/0610-what-ai-review-catches.html"
+        },
+        {
+          "title": "What AI review misses",
+          "href": "lessons/0620-what-ai-review-misses.html"
+        },
+        {
+          "title": "Review architectures",
+          "href": "lessons/0630-review-architectures.html"
+        },
+        {
+          "title": "Rules you write down",
+          "href": "lessons/0640-rules-you-write-down.html"
+        },
+        {
+          "title": "Wiring review into the pull request",
+          "href": "lessons/0650-wiring-review-into-the-pull-request.html"
+        },
+        {
+          "title": "Measuring your reviewer",
+          "href": "lessons/0660-measuring-your-reviewer.html"
+        },
+        {
+          "title": "In the field: Cognition",
+          "href": "lessons/0670-in-the-field-cognition.html"
+        }
+      ]
+    },
+    {
       "n": "07",
       "title": "Security",
       "lessons": [
