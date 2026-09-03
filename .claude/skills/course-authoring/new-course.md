@@ -51,6 +51,17 @@ Where an answer is genuinely derivable from the existing hub, derive it and say 
 13. What is the canon: the small set of primary sources this course will keep returning to? A course with no canon cites whatever a search returns.
 14. Is there a spine document, deck, or syllabus this course follows? If yes, its numbers are the ceiling and its ordering is the default.
 
+**Time.**
+
+15. Does the spine carry anything that must not reach a page: dates, a class schedule, grading weights, due dates, guest-lecture slots, or a named attendee?
+    A hub page has no term and no cohort, so every one of those is either dropped or converted.
+    A version is not a date even when it is written as one: a protocol revision, a model id and a pinned commit are names, and all three are welcome in a sentence.
+    An "as of September this is true" hedge is the shape to catch; the version belongs in the claim instead.
+16. For each organisation the spine names, is there enough **public primary material** - documentation, an engineering blog, an open-source repository at a commit, a published talk - to build a lesson from?
+    If yes, that slot becomes an **"in the field"** lesson written from that material alone.
+    If no, the slot is dropped rather than written from memory or from a session nobody can link.
+    A private lecture is never presented as if attended, and a person is named only as the author of something the reader can open.
+
 Write the answers into `MISSION.md` before anything else.
 That file is the record of this interview, and every later authoring decision is settled by re-reading it.
 The answer to question 9 becomes `PLOT.md` in step 3; it is the one answer that gets a file of its own.
@@ -100,7 +111,7 @@ Three courses carry a grandfathered `assets/course-extras.css` from before the c
 A rule two courses would both want belongs in `assets/hub.css`, and so does a rule only one course wants: one owner is the whole point.
 A course's identity is the seven tokens below, not a stylesheet.
 
-Then three registrations, none of which the course can do for itself:
+Then four registrations, none of which the course can do for itself:
 
 1. **Register the course.** Add one block to the course-contract section of `assets/hub.css`.
    Seven tokens are available, one of them required, and that is the entire author surface:
@@ -143,8 +154,55 @@ Then three registrations, none of which the course can do for itself:
 
 3. **Add the course card to the hub `index.html`,** inside the `<section class="module">` for its subject, using the card shape in [`references/page-contracts.md`](references/page-contracts.md), and correct that section's `.mcount`.
 
+4. **Put the course into the style sample and record its baseline.** A new course folder fails `scripts/style_snapshot.py` the moment it exists - `the sample does not represent every course` - because the computed-style gate asserts the fixed sample covers every course rather than recording a count of it.
+
+   ```bash
+   python3 scripts/style_snapshot.py --refresh-sample   # one line into scripts/style-sample.txt, 0.6s, no browser
+   python3 scripts/style_snapshot.py --write            # records scripts/style-baseline/<course>/, needs Chrome
+   ```
+
+   Both belong in the scaffold pull request.
+   `--refresh-sample` adds exactly one line and moves no other course's sample page, so it collides with nothing; `--write` records the new page and nothing else.
+   Leave either out and every later pull request on this course is red on a job it did not break.
+
 Do not fork `assets/hub.js` or `assets/hub.css`.
 The hub carried six byte-identical copies of an earlier design system, one of which had a rendering fix the other five never received, and de-forking them is why there is one copy now.
+
+## 3b. Many writers, one course
+
+Skip this when one agent writes the whole course.
+Read it before dispatching the second one, because what it prevents is decided in the scaffold and cannot be added later.
+
+**Divide the course into vertical slices.**
+A slice is one module, or one self-contained lesson range, taken end to end: its own lesson files, its own delimited registration block in `index.html` and in `PLOT.md`, and nothing shared with a sibling slice.
+The `tdd` skill draws the same line for code - all tests first and then all implementation is a horizontal slice, one test and one implementation at a time is a vertical one - and the course analogue is exact: one module written, registered and verified in its own block beats all the lessons first and all the registration later.
+A horizontal split here reads as tidy division of labour and lands as eight branches editing four files.
+
+**The scaffold pull request creates every block up front, empty.**
+A writer fills its own and touches no other, so two slices never edit the same lines:
+
+```html
+<!-- module-05:start -->
+<!-- module-05:end -->
+```
+
+The same markers go into `PLOT.md` as HTML comments, one pair per module, around that module's rows.
+Empty blocks in the scaffold are what makes the rule enforceable: a writer given a marker that already exists has nowhere else to put its cards.
+
+**Three files are the integrator's, not a writer's.**
+
+- `reference/glossary.html` and `RESOURCES.md` are written in **one final pass** after the modules land. Every module adds terms alphabetically into one list, so every module conflicts on it, and the terms are better chosen once the whole course exists anyway.
+- `outline.js` is **generated and never merged**. Regenerate it with `scripts/gen_outline.py <course>` after every rebase and commit the result. Hand-resolving it is resolving a build artefact against itself.
+- The **previous slice's last lesson** is the one nobody expects: adding module `N` changes the "next" pager on the last page of module `N-1`, so two slices are not independent even when their lesson blocks are disjoint. Give that edit to the integrator too, or make the pager fix the first act of the later slice.
+
+**Pass each agent only its own slice.**
+Its lesson numbers and slugs, the block markers it owns, the section of the research report that carries its content, and the rules above.
+An agent that never sees a sibling's numbers cannot write into a sibling's block.
+
+**Two failure modes, and both were paid for.**
+Ten module writers on one course produced **eight pull requests that all conflicted on the same four files** - the course `index.html`, `PLOT.md`, the glossary and `RESOURCES.md` - so every merge put every other branch back into conflict and the queue never emptied on its own.
+And a **conflicting pull request gets no CI run at all**: GitHub builds `refs/pull/N/merge` to run a `pull_request` workflow and cannot build it for a conflicting branch, so `gh pr checks` reports "no checks reported" and reads exactly like a repository-wide outage. It is not one. **The fix is always the conflict, never the workflow.**
+The root `AGENTS.md` carries the second of those under hard rule 8, beside the two collisions it already names.
 
 ## 4. Prove the scaffold
 

@@ -5,7 +5,8 @@
 links and outlines. That is the gate on the pull request. This checks that a
 page is one of these courses: the design-system links it must carry, the four
 ways a Mermaid diagram breaks silently, the widget shapes in
-``references/widgets.md`` and the counts in ``references/pedagogy.md``.
+``references/widgets.md``, the counts in ``references/pedagogy.md``, and the
+label a hand-drawn figure paints outside its own frame.
 
 The caption pair splits across the two: whether a ``.fig-cap`` and a
 ``.fig-claim`` are in the right place is structural and belongs to
@@ -78,6 +79,38 @@ MAX_FIG_CLAIM_WORDS: int = 15
 EXTENDED_BAR_COURSES: frozenset[str] = frozenset({"math-for-ml-course", "staff-ai-course", "llm-efficiency-course"})
 MIN_PRACTICE_PER_PAGE: int = 1
 MIN_CHARTS_PER_PAGE: int = 1
+
+# A hand-drawn label that leaves its own frame is cut there and nothing says so,
+# so this estimates where each one ends. Every constant below is measured rather
+# than chosen, because the whole check is an approximation of a font metric this
+# script does not have.
+#
+# The sizes are what `assets/hub.css` paints a chart label at: `.chart text` is
+# --fs-chart, `.lbl-sm` and `.d-mono` are --fs-chart-sm, `.ttl` is --fs-chart-ttl.
+LABEL_SIZE_BASE: float = 13.0
+LABEL_SIZES: dict[str, float] = {"lbl-sm": 11.5, "d-mono": 11.5, "ttl": 13.5}
+
+# Two advances, because a chart carries two faces. `.d-mono` is JetBrains Mono,
+# whose advance is exactly .6em on every glyph, so the estimate is the width.
+# Everything else is `--font-ui`, Inter, whose measured average prose advance is
+# .4739em - the figure `assets/hub.css` states for `--face-advance` - rounded
+# down so a proportional label is under-stated rather than over-stated.
+MONO_CLASSES: frozenset[str] = frozenset({"d-mono"})
+ADVANCE_MONO: float = 0.60
+ADVANCE_PROPORTIONAL: float = 0.47
+
+# Inter's ascender and descender, which is the box a browser reports for a line
+# of text rather than the ink inside it. The bar label the sweep moved was
+# reported 1px above the frame at these numbers and 1.6 units inside it at cap
+# height, so the em box is what the measurement being approximated here used.
+ASCENT: float = 0.97
+DESCENT: float = 0.24
+
+# How close to the frame a label may come before this says so. Half a unit, and
+# it is measured: the verification sweep left the tightest label in the hub 1.05
+# units inside its frame, so anything wider reports pages a browser has already
+# confirmed are clean. What is left is what the estimate puts outside the box.
+EDGE_MARGIN: float = 0.5
 
 QUIZ_BLOCK = re.compile(r'<div class="q" data-answer="(\d+)">(.*?)</div>\s*</div>', re.S)
 OPTION = re.compile(r'<button class="q-opt">(.*?)</button>', re.S)
@@ -188,6 +221,12 @@ NOT_PROSE = (
 )
 SECTION_HEADING = re.compile(r"<h2\b", re.I)
 SVG_TEXT = re.compile(r"<text\b", re.I)
+# The opening tag of a hand-drawn figure and one label inside it, read as
+# attributes rather than as a document: the label check needs the viewBox, the
+# class, the anchor and the two coordinates, and all five are on the tag.
+CHART_SVG_OPEN = re.compile(r'<svg\b[^>]*\bclass="[^"]*\bchart\b[^"]*"[^>]*>', re.I)
+SVG_TEXT_BLOCK = re.compile(r"<text\b([^>]*)>(.*?)</text>", re.S | re.I)
+SVG_ATTR = re.compile(r'([\w:-]+)\s*=\s*"([^"]*)"')
 # Matched on the attribute rather than on one spelling of the tag, so that
 # <svg viewBox="..." class="chart"> counts as well as <svg class="chart">.
 CHART_SVG = re.compile(r'<svg\b[^>]*\bclass="[^"]*\bchart\b[^"]*"', re.I)
@@ -517,6 +556,106 @@ def check_figures(page: Path, src: str, css_classes: frozenset[str]) -> list[Fin
     return found
 
 
+def label_font_size(classes: set[str]) -> float:
+    """The size one chart label is painted at, in user units of the viewBox.
+
+    A CSS length inside an SVG resolves to user units, so a 13px label in a
+    640-wide viewBox is 13 units wide per em however the figure is scaled to
+    the column. The three sizes are the ones `assets/hub.css` declares for
+    `.chart text` and the two classes that override it.
+    """
+    for name in classes:
+        if name in LABEL_SIZES:
+            return LABEL_SIZES[name]
+    return LABEL_SIZE_BASE
+
+
+def label_extent(text: str, classes: set[str], anchor: str, x: float) -> tuple[float, float]:
+    """Where one label starts and ends along the x axis, estimated narrow.
+
+    The estimate is deliberately a lower bound on the real width, because the
+    cost of the two errors is not symmetric: a missed clip is a defect no check
+    in this repository can see, and a false one is an author reading a figure
+    that was already fine.
+    """
+    size = label_font_size(classes)
+    advance = ADVANCE_MONO if classes & MONO_CLASSES else ADVANCE_PROPORTIONAL
+    width = len(text) * advance * size
+    if anchor == "middle":
+        return x - width / 2, x + width / 2
+    if anchor == "end":
+        return x - width, x
+    return x, x + width
+
+
+def check_label_edges(page: Path, src: str) -> list[Finding]:
+    """Labels a hand-drawn figure paints outside its own frame.
+
+    SVG text neither wraps nor is bounded by the `viewBox`, and the browser's
+    own `overflow: hidden` on an outermost `<svg>` cuts whatever leaves the box
+    at the frame edge. So the tail of a long label is simply gone, and nothing
+    reports it: the element is in the DOM, `getBBox` returns a real box, the
+    page validates, and a figcaption can describe words no reader can see. The
+    verification sweep of `ai-software-developer-course` found five of them by
+    measuring every label in a real browser, which is the only way it had.
+
+    This is the cheap approximation of that measurement, so it is a WARN: the
+    width of a string is a font metric this script does not have and estimates
+    from two measured constants. What it is worth is the direction - a label
+    the estimate puts outside the frame is one to open the page and look at.
+    """
+    found: list[Finding] = []
+    for index, figure in enumerate(FIGURE.findall(src)):
+        for opening in CHART_SVG_OPEN.finditer(figure):
+            close = figure.find("</svg>", opening.end())
+            body = figure[opening.end():close if close != -1 else len(figure)]
+            frame = dict(SVG_ATTR.findall(opening.group(0))).get("viewBox", "").replace(",", " ").split()
+            if len(frame) != 4:
+                continue
+            try:
+                min_x, min_y, width, height = (float(value) for value in frame)
+            except ValueError:
+                continue
+            # A `transform` moves the coordinate system the label is placed in,
+            # so the frame this compares against is no longer the one the label
+            # is measured in. Two figures in the hub carry one; both are skipped
+            # rather than reported against the wrong box.
+            if "transform" in body:
+                continue
+            for element in SVG_TEXT_BLOCK.finditer(body):
+                attributes = dict(SVG_ATTR.findall(element.group(1)))
+                # A <tspan> carries its own x, so the element's own x names only
+                # the first run and the estimate would measure the whole string
+                # from it.
+                if "<tspan" in element.group(2):
+                    continue
+                label = plain(element.group(2))
+                if not label:
+                    continue
+                try:
+                    x = float(attributes["x"])
+                except (KeyError, ValueError):
+                    continue
+                classes = set(attributes.get("class", "").split())
+                left, right = label_extent(label, classes, attributes.get("text-anchor", "start"), x)
+                slack = [(min_x + width) - right, left - min_x]
+                try:
+                    y = float(attributes["y"])
+                except (KeyError, ValueError):
+                    y = None
+                if y is not None:
+                    size = label_font_size(classes)
+                    slack += [y - ASCENT * size - min_y, (min_y + height) - (y + DESCENT * size)]
+                if min(slack) >= EDGE_MARGIN:
+                    continue
+                found.append(Finding(
+                    rel(page), "WARN",
+                    f'figure {index} label "{label[:40]}" is estimated to reach the frame edge of a '
+                    f"{width:g}x{height:g} viewBox; SVG text is clipped there, so open the page and "
+                    "read the figure at full width"))
+    return found
+
+
 def reading_column(src: str) -> str:
     """The page body, which is what a reader reads. Chrome lives outside it."""
     body = MAIN.search(src)
@@ -840,6 +979,7 @@ def main() -> int:
         findings += check_design_system(page, src)
         findings += check_mermaid(page, src)
         findings += check_figures(page, src, css_classes)
+        findings += check_label_edges(page, src)
         findings += check_orientation(page, src)
         findings += check_word_load(page, src)
         findings += check_math(page, src)
