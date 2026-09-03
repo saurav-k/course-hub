@@ -609,8 +609,7 @@ def check_label_edges(page: Path, src: str) -> list[Finding]:
         for opening in CHART_SVG_OPEN.finditer(figure):
             close = figure.find("</svg>", opening.end())
             body = figure[opening.end():close if close != -1 else len(figure)]
-            box = SVG_ATTR.findall(opening.group(0))
-            frame = dict(box).get("viewBox", "").replace(",", " ").split()
+            frame = dict(SVG_ATTR.findall(opening.group(0))).get("viewBox", "").replace(",", " ").split()
             if len(frame) != 4:
                 continue
             try:
