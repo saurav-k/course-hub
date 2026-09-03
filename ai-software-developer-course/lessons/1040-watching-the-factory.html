@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Watching the factory - AI Software Developer</title>
+<meta name="description" content="You cannot review every agent action, so you log all of them, read a risk-weighted sample, and keep a switch that stops everything. The containment underneath is what makes the log worth having.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 10 &middot; The software factory &middot; Lesson 1040</div>
+  <h1>Log everything, read a sample by risk, and keep one switch that stops it all</h1>
+  <p class="paper-meta">
+    <span class="pill hard">frontier</span>
+    <span class="pill">13 min</span>
+    The event shape you already emit, the layers underneath it, and the trap that only shows up once you have an allowlist.
+    &middot; <a href="https://code.claude.com/docs/en/monitoring-usage">Monitoring usage</a>
+    &middot; <a href="https://www.anthropic.com/engineering/how-we-contain-claude">Containment</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Nobody reviews every action of an unattended fleet, so the honest design is: <b>log all of them, read a risk-weighted sample</b>, and be able to stop everything at once.</li>
+      <li>You do not have to invent the event shape. Twelve event names and a standard attribute set already exist, and <b><code>prompt.id</code></b> ties every event from one prompt together.</li>
+      <li>Containment is layered and named: an <b>OS sandbox</b>, <b>mount rules</b>, an <b>egress allowlist</b>, and a <b>defensive proxy</b> - because an allowlisted domain is still an exfiltration path.</li>
+      <li>Five kill switches exist and they are not equivalent. Know which one you would reach for, and check that the list you wrote down is complete.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">From contained to watched</div>
+    <div class="fig-claim">A contained agent still needs a record, because containment is silent.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What you have now&lt;br/&gt;one identity per agent, scoped"] --> T["THIS PAGE&lt;br/&gt;the record, the sample, the switch"]
+  T --> N["What it enables&lt;br/&gt;what happened, and how to stop it"]
+  W["Module 10&lt;br/&gt;one arc repaired per lesson"] -.- T
+    </div>
+    <figcaption>Where this sits: the previous lesson bounded what each agent could reach. A boundary that holds says nothing, so this page is about the part that speaks - the log, and the switch beside it.
+    <b>Containment tells you what could not happen; only the log tells you what did.</b></figcaption>
+  </figure>
+
+  <h2 id="what-to-log">1. Log everything, and read almost none of it</h2>
+  <p>The published framework states the policy in one sentence, and the sentence is doing more work than it looks: <b>"Every automated approval, tool call, and agent-to-agent message is logged with the signals it used and lands in our SIEM."</b> Note what is being logged - not the outcome, but <b>the signals the decision used</b>, which is what lets a reviewer disagree with a decision rather than merely notice it.</p>
+  <p>The reading half is the honest part. Nobody reads all of it. What gets read is a <b>risk-weighted sample</b>, by a person, on a schedule, and human reviewers move from inspecting routine changes to watching these loops and dashboards.
+  That is the real answer to "who reviews the reviewer", and it is a sampling answer rather than a coverage one.</p>
+
+  <figure class="diagram calc" id="sample-budget">
+    <div class="fig-cap">What a person can read</div>
+    <div class="fig-claim">Sampling is linear in fleet size, so the rate is the only free variable.</div>
+
+    <div class="build-controls">
+      <label>tool calls per agent-day <input type="range" data-var="c" min="20" max="400" step="20" value="120"></label>
+      <label>agents <input type="range" data-var="a" min="1" max="30" step="1" value="6"></label>
+      <label>sample rate, percent <input type="range" data-var="s" min="1" max="25" step="1" value="5"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>calls logged per day <b data-calc="product" data-of="c a">720</b></span>
+      <span>records read <b data-calc="scale" data-of="c a s" data-by="0.01" data-decimals="0">36</b></span>
+      <span>minutes, at 30 seconds each <b data-calc="scale" data-of="c a s" data-by="0.005" data-decimals="0">18</b></span>
+    </div>
+    <figcaption>Move the agent count and watch the third number rather than the second. A rate that is comfortable at six agents is a full working day at thirty, which is why the rate has to be weighted by risk rather than held flat.
+    <b>You do not choose how much to review, you choose which five percent, and that choice is the whole control.</b></figcaption>
+  </figure>
+
+  <h2 id="the-event">2. The event shape already exists</h2>
+  <p>Before writing a bespoke log, look at what is already emitted. Eight metrics and twelve events, over OpenTelemetry, with a standard attribute set on every one of them.
+  Three of those events are the interesting ones for supervision: <code>claude_code.tool_decision</code>, <code>claude_code.api_error</code> and <code>claude_code.permission_mode_changed</code>.</p>
+  <p>The attribute that turns a stream into a story is <b><code>prompt.id</code></b>, a UUID linking every event produced while one prompt is processed. Filter by it and you get the prompt, the API requests it caused and every tool result that came back - the whole turn, in order, without reconstructing anything.</p>
+
+  <div class="code-cap">one audit row &middot; authored for this course &middot; every field name and value is documented at code.claude.com/docs/en/monitoring-usage</div>
+  <pre><code>{
+  "event.name":      "tool_decision",
+  "event.timestamp": "&lt;ISO 8601, written by the exporter&gt;",
+  "event.sequence":  412,
+
+  "session.id":      "01JXXXXXXXXXXXXXXXXXXXXXXX",
+  "prompt.id":       "b6f0c3a2-0000-4000-8000-000000000000",
+  "organization.id": "00000000-0000-0000-0000-000000000000",
+  "user.email":      "fixer@acme.example",
+  "team.id":         "platform",
+
+  "tool_name":       "Bash",
+  "tool_use_id":     "toolu_01XXXXXXXXXXXXXXXXXXXXXX",
+  "tool_source":     "builtin",
+
+  "decision":        "accept",
+  "source":          "config"
+}
+</code></pre>
+
+  <p>Two fields carry the whole review. <code>decision</code> is <code>accept</code> or <code>reject</code>. <code>source</code> says <b>who decided</b>, and its documented values split cleanly into machine and human: <code>config</code> and <code>hook</code> on one side, <code>user_permanent</code>, <code>user_temporary</code>, <code>user_abort</code> and <code>user_reject</code> on the other.
+  <code>team.id</code> is not built in - it is a custom resource attribute, which is how a fleet's rows become answerable by team rather than only by session.</p>
+
+  <p>Three queries are what the row is shaped for, and each one answers a question a reviewer would otherwise have to guess at.</p>
+
+  <ul>
+    <li><b>What ran with no human anywhere in the loop.</b> <code>decision = "accept" AND source IN ("config", "hook")</code>. Everything here was approved by a rule you wrote, which means every one of these is a rule you should be able to point at.</li>
+    <li><b>Which identity ran a shell, and under what rule.</b> <code>tool_name = "Bash" AND source = "config"</code>, grouped by <code>user.email</code>. An identity appearing here that your policy file says should never run a shell is the finding.</li>
+    <li><b>What each agent actually uses.</b> <code>group by user.email, tool_name</code> over thirty days. Anything absent for a month is not part of that agent's job, and the list is the input to narrowing its allow rules.</li>
+  </ul>
+
+  <div class="callout warn">
+    Tool arguments are not in the row above, and that is the default rather than an omission: the parameters field appears only when <code>OTEL_LOG_TOOL_DETAILS=1</code> is set, and it carries the full shell command among other things.
+    Turning it on makes the second query far more useful and turns your log into a place where a secret typed into a command line now lives forever.
+    Decide that deliberately, in the same conversation as your retention period, and never as a debugging convenience somebody leaves on.</div>
+
+  <h2 id="the-layers">3. What the log is a record of</h2>
+  <p>A log of tool calls is only interesting if something underneath it was capable of refusing. The layers are documented and named, and they nest.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The layers underneath</div>
+    <div class="fig-claim">Five boundaries stand between a tool call and the network.</div>
+    <svg class="chart" viewBox="0 0 640 380" role="img" aria-label="Five nested boundaries drawn inside one another. From outside in: the machine or the virtual machine, the operating system sandbox using Seatbelt, bubblewrap or a gVisor container, the filesystem mount rules, the egress proxy with its domain allowlist, and the defensive proxy that checks the session's own token. At the centre sits the agent's own tool calls. An arrow runs from the centre out to an audit log box beside the boundaries.">
+      <rect class="d-bound" x="20" y="30" width="430" height="300" rx="6"/>
+      <text class="d-mono" x="32" y="48">the machine, or the virtual machine</text>
+      <rect class="d-bound" x="36" y="56" width="398" height="248" rx="6"/>
+      <text class="d-mono" x="48" y="74">OS sandbox - Seatbelt, bubblewrap, gVisor</text>
+      <rect class="d-bound" x="52" y="82" width="366" height="196" rx="6"/>
+      <text class="d-mono" x="64" y="100">mounts - read-only, read-write, no-delete</text>
+      <rect class="d-bound" x="68" y="108" width="334" height="144" rx="6"/>
+      <text class="d-mono" x="80" y="126">egress proxy - the domain allowlist</text>
+      <rect class="d-bound" x="84" y="134" width="302" height="92" rx="6"/>
+      <text class="d-mono" x="96" y="152">defensive proxy - this session's own token</text>
+      <rect class="d-focus" x="100" y="160" width="270" height="46" rx="4"/>
+      <text class="lbl-b" x="235" y="181" text-anchor="middle">the agent's tool calls</text>
+      <text class="d-mono" x="235" y="197" text-anchor="middle">everything you actually asked for</text>
+
+      <path class="d-flow s-signal" d="M372 176 L466 156"/>
+      <rect class="d-box" x="470" y="130" width="150" height="52" rx="4"/>
+      <text class="lbl-sm" x="545" y="151" text-anchor="middle">the audit log</text>
+      <text class="d-mono" x="545" y="167" text-anchor="middle">crosses every layer</text>
+
+      <text class="read" x="320" y="360" text-anchor="middle">Each ring refuses something. The log is the only one that speaks.</text>
+    </svg>
+    <figcaption>The two outer rings are enforced by the operating system rather than by any prompt. The two proxy rings are the pair that matters most, and the inner one exists because the outer one is not enough.
+    <b>Every ring is silent when it works, which is exactly why the arrow leaving the centre is not optional.</b></figcaption>
+  </figure>
+
+  <h2 id="the-trap">4. An allowlisted domain is still a way out</h2>
+  <p>This is the measured trap worth the whole lesson, and it is the kind of thing you only find by running the system rather than by designing it.</p>
+  <p>An egress allowlist admits a host. It does not admit a <i>purpose</i>. The published account puts it exactly: <b>"Allowing api.anthropic.com meant allowing file uploads to arbitrary Anthropic accounts."</b> The domain was on the list for a good reason, and that same entry was a channel out.</p>
+  <p>The fix is a second proxy, positioned deliberately: a <b>defensive man-in-the-middle proxy inside the machine</b> that passes only requests carrying that machine's own provisioned session token, and rejects an attacker-embedded key. It has to sit inside because only the machine knows the provenance - from the server's side, a request from a compromised session looks like any other client.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two refusals, in order</div>
+    <div class="fig-claim">The allowlist checks the host and the proxy checks whose key it is.</div>
+    <div class="mermaid">
+flowchart TB
+  R["A request leaves the sandbox"] --> A{"Is the host on&lt;br/&gt;the domain allowlist"}
+  A -- no --> D1["Refused at the edge&lt;br/&gt;a 403 naming the deny reason"]
+  A -- yes --> P{"Does it carry this machine's&lt;br/&gt;own provisioned token"}
+  P -- no --> D2["Refused inside&lt;br/&gt;an embedded key is not this session"]
+  P -- yes --> S["Sent&lt;br/&gt;and a masked credential is substituted on the way out"]
+    </div>
+    <figcaption>The left-hand refusals are the two different questions. The first is about where the request is going and can be answered from the hostname alone; the second is about who is asking, and can only be answered by something that knows what this session was issued.
+    <b>An allowlist without a provenance check moves the exfiltration path rather than closing it.</b></figcaption>
+  </figure>
+
+  <p>Two more findings from the same account are worth keeping because both look like ordering details and both are escapes.
+  <b>Symlink resolution has to happen before path validation</b>, not after, or a link inside an authorised folder points outside it and the check passes on the wrong path.
+  And <b>a project's own configuration is parsed only after the trust prompt is accepted</b>, on the principle that opening a project, loading a config and listening on localhost should all be treated the way an inbound request from the internet is treated rather than implicitly trusted.</p>
+
+  <h2 id="the-switches">5. Five switches, and they are not the same switch</h2>
+  <p>Every unattended system needs a way to stop, and "we would just turn it off" is not one until somebody has named which thing they would turn off. These five exist, they act at different scopes, and they take effect at different moments.</p>
+
+  <table>
+    <thead><tr><th>Switch</th><th>Scope</th><th>Takes effect</th><th>What survives it</th></tr></thead>
+    <tbody>
+      <tr><td>Delete the workflow files</td><td>one repository</td><td>immediately, on the next event</td><td>routines, desktop tasks, local sessions</td></tr>
+      <tr><td>A deny rule in managed settings</td><td>every machine carrying the policy</td><td>the next session on each machine</td><td>anything not using that tool</td></tr>
+      <tr><td><code>CLAUDE_CODE_DISABLE_CRON=1</code></td><td>one machine's sessions</td><td>immediately - scheduled tasks stop firing</td><td>cloud routines, CI workflows</td></tr>
+      <tr><td>The organisation Routines toggle</td><td>every member of the organisation</td><td>immediately - existing routines stop</td><td>CI workflows, local sessions</td></tr>
+      <tr><td>Revoke the credential</td><td>everything authenticating with it</td><td>the next run that needs it</td><td>anything holding a different credential</td></tr>
+    </tbody>
+  </table>
+
+  <p>Read the last column rather than the first. Each switch leaves something running, and the one people reach for in a hurry - deleting the workflow file - leaves every cloud routine untouched.
+  A complete stop is a short ordered list, and the place to write that list is the policy file from the previous lesson, where it sits beside the identities it stops.</p>
+
+  <h2 id="the-effect">6. What watching is for, and one number about it</h2>
+  <p>The point of all this is not tidiness. It is that review moves from being a thing people do to being a thing people <b>supervise</b>, and the measurable claim made for that shift is about depth rather than volume.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Review depth, before and after</div>
+    <div class="fig-claim">A reported rise from 16 to 54 percent of pull requests carrying substantive comments.</div>
+    <svg class="chart" viewBox="0 0 640 290" role="img" aria-label="A bar chart of the reported share of pull requests receiving substantive review comments, rising from 16 percent before automated review to 54 percent after it, against a full-coverage reference line at 100 percent.">
+      <line class="grid" x1="140" y1="60" x2="600" y2="60"/>
+      <line class="grid" x1="140" y1="105" x2="600" y2="105"/>
+      <line class="grid" x1="140" y1="150" x2="600" y2="150"/>
+      <line class="grid" x1="140" y1="195" x2="600" y2="195"/>
+      <line class="axis" x1="140" y1="240" x2="600" y2="240"/>
+      <text class="lbl-sm" x="132" y="64" text-anchor="end">100%</text>
+      <text class="lbl-sm" x="132" y="109" text-anchor="end">75%</text>
+      <text class="lbl-sm" x="132" y="154" text-anchor="end">50%</text>
+      <text class="lbl-sm" x="132" y="199" text-anchor="end">25%</text>
+      <text class="lbl-sm" x="132" y="244" text-anchor="end">0</text>
+
+      <rect class="m-stat" x="210" y="211" width="100" height="29"/>
+      <rect class="m-alarm" x="410" y="143" width="100" height="97"/>
+
+      <text class="lbl-sm" x="260" y="203" text-anchor="middle">16%</text>
+      <text class="lbl-sm" x="460" y="135" text-anchor="middle">54%</text>
+      <text class="lbl-sm" x="260" y="262" text-anchor="middle">before automated review</text>
+      <text class="lbl-sm" x="460" y="262" text-anchor="middle">after</text>
+
+      <text class="ttl" x="140" y="38">pull requests carrying substantive review comments</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>reported baseline</span><span><i class="sw-alarm"></i>reported after</span></div>
+    <figcaption>From the same published framework, alongside a claim that roughly a third of the bugs behind past incidents in one product would have been caught by the automated review they put in place.
+    <b>The bars say more pull requests got looked at, and they do not say anybody caught more bugs.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    Both numbers above are <b>self-reported</b>, from one organisation about its own codebase, with no published method: no definition of "substantive", no baseline period stated, and no independent replication.
+    They are worth printing because they are specific and attributable, and they are not evidence about your repository.
+    What would make them evidence is exactly what is missing - the classifier that decided what counts as substantive, the population, and the same measurement taken somewhere else. Ask for those three before you quote either figure in a planning document.</div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does the defensive proxy sit inside the machine rather than in front of it?</div>
+      <button class="q-opt">Because an external proxy cannot terminate TLS on the connection</button>
+      <button class="q-opt">Because only the machine knows which token it was itself issued</button>
+      <button class="q-opt">Because the domain allowlist is enforced on the same host</button>
+      <button class="q-opt">Because an outbound request has no hostname before it leaves</button>
+      <div class="q-fb">The published reasoning is about provenance: from the server's side a request from a compromised session is indistinguishable from any other client, so only something inside the machine can tell whether the request carries the session's own provisioned token. The first option is wrong - TLS termination is a configuration choice available in either position. The third is true but is a deployment detail, not the reason. The fourth is simply false.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">You want every tool call that was approved without a person in the loop. Which filter is right?</div>
+      <button class="q-opt">decision equals accept, and tool_source equals builtin</button>
+      <button class="q-opt">decision equals accept, and session.id is not null</button>
+      <button class="q-opt">decision equals accept, and source is config or hook</button>
+      <button class="q-opt">decision equals reject, and source begins with user</button>
+      <div class="q-fb">The <code>source</code> attribute is what names the decider, and its documented values split into <code>config</code> and <code>hook</code> for machine decisions against four <code>user_</code> values for human ones. The first filter selects built-in tools rather than automatic approvals. The second selects everything, since every event carries a session identifier. The fourth finds human rejections, which is a different and also useful query.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 40 minutes, with telemetry turned on</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill hard">frontier</span></div>
+
+    <div class="p-stem">
+      <p>Turn on telemetry for one agent in your factory and capture a single unattended run end to end.</p>
+      <p><b>Find</b> the run's <code>prompt.id</code> values and reconstruct one whole turn from them: the prompt, the API requests it produced, and every tool decision.</p>
+      <p><b>Then run the first of the three queries above</b> - every acceptance whose <code>source</code> is <code>config</code> or <code>hook</code> - and, for each distinct rule it names, point at the file the rule lives in.</p>
+      <p><b>Finally, break it on purpose.</b> Flip one kill switch from your policy file and confirm from the log that the agent stopped. Then check whether anything else did.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Start from the smallest possible run - one issue, one file changed - so the reconstruction is a dozen events rather than a hundred. The exercise is about the joins, not the volume.</p></details>
+
+    <details class="solution"><summary>Show what each step should turn up</summary>
+      <ol class="worked">
+        <li><b>The reconstruction should have no gaps.</b> If a tool call appears with no matching prompt, either the exporter dropped events or something started a turn you did not trigger. Both are worth a morning.</li>
+        <li><b>Most acceptances should name a rule you can point at.</b> An acceptance whose source is <code>config</code> and whose rule you cannot find in any settings file means the rule is coming from a layer you had forgotten about - managed settings, or a project file you did not write.</li>
+        <li><b>Expect the kill switch to leave something running.</b> The common surprise is that deleting the workflow leaves a cloud routine firing on its own schedule, or that revoking the model credential stops the agent while the trigger keeps starting empty runs.</li>
+        <li><b>Then correct the switch list in your policy file.</b> That correction is the whole deliverable. A stop procedure nobody has executed is a stop procedure that has not been tested.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> A correct run of this exercise produces one reconstructed turn, a short list of named rules, and at least one surprise in step four. If step four produced no surprise, check whether the thing you stopped was actually running before you stopped it.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to list every place a permission decision could come from on your machine - managed settings, user settings, project settings, a hook, a session answer - and then ask which of them would appear in a <code>tool_decision</code> event as <code>source: "config"</code>. The layers it names that you did not know about are the ones your audit log has been quietly attributing to you.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The containment architecture and the three findings this page names, written up by the team that shipped them: <a href="https://www.anthropic.com/engineering/how-we-contain-claude">How we contain Claude</a>. Read the section on the egress proxy twice; the sentence about what allowing one domain actually allowed is the most transferable thing on that page.</p>
+
+  <div class="pager">
+    <a href="1030-agent-identity-and-least-privilege.html"><span class="dir">&larr; Previous</span><span class="ttl">Give every agent one job and one key</span></a>
+    <a class="nxt" href="1050-reading-the-trend-lines.html"><span class="dir">Next &rarr;</span><span class="ttl">Reading the trend lines</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 1040 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
