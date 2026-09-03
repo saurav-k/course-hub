@@ -89,6 +89,13 @@ If you are looking at a hub page with no bar, you are looking at the live site.
    `.github/workflows/validate.yml`, where two branches each append a step to the `Computed style`
    job, and in the widget reference, where two sections get inserted at one point.
 
+   **A conflicting pull request gets no CI run at all.** GitHub builds `refs/pull/N/merge` to run a
+   `pull_request` workflow and cannot build that ref while the branch conflicts with its base, so
+   `gh pr checks` reports "no checks reported" and reads exactly like a repository-wide outage. It
+   is not one, and the fix is always the conflict rather than the workflow. Parallel branches on one
+   course are what produce this: see "Many writers, one course" in
+   `.claude/skills/course-authoring/new-course.md` for the slicing that avoids it.
+
 ## Before you write anything
 
 Read, in this order:

@@ -16,6 +16,13 @@ It checks registration, links, that no page links a local `.md` file, and that e
 On a routed course it also checks the route manifest, every committed pager against its owning route, and the living-document metadata.
 
 `check_pages.py` checks the house standard: the design-system links, the Mermaid traps, widget shapes, the orientation figure, the word ceilings, the diagram and quiz counts, the answer-index distribution, and the rung and reading-time pills.
+
+One of its warnings is an estimate rather than a reading, and it is worth knowing which.
+**The label-edge warning** measures where each `<text>` in a hand-drawn `svg.chart` ends and says so when the estimate puts it outside the figure's own `viewBox`, which is where the browser cuts it.
+It is an approximation of a font metric the script does not have: the width of a string is estimated from the character count, the size the class is painted at, and one advance per face - `.d-mono` is JetBrains Mono at exactly .6em a glyph, everything else is Inter at the .4739em `hub.css` measures, rounded down so a proportional label is under-stated.
+So it is a WARN and it under-reports on purpose.
+A label it names is a figure to open and read at full width, not a coordinate to nudge until the warning stops.
+Nothing it stays quiet about is proven safe: the browser pass below is still the check.
 Both green before you open the pull request.
 A warning from `check_pages.py` is a decision you must be able to defend in the pull request body, not a line to scroll past.
 
@@ -54,14 +61,25 @@ document.querySelectorAll('.mermaid .error-icon, .mermaid text.error-text').leng
 
 Then look anyway. A diagram that parses can still say the wrong thing.
 
+**What the repaint is actually compared on is the rendered label text.**
+Read every label out of every diagram on first paint, repaint, read them again, and diff the two lists.
+That is what catches the `<br/>` class, because the defect is two words joining rather than an error box, and neither an error-box count nor an SVG count can see it.
+One trap in the diff: Mermaid writes its `classDef` colours into the SVG's own `<style>` element, which changes with the palette by design, so strip that element before comparing or every palette switch reports two false positives.
+
+**Twice over, on two different palettes, when the sweep is a whole course.**
+Seven palettes and two modes exist and a repaint is a repaint, so one switch proves the mechanism; a second switch to a different palette is what catches a colour that only fails on one ground.
+The sweep this list comes from ran 87 pages on the shipped default, again on `ink` + `dark`, and again on `sage` + `dark`.
+
 ### The rest of the browser pass
 
 - **Every diagram legible at its authored size.** A wide Mermaid diagram scaled down to fit the reading column is unreadable, and its own caption will be larger than its labels. The figure should scroll inside its box rather than shrink. Check the widest figure on the page, and check it can be reached by keyboard: `hub.js` gives a box that genuinely overflows a tab stop and takes it back when the column grows.
 - **Both modes and more than one palette.** Seven palettes and three modes exist, and the accent each course wears is the palette's accent rotated by that course's hue. A colour that reads on cream can disappear on near-black, and a literal hex in a hand-authored SVG is the usual cause.
-- **Print preview.** Diagrams carry their colours inside the SVG, so `hub.js` draws an ink-on-paper copy of each one while the browser is idle and swaps it in on `beforeprint`. If a figure prints in screen colours or as raw graph source, that mechanism is what broke.
-- **360px wide.** The figure may scroll; the page body may not. Horizontal scroll on the body is a bug every time.
+- **Print preview.** Diagrams carry their colours inside the SVG, so `hub.js` draws an ink-on-paper copy of each one while the browser is idle and swaps it in on `beforeprint`. If a figure prints in screen colours or as raw graph source, that mechanism is what broke. Driving `beforeprint` and `afterprint` by hand is enough for a spot check and it also proves the screen state comes back: the print path opens every content disclosure and has to restore each one exactly.
+- **360px wide.** The figure may scroll; the page body may not. Horizontal scroll on the body is a bug every time. This is a pass over the whole course rather than a look at one page, because what spills at 360px is a nowrap row and those are in the chrome, not in the lesson you wrote.
 - **The longest line of text in every hand-drawn figure, at 360px and at full width.** SVG text neither wraps nor is bounded by the `viewBox`, and the browser's own `overflow: hidden` cuts it at the frame edge, so the tail of a long label is simply gone. Nothing reports it: the element is in the DOM, `getBBox` returns a real box, and a figcaption can happily describe words no reader can see.
 - **Every hand-drawn figure read for what its roles claim.** The `d-*` classes make fill mean something, so a box drawn `d-ghost` with a live `d-flow` into it says "removed" and "reading" at once. Nothing in the repository catches a figure that contradicts itself; it renders, it validates, and it teaches the wrong thing.
+- **Every interactive figure operated, once with the mouse and once from the keyboard.** One pass per shape on the page, not one pass per page: a stepper, an assembler, a calculator, a scorecard and a taint map fail in five different ways. Tab to each control, drive it - Enter on a stepper's Next, arrow keys on a range, Space on a checkbox - and confirm the focus ring travels with you. Then read the **readout and the output together**: an assembler that writes its file into the wrong element still updates its readout correctly beside it, which is how one shipped inert past every check in this repository.
+- **Every interactive figure read once with the script blocked.** Turn JavaScript off and reload. Every step, every fix, every block and every committed default value must be there and must be right, because that is what the page shows a reader with no script and what every printed copy shows. An assembler is the one to look at hardest: its `<pre>` is committed by hand and is the one default in these five that can drift from the templates beside it.
 - **Every quiz answered.** Click the right option and confirm it goes green; click a wrong one and read the feedback you wrote. A `data-answer` off by one is invisible until someone clicks it.
 - **The sidebar rail.** Your new lesson appears in it, in the right module, and is marked as the current page. If it is missing, `outline.js` was not regenerated.
 - **Every copy button.** They are injected into every `<pre>`; confirm the one you added copies what you meant.
