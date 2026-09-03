@@ -91,6 +91,44 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0770-in-the-field-semgrep.html"
         }
       ]
+    },
+    {
+      "n": "09",
+      "title": "Building an AI-native team",
+      "lessons": [
+        {
+          "title": "One door for every tool",
+          "href": "lessons/0900-one-door-for-every-tool.html"
+        },
+        {
+          "title": "Who is this token for?",
+          "href": "lessons/0910-mcp-authorization-in-practice.html"
+        },
+        {
+          "title": "Granting and taking away",
+          "href": "lessons/0920-granting-and-auditing-tool-access.html"
+        },
+        {
+          "title": "One place the model bill is paid",
+          "href": "lessons/0930-the-llm-gateway.html"
+        },
+        {
+          "title": "What a token actually costs",
+          "href": "lessons/0940-what-a-token-actually-costs.html"
+        },
+        {
+          "title": "Making the good setup the default one",
+          "href": "lessons/0950-rolling-it-out-to-a-team.html"
+        },
+        {
+          "title": "Measuring adoption honestly",
+          "href": "lessons/0960-measuring-adoption-honestly.html"
+        },
+        {
+          "title": "In the field: Replit",
+          "href": "lessons/0970-in-the-field-replit.html"
+        }
+      ]
     }
   ],
   "extras": [

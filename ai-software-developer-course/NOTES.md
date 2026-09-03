@@ -81,6 +81,12 @@ Agent-loop diagrams are exactly this shape. Turn the direction, or cut the row t
 The `d-*` classes make fill mean something, so a `d-ghost` box with a live `d-flow` into it says "removed" and "busy" at once.
 Nothing in this repository can catch that. Read every drawing for what its roles claim, at 360px and at full width, and read the longest line of text in it: SVG text neither wraps nor is bounded by the `viewBox`.
 
+**A cross-module link fails the validator, and this course is written by parallel writers.**
+`validate_site.py` resolves every relative `href` and fails on a file that is not there, so a page in module 9 cannot link a page in module 2 until module 2 is merged.
+Name the lesson in prose by its number and its title, record the debt in `PLOT.md`, and let whoever writes the other half turn it into an `href` in their pull request.
+`0900` carries exactly this, for the `0270` half of the pair `PLOT.md` calls load-bearing in both directions.
+The same rule decides a module's outer pagers: the first lesson's "previous" and the last lesson's "next" point at `../index.html` until the neighbouring module exists.
+
 **A roadmap entry that became a link fails the validator.**
 Every unwritten lesson in `index.html` is plain text inside `.roadmap`. This course carries more unwritten pages than written ones for most of its life, so this will bite repeatedly.
 
