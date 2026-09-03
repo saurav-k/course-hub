@@ -72,7 +72,14 @@ Cited once or twice, by module.
 - [containers.dev - the devcontainer reference](https://containers.dev/implementors/json_reference/) - `0530`.
 - [GitHub - workflow commands](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands) - annotations and job summaries with their limits. The whole of `0540`.
 - [GitHub Copilot - customize the agent environment](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/coding-agent/customize-the-agent-environment) - `0530`.
-- [Cognition - how Cognition uses Devin to build Devin](https://cognition.com/blog/how-cognition-uses-devin-to-build-devin) - the best published statement of the agent-perception gap. `0500`.
+- [Cognition - how Cognition uses Devin to build Devin](https://cognition.com/blog/how-cognition-uses-devin-to-build-devin) - the best published statement of the agent-perception gap `0500` teaches. Not cited on the page, which builds the gap from a shipped instruction file instead.
+- [Factory - AGENTS.md, as one harness reads it](https://docs.factory.ai/harness/agents-md.md) - the search order, the compatible filenames, the nesting rule, the root template, and the 80,000 and 40,000 character context budgets. `0560`.
+- [Factory - Droid Shield](https://docs.factory.ai/autonomy-and-safety/droid-shield.md) - secret detection shipped as a product feature, which is the evidence that "secrets in the environment" is a real blocker rather than a hypothetical. `0560`.
+- [Factory - the software factory](https://factory.ai/news/software-factory) - the company's own argument that autonomy is gated on organisational readiness, which is the claim `0570` is built on.
+- [GitHub - about code owners](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners) - what CODEOWNERS matches, last-pattern-wins, and the 3 MB limit past which the file is not loaded at all. `0540`, `0550`.
+- [`getsentry/sentry` CODEOWNERS coverage baseline](https://raw.githubusercontent.com/getsentry/sentry/master/.github/codeowners-coverage-baseline.txt) - 2,481 lines carrying 2,470 uncovered paths, under the header "Goal: Reduce this list to zero". The ratchet, as a shipped artefact. `0540`.
+- [`discourse/discourse`](https://github.com/discourse/discourse) - GPL-2.0. The worked scoring example in `0550`: `AI-AGENTS.md` with `AGENTS.md` and `CLAUDE.md` as 12-byte symlinks to it, 15 scripts in `bin/`, 17 skills in `.skills/`, a 574-byte root `CODEOWNERS`, 19 workflows, and the devcontainer quoted in `0530`.
+- [`keycloak/keycloak`](https://github.com/keycloak/keycloak) - the contrast case in `0550`: no root `AGENTS.md`, no `CLAUDE.md`, no container definition, and a vendor-specific `.github/copilot-instructions.md` instead.
 
 ### Module 06 - Agentic code review
 

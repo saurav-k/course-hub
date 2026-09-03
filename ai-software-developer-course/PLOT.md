@@ -84,14 +84,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0470 | In the field: Claude Code | reserved | Public primary material only. |
 | 1110 | The capstone: write the contract | reserved | **Read here**, after module 4. `AGENTS.md`, one skill, one hook gate, committed and tested. |
 | | **Module 05 - Agent-ready codebases** | | Working. Nothing in this hub covers it. |
-| 0500 | What agent-ready means | reserved | The agent can close its own loop: set up, change, prove, without asking a human. |
-| 0510 | The nine pillars and five levels | reserved | Readiness is a maturity ladder with named rungs. |
-| 0520 | Tests are the agent's feedback loop | reserved | The suite is the agent's only sense organ, and its latency is the loop's clock speed. |
-| 0530 | Reproducible environments | reserved | If the agent's environment differs from CI's, every failure it fixes is a guess. |
-| 0540 | CI an agent can read | reserved | CI output is an API: addressable rather than scrollable. |
-| 0550 | Scoring a repository | reserved | Every point must be evidence you can point at. Carries the warning that agent-readiness and AI-reviewability are different properties. |
-| 0560 | The gaps that block agents | reserved | The gaps are boringly consistent and each has a named artefact that closes it. |
-| 0570 | In the field: Factory | reserved | Public primary material only. |
+| 0500 | What agent-ready means | **written** | The agent can close its own loop: set up, change, prove, without asking a human. |
+| 0510 | The nine pillars and five levels | **written** | Readiness is a maturity ladder with named rungs. |
+| 0520 | Tests are the agent's feedback loop | **written** | The suite is the agent's only sense organ, and its latency is the loop's clock speed. |
+| 0530 | Reproducible environments | **written** | If the agent's environment differs from CI's, every failure it fixes is a guess. |
+| 0540 | CI an agent can read | **written** | CI output is an API: addressable rather than scrollable. |
+| 0550 | Scoring a repository | **written** | Every point must be evidence you can point at. Carries the warning that agent-readiness and AI-reviewability are different properties. |
+| 0560 | The gaps that block agents | **written** | The gaps are boringly consistent and each has a named artefact that closes it. |
+| 0570 | In the field: Factory | **written** | Public primary material only. |
 | | **Module 06 - Agentic code review** | | Working, except `0670`, which is frontier. |
 | 0600 | What review is actually for | reserved | Review has four jobs and an AI reviewer can do two. |
 | 0610 | What AI review catches | reserved | The findings a machine can reach at all. **Adjacent pair with `0620`; neither may be merged back.** |

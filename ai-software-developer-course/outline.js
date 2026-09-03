@@ -15,6 +15,44 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0000-you-are-already-running-one.html"
         }
       ]
+    },
+    {
+      "n": "05",
+      "title": "Agent-ready codebases",
+      "lessons": [
+        {
+          "title": "What agent-ready means",
+          "href": "lessons/0500-what-agent-ready-means.html"
+        },
+        {
+          "title": "The nine pillars and five levels",
+          "href": "lessons/0510-the-nine-pillars-and-five-levels.html"
+        },
+        {
+          "title": "Tests are the agent's feedback loop",
+          "href": "lessons/0520-tests-are-the-agents-feedback-loop.html"
+        },
+        {
+          "title": "Reproducible environments",
+          "href": "lessons/0530-reproducible-environments.html"
+        },
+        {
+          "title": "CI an agent can read",
+          "href": "lessons/0540-ci-an-agent-can-read.html"
+        },
+        {
+          "title": "Scoring a repository",
+          "href": "lessons/0550-scoring-a-repository.html"
+        },
+        {
+          "title": "The gaps that block agents",
+          "href": "lessons/0560-the-gaps-that-block-agents.html"
+        },
+        {
+          "title": "In the field: Factory",
+          "href": "lessons/0570-in-the-field-factory.html"
+        }
+      ]
     }
   ],
   "extras": [
