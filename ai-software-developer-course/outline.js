@@ -17,6 +17,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "01",
+      "title": "The internals of coding agents",
+      "lessons": [
+        {
+          "title": "What the model actually receives",
+          "href": "lessons/0100-what-the-model-actually-receives.html"
+        },
+        {
+          "title": "The loop in one picture",
+          "href": "lessons/0110-the-loop-in-one-picture.html"
+        },
+        {
+          "title": "The core four tools",
+          "href": "lessons/0120-the-core-four-tools.html"
+        },
+        {
+          "title": "Reading a tool-call trace",
+          "href": "lessons/0130-reading-a-tool-call-trace.html"
+        },
+        {
+          "title": "How a system prompt is assembled",
+          "href": "lessons/0140-how-a-system-prompt-is-assembled.html"
+        },
+        {
+          "title": "A tool definition is a contract",
+          "href": "lessons/0150-a-tool-definition-is-a-contract.html"
+        },
+        {
+          "title": "Two hundred lines",
+          "href": "lessons/0160-two-hundred-lines.html"
+        },
+        {
+          "title": "What a shipped harness does that yours does not",
+          "href": "lessons/0170-what-your-agent-does-that-yours-does-not.html"
+        }
+      ]
+    },
+    {
       "n": "05",
       "title": "Agent-ready codebases",
       "lessons": [

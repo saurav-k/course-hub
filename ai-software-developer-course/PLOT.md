@@ -46,14 +46,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 |---|---|---|---|
 | 0000 | You are already running one | **written** | The on-ramp. The ten-module map, what this course is not, the capstone opened, and the promise that everything here is done at a keyboard. |
 | | **Module 01 - The internals of coding agents** | | Foundation. The machine, made visible. |
-| 0100 | What the model actually receives | reserved | A request is a system prompt, a tool schema, a history and your words, concatenated by a program you can read. |
-| 0110 | The loop in one picture | reserved | An agent is a while-loop around one API call, and every capability you notice is a tool the loop dispatched. |
-| 0120 | The core four tools | reserved | Read, list, edit and bash are enough, because a filesystem plus a shell is a universal interface. |
-| 0130 | Reading a tool-call trace | reserved | The trace answers "why did it do that" faster than any prompt change. |
-| 0140 | How a system prompt is assembled | reserved | A production system prompt is assembled from parts at run time, and the parts have precedence. |
-| 0150 | A tool definition is a contract | reserved | The description is behaviour, not documentation. |
-| 0160 | Two hundred lines | reserved | The whole loop fits on one screen. **Split by purpose** from `coding-harness-course/lessons/0270-build-a-harness.html`; each page links the other in its first paragraph. |
-| 0170 | What a shipped harness does that yours does not | reserved | Context assembly, permission and recovery, named so the reader knows what to go and read. |
+| 0100 | What the model actually receives | **written** | A request is a system prompt, a tool schema, a history and your words, concatenated by a program you can read. |
+| 0110 | The loop in one picture | **written** | An agent is a while-loop around one API call, and every capability you notice is a tool the loop dispatched. |
+| 0120 | The core four tools | **written** | Read, list, edit and bash are enough, because a filesystem plus a shell is a universal interface. |
+| 0130 | Reading a tool-call trace | **written** | The trace answers "why did it do that" faster than any prompt change. |
+| 0140 | How a system prompt is assembled | **written** | A production system prompt is assembled from parts at run time, and the parts have precedence. |
+| 0150 | A tool definition is a contract | **written** | The description is behaviour, not documentation. |
+| 0160 | Two hundred lines | **written** | The whole loop fits on one screen. **Split by purpose** from `coding-harness-course/lessons/0270-build-a-harness.html`; each page links the other in its first paragraph. |
+| 0170 | What a shipped harness does that yours does not | **written** | Context assembly, permission and recovery, named so the reader knows what to go and read. |
 | 1100 | The capstone: pick your repository | reserved | **Read here**, after module 1. A repository chosen, a baseline trace recorded, three tasks to measure. |
 | | **Module 02 - Advanced context engineering** | | Foundation. The budget, and how to spend it. |
 | 0200 | The window is a budget | reserved | Context is a budget with an eviction policy. |
@@ -144,7 +144,7 @@ Read alongside, not positions in the sequence.
 
 | Path | Status | Notes |
 |---|---|---|
-| `reference/glossary.html` | **written**, 19 terms | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
+| `reference/glossary.html` | **written** | Every term the course introduces, one definition each. **Each module pull request adds its own terms**, alphabetically. |
 | `reference/samples.html` | reserved | The samples gallery: a complete, runnable, licensed example of each artefact the course teaches. Written last, because it collects from every module. |
 | `reference/readiness.html` | reserved | The readiness scorecard as a standalone printable page, lifted from `0550`. Written last. |
 
