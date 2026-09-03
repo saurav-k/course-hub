@@ -91,6 +91,40 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0770-in-the-field-semgrep.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Background agents",
+      "lessons": [
+        {
+          "title": "What a background agent is",
+          "href": "lessons/0800-what-a-background-agent-is.html"
+        },
+        {
+          "title": "The six cloud agents",
+          "href": "lessons/0810-the-six-cloud-agents.html"
+        },
+        {
+          "title": "Triggers",
+          "href": "lessons/0820-triggers.html"
+        },
+        {
+          "title": "Issue to pull request",
+          "href": "lessons/0830-issue-to-pr.html"
+        },
+        {
+          "title": "Running a fleet",
+          "href": "lessons/0840-running-a-fleet.html"
+        },
+        {
+          "title": "What you owe a background agent",
+          "href": "lessons/0850-what-you-owe-a-background-agent.html"
+        },
+        {
+          "title": "In the field: Cloudflare",
+          "href": "lessons/0860-in-the-field-cloudflare.html"
+        }
+      ]
     }
   ],
   "extras": [
