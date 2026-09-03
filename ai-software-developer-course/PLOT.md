@@ -103,14 +103,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0670 | In the field: Cognition | reserved | Public primary material only. |
 | 1120 | The capstone: close the gaps | reserved | **Read here**, after module 6. A readiness score before and after, and review running on their pull requests. |
 | | **Module 07 - Security** | | Working, except `0770`, which is frontier. |
-| 0700 | The three scanners | reserved | Three scanners answer three different questions. |
-| 0710 | Writing a rule | reserved | A scanner rule is a small program you can read. |
-| 0720 | The agent attack surface | reserved | Every input the agent reads is a place instructions can enter. Home of the taint figure. |
-| 0730 | Permissions are the defence | reserved | You do not defend an agent by prompting it better. |
-| 0740 | Sandboxes and hooks | reserved | A rule the model can talk past is a suggestion. |
-| 0750 | Scanners in CI | reserved | The gate is the pull request. |
-| 0760 | Triage and auto-fix | reserved | The model's job is deciding whether a finding matters and drafting the fix. |
-| 0770 | In the field: Semgrep | reserved | Public primary material only. |
+| 0700 | The three scanners | **written** | Three scanners answer three different questions. |
+| 0710 | Writing a rule | **written** | A scanner rule is a small program you can read. |
+| 0720 | The agent attack surface | **written** | Every input the agent reads is a place instructions can enter. Home of the taint figure. |
+| 0730 | Permissions are the defence | **written** | You do not defend an agent by prompting it better. |
+| 0740 | Sandboxes and hooks | **written** | A rule the model can talk past is a suggestion. |
+| 0750 | Scanners in CI | **written** | The gate is the pull request. |
+| 0760 | Triage and auto-fix | **written** | The model's job is deciding whether a finding matters and drafting the fix. |
+| 0770 | In the field: Semgrep | **written** | Public primary material only. |
 | | **Module 08 - Background agents** | | Working. |
 | 0800 | What a background agent is | reserved | Where it runs, what it can reach, and how you find out what it did. |
 | 0810 | The six cloud agents | reserved | **Written on the mechanism axis** - where the sandbox is, what triggers it, what it may write - with the six as evidence. |

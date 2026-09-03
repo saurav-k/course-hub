@@ -53,6 +53,44 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0570-in-the-field-factory.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Security",
+      "lessons": [
+        {
+          "title": "The three scanners",
+          "href": "lessons/0700-the-three-scanners.html"
+        },
+        {
+          "title": "Writing a rule",
+          "href": "lessons/0710-writing-a-rule.html"
+        },
+        {
+          "title": "The agent attack surface",
+          "href": "lessons/0720-the-agent-attack-surface.html"
+        },
+        {
+          "title": "Permissions are the defence",
+          "href": "lessons/0730-permissions-are-the-defence.html"
+        },
+        {
+          "title": "Sandboxes and hooks",
+          "href": "lessons/0740-sandboxes-and-hooks.html"
+        },
+        {
+          "title": "Scanners in CI",
+          "href": "lessons/0750-scanners-in-ci.html"
+        },
+        {
+          "title": "Triage and auto-fix",
+          "href": "lessons/0760-triage-and-auto-fix.html"
+        },
+        {
+          "title": "In the field: Semgrep",
+          "href": "lessons/0770-in-the-field-semgrep.html"
+        }
+      ]
     }
   ],
   "extras": [

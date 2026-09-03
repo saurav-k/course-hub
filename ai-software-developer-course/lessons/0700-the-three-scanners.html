@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The three scanners - AI Software Developer</title>
+<meta name="description" content="SAST, SCA and secret scanning read different inputs and answer different questions. Confusing the three is why a security backlog stops being actionable.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Security &middot; Lesson 0700</div>
+  <h1>Three scanners, three questions, three kinds of noise</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Built from the vendors' own documentation for the three scanner families.
+    &middot; <a href="https://docs.semgrep.dev/introduction">Semgrep, introduction</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li><b>SAST</b> reads your first-party source and asks whether the code is shaped wrongly. It never opens a lockfile.</li>
+      <li><b>SCA</b> reads your dependency manifests and asks whether any named package has a published advisory. It never reads your logic.</li>
+      <li><b>Secret scanning</b> reads text, including history, and asks whether a live credential is sitting in it.</li>
+      <li>Each family has its own <b>false-positive economy</b>, and each has a documented fix for it: reachability for SCA, validation for secrets, and a rule you wrote yourself for SAST.</li>
+      <li>The rule the rest of this module uses: <b>a finding you cannot act on costs more than no finding</b>, because it trains the team to close the tab.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Review told you what changed; scanners tell you what is dangerous.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;a repository with review running on it"] --> T["THIS PAGE&lt;br/&gt;three scanners, three questions"]
+  T --> N["What it enables&lt;br/&gt;writing your own rule, and the CI gate"]
+  W["Module 07&lt;br/&gt;the reach your agent now has"] -.- T
+    </div>
+    <figcaption>You arrive with a repository an AI reviewer already reads. A reviewer argues about a diff; a scanner asks a fixed question of the whole tree, and the three questions do not overlap.
+    <b>Every scanner in this module is a fixed question, and knowing which question you asked is what makes an answer actionable.</b></figcaption>
+  </figure>
+
+  <h2 id="one-commit">1. One commit, three red checks, three different reasons</h2>
+  <p>Open a pull request on a repository with the usual gates and you can fail three checks at once without any two of them being about the same thing.
+  One says your code passes a request parameter into a shell. One says a package four levels down your dependency tree has an advisory. One says the string in <code>config/test_fixtures.py</code> looks like an AWS key.
+  Three tools, three inputs, three questions, and the only thing they share is the pull request they landed on.</p>
+  <p>The reason to hold them apart is not tidiness. It is that each family fails in a different direction, so the thing you do about a wall of findings is different in each case, and a team that treats "the security check is red" as one signal ends up muting all three.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each scanner reads</div>
+    <div class="fig-claim">The three read different files, so they cannot catch each other's defects.</div>
+    <svg class="chart" viewBox="0 0 640 290" role="img" aria-label="A repository tree drawn as a column of files, with three labelled reading windows drawn beside it. The SAST window covers the source directory. The SCA window covers the lockfile and manifest only. The secret scanning window covers every file plus the git history object store beneath them.">
+      <text class="d-mono" x="20" y="30">one repository</text>
+
+      <rect class="d-box" x="20" y="42" width="180" height="26" rx="4"/>
+      <text class="lbl-sm" x="110" y="60" text-anchor="middle">src/handlers.py</text>
+      <rect class="d-box" x="20" y="74" width="180" height="26" rx="4"/>
+      <text class="lbl-sm" x="110" y="92" text-anchor="middle">src/report.py</text>
+      <rect class="d-box" x="20" y="106" width="180" height="26" rx="4"/>
+      <text class="lbl-sm" x="110" y="124" text-anchor="middle">package-lock.json</text>
+      <rect class="d-box" x="20" y="138" width="180" height="26" rx="4"/>
+      <text class="lbl-sm" x="110" y="156" text-anchor="middle">config/fixtures.py</text>
+      <rect class="d-ghost" x="20" y="170" width="180" height="26" rx="4"/>
+      <text class="lbl-sm" x="110" y="188" text-anchor="middle">.git/ objects</text>
+
+      <rect class="d-bound" x="226" y="34" width="130" height="76" rx="6"/>
+      <text class="lbl-b" x="291" y="56" text-anchor="middle">SAST</text>
+      <text class="d-mono" x="291" y="76" text-anchor="middle">first-party</text>
+      <text class="d-mono" x="291" y="92" text-anchor="middle">source only</text>
+      <path class="d-flow s-signal" d="M222 72 L204 72"/>
+
+      <rect class="d-bound" x="376" y="98" width="130" height="44" rx="6"/>
+      <text class="lbl-b" x="441" y="118" text-anchor="middle">SCA</text>
+      <text class="d-mono" x="441" y="134" text-anchor="middle">manifests only</text>
+      <path class="d-flow s-stat" d="M372 119 L204 119"/>
+
+      <rect class="d-bound" x="526" y="42" width="104" height="154" rx="6"/>
+      <text class="lbl-b" x="578" y="66" text-anchor="middle">secrets</text>
+      <text class="d-mono" x="578" y="86" text-anchor="middle">every byte</text>
+      <text class="d-mono" x="578" y="102" text-anchor="middle">including</text>
+      <text class="d-mono" x="578" y="118" text-anchor="middle">history</text>
+      <path class="d-flow s-alarm" d="M522 150 C 400 150, 300 186, 204 183"/>
+
+      <text class="read" x="320" y="232" text-anchor="middle">A defect in the lockfile is invisible to SAST. A defect in your logic is invisible to SCA.</text>
+      <text class="read" x="320" y="256" text-anchor="middle">A key deleted in the working tree is still in the history the third window reads.</text>
+      <text class="d-mono" x="320" y="280" text-anchor="middle">windows drawn from each tool's own documented input</text>
+    </svg>
+    <figcaption>The windows are drawn from what each tool says it reads: Semgrep Code scans first-party code, Supply Chain scans declared dependencies, and TruffleHog scans history, which is why its CI step needs the full clone.
+    <b>Coverage is decided by the input a scanner takes, not by how clever its rules are.</b></figcaption>
+  </figure>
+
+  <h2 id="sast">2. SAST asks whether the code is shaped wrongly</h2>
+  <p><b>Static application security testing</b> reads source without running it and reports where the code matches a dangerous shape. Semgrep describes its own SAST product as detecting vulnerabilities <a href="https://docs.semgrep.dev/introduction">"in your <b>first-party code</b>"</a>, and its community scanner as covering "over 30 programming languages". That is the whole promise and it is worth reading literally: first-party, and shape.</p>
+  <p>The noise here comes from shape being a proxy for danger. <code>subprocess.run</code> with a variable in it is a shape; whether the variable can hold anything an outsider chose is a different question, and a pattern match cannot answer it. That gap is what <a href="../lessons/0710-writing-a-rule.html">the next lesson</a> closes with dataflow, and it is why the fix for SAST noise is usually a rule you narrowed yourself rather than a setting.</p>
+
+  <h2 id="sca">3. SCA asks whether a named package has an advisory</h2>
+  <p><b>Software composition analysis</b> reads what your manifests declare and matches it against a vulnerability database. <a href="https://google.github.io/osv-scanner/">OSV-Scanner</a> is the officially supported front end to the OSV database, whose design goal is stated as "fewer, more actionable vulnerability notifications, which reduces the time needed to resolve them".</p>
+  <p>The noise here has a specific shape: the advisory is real, the package is genuinely in your tree, and the vulnerable function is never called from your code. <b>Reachability</b> is the documented answer. Semgrep Supply Chain classifies a finding three ways rather than two - reachable, unreachable, and no reachability analysis - and it is candid that <a href="https://docs.semgrep.dev/semgrep-supply-chain/overview">it "does <i>not</i> perform reachability analysis"</a> on transitive dependencies, where you get version matching alone.</p>
+
+  <div class="callout warn">
+    Read that caveat next to your own dependency tree before you promise anybody a quiet backlog.
+    Most advisories in a modern JavaScript or Python project arrive through packages you never named, and those are exactly the findings that come back with no reachability verdict at all.
+  </div>
+
+  <h2 id="secrets">4. Secret scanning asks whether the credential is live</h2>
+  <p>A secret scanner reads text - the diff, the working tree, and the history behind both - and flags things shaped like credentials. <a href="https://github.com/trufflesecurity/trufflehog">TruffleHog</a> classifies "over 800 secret types", which is a detector count rather than a claim about your repository.</p>
+  <p>The noise here is fixtures, rotated keys and example values. <b>Validation</b> is the documented answer: the detector calls the issuing service and reports what came back. TruffleHog's AWS detector "performs a <code>GetCallerIdentity</code> API call against the AWS API to verify if an AWS credential is active", and the result is <i>verified</i>, <i>unverified</i> or <i>unknown</i>, with <code>--results</code> deciding which of the three you are shown. Semgrep Secrets runs the same idea locally and is explicit that <a href="https://docs.semgrep.dev/semgrep-secrets/conceptual-overview">"No tokens are sent to Semgrep servers"</a>.</p>
+  <p>Notice what validation changes. It does not make the scanner better at finding strings. It replaces a guess about a string with a fact about an account, which is the only thing that turns a page of matches into a queue you can work down.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Verdicts a finding can carry</div>
+    <div class="fig-claim">The scanners that solved their noise problem did it by enriching the verdict.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A bar chart of how many distinct verdicts a finding can carry in each scanner family: one for a plain pattern match in SAST, three for Semgrep Supply Chain reachability, three for TruffleHog result states, and four for Semgrep Secrets validation states.">
+      <line class="grid" x1="150" y1="60" x2="610" y2="60"/>
+      <line class="grid" x1="150" y1="108" x2="610" y2="108"/>
+      <line class="grid" x1="150" y1="155" x2="610" y2="155"/>
+      <line class="grid" x1="150" y1="203" x2="610" y2="203"/>
+      <line class="axis" x1="150" y1="250" x2="610" y2="250"/>
+      <text class="lbl-sm" x="142" y="64" text-anchor="end">4</text>
+      <text class="lbl-sm" x="142" y="112" text-anchor="end">3</text>
+      <text class="lbl-sm" x="142" y="159" text-anchor="end">2</text>
+      <text class="lbl-sm" x="142" y="207" text-anchor="end">1</text>
+      <text class="lbl-sm" x="142" y="254" text-anchor="end">0</text>
+
+      <rect class="m-noise" x="180" y="203" width="70" height="47"/>
+      <rect class="m-stat" x="290" y="108" width="70" height="142"/>
+      <rect class="m-stat" x="400" y="108" width="70" height="142"/>
+      <rect class="m-gold" x="510" y="60" width="70" height="190"/>
+
+      <text class="lbl-sm" x="215" y="195" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="325" y="100" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="435" y="100" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="545" y="52" text-anchor="middle">4</text>
+
+      <text class="lbl-sm" x="215" y="268" text-anchor="middle">pattern match</text>
+      <text class="lbl-sm" x="325" y="268" text-anchor="middle">reachability</text>
+      <text class="lbl-sm" x="435" y="268" text-anchor="middle">secret result</text>
+      <text class="lbl-sm" x="545" y="268" text-anchor="middle">validation</text>
+      <text class="d-mono" x="215" y="284" text-anchor="middle">SAST</text>
+      <text class="d-mono" x="325" y="284" text-anchor="middle">Supply Chain</text>
+      <text class="d-mono" x="435" y="284" text-anchor="middle">TruffleHog</text>
+      <text class="d-mono" x="545" y="284" text-anchor="middle">Semgrep Secrets</text>
+      <text class="ttl" x="150" y="34">distinct verdicts a single finding can carry</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>found, or not found</span><span><i class="sw-stat"></i>three documented states</span><span><i class="sw-gold"></i>four documented states</span></div>
+    <figcaption>Counted from each vendor's own documentation: Supply Chain's reachable, unreachable and no-reachability-analysis; TruffleHog's verified, unverified and unknown; Semgrep Secrets' confirmed valid, confirmed invalid, validation error and no validator.
+    <b>A scanner that can only say "found" has handed you the triage problem entire, which is why triage is a whole lesson later in this module.</b></figcaption>
+  </figure>
+
+  <h2 id="side-by-side">5. The three, side by side</h2>
+  <p>This table is the one to keep. When a finding arrives, the first move is to name which row it came from, because that decides whether the fix is a code change, a version bump or a rotation.</p>
+
+  <table>
+    <thead><tr><th>Family</th><th>Input it reads</th><th>Question it asks</th><th>Its typical false positive</th><th>The documented noise fix</th></tr></thead>
+    <tbody>
+      <tr><td>SAST</td><td>first-party source</td><td>is this code shaped dangerously</td><td>a dangerous shape no outsider can reach</td><td>dataflow, and rules you narrowed yourself</td></tr>
+      <tr><td>SCA</td><td>manifests and lockfiles</td><td>does this tree name a package with an advisory</td><td>a real advisory in code you never call</td><td>reachability, direct dependencies only</td></tr>
+      <tr><td>Secrets</td><td>text, including git history</td><td>is a live credential in here</td><td>a fixture, an example, an already-rotated key</td><td>validation against the issuing service</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="fig-cap">One commit, three verdicts</div>
+    <div class="fig-claim">Three independent questions converge on one check summary, and only one is yours to code.</div>
+    <div class="mermaid">
+flowchart TB
+  C["One commit on a branch"] --> A["SAST reads src/"]
+  C --> B["SCA reads the lockfile"]
+  C --> D["Secrets read the history"]
+  A --> E["Fix the code"]
+  B --> F["Bump the version - or record why not"]
+  D --> G["Rotate the credential, then purge"]
+  E --> H["One pull request check summary"]
+  F --> H
+  G --> H
+    </div>
+    <figcaption>Read the middle column downward: the remedy differs by family, and the third one is not a code change at all. A rotated credential is still in the history, so deleting the line closes nothing.
+    <b>Three questions, three remedies - and a single red check that hides which one you are looking at is a process defect, not a tooling one.</b></figcaption>
+  </figure>
+
+  <h2 id="actionable">6. The rule the rest of this module uses</h2>
+  <p>Every mechanism in the next seven lessons is chosen for the same reason: it turns a finding into something a person, or an agent, can act on without a meeting. Reachability does it by ranking. Validation does it by checking. A rule you wrote does it by encoding what your team actually cares about. Diff-aware scanning, which arrives in <a href="0750-scanners-in-ci.html">lesson 0750</a>, does it by only showing you what this branch introduced.</p>
+  <p>The failure that all four are aimed at is one you have already lived through: a backlog whose size makes it unreadable, so nobody reads it, so a genuinely reachable finding sits in it for a year. <b>Volume is a security control that fails open.</b></p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">A dependency four levels down your tree carries a published advisory. Which scanner family raised it, and what makes the finding actionable?</div>
+      <button class="q-opt">SAST raised it, and a narrower pattern rule is the fix</button>
+      <button class="q-opt">Secret scanning did, and validating the key ranks it</button>
+      <button class="q-opt">SCA raised it, and reachability is the documented rank</button>
+      <button class="q-opt">All three raised it, since a lockfile is source too</button>
+      <div class="q-fb">Only SCA reads manifests, so only SCA can see a transitive package at all. Reachability is the documented way to rank such a finding - though Semgrep states plainly that transitive dependencies get version matching and no reachability verdict, which is why this exact case is the hard one. The first option describes a SAST remedy applied to a dependency SAST never reads; the second confuses a package advisory with a credential; the fourth is the mistake this page exists to prevent, since a lockfile is data to SAST and not code.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your secret scanner reports 40 matches and your team ignores all of them. Which change most directly makes the list workable?</div>
+      <button class="q-opt">Turn on validation and show only live credentials</button>
+      <button class="q-opt">Raise the entropy threshold until the list is short</button>
+      <button class="q-opt">Scan the working tree instead of the full history</button>
+      <button class="q-opt">Move the check from the pull request to a weekly job</button>
+      <div class="q-fb">Validation replaces a guess about a string with a fact about an account, which is exactly the enrichment the verdict chart is about. Raising a threshold shortens the list by dropping real secrets as readily as fixtures, and you never learn which. Dropping history reads is worse than useless here, because a credential removed from the working tree is precisely the one still sitting in the objects. Moving the job changes when you ignore the list, not whether.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 20 minutes, with your own repository</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Open the security findings your capstone repository already has - the Dependabot alerts tab, an existing scanner report, or the output of one local run of <code>osv-scanner</code>.</p>
+      <p><b>Take the first ten findings</b> and, for each one, write down two things: which of the three families it came from, and what a fix would actually be - a code change, a version bump, or a rotation. Then mark each one <i>actionable today</i> or <i>not</i>, and write one word for why not.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>If you cannot tell which family a finding came from, look at what it names. A file and a line number is SAST. A package and a version range is SCA. A string and a commit is a secret finding.</p></details>
+
+    <details class="solution"><summary>Show what the ten usually look like</summary>
+      <ol class="worked">
+        <li><b>Most of them are SCA.</b> Dependency advisories outnumber everything else in a normal repository, because a single lockfile can pull thousands of packages and every one of them has a version number to match against.</li>
+        <li><b>Their "why not" is nearly always the same word: <i>unreachable</i>, or <i>unknown</i>.</b> That is the reachability gap, and it is where the noise fix belongs rather than in a mute button.</li>
+        <li><b>The secret findings split cleanly in two</b> once you ask whether anybody validated them. Unvalidated, they all look identical. That is the whole argument for validation.</li>
+        <li><b>The SAST findings are the fewest and the most argued about</b>, because a shape is a proxy and your team has opinions about whether this instance is real. Those opinions are what a rule you write yourself encodes.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If every one of your ten came out actionable, you are almost certainly reading a filtered view rather than the raw list. If none did, check whether the tool that produced them offers a verdict beyond "found" - that missing verdict is usually the whole problem.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to run one scanner of each family over a repository you own and to report only the counts, then to tell you which counts it would not trust and why. If it gives you a single combined number, ask it which of the three questions that number answers - the answer is that it answers none of them.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>Semgrep's overview of its own product family is the shortest place to see one vendor drawing the same three boundaries this page draws, in its own words and with its own scope limits attached: <a href="https://docs.semgrep.dev/introduction">Introduction to Semgrep</a>. Read it beside <a href="https://docs.semgrep.dev/semgrep-supply-chain/overview">the Supply Chain overview</a> and note how much of the second page is about ranking rather than finding.</p>
+
+  <div class="pager">
+    <a href="../index.html"><span class="dir">&larr; Previous</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0710-writing-a-rule.html"><span class="dir">Next &rarr;</span><span class="ttl">Writing a rule</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0700 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

