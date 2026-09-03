@@ -65,14 +65,14 @@ Lesson `0000` opens the capstone by naming it, so nobody meets it for the first 
 | 0260 | Tools are designed for a reader who cannot ask | reserved | A tool description is executed, not read. |
 | 0270 | When not to add a tool | reserved | Every tool you mount is permanent context. Carries the per-turn tool-context arithmetic, and links **both ways** with `0900`. |
 | | **Module 03 - Agent skills and the CLI** | | Working. The smallest artefact you write for yourself. |
-| 0300 | What a skill is | reserved | A folder the agent reads only when the task matches its description. |
-| 0310 | Writing your first skill | reserved | The frontmatter is the whole contract. |
-| 0320 | Progressive disclosure, and scripts | reserved | What the agent does not need every time belongs in `references/` or `scripts/`. |
-| 0330 | Where skills live | reserved | Four agents, one folder shape, four precedence rules. |
-| 0340 | Web skills | reserved | A skill that reaches past the repository turns a context problem into a permission problem. |
-| 0350 | The agent in a pipeline | reserved | An ordinary unix filter: stdin in, chosen format out, exit code you can branch on. |
-| 0360 | Session control from the CLI | reserved | A non-interactive run still leaves a session behind. |
-| 0370 | In the field: Cursor | reserved | Public primary material only. |
+| 0300 | What a skill is | **written** | A folder the agent reads only when the task matches its description. Carries the measured metadata-against-bodies arithmetic over the nineteen published skills. |
+| 0310 | Writing your first skill | **written** | The frontmatter is the whole contract. Carries `internal-comms` verbatim and the measured finding that one published description is 1,068 characters against the standard's 1,024. |
+| 0320 | Progressive disclosure, and scripts | **written** | What the agent does not need every time belongs in `references/` or `scripts/`. Carries this repository's own `course-authoring` skill as the shape at scale. |
+| 0330 | Where skills live | **written** | Four agents, four precedence rules, and Claude Code and Gemini CLI resolve the same clash in opposite directions. The portable answer is `.agents/skills/` plus a symlink. |
+| 0340 | Web skills | **written** | A skill that reaches past the repository turns a context problem into a permission problem. Carries `webapp-testing` and its script complete. Home of the taint figure in this module. |
+| 0350 | The agent in a pipeline | **written** | An ordinary unix filter: stdin in, chosen format out, exit code you can branch on. Carries the 10MB pipe cap against six real inputs measured in this repository. |
+| 0360 | Session control from the CLI | **written** | A non-interactive run still leaves a session behind. Every flag verified at source, including that Codex has no `--full-auto` at the pinned commit. |
+| 0370 | In the field: Cursor | **written** | Public primary material only. Cursor's four answers to the four questions, and the module assignment, which feeds the capstone's first committed agent configuration. |
 | | **Module 04 - Customizing your agent and repository** | | Working. The file a team argues about. |
 | 0400 | One file, two readers | reserved | Write `AGENTS.md`, then make Claude Code read it with one line. Module entry point. |
 | 0410 | What belongs in the file | reserved | The instruction file is a context budget. Carries this repository's own 770-line `AGENTS.md` against the documented "under 200 lines". |
