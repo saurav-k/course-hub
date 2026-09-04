@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Two rankings beat one, and RRF is the cheapest way to add them - End-to-End AI Engineering</title>
+<meta name="description" content="Lexical and dense retrieval fail on different queries, so fusing their ranks costs one extra query and recovers most of what either alone would have lost. The constant barely matters, and the paper says so.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Retrieval quality and context engineering &middot; Lesson 0260</div>
+  <h1>Add a second ranking before you add a second model</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Grounded in the reciprocal rank fusion paper, SIGIR'09, and in the BM25 survey, <i>Foundations and Trends in Information Retrieval</i> 3(4), DOI <code>10.1561/1500000019</code>.
+    &middot; <a href="https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf">Cormack, Clarke &amp; B&uuml;ttcher</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Dense retrieval misses <b>exact strings</b> - part numbers, error codes, rare proper nouns. Keyword retrieval misses <b>paraphrase</b>. The failures barely overlap.</li>
+      <li>BM25 is not a legacy fallback. Across eighteen zero-shot datasets, BEIR found <b>"BM25 is a robust baseline"</b>.</li>
+      <li>Fusing two rankings needs <b>no scores, no training and no tuning</b>: reciprocal rank fusion adds one over a constant plus the rank, and sorts.</li>
+      <li>The constant is <b>60</b>, and the paper says it "was near-optimal, but that the choice was not critical". You do not have a hyperparameter here.</li>
+      <li>It costs one extra query per request and no new database: Postgres full-text search beside your vectors is enough.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Two rankings disagree, and the fusion keeps what either one found.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two ranked lists drawn side by side for the same query. The dense list has document B first and document D fourth. The keyword list has document D first and document B fifth. Both lists feed a fusion step below, whose output puts D and B at the top together, and an arrow leads on to lesson 0270 which reranks the fused shortlist.">
+      <text class="d-mono" x="16" y="24">one query, two rankings, one fused list</text>
+
+      <rect class="d-bound" x="12" y="36" width="290" height="126" rx="6"/>
+      <text class="lbl-sm" x="26" y="58">dense ranking</text>
+      <rect class="d-keep" x="26" y="66" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="38" y="81">1  doc B</text>
+      <rect class="d-box" x="26" y="90" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="38" y="105">2  doc A</text>
+      <rect class="d-box" x="26" y="114" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="38" y="129">3  doc C</text>
+      <rect class="d-focus" x="26" y="138" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="38" y="153">4  doc D</text>
+
+      <rect class="d-bound" x="338" y="36" width="290" height="126" rx="6"/>
+      <text class="lbl-sm" x="352" y="58">keyword ranking</text>
+      <rect class="d-focus" x="352" y="66" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="364" y="81">1  doc D</text>
+      <rect class="d-box" x="352" y="90" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="364" y="105">2  doc E</text>
+      <rect class="d-box" x="352" y="114" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="364" y="129">3  doc A</text>
+      <rect class="d-keep" x="352" y="138" width="262" height="20" rx="3"/>
+      <text class="d-mono" x="364" y="153">5  doc B</text>
+
+      <path class="d-flow" d="M157 166 L280 194"/>
+      <path class="d-flow" d="M483 166 L360 194"/>
+
+      <rect class="d-keep" x="150" y="198" width="340" height="42" rx="5"/>
+      <text class="lbl-b" x="320" y="218" text-anchor="middle">fused: D, B, A, C, E</text>
+      <text class="d-mono" x="320" y="234" text-anchor="middle">rank in, score out, nothing trained</text>
+
+      <path class="d-flow ref" d="M494 219 L520 219"/>
+      <rect class="d-absent" x="524" y="198" width="104" height="42" rx="5"/>
+      <text class="lbl-sm" x="576" y="224" text-anchor="middle">lesson 0270</text>
+
+      <text class="read" x="320" y="272" text-anchor="middle">Doc D was fourth on one list and first on the other.</text>
+    </svg>
+    <figcaption>The same five documents ranked twice and fused once. The two highlighted documents are the ones each ranking alone would have pushed down, and the fused list keeps both near the top.
+    <b>Fusion is not an averaging of opinions; it is a way of not losing the document that only one retriever found.</b></figcaption>
+  </figure>
+
+  <h2 id="two-failure-sets">1. The two retrievers fail on different queries</h2>
+  <p>An embedding is a lossy address, as lesson 0130 put it, and the loss is systematic. A rare token - a part number, an error code, a person's surname, a flag name - contributes almost nothing to a 1,536-dimension average, so a query built out of that token retrieves passages that are about the same <i>topic</i> and do not contain the string.</p>
+  <p>A keyword index has the opposite failure. It matches the string exactly and cannot match a paraphrase, so a reader who asks "when can a refund be reversed" against a document that says "chargebacks may be contested within 60 days" gets nothing at all.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four queries, two retrievers</div>
+    <div class="fig-claim">Each retriever misses exactly what the other one finds.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="A grid of four example queries against three columns: dense retrieval, keyword retrieval and the fused result. Two paraphrase queries are found by dense and missed by keyword. Two exact-string queries, an error code and a part number, are missed by dense and found by keyword. The fused column finds all four.">
+      <text class="d-mono" x="16" y="24">the same four questions, three retrievers</text>
+
+      <text class="lbl-sm" x="16" y="52">the query</text>
+      <text class="lbl-sm" x="340" y="52" text-anchor="middle">dense</text>
+      <text class="lbl-sm" x="450" y="52" text-anchor="middle">keyword</text>
+      <text class="lbl-sm" x="560" y="52" text-anchor="middle">fused</text>
+
+      <text class="d-mono" x="16" y="80">when can a refund be reversed</text>
+      <rect class="d-keep" x="296" y="62" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="340" y="80" text-anchor="middle">hit</text>
+      <rect class="d-drop" x="406" y="62" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="450" y="80" text-anchor="middle">miss</text>
+      <rect class="d-keep" x="516" y="62" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="560" y="80" text-anchor="middle">hit</text>
+
+      <text class="d-mono" x="16" y="118">what does parental leave cover</text>
+      <rect class="d-keep" x="296" y="100" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="340" y="118" text-anchor="middle">hit</text>
+      <rect class="d-drop" x="406" y="100" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="450" y="118" text-anchor="middle">miss</text>
+      <rect class="d-keep" x="516" y="100" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="560" y="118" text-anchor="middle">hit</text>
+
+      <text class="d-mono" x="16" y="156">error code E4021</text>
+      <rect class="d-drop" x="296" y="138" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="340" y="156" text-anchor="middle">miss</text>
+      <rect class="d-keep" x="406" y="138" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="450" y="156" text-anchor="middle">hit</text>
+      <rect class="d-keep" x="516" y="138" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="560" y="156" text-anchor="middle">hit</text>
+
+      <text class="d-mono" x="16" y="194">SKU 88-XR-14 lead time</text>
+      <rect class="d-drop" x="296" y="176" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="340" y="194" text-anchor="middle">miss</text>
+      <rect class="d-keep" x="406" y="176" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="450" y="194" text-anchor="middle">hit</text>
+      <rect class="d-keep" x="516" y="176" width="88" height="26" rx="3"/>
+      <text class="d-mono" x="560" y="194" text-anchor="middle">hit</text>
+
+      <text class="read" x="320" y="228" text-anchor="middle">Neither column is better - they are wrong about different things.</text>
+      <text class="lbl-sm" x="320" y="250" text-anchor="middle">An illustration of the two failure modes, not a measurement on any corpus.</text>
+    </svg>
+    <figcaption>Four questions of the two kinds, with the outcome each retriever gives. Written to show the shape of the two failure sets rather than to report a result; the point is that the misses are in different rows, which is what makes fusion pay.
+    <b>If your two retrievers failed on the same queries, fusing them would buy nothing at all.</b></figcaption>
+  </figure>
+
+  <h2 id="bm25">2. BM25 is a baseline, not a legacy</h2>
+  <p>It is worth being precise about what the keyword side actually is, because "keyword search" sounds like a downgrade. BM25 scores a document by how often the query's terms appear in it, with two corrections: term frequency <b>saturates</b>, so the twentieth occurrence of a word adds almost nothing over the tenth, and the score is <b>normalised by document length</b>, so a long document does not win by containing more of everything.</p>
+  <p>Those two corrections have two constants, and the survey that defines the model is unusually candid about them: "the model provides no guidance on how these should be set. This may be regarded as a limitation of the model." It then reports that experiments "suggest that in general values such as 0.5 &lt; b &lt; 0.8 and 1.2 &lt; k1 &lt; 2 are reasonably good in many circumstances", while noting optimal values depend on the documents and queries.</p>
+  <p>So take the defaults your database ships, and do not spend a week tuning two constants whose own authors give you a range. The reason to reach for BM25 at all is BEIR's result across eighteen zero-shot datasets: "BM25 is a robust baseline". Not a strong result on one benchmark - a result that survives being moved to a domain nobody trained on, which is exactly your situation.</p>
+
+  <h2 id="rrf">3. Reciprocal rank fusion, exactly</h2>
+  <p>You now have two ranked lists whose scores are not comparable: a cosine similarity and a BM25 score live on different scales and normalising them into agreement is a project of its own. Reciprocal rank fusion sidesteps that by throwing the scores away and using only the positions.</p>
+
+  <div class="math">
+    RRFscore(d) = &Sigma;<sub>r &isin; R</sub> 1 &divide; (k + r(d))
+    <span class="gloss">Read as: for one document <i>d</i>, take each ranking <i>r</i> in the set of rankings <i>R</i>, find the position that ranking gave the document, add the constant <i>k</i> to it, and take one over the result. Add those up across the rankings. A document absent from a ranking contributes nothing from it.</span>
+  </div>
+
+  <p>The paper fixes <b>k = 60</b>, and says so in the same sentence that defines the formula: it "was fixed during a pilot investigation and not altered during subsequent validation". Their reason for the shape is that "while highly-ranked documents are more important, the importance of lower-ranked documents does not vanish as it would were, say, an exponential function used", and the constant itself exists because it "mitigates the impact of high rankings by outlier systems".</p>
+  <p>The part that saves you a week is their pilot result: the experiments "indicated that k = 60 was near-optimal, but that the choice was not critical". Take them at their word and check it once on your own corpus rather than treating it as a knob.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What the constant does</div>
+    <div class="fig-claim">A larger constant flattens the curve and demotes rank one.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A line chart of the reciprocal rank fusion weight given to each rank, relative to the weight of rank one, for three values of the constant k. At k equals ten the weight falls to about 0.55 by rank ten. At k equals sixty it falls only to about 0.87. At k equals two hundred it falls to about 0.96, almost flat.">
+      <line class="grid" x1="110" y1="86" x2="610" y2="86"/>
+      <line class="grid" x1="110" y1="122" x2="610" y2="122"/>
+      <line class="grid" x1="110" y1="158" x2="610" y2="158"/>
+      <line class="grid" x1="110" y1="194" x2="610" y2="194"/>
+      <line class="axis" x1="110" y1="50" x2="110" y2="230"/>
+      <line class="axis" x1="110" y1="230" x2="610" y2="230"/>
+
+      <polyline class="s-noise" points="110,50 166,80 221,105 277,127 332,146 388,163 443,177 499,190 554,202 610,212"/>
+      <polyline class="s-stat" points="110,50 166,56 221,61 277,67 332,72 388,77 443,82 499,87 554,92 610,96"/>
+      <polyline class="s-signal" points="110,50 166,52 221,54 277,55 332,57 388,59 443,60 499,62 554,64 610,66"/>
+
+      <text class="lbl-sm" x="102" y="54" text-anchor="end">1.00</text>
+      <text class="lbl-sm" x="102" y="90" text-anchor="end">0.90</text>
+      <text class="lbl-sm" x="102" y="126" text-anchor="end">0.80</text>
+      <text class="lbl-sm" x="102" y="162" text-anchor="end">0.70</text>
+      <text class="lbl-sm" x="102" y="198" text-anchor="end">0.60</text>
+      <text class="lbl-sm" x="102" y="234" text-anchor="end">0.50</text>
+
+      <text class="lbl-sm" x="110" y="250" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="221" y="250" text-anchor="middle">3</text>
+      <text class="lbl-sm" x="332" y="250" text-anchor="middle">5</text>
+      <text class="lbl-sm" x="443" y="250" text-anchor="middle">7</text>
+      <text class="lbl-sm" x="610" y="250" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="360" y="268" text-anchor="middle">rank within one ranking</text>
+      <text class="ttl" x="20" y="290">RRF weight by rank</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>k = 10</span><span><i class="sw-stat"></i>k = 60, the paper's value</span><span><i class="sw-signal"></i>k = 200</span></div>
+    <figcaption>Computed directly from the formula above rather than measured: the weight of rank <i>r</i> divided by the weight of rank one, for three constants. At sixty, rank ten still carries 87% of rank one's weight, which is the paper's own reasoning about outlier systems, drawn.
+    <b>Moving k from 60 to 200 changes the shape hardly at all, which is why the paper could leave it alone.</b></figcaption>
+  </figure>
+
+  <figure class="diagram stepper" id="hybrid-one-query">
+    <div class="fig-cap">One query, both rankings</div>
+    <div class="fig-claim">The second ranking costs one query and a sort.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="tool" data-cost="25">
+        <span class="step-role">dense search</span>
+        <span class="step-body">The question is embedded and the vector index returns its top 100 as ids and scores.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="8">
+        <span class="step-role">keyword search</span>
+        <span class="step-body">The same question runs as full-text search over the same corpus, returning its own top 100. <b>No embedding call and no second database.</b></span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="1">
+        <span class="step-role">fuse</span>
+        <span class="step-body">One over sixty plus rank, summed per document, sorted. No scores are compared and nothing is normalised.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="0">
+        <span class="step-role">cut to the shortlist</span>
+        <span class="step-body">The fused list is truncated to what lesson 0270 will rerank, or to what you pack.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">4</b></span>
+      <span>elapsed <b data-step-out="cost">25</b> ms</span>
+    </div>
+    <figcaption>Step through and watch which move is expensive. The illustrative timings are the shape of a small corpus on one machine; yours will differ and the ordering of the four will not.
+    <b>The whole of hybrid search is one extra query and an arithmetic sort, which is why it comes before anything with a model in it.</b></figcaption>
+  </figure>
+
+  <p>You need no new infrastructure for this. The pgvector README, at tag <code>v0.8.6</code>, points at exactly this arrangement - "Use together with Postgres full-text search for hybrid search" - and names reciprocal rank fusion or a cross-encoder as the two ways to combine the results, which is this lesson and the next one.</p>
+
+  <h2 id="what-moved">4. What this changed</h2>
+  <p>This is the lesson in the module most likely to move your number, and the size of the move is a property of your corpus rather than of the technique. Corpora full of identifiers, versions, error codes and product names gain a lot. Corpora of flowing prose gain little, because the dense retriever was already finding what there was to find.</p>
+  <p>Run it as one change: add the keyword ranking, fuse at k = 60, re-run the same thirty questions, record recall@10 against the lesson 0240 row. Then change k to 10 and to 200 and re-run twice more, and expect the number to barely move - which is the paper's own finding and is worth confirming yourself, because it is what tells you to stop touching it.</p>
+  <p>The whiteboard framing of the same decision is <a href="../../ai-system-design-course/lessons/0001-rag-and-retrieval.html#hybrid-search">Hybrid search</a>, with <a href="../../ai-system-design-course/lessons/0001-rag-and-retrieval.html#keyword-search">Keyword search</a> beside it, in AI System Design for Staff+ Interviews.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Why does reciprocal rank fusion use ranks rather than the retrievers' own scores?</div>
+      <button class="q-opt">Ranks are far cheaper to compute than a similarity is</button>
+      <button class="q-opt">Two retrievers' scores are on scales that cannot be compared</button>
+      <button class="q-opt">Ranks weight the top result far more heavily than scores do</button>
+      <button class="q-opt">Scores are unavailable from a keyword index in most databases</button>
+      <div class="q-fb">A cosine similarity and a BM25 score have no common scale, so combining them means inventing a normalisation, and the fusion exists to avoid that. Ranks are not cheaper: both retrievers already computed scores to produce the ranks. The constant makes the weighting flatter than a raw score would, not steeper. A keyword index does return scores, which is why this is a design choice rather than a workaround.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your fused results are barely better than dense alone. What is the most likely reason?</div>
+      <button class="q-opt">The constant k is wrong and needs a much wider sweep</button>
+      <button class="q-opt">The keyword index is scoring documents on the wrong text field</button>
+      <button class="q-opt">The two rankings should be weighted rather than added</button>
+      <button class="q-opt">Your queries and corpus have few exact strings to match on</button>
+      <div class="q-fb">Fusion pays when the two retrievers fail on different queries, so a corpus of flowing prose with paraphrased questions gives the keyword side little to contribute and a small gain is the honest result. The constant is the least likely cause, because the paper reports the choice was not critical. A misconfigured index is worth checking second, and weighting is a change you would make only after establishing there was something to weight.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 50 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Hybrid search is the module's best ratio of gain to code, and it needs no component you do not already run.</p>
+      <p><b>Add a full-text index</b> over the same chunk text you already store, in the database you already have. Retrieve the top 100 from each of the two rankings for one query and print both lists side by side.</p>
+      <p><b>Fuse them with the formula</b> from section 3 at k = 60. Write the fusion yourself; it is about ten lines, and reading them is worth more than importing them.</p>
+      <p><b>Re-run the golden set</b> and record recall@10 against the previous row.</p>
+      <p><b>Then re-run at k = 10 and k = 200</b> and record both. Three numbers that agree to within the noise is the result the paper predicts.</p>
+      <p><b>Finally, classify your thirty questions</b> into paraphrase-shaped and exact-string-shaped, and look at which group moved.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>A document that appears in only one of the two rankings still gets a score - from that ranking alone. Handle it as a sum over the rankings that contain it, not as a join that drops it, or you will silently throw away every document only one retriever found, which is the entire benefit.</p>
+      <p>Contextualised chunks from lesson 0230 help the keyword side too, because the generated context adds the document's real nouns to the row. If you ran that lesson, this one starts from a better keyword index than you might expect.</p></details>
+
+    <details class="solution"><summary>Show what a good result looks like</summary>
+      <ol class="worked">
+        <li><b>Check one query by hand first.</b> Print the two top-tens and the fused top-ten. A document that was fourth on one list and first on the other should rise; a document only one retriever found should still be present. If the second is not true, your fusion is an intersection.</li>
+        <li><b>Work one score through the arithmetic.</b> A document ranked 4th by dense and 1st by keyword scores 1 &divide; 64 plus 1 &divide; 61, which is <span class="keynum">0.03202</span>. A document ranked 1st by dense only scores 1 &divide; 61, or <span class="keynum">0.01639</span>. Appearing well on both lists beats topping one of them, which is the behaviour you wanted.</li>
+        <li><b>Expect the three k values to agree.</b> If recall@10 at k = 10, 60 and 200 differs by more than your run-to-run noise, you have found something the paper did not, and the first thing to check is whether one of your rankings is much shorter than the other.</li>
+        <li><b>The split by question type is the real finding.</b> "recall@10 0.74 to 0.79, and all five of the gained questions contain an identifier" tells you more than the delta does, and it tells you what to do next: if none of your questions contain identifiers, this lesson is not where your remaining loss is.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The fused list should never be shorter than the longer of the two inputs, and every document in either input should have a score. If your fused list is about the size of the overlap, you joined instead of summing, and the number you are about to record is measuring the wrong thing.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to write the fusion in ten lines with no library, then to construct a test where one document is first on one list and absent from the other, and to show that the document survives. Then ask it to tag each of your thirty golden-set questions as paraphrase-shaped or string-shaped and to report the delta separately for the two groups, which is the only way to see whether the gain came from where the theory says it should.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The whole method in two pages: <a href="https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf">Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods</a>, Cormack, Clarke and B&uuml;ttcher, SIGIR'09. Read section 1, where the formula, the constant and the reasoning behind the shape all appear inside a single paragraph, and note how little apparatus the method needs.</p>
+
+  <div class="pager">
+    <a class="prv" href="0250-a-prompt-is-a-versioned-artefact-with-a-name.html"><span class="dir">&larr; Back</span><span class="ttl">A prompt is a versioned artefact with a name</span></a>
+    <a class="nxt" href="0270-a-reranker-is-a-second-more-expensive-opinion-on-twenty-documents.html"><span class="dir">Next &rarr;</span><span class="ttl">A reranker is a second, more expensive opinion on twenty documents</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0260 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

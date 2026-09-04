@@ -213,6 +213,22 @@ window.COURSE_OUTLINE = {
         {
           "title": "Practice: processes and modelling",
           "href": "lessons/0044-practice-processes-and-modelling.html"
+        },
+        {
+          "title": "Solution, graded 1: counting and sampling",
+          "href": "lessons/0092-solution-graded-1-counting-and-sampling.html"
+        },
+        {
+          "title": "Solution: graded 2, independence four ways",
+          "href": "lessons/0093-solution-graded-2-independence.html"
+        },
+        {
+          "title": "Solution: graded 3, Bonferroni bounds",
+          "href": "lessons/0094-solution-graded-3-bonferroni-bounds.html"
+        },
+        {
+          "title": "Solution: graded 4, the alternating dice game",
+          "href": "lessons/0095-solution-graded-4-the-alternating-dice-game.html"
         }
       ]
     },
@@ -437,6 +453,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Glossary",
       "href": "reference/glossary.html"
+    },
+    {
+      "title": "Lecture 2 Formula Sheet",
+      "href": "reference/lecture-2-formula-sheet.html"
     },
     {
       "title": "Lecture 3 Formula Sheet",

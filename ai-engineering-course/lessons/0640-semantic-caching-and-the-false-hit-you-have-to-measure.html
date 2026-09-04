@@ -1,0 +1,239 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Semantic caching, and the false hit you have to measure - End-to-End AI Engineering</title>
+<meta name="description" content="A semantic cache serves a stored answer to a question that only resembles the one asked. Every vendor page quotes a hit rate; the one primary source that measured both also counted the wrong answers.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deployment &middot; Lesson 0640</div>
+  <h1>A cache that is nearly right is a new way to be wrong</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Every number here is read from Tables 1 and 2 of the GPTCache paper with the PDF open, together with its authors' own conclusion in section 5.
+    &middot; <a href="https://aclanthology.org/2023.nlposs-1.24/">GPTCache, NLP-OSS 2023</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A semantic cache serves a stored answer when the new question is <b>close enough</b> to an old one. "Close enough" is a threshold, and the threshold is the entire design.</li>
+      <li>Every hit is either a right answer you got cheaply or a <b>wrong answer you got cheaply</b>, and the two are indistinguishable without measurement.</li>
+      <li>The one primary source that counted both: at threshold 0.7, <b>876 hits out of 1,000 queries, of which 39 were wrong</b>, at 0.20 s a hit.</li>
+      <li>Its authors' own verdict is the sentence to carry away: negative hits "would be unacceptable in real production scenarios".</li>
+      <li>So this is the one lesson in the module about a technique you may correctly decide <b>not to ship</b>. The deliverable is the measurement and the decision, not the cache.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Only this layer can return an answer to a question nobody asked.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A question enters a decision diamond labelled is a stored question close enough. Three exits leave it. Two exits are marked correct: a true hit returning a cheap right answer, and a miss falling through to the model. The third exit, drawn in the warning colour, is a false hit returning a cheap wrong answer with no error and no signal. A note says the third exit is the only one that produces no evidence of itself.">
+      <rect class="d-box" x="20" y="30" width="132" height="40" rx="4"/>
+      <text class="lbl-b" x="86" y="55" text-anchor="middle">a new question</text>
+      <path class="d-flow" d="M154 50 L188 50"/>
+
+      <rect class="d-focus" x="192" y="24" width="176" height="52" rx="4"/>
+      <text class="lbl-b" x="280" y="46" text-anchor="middle">close enough?</text>
+      <text class="d-mono" x="280" y="64" text-anchor="middle">one threshold decides</text>
+
+      <path class="d-flow s-signal" d="M370 40 L426 40"/>
+      <text class="d-mono" x="376" y="32">yes, and right</text>
+      <rect class="d-keep" x="430" y="22" width="198" height="38" rx="4"/>
+      <text class="lbl-b" x="529" y="46" text-anchor="middle">cheap, correct, fast</text>
+
+      <path class="d-flow s-alarm" d="M370 62 L426 104"/>
+      <text class="d-mono" x="376" y="88">yes, and wrong</text>
+      <rect class="d-drop" x="430" y="86" width="198" height="38" rx="4"/>
+      <text class="lbl-b" x="529" y="110" text-anchor="middle">cheap, confident, wrong</text>
+
+      <path class="d-flow" d="M280 80 L280 148"/>
+      <text class="d-mono" x="290" y="120">no</text>
+      <rect class="d-box" x="192" y="152" width="176" height="38" rx="4"/>
+      <text class="lbl-b" x="280" y="176" text-anchor="middle">call the model</text>
+
+      <rect class="d-bound" x="430" y="140" width="198" height="66" rx="5"/>
+      <text class="lbl-sm" x="444" y="164">the middle exit raises</text>
+      <text class="lbl-sm" x="444" y="182">no error and logs</text>
+      <text class="lbl-sm" x="444" y="200">nothing unusual</text>
+
+      <text class="read" x="320" y="246" text-anchor="middle">Every other cache in lesson 0630 can only be a hit or a miss.</text>
+      <text class="read" x="320" y="270" text-anchor="middle">This one has a third exit, and it looks exactly like the first.</text>
+    </svg>
+    <figcaption>The three ways a request leaves a semantic cache, against the two ways it leaves every other cache on the previous page. The middle exit is what makes this layer a correctness decision rather than a cost one.
+    <b>An exact-match cache cannot be wrong; this one can, and it will not tell you.</b></figcaption>
+  </figure>
+
+  <h2 id="the-mechanism">1. The mechanism, which is four steps and one number</h2>
+  <p>The machinery is unsurprising and worth stating so the risk is locatable.
+  The incoming question is embedded. The resulting vector is searched against the vectors of previously answered questions. The top few candidates come back with similarity scores. A similarity evaluator decides whether the best of them is close enough. If it is, the stored answer is returned; if not, the model is called and the new pair is stored.</p>
+  <p>The GPTCache paper names six components for this - an adapter, a pre-processor, an embedding generator, a cache manager, a similarity evaluator and a post-processor - and puts eviction under the cache manager, with LRU or FIFO when the cache is full. The structure is ordinary and the interesting part is the single number in step four.</p>
+  <p>That number is a <b>threshold</b>, and it is the entire design. Raise it and you serve fewer wrong answers and get fewer hits. Lower it and you get more hits and more wrong answers. There is no setting that gives you both, and there is no default that is correct for a corpus you have not measured.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four steps, one dial</div>
+    <div class="fig-claim">Three steps are mechanical and the fourth is a judgement you must set.</div>
+    <div class="mermaid">
+flowchart LR
+  Q["question"] --> E["embed&lt;br/&gt;mechanical"]
+  E --> S["search stored questions&lt;br/&gt;mechanical"]
+  S --> V["top-k with scores&lt;br/&gt;mechanical"]
+  V --> D{"best score above&lt;br/&gt;the threshold?"}
+  D -- yes --> H["return the stored answer"]
+  D -- no --> M["call the model&lt;br/&gt;then store the pair"]
+    </div>
+    <figcaption>The path a question takes, with the one decision that is yours marked as a diamond. Everything before it is the same retrieval machinery module 1 already built, pointed at questions rather than at documents.
+    <b>You are not choosing a cache library, you are choosing where to put one number.</b></figcaption>
+  </figure>
+
+  <h2 id="the-measurement">2. The one experiment that counted the wrong answers</h2>
+  <p>Vendor pages for this feature quote hit rates and cost savings. The primary source that also counted the errors is the paper describing GPTCache itself, published at NLP-OSS 2023, and its two tables are worth reading precisely.</p>
+  <p>In the first experiment the authors cached the keys of all <b>30,000</b> positive sample pairs, then queried with 1,000 of their partners at a similarity threshold of <b>0.7</b>. The result was <b>876 cache hits and 124 misses</b>, and of those 876 hits, <b>837 were positive and 39 were negative</b> - that is, 39 returned a cached answer the authors judged not similar to the query - at a hit latency of <b>0.20 s</b>.</p>
+  <p>In the second, they issued <b>1,160</b> queries split evenly between related and unrelated samples: <b>570 hits and 590 misses, 549 positive and 21 negative</b>, at <b>0.17 s</b>. The hit ratio of about half is the correct behaviour on a workload where half the questions have no stored partner, and they read it as the cache successfully telling related from unrelated.</p>
+  <p>Take the first experiment's proportions rather than its absolute numbers, because the proportions are what might transfer: about <b>88%</b> of queries hit, and about <b>4.5%</b> of those hits were wrong. Both numbers are the authors' measurement on the authors' own scraped dataset, with positive and negative judged by prompting a model for a similarity score. They are evidence that the effect and the error are both real, and neither is a target for your corpus.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What 1,000 queries did</div>
+    <div class="fig-claim">Thirty-nine of the answers served were answers to something else.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Two stacked bars showing the outcome of the two GPTCache experiments. The first bar, one thousand queries, splits into eight hundred and thirty-seven correct hits, thirty-nine wrong hits and one hundred and twenty-four misses. The second bar, one thousand one hundred and sixty queries, splits into five hundred and forty-nine correct hits, twenty-one wrong hits and five hundred and ninety misses. The wrong-hit segment is drawn in the warning colour in both.">
+      <text class="lbl-sm" x="132" y="72" text-anchor="end">experiment 1</text>
+      <text class="d-mono" x="132" y="90" text-anchor="end">1,000 queries</text>
+      <rect class="m-stat" x="140" y="48" width="392" height="44"/>
+      <rect class="m-alarm" x="532" y="48" width="18" height="44"/>
+      <rect class="m-noise" x="550" y="48" width="58" height="44"/>
+      <text class="lbl-on" x="336" y="76" text-anchor="middle">837 correct hits</text>
+      <text class="lbl-sm" x="541" y="112" text-anchor="middle">39</text>
+      <text class="lbl-sm" x="579" y="112" text-anchor="middle">124</text>
+
+      <text class="lbl-sm" x="132" y="176" text-anchor="end">experiment 2</text>
+      <text class="d-mono" x="132" y="194" text-anchor="end">1,160 queries</text>
+      <rect class="m-stat" x="140" y="152" width="257" height="44"/>
+      <rect class="m-alarm" x="397" y="152" width="10" height="44"/>
+      <rect class="m-noise" x="407" y="152" width="201" height="44"/>
+      <text class="lbl-on" x="268" y="180" text-anchor="middle">549 correct hits</text>
+      <text class="lbl-sm" x="402" y="216" text-anchor="middle">21</text>
+      <text class="lbl-sm" x="507" y="216" text-anchor="middle">590</text>
+
+      <text class="read" x="320" y="256" text-anchor="middle">A miss costs money. A wrong hit costs trust.</text>
+      <text class="read" x="320" y="280" text-anchor="middle">Only one of the two appears in a cost dashboard.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>hit, correct</span><span><i class="sw-alarm"></i>hit, wrong</span><span><i class="sw-noise"></i>miss</span></div>
+    <figcaption>Both rows are the paper's own Tables 1 and 2, drawn to scale and not rounded. Both were measured at a similarity threshold of 0.7 on a dataset the authors scraped and labelled themselves, with a model asked to score each pair.
+    <b>The narrow red band is the whole argument of this page, and it is the only band a hit-rate claim omits.</b></figcaption>
+  </figure>
+
+  <h2 id="the-authors-verdict">3. What the authors concluded about their own tool</h2>
+  <p>The section that matters most is not a table. In section 5 the authors write that the choice of embedding model is the core factor, and then: <i>"Our testing has shown that even the best cache hit rates do not exceed 90% with current embedding models. This means that negative cache hits are noticeable during use. While this may not greatly impact individual users, it would be unacceptable in real production scenarios."</i></p>
+  <p>They add the trade in the same paragraph: stricter similarity evaluation "could improve positive cache hit rates" and "would also decrease the overall hit rate". That is the dial from section 1, stated by the people who built the dial.</p>
+  <p>It is unusual for a tool's own authors to publish that sentence, and it is why this course teaches the mechanism from this paper rather than from any vendor page. It is also why the honest position is not "semantic caching is bad" but <b>"semantic caching is a correctness trade you must price for your own product"</b>.</p>
+  <p>One more piece of evidence about the tool rather than the technique. The GPTCache repository's most recent release is <code>0.1.44</code>, published on 2024-08-01, and its last commit was on 2025-07-11, with 97 issues open and the repository not archived. So the canonical open-source implementation of this idea has been quiet for a long time. Teach yourself the mechanism from the paper and write the thirty lines over whatever vector store module 1 already gave you; do not take a dependency on a library that has stopped moving.</p>
+
+  <figure class="diagram calc" id="false-hit-volume">
+    <div class="fig-cap">Wrong answers a day</div>
+    <div class="fig-claim">A small percentage of a large traffic is a number with a name attached.</div>
+
+    <div class="build-controls">
+      <label>requests a day <input type="range" data-var="r" min="500" max="50000" step="500" value="5000"></label>
+      <label>hit rate, per cent <input type="range" data-var="h" min="10" max="95" step="1" value="88"></label>
+      <label>wrong, per cent of hits <input type="range" data-var="f" min="1" max="15" step="1" value="4"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>wrong answers served <b data-calc="scale" data-of="r h f" data-by="0.0001" data-decimals="0">176</b> a day</span>
+      <span>and <b data-calc="scale" data-of="r h f" data-by="0.0007" data-decimals="0">1,232</b> a week</span>
+    </div>
+    <figcaption>The two sliders on the right start at the proportions of the paper's first experiment, 88 per cent hits and roughly 4.5 per cent of those wrong, rounded down to 4. Set the left slider to your own traffic. Those proportions are the authors' measurement on their dataset and not a prediction for yours, which is exactly why the practice below measures your own.
+    <b>Decide whether you would accept this many wrong answers before you decide whether the latency is worth it.</b></figcaption>
+  </figure>
+
+  <h2 id="where-it-belongs">4. Where the trade is worth making</h2>
+  <p>The decision follows from what a wrong answer costs in your product, and that is a question with real variation in it.</p>
+  <p>It is a reasonable trade when a near-miss is cheap and visible: a suggestion the reader can ignore, an autocomplete, a first draft, a summary shown beside its sources so a wrong one is obvious. It is a bad trade when the answer is acted on without being checked, when it concerns one named person or account, or when it is a number somebody will paste into a document.</p>
+  <p>Two safeguards are worth more than tuning the threshold. <b>Never share a cache across users whose permissions differ</b>, because a semantic hit crossing a tenancy boundary is a data leak wearing a performance improvement - <code>LLM08</code> in the OWASP Top 10 for LLM Applications, 2025 edition, covers exactly this class. And <b>show the reader that an answer was cached</b>, with its stored question, so a wrong hit has one obvious symptom instead of none.</p>
+  <p>The whiteboard framing of the same choice is <a href="../../ai-system-design-course/lessons/0003-cost-and-performance.html">AI System Design, <i>Cost and performance</i></a>, and <a href="../../agent-engineering-course/lessons/0003-latency-cost-and-local-first.html">Production Agent Engineering, <i>Latency, cost and local-first</i></a> treats it concept-first for agents. What this page adds is the number and the way to get it for yourself.</p>
+
+  <div class="callout warn">
+    Every figure on this page is the GPTCache authors' measurement on a dataset they scraped and labelled themselves, using a model prompted for a similarity score to decide which hits were wrong. The sample is 1,000 and 1,160 queries, the threshold is 0.7 throughout, and the paper says it plans "more rigorous evaluations on larger and more diverse datasets" - which, at release <code>0.1.44</code>, it has not published.
+    So the direction is well evidenced and the magnitude is one team's result on one corpus. Nothing here is a target, and a hit rate quoted at you by a vendor with no false-hit rate beside it is not evidence at all.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">You raise the similarity threshold from 0.7 to 0.9. What happens to the two rates?</div>
+      <button class="q-opt">Both the hit rate and errors rise</button>
+      <button class="q-opt">Fewer hits, and fewer of them wrong</button>
+      <button class="q-opt">More hits, and fewer of them wrong</button>
+      <button class="q-opt">Neither moves, the threshold caps k</button>
+      <div class="q-fb">A stricter threshold admits fewer candidates, so fewer queries hit and a smaller share of the hits are wrong. That trade is stated by the paper's own authors, who write that stricter evaluation improves the positive rate and decreases the overall hit rate. The third option is the setting everybody wants and no threshold provides. The last confuses the threshold with top-k, which is the separate knob that decides how many candidates are scored at all.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Which symptom does a false hit produce in an otherwise well-instrumented system?</div>
+      <button class="q-opt">An error rate rise in the cache layer</button>
+      <button class="q-opt">A latency spike on the affected route</button>
+      <button class="q-opt">A drop in the reported hit ratio</button>
+      <button class="q-opt">None, and that is the whole problem</button>
+      <div class="q-fb">A false hit is a successful cache read that returns quickly and raises nothing, so error rates, latency and hit ratio all look better rather than worse. That is why the measurement in the practice below has to be deliberate: no dashboard produces this number as a side effect. The first three options are the signals people expect to protect them, and each one moves in the reassuring direction when this defect fires.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about an hour, with your golden set</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>The deliverable here is a decision with a number under it, and the decision is allowed to be no.</p>
+      <p><b>Use the golden set you built in module 1</b> - the thirty questions with their known answering passages. Do not build a second evaluation set for this; one golden set is the whole point of having one.</p>
+      <p><b>Put a semantic cache in front of your pipeline</b> and warm it by running the golden set through once. Then run it again with each question <b>rephrased</b> the way a colleague would ask it, and record for every question whether it hit and whether the served answer is still correct for the rephrasing.</p>
+      <p><b>Sweep the threshold</b> over at least five values and plot two lines: the share of questions that hit, and the share of hits whose answer no longer matches the question. Then <b>write one paragraph</b> saying whether this ships, at what threshold, and what a wrong answer costs in your product.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The rephrasings are the experiment. If you re-run the identical strings you are measuring an exact-match cache with extra steps, and everything will hit and nothing will be wrong.</p>
+      <p>Thirty questions gives you a coarse estimate and a genuine one. Say the sample size beside the two rates, exactly as module 1 told you to, rather than reporting a percentage that implies more precision than thirty items can carry.</p></details>
+
+    <details class="solution"><summary>Show what a finished decision looks like</summary>
+      <ol class="worked">
+        <li><b>Two lines that cross, and no threshold where both are good.</b> That is the expected shape and reproducing it is the finding. If your wrong-hit line is flat at zero everywhere, your rephrasings were too close to the originals, which is the same defect the module 1 practice warned about with retrieval questions.</li>
+        <li><b>Your numbers will not match the paper's.</b> Theirs is a general scraped dataset; yours is a narrow domain where questions are more similar to one another, which usually means <i>more</i> hits and <i>more</i> false ones. A domain corpus is the harder case for this technique, not the easier one.</li>
+        <li><b>The decision paragraph names the cost of a wrong answer.</b> "A stale policy answer sent to a customer" and "a suggested phrase the writer can reject" are different products, and the same two lines justify opposite decisions in them.</li>
+        <li><b>If it ships, two safeguards ship with it.</b> A cache key that includes the permission scope, so no hit can cross a tenancy boundary, and a visible marker on a cached answer with the question it was stored against.</li>
+        <li><b>If it does not ship, record that too, with the numbers.</b> A recorded refusal is a real capstone artefact. The next person to propose this will otherwise re-do the work, and lesson 0630's prompt cache has already taken most of the cost saving with none of the risk.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> At a threshold near 1.0 your hit rate should collapse towards the rate of an exact-match cache and your wrong-hit rate towards zero; at a very low threshold nearly everything should hit and a large share should be wrong. If either end does not behave that way, the evaluator or the embedding is wired wrongly and the middle of the sweep is not measuring what you think.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the trade still feels like a tuning problem rather than a product decision, ask your agent to write the two worst wrong answers your own system could plausibly serve from a cache, using your real corpus, and then ask yourself whether any latency saving pays for them. If your sweep produced an odd shape, hand it the two lines and ask what wiring error would produce that shape before you conclude anything about the technique.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The paper behind every number here, including both tables and the authors' own conclusion about production use: <a href="https://aclanthology.org/2023.nlposs-1.24/">GPTCache: An Open-Source Semantic Cache for LLM Applications</a>, NLP-OSS 2023. Read section 5 before section 4, because the future-challenges section is where the authors say the thing the abstract does not.</p>
+
+  <div class="pager">
+    <a class="prv" href="0630-four-caches-and-only-two-of-them-are-yours.html"><span class="dir">&larr; Back</span><span class="ttl">Four caches, and only two of them are yours</span></a>
+    <a class="nxt" href="0650-what-a-prompt-injection-is-allowed-to-do.html"><span class="dir">Next &rarr;</span><span class="ttl">What a prompt injection is allowed to do</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0640 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

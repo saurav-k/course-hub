@@ -1,0 +1,264 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A pause is a state you saved, not a thread you blocked - End-to-End AI Engineering</title>
+<meta name="description" content="Human-in-the-loop is a persistence problem. The runtime restarts the whole node on resume rather than continuing at the line that paused, which makes idempotency a requirement rather than a nicety.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; From basic to agentic RAG &middot; Lesson 0420</div>
+  <h1>The runtime restarts the node, so your side effects run twice</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Mechanics and the resume caveat from the LangGraph interrupt documentation, at <code>1.2.x</code>; the protocol equivalents at MCP revision <code>2026-07-28</code> and A2A <code>1.0</code>.
+    &middot; <a href="https://docs.langchain.com/oss/python/langgraph/interrupts">LangGraph interrupts</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>An <code>input()</code> call is not human-in-the-loop. A real approval takes hours or days, and nothing you own should be blocked for that long.</li>
+      <li>A pause is a <b>persistence problem</b>: write the state, return, and let a later process resume it from a key.</li>
+      <li>The caveat that costs everyone an afternoon: on resume <b>the runtime restarts the whole node from the beginning</b>, so anything before the pause runs again.</li>
+      <li>That makes <b>idempotency a requirement</b> of any node containing an interrupt, not a nicety, and it decides where you put the pause.</li>
+      <li>Three independent designs put the resumption state outside the paused process, which is why this is a mechanism rather than one framework's feature.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The process is gone and the run survives on disk.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Three panels left to right. The first shows a running process containing a graph. The second shows the process absent, drawn as a ghost, with a checkpoint on disk holding the state and a thread id. The third shows a different process resuming from that checkpoint with the human's answer supplied.">
+      <text class="d-mono" x="16" y="24">1  running</text>
+      <rect class="d-bound" x="12" y="34" width="190" height="120" rx="6"/>
+      <rect class="d-box" x="30" y="54" width="154" height="34" rx="4"/>
+      <text class="lbl-sm" x="107" y="76" text-anchor="middle">the graph runs</text>
+      <rect class="d-focus" x="30" y="98" width="154" height="38" rx="4"/>
+      <text class="lbl-b" x="107" y="122" text-anchor="middle">interrupt</text>
+
+      <path class="d-flow" d="M204 94 L226 94"/>
+
+      <text class="d-mono" x="232" y="24">2  nobody is waiting</text>
+      <rect class="d-ghost" x="228" y="34" width="184" height="60" rx="6"/>
+      <text class="lbl-sm" x="320" y="70" text-anchor="middle">the process exited</text>
+      <rect class="d-keep" x="228" y="106" width="184" height="48" rx="5"/>
+      <text class="lbl-sm" x="320" y="126" text-anchor="middle">checkpoint on disk</text>
+      <text class="d-mono" x="320" y="144" text-anchor="middle">keyed by thread_id</text>
+
+      <path class="d-flow" d="M414 128 L436 128"/>
+
+      <text class="d-mono" x="442" y="24">3  hours later</text>
+      <rect class="d-bound" x="438" y="34" width="190" height="120" rx="6"/>
+      <rect class="d-box" x="456" y="54" width="154" height="34" rx="4"/>
+      <text class="lbl-sm" x="533" y="76" text-anchor="middle">a new process</text>
+      <rect class="d-box" x="456" y="98" width="154" height="38" rx="4"/>
+      <text class="lbl-sm" x="533" y="122" text-anchor="middle">resume with a value</text>
+
+      <rect class="d-bound" x="12" y="182" width="616" height="62" rx="5"/>
+      <text class="lbl-sm" x="26" y="206">the node is re-entered at its first line, not at the interrupt</text>
+      <text class="d-mono" x="26" y="228">so everything the node did before pausing happens a second time</text>
+
+      <text class="read" x="320" y="272" text-anchor="middle">Nothing was blocked, and something did run twice.</text>
+    </svg>
+    <figcaption>The three states of a paused run, with the machine that was waiting drawn as absent in the middle. The band underneath is the part that surprises people and it is the reason this page exists.
+    <b>A pause costs you no process and it costs you a duplicated side effect unless you designed for one.</b></figcaption>
+  </figure>
+
+  <h2 id="not-input">1. Why blocking is not an option</h2>
+  <p>The obvious implementation is to stop and wait. In a notebook that works, and it is how most examples show it, because an example's approval arrives two seconds later from the person who wrote it.</p>
+  <p>A real approval is a person who is in a meeting, then at lunch, then gone until tomorrow. Blocking for that means a held process, a held connection and a held database transaction if you were unlucky, and it means a deploy kills the run.
+  Module 6's lesson <a href="0600-four-shapes-for-a-request-that-takes-thirty-seconds.html">0600</a> works through the request shapes for work that outlives a response, and a human approval is that problem with the duration multiplied by ten thousand.</p>
+  <p>So the pause has to be a write. The run stops, its state goes somewhere durable under a key, and the process is free. Later, anything holding that key can resume it.</p>
+
+  <h2 id="the-mechanism">2. The mechanism, in one implementation</h2>
+  <p>LangGraph at <code>1.2.x</code> is the worked example here, and this course uses it as a fixture rather than a subject: what matters is the shape, and you should be able to rebuild it on anything with durable storage.</p>
+  <p><code>interrupt()</code> called inside a node stops the graph and hands a value back to the caller. The runtime saves the state through a <b>checkpointer</b>, identified by a <code>thread_id</code>. The documentation is explicit about what the checkpointer buys: it writes the exact graph state so you can resume later, even from an error state.</p>
+  <p>Resuming is a second invocation carrying <code>Command(resume=...)</code>, and the value you pass becomes the return value of the original <code>interrupt()</code> call.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">The states of one run</div>
+    <div class="fig-claim">Resume re-enters the node rather than the statement.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Running
+  Running --> Interrupted: interrupt writes the checkpoint
+  Interrupted --> Interrupted: the process may exit here&lt;br/&gt;and the run survives
+  Interrupted --> NodeStart: resume with a value
+  NodeStart --> Running: the node re-enters at its FIRST line
+  Running --> Done: the node completes
+  Done --> [*]
+    </div>
+    <figcaption>The lifecycle as states rather than as a sequence, which is the view that makes the resume edge legible. Note where the resume arrow lands: on the start of the node, not on the interrupt that paused it.
+    <b>The self-loop on Interrupted is the property worth having, and the arrow into NodeStart is the price of it.</b></figcaption>
+  </figure>
+
+  <h2 id="the-caveat">3. The caveat, quoted</h2>
+  <p>Here is the sentence to read twice, from the documentation itself: when execution resumes, <b>the runtime restarts the entire node from the beginning</b> - it does not resume from the exact line where <code>interrupt</code> was called. Any code that ran before the <code>interrupt</code> will execute again.</p>
+  <p>Think about what is usually above an approval prompt. A retrieval, which is harmless to repeat. A model call, which is merely expensive to repeat. And, in the code people actually write, the thing being approved: the draft was generated, the ticket was created, the email was composed and saved.
+  All of it runs a second time on resume.</p>
+  <p>Two rules fall straight out. <b>Put nothing with a side effect above an interrupt in the same node</b>: do the work in one node, pause in the next. And where you cannot avoid it, <b>make the side effect idempotent</b> with a key derived from the run rather than from the clock, exactly as an at-least-once queue consumer must.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What re-runs on resume</div>
+    <div class="fig-claim">Splitting the node moves the repeated work to almost nothing.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A horizontal bar chart comparing three node designs by how much work repeats when the run resumes. One node doing everything repeats about 4600 tokens of work and one side effect. A node split so the pause is first repeats about 300 tokens and no side effect. An idempotent side effect above the pause repeats 4600 tokens and no duplicate effect.">
+      <line class="grid" x1="240" y1="40" x2="240" y2="192"/>
+      <line class="grid" x1="360" y1="40" x2="360" y2="192"/>
+      <line class="grid" x1="480" y1="40" x2="480" y2="192"/>
+      <line class="grid" x1="600" y1="40" x2="600" y2="192"/>
+      <line class="axis" x1="180" y1="192" x2="620" y2="192"/>
+
+      <text class="lbl-sm" x="172" y="66" text-anchor="end">one node, all of it</text>
+      <rect class="m-alarm" x="180" y="52" width="414" height="26"/>
+      <text class="lbl-on" x="586" y="71" text-anchor="end">4,600 and a duplicate</text>
+
+      <text class="lbl-sm" x="172" y="116" text-anchor="end">idempotent effect</text>
+      <rect class="m-signal" x="180" y="102" width="414" height="26"/>
+      <text class="lbl-sm" x="600" y="121" text-anchor="end">4,600, no duplicate</text>
+
+      <text class="lbl-sm" x="172" y="166" text-anchor="end">pause in its own node</text>
+      <rect class="m-stat" x="180" y="152" width="27" height="26"/>
+      <text class="lbl-sm" x="215" y="171">300, no duplicate</text>
+
+      <text class="lbl-sm" x="180" y="212">0</text>
+      <text class="lbl-sm" x="360" y="212" text-anchor="middle">2,000</text>
+      <text class="lbl-sm" x="600" y="212" text-anchor="end">4,600 tokens</text>
+      <text class="lbl-sm" x="20" y="240">Derived from a worked node: 4,000 tokens of retrieved passages, a 300</text>
+      <text class="lbl-sm" x="20" y="258">token model call, a 300 token prompt, and one ticket created.</text>
+      <text class="ttl" x="20" y="284">work repeated when the run resumes</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>duplicate side effect</span><span><i class="sw-signal"></i>wasteful but safe</span><span><i class="sw-stat"></i>the design to reach for</span></div>
+    <figcaption>Three node layouts against what each repeats. Derived arithmetic over a worked node rather than a measurement, and the token sizes are the ones this course has used throughout.
+    <b>Making the effect idempotent stops the duplicate and still pays the whole bill twice; moving the pause into its own node stops both.</b></figcaption>
+  </figure>
+
+  <h2 id="patterns">4. Four patterns, and where the pause belongs</h2>
+  <p>The documentation names four shapes and they are worth knowing by name because they need different state.
+  <b>Approve or reject</b> routes to different nodes on the answer. <b>Review and edit state</b> hands the human a value and takes back a modified one. <b>Interrupts inside tools</b> put the pause in the tool itself, so approval is per tool call rather than per turn. <b>Validating human input</b> loops back until the answer is acceptable.</p>
+  <p>For a retrieval system the useful rule is narrower: <b>pause before an action with a side effect, never before an answer.</b> A reader waiting for a paragraph will not wait for a human, and a human asked to approve every answer will start approving without reading within a day, which is worse than no approval at all.</p>
+
+  <figure class="diagram stepper" id="pause-and-resume">
+    <div class="fig-cap">Pause, exit, resume</div>
+    <div class="fig-claim">Step five is where the work is done a second time.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user" data-cost="0">
+        <span class="step-role">the request</span>
+        <span class="step-body">"File a ticket for the policy gap you found." The graph starts under thread <code>t-8814</code>.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="4000">
+        <span class="step-role">retrieve</span>
+        <span class="step-body">Ten passages, in the same node as everything below. This is the design the chart calls costly.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="300">
+        <span class="step-role">draft</span>
+        <span class="step-body">The model writes the ticket body. Nothing has been created yet.</span>
+      </li>
+      <li class="step" data-actor="error" data-cost="0">
+        <span class="step-role">interrupt</span>
+        <span class="step-body">State is checkpointed under <code>t-8814</code> and <b>the process exits</b>. No thread is held.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="4300">
+        <span class="step-role">resume</span>
+        <span class="step-body"><b>The node restarts at its first line</b>, so the retrieval and the draft happen again before the answer is read.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="120">
+        <span class="step-role">act</span>
+        <span class="step-body">The approval is read and the ticket is filed once, because the create call sits below the pause.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">6</b></span>
+      <span>tokens spent <b data-step-out="cost">0</b></span>
+    </div>
+    <figcaption>Play it and watch the counter at step five, where a request that had already spent 4,300 tokens spends them again. A worked trace with this course's usual token sizes, not a measurement.
+    <b>The duplicated cost is invisible in every tutorial because a tutorial resumes two seconds later with nothing expensive above the pause.</b></figcaption>
+  </figure>
+
+  <h2 id="not-one-framework">5. Three designs, one shape</h2>
+  <p>It is worth knowing this is not a LangGraph idea, because that is what makes it safe to build on.</p>
+  <p>The Model Context Protocol replaced server-initiated requests at revision <code>2026-07-28</code> with <b>Multi Round-Trip Requests</b>: a server returns a result marked as needing input, with an opaque <code>requestState</code>, and the client retries the original request carrying its responses and that same state.
+  The A2A protocol at version <code>1.0</code> carries <code>TASK_STATE_INPUT_REQUIRED</code> and <code>TASK_STATE_AUTH_REQUIRED</code> as interrupted task states, alongside its terminal ones.</p>
+  <p>Three independent designs, and all three put the resumption state <b>outside the process that paused</b> and hand the caller a key. When protocols and frameworks converge on a shape without copying each other, the shape is the thing to learn.
+  The two protocols belong to module 5, which teaches them; this page borrows only the fact that they agree.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">A node retrieves, drafts an email, sends it, then interrupts for approval. What happens on resume?</div>
+      <button class="q-opt">Execution continues after the interrupt</button>
+      <button class="q-opt">The graph raises a duplicate-run error</button>
+      <button class="q-opt">Only the interrupt call is re-evaluated</button>
+      <button class="q-opt">The email is sent a second time</button>
+      <div class="q-fb">The runtime restarts the whole node from its first line, so everything above the interrupt runs again, and the send is above it. Continuing after the interrupt is what people assume and is exactly what the documentation says does not happen. Nothing detects the repeat, which is why the defect is silent. Re-evaluating only the interrupt would be the safe behaviour and is not the behaviour.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">Where does a pause belong in a retrieval system?</div>
+      <button class="q-opt">Before returning any generated answer</button>
+      <button class="q-opt">Before an action with a side effect</button>
+      <button class="q-opt">Before each retrieval the model requests</button>
+      <button class="q-opt">After the answer, to collect feedback</button>
+      <div class="q-fb">Pausing before a side effect is where a human's judgement changes the outcome and where the cost of being wrong is real. Pausing before every answer makes a reader wait for a person, and an approver asked to read every answer stops reading within a day. Retrievals are read-only and approving them buys nothing. Collecting feedback after the answer is lesson 0430 and needs no pause at all.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 40 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Put an approval in front of one side-effecting action, then kill the process to prove the pause is real.</p>
+      <p>Pick the one action in your system that writes something: filing a ticket, sending a message, updating a record. If you have none, add a trivial one that appends a line to a file, because the exercise is about the mechanism.</p>
+      <p>Build it with the pause in its own node. Run until it pauses, <b>kill the process</b>, start a new one, and resume with the approval. Then deliberately build the bad version, with the write above the interrupt in the same node, and count the lines in your file after a resume.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Use a file-backed or database checkpointer rather than an in-memory one for this exercise. An in-memory checkpointer dies with the process and the kill step will look like a framework bug rather than the thing you were testing.</p>
+      <p>The <code>thread_id</code> is the whole interface. Print it when the run pauses, and resume from a completely separate script that knows nothing except that string.</p></details>
+
+    <details class="solution"><summary>Show what both versions demonstrate</summary>
+      <ol class="worked">
+        <li><b>The good version writes one line and the bad version writes two.</b> That is the entire lesson, reproduced in about forty minutes, and it is worth having seen on your own machine because it is invisible in review: the code reads correctly top to bottom and the defect only exists across a resume.</li>
+        <li><b>Resuming from a separate process is the part that proves it.</b> If you resume in the same script, an in-memory variable can carry the state and you have tested nothing. A different process holding only the thread id is the real interface.</li>
+        <li><b>Note what it cost to resume.</b> The retrieval and the draft happened twice, so the token bill for an approved request is roughly double an unapproved one. That belongs in the cost model module 6 builds, and it is a line people forget entirely.</li>
+        <li><b>Now decide where your pause actually goes.</b> In most retrieval systems the honest answer is that there is exactly one action worth approving, and every other pause is ceremony that trains the approver to click yes.</li>
+        <li><b>Record the paused state in the trace.</b> A run that is waiting on a human looks identical to a run that is stuck, unless the span says which, and module 6's lesson 0670 is about failures that are quiet.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> After killing the process, your file should contain the state and your resume should succeed with no part of the original process alive. If resume only works while the first process is still running, you are using an in-memory checkpointer and have built the blocking version with extra steps.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Show your agent the node you wrote and ask it to list, in order, every statement that will execute a second time on resume, and which of them has an effect outside the process. Then ask where it would split the node. The disagreements are worth reading: the usual one is whether an expensive but harmless model call should also move, which is a cost decision rather than a correctness one.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The mechanism, the four patterns and the resume caveat quoted in section 3: <a href="https://docs.langchain.com/oss/python/langgraph/interrupts">Human-in-the-loop with interrupts</a>, LangGraph documentation at <code>1.2.x</code>. Read the paragraph on what happens when execution resumes before you write a node. For the request shapes a long pause implies, module 6's <a href="0600-four-shapes-for-a-request-that-takes-thirty-seconds.html">Four shapes for a request that takes thirty seconds</a>, and for durable execution as an architectural property, <a href="../../agent-engineering-course/lessons/0002-state-async-and-degradation.html">State, Async and Degradation</a>.</p>
+
+  <div class="pager">
+    <a class="prv" href="0410-a-retrieval-you-do-not-trust-is-one-you-can-correct.html"><span class="dir">&larr; Back</span><span class="ttl">A retrieval you do not trust is one you can correct</span></a>
+    <a class="nxt" href="0430-a-thumb-down-is-a-row-in-the-golden-set.html"><span class="dir">Next &rarr;</span><span class="ttl">A thumb down is a row in the golden set</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0420 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

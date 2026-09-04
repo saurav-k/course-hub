@@ -1,0 +1,249 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A loop you did not write is still a loop you must stop - End-to-End AI Engineering</title>
+<meta name="description" content="An agent loop has one exit you control and three ceilings you can put on it. The cost is quadratic in turns because every turn re-sends the whole history, so the ceiling is not a linear budget.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Agents and agentic systems &middot; Lesson 0310</div>
+  <h1>Choose where the loop stops, or your provider's timeout will choose for you</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The loop's shape is quoted from a runner that documents it, the OpenAI Agents SDK at <code>0.22.0</code>, as evidence that the shape is real rather than as the subject.
+    &middot; <a href="https://openai.github.io/openai-agents-python/running_agents/">Running agents</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every agent runtime executes the same four-line loop, and every one of them stops on the same condition: <b>typed output with no tool calls</b>.</li>
+      <li>You get three ceilings on top of that: a turn limit, a token limit and a deadline. Choosing between them is a product decision and it has an owner.</li>
+      <li>The reason the turn limit matters more than it looks: <b>each turn re-sends the entire history</b>, so the cost of a run is quadratic in its turns, not linear.</li>
+      <li>Doubling the ceiling from 8 turns to 16 multiplies the prompt tokens by about <b>four</b> on the assumptions below, not by two.</li>
+      <li>A ceiling with no user-visible degradation behind it is a crash with a nicer name. Write the sentence, then the number.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">You chose a shape in 0300, and this page puts a wall around it.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Three panels. On the left, the shape decision from lesson 0300 recorded in a file. In the middle, highlighted, the loop with three ceilings drawn around it as a boundary: turns, tokens and a deadline. On the right, what it enables: a per-request cost you can put on a dashboard, which module 6 later turns into a budget.">
+      <text class="d-mono" x="16" y="24">what you have</text>
+      <rect class="d-bound" x="12" y="34" width="168" height="132" rx="5"/>
+      <rect class="d-box" x="26" y="56" width="140" height="26" rx="4"/>
+      <text class="lbl-sm" x="96" y="74" text-anchor="middle">docs/shape.md</text>
+      <rect class="d-box" x="26" y="92" width="140" height="26" rx="4"/>
+      <text class="lbl-sm" x="96" y="110" text-anchor="middle">a stop sentence</text>
+      <text class="d-mono" x="26" y="142">words, not code</text>
+
+      <path class="d-flow" d="M182 100 L206 100"/>
+
+      <text class="d-mono" x="212" y="24">this lesson</text>
+      <rect class="d-focus" x="210" y="34" width="216" height="132" rx="5"/>
+      <rect class="d-box" x="234" y="60" width="168" height="30" rx="4"/>
+      <text class="lbl-sm" x="318" y="80" text-anchor="middle">call, act, call again</text>
+      <text class="d-mono" x="318" y="112" text-anchor="middle">turns  &middot;  tokens  &middot;  deadline</text>
+      <text class="d-mono" x="318" y="134" text-anchor="middle">three walls you choose</text>
+      <text class="d-mono" x="318" y="156" text-anchor="middle">one degradation you write</text>
+
+      <path class="d-flow" d="M428 100 L452 100"/>
+
+      <text class="d-mono" x="458" y="24">what it enables</text>
+      <rect class="d-absent" x="456" y="34" width="172" height="132" rx="5"/>
+      <text class="lbl-b" x="542" y="72" text-anchor="middle">a worst case</text>
+      <text class="lbl-sm" x="542" y="100" text-anchor="middle">cost per request</text>
+      <text class="lbl-sm" x="542" y="122" text-anchor="middle">with a known maximum</text>
+      <text class="d-mono" x="542" y="148" text-anchor="middle">module 06 budgets it</text>
+
+      <text class="read" x="320" y="206" text-anchor="middle">An unbounded loop has no worst case, so it cannot appear on any budget.</text>
+      <text class="lbl-sm" x="320" y="234" text-anchor="middle">The ceilings are the only thing standing between one bad question and an unbounded bill.</text>
+      <text class="lbl-sm" x="320" y="260" text-anchor="middle">Everything after this lesson assumes the wall is there.</text>
+    </svg>
+    <figcaption>The sentence you wrote in the last lesson, the three walls this one turns it into, and the reason module 6 can price the result at all. Nothing here changes what the agent can do.
+    <b>A ceiling is what converts an agent from an experiment into a line item.</b></figcaption>
+  </figure>
+
+  <h2 id="the-loop">1. The loop, and its one natural exit</h2>
+  <p>Runtimes differ in almost everything and agree on this. The OpenAI Agents SDK at <code>0.22.0</code> documents its runner as a numbered loop, and the numbering is worth reading because it is the shape underneath every framework you will meet: call the model with the current input; if the output is final, return it; if it is a handoff, swap the agent and re-run; if it produces tool calls, run them, append the results, and re-run.</p>
+  <p>The interesting line is the definition of final, which that runtime states as text output of the desired type with <b>no tool calls</b>. That is the loop's only natural exit, and it is a property of the model's output rather than of your task being done.
+  So the loop ends when the model stops asking for things. It does not end when the answer is good, and nothing in the loop is checking.</p>
+  <p>Everything else is a wall you build. The same runtime raises a <code>MaxTurnsExceeded</code> exception when the configured turn count is passed, which is the first of the three.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One exit, three walls</div>
+    <div class="fig-claim">Only the left edge is the model's decision. You own the other three.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Calling
+  Calling --> Answered: typed text&lt;br/&gt;no tool calls
+  Calling --> Acting: tool calls
+  Acting --> Calling: results appended
+  Calling --> Capped: turn ceiling hit
+  Acting --> Starved: token ceiling hit
+  Calling --> Expired: deadline passed
+  Answered --> [*]
+  Capped --> [*]
+  Starved --> [*]
+  Expired --> [*]
+    </div>
+    <figcaption>The loop as a state machine, with the model's own exit on the upper edge and the three you configure below it. Every one of the lower three needs a message a user can read, and only one of them is an error.
+    <b>Three of the four ways out of this loop are yours to design, and by default none of them is designed.</b></figcaption>
+  </figure>
+
+  <h2 id="the-arithmetic">2. Why a turn ceiling is not a linear budget</h2>
+  <p>Here is the part that surprises people who have only priced single-shot calls. The model is stateless, so every turn sends the whole conversation again: the system prompt, the tool schemas, the question, and every assistant message and tool result produced so far.</p>
+  <p>Work it with four assumptions and substitute your own afterwards. Say the system prompt and tool schemas come to 500 tokens, the question is 20, each assistant turn adds about 150 tokens, and each tool result adds about 400. Every completed turn therefore adds roughly 550 tokens to the history that the next turn must re-send.</p>
+  <p>Turn <i>n</i> sends 520 + 550(<i>n</i>&nbsp;&minus;&nbsp;1) prompt tokens, so a run of <i>N</i> turns sends 520<i>N</i> + 550 &times; <i>N</i>(<i>N</i>&nbsp;&minus;&nbsp;1)/2 in total.
+  At <i>N</i>&nbsp;=&nbsp;8 that is <span class="keynum">19,560</span> prompt tokens. At <i>N</i>&nbsp;=&nbsp;16 it is <span class="keynum">74,320</span>.
+  Doubling the ceiling multiplied the bill by <span class="keynum">3.8</span>, and the naive estimate of 520 tokens a turn would have said 8,320.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What a turn actually costs</div>
+    <div class="fig-claim">Re-sending the history makes the run quadratic, not linear.</div>
+    <svg class="chart" viewBox="0 0 640 320" role="img" aria-label="A line chart of cumulative prompt tokens against turn number from one to twenty. A dashed reference line rises linearly to about ten thousand tokens at turn twenty, labelled as the naive estimate of five hundred and twenty tokens per turn. A solid curve rises far faster and reaches about one hundred and fifteen thousand at turn twenty, labelled as the actual cost when each turn re-sends the whole history. The gap between them at turn twenty is marked as eleven times.">
+      <line class="grid" x1="70" y1="220" x2="612" y2="220"/>
+      <line class="grid" x1="70" y1="160" x2="612" y2="160"/>
+      <line class="grid" x1="70" y1="100" x2="612" y2="100"/>
+      <line class="grid" x1="70" y1="40" x2="612" y2="40"/>
+      <line class="axis" x1="70" y1="256" x2="612" y2="256"/>
+
+      <path class="s-signal ref" d="M70 256 L612 239"/>
+      <path class="s-alarm thick" d="M70 256 L124 253 L178 248 L232 240 L286 229 L340 214 L394 196 L448 174 L502 148 L556 119 L612 85"/>
+
+      <circle class="m-alarm" cx="286" cy="229" r="4"/>
+      <text class="lbl-sm" x="292" y="224">turn 8 - 19,560</text>
+      <circle class="m-alarm" cx="502" cy="148" r="4"/>
+      <text class="lbl-sm" x="508" y="143" text-anchor="end">turn 16 - 74,320</text>
+
+      <text class="lbl-sm" x="612" y="234" text-anchor="end">naive: 520 a turn</text>
+      <text class="lbl-on" x="612" y="76" text-anchor="end">11x the naive estimate at turn 20</text>
+
+      <text class="lbl-sm" x="62" y="260" text-anchor="end">0</text>
+      <text class="lbl-sm" x="62" y="224" text-anchor="end">25k</text>
+      <text class="lbl-sm" x="62" y="164" text-anchor="end">65k</text>
+      <text class="lbl-sm" x="62" y="104" text-anchor="end">95k</text>
+      <text class="lbl-sm" x="62" y="44" text-anchor="end">125k</text>
+      <text class="lbl-sm" x="70" y="276" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="232" y="276" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="394" y="276" text-anchor="middle">12</text>
+      <text class="lbl-sm" x="556" y="276" text-anchor="middle">18</text>
+      <text class="lbl-sm" x="340" y="298" text-anchor="middle">turn number</text>
+      <text class="ttl" x="20" y="316">cumulative prompt tokens, derived from the four assumptions in section 2</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>history re-sent every turn</span><span><i class="sw-signal"></i>what people budget for</span></div>
+    <figcaption>Both lines are this page's arithmetic over the four stated assumptions rather than a measurement of any system. Your per-turn additions will differ and the curvature will not, because the curvature comes from re-sending rather than from the numbers.
+    <b>The turn ceiling is the square root of your bill, which is why halving it helps four times as much as it looks.</b></figcaption>
+  </figure>
+
+  <figure class="diagram calc" id="loop-ceiling-bill">
+    <div class="fig-cap">The ceiling as a bill</div>
+    <div class="fig-claim">Model calls per day is what a turn ceiling actually buys or costs.</div>
+
+    <div class="build-controls">
+      <label>requests per day <input type="range" data-var="r" min="50" max="5000" step="50" value="500"></label>
+      <label>turn ceiling <input type="range" data-var="t" min="2" max="30" step="1" value="8"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>worst-case model calls per day <b data-calc="product" data-of="r t">4,000</b></span>
+      <span>at 2,445 average prompt tokens and $3 per Mtok <b data-calc="scale" data-of="r t" data-by="0.007335" data-decimals="2" data-prefix="$">$29.34</b></span>
+    </div>
+    <figcaption>Move the turn ceiling and watch what a single configuration line is worth. The 2,445 figure is the eight-turn total from section 2 divided by its eight calls, so this widget is honest only near that ceiling and understates a longer run.
+    <b>Every request will not hit the ceiling, and the ceiling is the only number you can promise anybody.</b></figcaption>
+  </figure>
+
+  <h2 id="which-wall">3. Which of the three walls your product actually needs</h2>
+  <p>A <b>turn ceiling</b> is the one to reach for first, because it is the only one that maps onto the thing going wrong. Loops fail by repeating, and a repeat costs a turn.</p>
+  <p>A <b>token ceiling</b> is what you need when tool results vary wildly in size. One retrieval that returns a hundred passages can blow a context window inside three turns while the turn counter reads three, and the model then fails on a length error rather than on your rule.</p>
+  <p>A <b>deadline</b> is what a user-facing request needs, because a person waiting has a limit that is not measured in tokens. It is also the only one of the three that survives a slow provider.</p>
+  <p>Set all three. They are cheap, and they fail in different directions.</p>
+
+  <h2 id="in-the-trace">4. What an unbounded loop looks like before it looks expensive</h2>
+  <p>Two of the failure modes catalogued in the multi-agent failure study by Cemri et al. (arXiv <code>2503.13657v3</code>) describe this precisely, and they were observed rather than imagined: the study's taxonomy names a mode for an agent that does not recognise the criteria for stopping, and another for unnecessarily repeating steps already completed. Those two are the same trace read twice.</p>
+  <p>You already have the instrument. Your module 1 trace has one span per model call, so an agent run is a span count, and a run whose span count sits at the ceiling is a run that did not finish - it was cut off. That distinction never appears in the answer, which is why the ceiling needs a message.</p>
+  <p><b>Write the degradation before the number.</b> "I could not finish this within the budget for one question, and here is what I found so far, with the two passages I did retrieve" is a product. An exception that reaches a user as a 500 is not, and the two differ by about six lines of code.</p>
+
+  <div class="callout warn">
+    Both lines on the chart in section 2 are <b>this page's arithmetic over four stated assumptions</b>, not a measurement of any system. Substitute your own system-prompt size and tool-result size before you quote a number from it to anyone. What is not an assumption is the shape: any loop that re-sends its history is quadratic in turns, and that follows from the mechanism rather than from the numbers.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">In the runner loop quoted in section 1, what makes an output the final one?</div>
+      <button class="q-opt">The model stopped emitting text</button>
+      <button class="q-opt">Typed text with no tool call</button>
+      <button class="q-opt">The tool returned successfully</button>
+      <button class="q-opt">A handoff moved the agent on</button>
+      <div class="q-fb">The documented rule is text output of the desired type with no tool calls, so both halves matter: untyped text is not final and typed text alongside a tool call is not either. A model that stops emitting text has produced nothing to return. A successful tool result is exactly the case that sends the loop round again. A handoff also re-runs the loop, with a different agent, so it is the opposite of an exit.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">On section 2's assumptions, raising the turn ceiling from 8 to 16 multiplies the run's prompt tokens by roughly what?</div>
+      <button class="q-opt">two, since turns doubled</button>
+      <button class="q-opt">one, the history is cached</button>
+      <button class="q-opt">eight, one per new turn</button>
+      <button class="q-opt">four, the history re-sends</button>
+      <div class="q-fb">19,560 tokens becomes 74,320, which is about 3.8 times, because turn n carries every earlier turn with it. Doubling would be right only if each turn cost the same as the first. Caching changes the price of the re-sent tokens and not their count, and it is module 6's subject rather than a reason the count stays flat. Eight would be the extra turns counted at the first turn's price, which is the naive line on the chart.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Put the wall in, then walk into it on purpose.</p>
+      <p><b>Add all three ceilings</b> to your capstone's agent path: a turn count, a token count for the whole run, and a deadline. Put them in one configuration object, not scattered through the call sites, and read them at the request boundary rather than inside the agent.</p>
+      <p><b>Then set the turn ceiling to two</b> and send a question that genuinely needs three or four tool calls. Catch whatever your runtime raises, and return the partial answer with an honest sentence rather than an error.</p>
+      <p><b>Record two numbers</b> in <code>docs/shape.md</code>: the prompt tokens your run actually spent at the ceiling you shipped, read from the trace, and the number the same run would spend at twice that ceiling. Compute the second one, do not measure it.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The deadline is the one that is easy to get wrong. A per-request deadline that is not also passed to the provider client leaves you cancelling a call the provider is still billing you for.</p>
+      <p>For the second number, you do not need the exact formula from section 2. Sum the prompt-token counts your trace already records, per turn, and extend the pattern by the same per-turn growth you measured.</p></details>
+
+    <details class="solution"><summary>Show what a good ceiling looks like</summary>
+      <ol class="worked">
+        <li><b>One config object, read once, at the boundary.</b> A turn limit buried in the agent constructor is a limit that a second call site silently does not have. Reading it where the request arrives is also what lets a future admin endpoint raise it for one tenant without a deploy.</li>
+        <li><b>The degradation is the deliverable, not the exception.</b> The test is whether a user who hits the ceiling gets something they can act on: what was found, what was not, and whether retrying is worth their time. If the honest answer is "nothing useful", say that, and say it in one sentence.</li>
+        <li><b>The measured number will be lower than you expect and the projected one higher.</b> Most requests finish in two or three turns. The ceiling is not the average, it is the promise, and the two get confused in exactly the meeting where the bill comes up.</li>
+        <li><b>Write down which wall fired.</b> A run that ended on the deadline and a run that ended on the turn count are different defects with different fixes, and by the time it reaches a dashboard they look identical unless you recorded which one it was.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your projected cost at double the ceiling should be roughly three to four times the measured one, not two. If you got two, you extended the average per-turn cost rather than the growing one, and the growth is the whole point of the exercise.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Hand your assistant the per-turn prompt-token counts from one real run of your own agent and ask it to fit the growth, then to say what the run would cost at ceilings of 8, 16 and 32. Then ask the harder question: which of the three walls should fire first for your product, and what the user sees in each case. If it answers with three numbers and no sentences, ask it for the sentences.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The loop and its exit conditions, written down by a runtime that documents them: <a href="https://openai.github.io/openai-agents-python/running_agents/">Running agents</a>, OpenAI Agents SDK <code>0.22.0</code>. Read it for the shape and not for the API, which is still a pre-1.0 surface. For the failure modes named in section 4, in a study that annotated over 1,600 traces across seven frameworks: <a href="https://arxiv.org/abs/2503.13657">Why Do Multi-Agent LLM Systems Fail?</a>, Cemri et al., <code>v3</code>.</p>
+
+  <div class="pager">
+    <a class="prv" href="0300-five-shapes-and-the-one-that-loops.html"><span class="dir">&larr; Back</span><span class="ttl">Five shapes, and the one that loops</span></a>
+    <a class="nxt" href="0320-a-tool-call-is-the-only-verb-an-agent-has.html"><span class="dir">Next &rarr;</span><span class="ttl">A tool call is the only verb an agent has</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0310 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
