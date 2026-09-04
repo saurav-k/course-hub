@@ -149,7 +149,7 @@ Working rung. What an agent loop is, what bounds it, what a tool call actually c
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1020 | The capstone: the agent that knows when to stop | reserved | **Read here**, at the foot of module 3. A turn ceiling, a token ceiling, retrieval bound as a tool, a file-backed memory with a traversal test, and an eval set with expected trajectories. The integrator writes it, not a module writer. |
+| 1020 | The capstone: the agent that knows when to stop | written | **Read here**, at the foot of module 3. A turn ceiling, a token ceiling, retrieval bound as a tool, a file-backed memory with a traversal test, and an eval set with expected trajectories. The integrator writes it, not a module writer. |
 
 ### Module 04 - From basic to agentic RAG
 
@@ -264,12 +264,12 @@ Read alongside, not positions in the sequence. All four are the integrator's fin
 |---|---|---|
 | `reference/glossary.html` | **written** | Glossary. Every term this course introduces, one definition each, linked to the page that develops it. Seeded from the three research reports; the integrator completes it after the modules land. |
 | `reference/eval-harness.html` | **written** | The eval harness. The golden-set format, every metric definition with its source, and the reporting rule: a number with no k, no set and no corpus version is not a number. |
-| `reference/troubleshooting.html` | **reserved** | The number did not move. What to check, in order, when a change that should have helped did not. The self-paced conversion of the syllabus's office hours. |
-| `reference/figures.html` | **partial** | The two figures the course reuses. The four request shapes from 0600, copied verbatim. The six-question design review is reserved rather than drawn: its owning lesson 0730 does not exist yet, and this sheet's rule is that a figure is copied from the lesson that owns it and never invented ahead of it. |
+| `reference/troubleshooting.html` | **written** | The number did not move. What to check, in order, when a change that should have helped did not. The self-paced conversion of the syllabus's office hours. |
+| `reference/figures.html` | **written** | The two figures the course reuses, each copied verbatim from the lesson that owns it: the four request shapes from 0600 and the six-question design review from 0730. |
 
 ## Planned but unwritten
 
-Everything above marked `reserved`: fifty-two lessons, nine free positions at the tail of the eight module blocks, the held module 5 in-the-field position `0560`, five capstone pages, one half-written reference sheet and one reserved one.
+Everything above marked `reserved`: fifty-two lessons, nine free positions at the tail of the eight module blocks, the held module 5 in-the-field position `0560`, four capstone pages. All four reference sheets are written.
 
 `0560` deserves its own line, because it is held rather than free.
 The strongest available page there is the orchestrator-worker research system, and its evaluation set is not published, so the page would have to be written as *what the company says it measured* rather than as a result.
