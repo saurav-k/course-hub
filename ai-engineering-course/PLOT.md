@@ -228,10 +228,10 @@ Frontier rung. Two case studies built from those organisations' own public mater
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0700 | In the field: an orchestrator and its workers | reserved | A fan-out research system buys quality with tokens at a rate the organisation published, and the multiplier is the design decision. |
-| 0710 | In the field: a text-to-SQL agent people actually use | reserved | Two independent teams arrived at the same three-stage decomposition, and every stage exists to shrink the search space. |
-| 0720 | Sizing a system you have not built | reserved | Five numbers price an agentic system before it is written, and the sensitivity says which of the five actually moves the answer. |
-| 0730 | The design review: six questions, on your own system | reserved | The transferable skill is a review you can run on any agentic system, including one you did not build. |
+| 0700 | In the field: an orchestrator and its workers | **written** | A fan-out research system buys quality with tokens at a rate the organisation published, and the multiplier is the design decision. |
+| 0710 | In the field: a text-to-SQL agent people actually use | **written** | Two independent teams arrived at the same three-stage decomposition, and every stage exists to shrink the search space. |
+| 0720 | Sizing a system you have not built | **written** | Five numbers price an agentic system before it is written, and the sensitivity says which of the five actually moves the answer. |
+| 0730 | The design review: six questions, on your own system | **written** | The transferable skill is a review you can run on any agentic system, including one you did not build. |
 | 0740 | Free position | reserved | Held for a lesson a module 7 writer discovers they need. |
 
 <!-- module-07:end -->
