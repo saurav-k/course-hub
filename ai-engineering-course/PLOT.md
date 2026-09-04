@@ -159,12 +159,12 @@ Working rung, and the join. Module 2's pipeline and module 3's loop become one s
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0400 | Retrieval becomes a tool the model decides to call | reserved | Always retrieve becomes retrieve if needed, and the tool description is what decides. |
-| 0410 | A retrieval you do not trust is one you can correct | reserved | A lightweight grader between retrieval and generation buys a refusal path, which is a designed exit rather than a failure. |
-| 0420 | A pause is a state you saved, not a thread you blocked | reserved | Human-in-the-loop is a checkpoint on disk, and the node restarts from its first line rather than resuming mid-function. |
-| 0430 | A thumb down is a row in the golden set | reserved | A feedback record with no trace id is unusable, and the loop closes on the set module 1 built. |
-| 0440 | Your RAG app is a host, and its best source is one you did not write | reserved | Mounting a server you do not run changes what reaches the window without changing top-k, and the annotation defaults are the trap. |
-| 0450 | A deep research agent is a retrieval loop with a citation contract | reserved | The loop is cheap to describe and expensive to run, and the citation contract is what makes it checkable. |
+| 0400 | Retrieval becomes a tool the model decides to call | written | Always retrieve becomes retrieve if needed, and the tool description is what decides. |
+| 0410 | A retrieval you do not trust is one you can correct | written | A lightweight grader between retrieval and generation buys a refusal path, which is a designed exit rather than a failure. |
+| 0420 | A pause is a state you saved, not a thread you blocked | written | Human-in-the-loop is a checkpoint on disk, and the node restarts from its first line rather than resuming mid-function. |
+| 0430 | A thumb down is a row in the golden set | written | A feedback record with no trace id is unusable, and the loop closes on the set module 1 built. |
+| 0440 | Your RAG app is a host, and its best source is one you did not write | written | Mounting a server you do not run changes what reaches the window without changing top-k, and the annotation defaults are the trap. |
+| 0450 | A deep research agent is a retrieval loop with a citation contract | written | The loop is cheap to describe and expensive to run, and the citation contract is what makes it checkable. |
 | 0460 | Free position | reserved | Held for a lesson a module 4 writer discovers they need. |
 
 <!-- module-04:end -->
