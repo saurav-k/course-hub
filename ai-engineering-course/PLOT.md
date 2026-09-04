@@ -86,14 +86,14 @@ Foundation rung. A pipeline you can run, and then a number you can argue with. T
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0100 | The lifecycle is a loop with a measurement in it | reserved | An AI product has no training step, so what you version is the corpus, the prompt and the eval set. |
-| 0110 | The environment is a lockfile, a key and a trace | reserved | A reproducible AI project is three files, and the tooling landscape only matters where it changes one of them. |
-| 0120 | RAG is a search problem wearing a generation costume | reserved | Retrieval decides the answer and the prompt only decides the wording. |
-| 0130 | An embedding is a lossy address, not a meaning | reserved | Similar addresses are a hypothesis about similar meaning, and the hypothesis is model-specific. |
-| 0140 | A vector index trades recall for latency, and a filter breaks it | reserved | An approximate index is a deliberate loss of recall, and a WHERE clause spends the budget again without saying so. |
-| 0150 | A RAG trace has a retrieval span, and that is where you look first | reserved | Instrument with names somebody else already agreed on, so why was this answer wrong is a query rather than an argument. |
-| 0160 | Measure the retrieval before the model is involved | reserved | Retrieval is measurable with no generation at all, and that measurement tells you where to spend. |
-| 0170 | A generation metric is a judge, and a judge needs its own eval | reserved | Reference-free scoring works, and the scorer is a model with named biases you evaluate too. |
+| 0100 | The lifecycle is a loop with a measurement in it | written | An AI product has no training step, so what you version is the corpus, the prompt and the eval set. |
+| 0110 | The environment is a lockfile, a key and a trace | written | A reproducible AI project is three files, and the tooling landscape only matters where it changes one of them. |
+| 0120 | RAG is a search problem wearing a generation costume | written | Retrieval decides the answer and the prompt only decides the wording. |
+| 0130 | An embedding is a lossy address, not a meaning | written | Similar addresses are a hypothesis about similar meaning, and the hypothesis is model-specific. |
+| 0140 | A vector index trades recall for latency, and a filter breaks it | written | An approximate index is a deliberate loss of recall, and a WHERE clause spends the budget again without saying so. |
+| 0150 | A RAG trace has a retrieval span, and that is where you look first | written | Instrument with names somebody else already agreed on, so why was this answer wrong is a query rather than an argument. |
+| 0160 | Measure the retrieval before the model is involved | written | Retrieval is measurable with no generation at all, and that measurement tells you where to spend. |
+| 0170 | A generation metric is a judge, and a judge needs its own eval | written | Reference-free scoring works, and the scorer is a model with named biases you evaluate too. |
 | 0180 | Free position | reserved | Held for a lesson a module 1 writer discovers they need. Nothing may take it by accident. |
 
 <!-- module-01:end -->

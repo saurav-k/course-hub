@@ -1,0 +1,262 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A vector index trades recall for latency, and a filter breaks it - End-to-End AI Engineering</title>
+<meta name="description" content="An approximate index is a deliberate loss of recall bought for latency. Adding a WHERE clause spends that budget a second time without telling you, and pgvector's own documentation gives the arithmetic.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 01 &middot; Foundations &middot; Lesson 0140</div>
+  <h1>A WHERE clause spends the recall budget a second time</h1>
+  <p class="paper-meta">
+    <span class="pill easy">foundation</span>
+    <span class="pill">11 min</span>
+    Arithmetic and defaults quoted from <code>pgvector</code> at tag <code>v0.8.6</code>; the graph structure from the HNSW paper at <code>v4</code>.
+    &middot; <a href="https://github.com/pgvector/pgvector">pgvector v0.8.6</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Exact nearest-neighbour search is correct and does not scale. An <b>approximate index buys latency with recall</b>, deliberately, and you choose the exchange rate.</li>
+      <li>HNSW is a layered proximity graph. Its authors report <b>logarithmic complexity scaling</b>, and three knobs are yours: <code>m</code>, <code>ef_construction</code> and <code>ef_search</code>.</li>
+      <li>The defect nobody expects: <b>filtering happens after the index scan</b>. pgvector's own README works it out - a condition matching 10% of rows, at the default <code>hnsw.ef_search</code> of 40, leaves <b>about four rows</b>.</li>
+      <li>That reads to a user as "it does not know about our European documents", and to you as a retrieval bug with a one-line fix.</li>
+      <li>The fixes are <code>hnsw.iterative_scan</code>, a partial index, or partitioning, and each costs something different.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The filter runs after the scan, on whatever survived it.</div>
+    <svg class="chart" viewBox="0 0 640 280" role="img" aria-label="A pipeline drawn left to right. A corpus of one hundred thousand vectors enters an approximate index scan governed by ef search of forty, which returns forty candidates. Those forty pass through a filter matching ten percent of rows, leaving four. A boundary beneath marks the two places recall is lost, one intended and one not.">
+      <text class="d-mono" x="16" y="24">one filtered query</text>
+
+      <rect class="d-box" x="12" y="42" width="132" height="58" rx="5"/>
+      <text class="lbl-b" x="78" y="66" text-anchor="middle">the corpus</text>
+      <text class="d-mono" x="78" y="86" text-anchor="middle">100,000 vectors</text>
+
+      <path class="d-flow" d="M144 71 L172 71"/>
+
+      <rect class="d-box" x="178" y="42" width="152" height="58" rx="5"/>
+      <text class="lbl-b" x="254" y="66" text-anchor="middle">index scan</text>
+      <text class="d-mono" x="254" y="86" text-anchor="middle">ef_search = 40</text>
+
+      <path class="d-flow" d="M330 71 L358 71"/>
+
+      <rect class="d-box" x="364" y="42" width="132" height="58" rx="5"/>
+      <text class="lbl-b" x="430" y="66" text-anchor="middle">40 candidates</text>
+      <text class="d-mono" x="430" y="86" text-anchor="middle">recall bought here</text>
+
+      <path class="d-flow s-alarm" d="M496 71 L524 71"/>
+
+      <rect class="d-drop" x="530" y="42" width="98" height="58" rx="5"/>
+      <text class="lbl-b" x="579" y="66" text-anchor="middle">4 rows</text>
+      <text class="d-mono" x="579" y="86" text-anchor="middle">you asked for 10</text>
+
+      <rect class="d-bound" x="178" y="124" width="450" height="76" rx="5"/>
+      <text class="lbl-sm" x="192" y="148">two places recall is lost, and only one of them is on purpose</text>
+      <text class="d-mono" x="192" y="170">1  the approximate scan, a budget you set</text>
+      <text class="d-mono" x="192" y="190">2  the filter, applied to what survived</text>
+
+      <text class="read" x="320" y="234" text-anchor="middle">The filter did not narrow a hundred thousand rows. It narrowed forty.</text>
+      <text class="lbl-sm" x="320" y="258" text-anchor="middle">Arithmetic from pgvector's own README at v0.8.6, for a condition matching 10% of rows.</text>
+    </svg>
+    <figcaption>One filtered query, drawn at the sizes pgvector's documentation uses. The red arrow is where the surprise lives: the filter is applied to the forty candidates the index returned, not to the corpus.
+    <b>Every metadata filter you add is a second, unbudgeted cut to recall, and nothing in the query result says so.</b></figcaption>
+  </figure>
+
+  <h2 id="exact-stops">1. When exact search stops being an option</h2>
+  <p>Exact nearest-neighbour search compares the query against every vector. It is trivially correct, and its cost is the whole index on every query.
+  At a few thousand chunks that is fine and you should use it, because a correct baseline is worth more than a fast approximation you cannot check against.</p>
+  <p>It stops being fine somewhere in the hundreds of thousands, and where exactly depends on your dimension count, your hardware and your latency budget rather than on a rule.
+  The important part is what you give up when you leave it: from that point on, <b>your retrieval is approximate and its error rate is a parameter you set</b>, and if you never set it deliberately you have taken a default somebody else chose.</p>
+
+  <h2 id="hnsw">2. What HNSW actually builds</h2>
+  <p>Malkov and Yashunin's construction is a multi-layer set of proximity graphs over nested subsets of the data. The layer an element appears in is chosen randomly with an exponentially decaying probability, so the top layers are sparse and the bottom layer holds everything.
+  A search starts at the top, follows edges greedily toward the query, drops a layer, and repeats. The paper's claim for this is <b>logarithmic complexity scaling</b>, and the separation of link lengths by scale is what buys it.</p>
+  <p>Three parameters are yours, and pgvector exposes them by those names:</p>
+  <p><code>m</code> is how many links each node keeps. More links means a better-connected graph, higher recall and a larger index. <code>ef_construction</code> is how hard the builder works to find good links, so it costs build time and nothing at query time.
+  <code>hnsw.ef_search</code> is the one that matters daily: how many candidates the search keeps in flight. It is the recall-for-latency dial, it is set per session, and <b>its default in pgvector is 40</b>.</p>
+
+  <h2 id="the-filter-trap">3. The four-row result</h2>
+  <p>Now the defect that costs a week the first time it happens, quoted from the documentation rather than paraphrased.</p>
+  <p>pgvector's README says it plainly: with approximate indexes, filtering is applied <em>after</em> the index is scanned. It then works the example: if a condition matches 10% of rows, with HNSW and the default <code>hnsw.ef_search</code> of 40, <b>only 4 rows will match on average</b>.</p>
+  <p>Read that against a query asking for ten results. You get four. Not four wrong ones, and not an error: four correct rows and six that silently do not exist.
+  A user reports that the assistant does not seem to know about the European policy documents. You check, and the European policy documents are in the index. They were candidates for nothing, because they were not among the forty the graph walk happened to reach.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Rows left after the filter</div>
+    <div class="fig-claim">Below a quarter selectivity you cannot fill a top ten.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A line chart of the expected number of surviving rows against filter selectivity, at the default ef search of forty. The line rises linearly from about zero rows at one percent selectivity to forty rows at one hundred percent. A horizontal reference line at ten rows marks a typical requested limit, and it is crossed at twenty five percent selectivity. Two points are marked: pgvector's worked example at ten percent giving four rows, and the crossing point.">
+      <line class="grid" x1="90" y1="167.5" x2="620" y2="167.5"/>
+      <line class="grid" x1="90" y1="125" x2="620" y2="125"/>
+      <line class="grid" x1="90" y1="82" x2="620" y2="82"/>
+      <line class="axis" x1="90" y1="210" x2="620" y2="210"/>
+      <line class="axis" x1="90" y1="40" x2="90" y2="210"/>
+
+      <line class="s-stat thick" x1="90" y1="210" x2="620" y2="40"/>
+
+      <line class="s-alarm ref" x1="90" y1="167.5" x2="620" y2="167.5"/>
+      <text class="lbl-sm" x="330" y="162">a request for ten rows</text>
+
+      <circle class="m-alarm" cx="143" cy="193" r="5"/>
+      <text class="lbl-sm" x="152" y="190">10% selectivity gives 4 rows</text>
+      <circle class="m-stat" cx="222" cy="167.5" r="5"/>
+      <text class="lbl-sm" x="231" y="148">25% is where ten arrive</text>
+
+      <text class="lbl-sm" x="82" y="46" text-anchor="end">40</text>
+      <text class="lbl-sm" x="82" y="130" text-anchor="end">20</text>
+      <text class="lbl-sm" x="82" y="172" text-anchor="end">10</text>
+      <text class="lbl-sm" x="82" y="214" text-anchor="end">0</text>
+      <text class="lbl-sm" x="90" y="232">1%</text>
+      <text class="lbl-sm" x="222" y="232" text-anchor="middle">25%</text>
+      <text class="lbl-sm" x="355" y="232" text-anchor="middle">50%</text>
+      <text class="lbl-sm" x="612" y="232" text-anchor="end">100%</text>
+      <text class="lbl-sm" x="20" y="262">Derived from pgvector's stated rule: the filter is applied to the</text>
+      <text class="lbl-sm" x="20" y="280">candidates the scan returned, so surviving rows are 40 times selectivity.</text>
+      <text class="ttl" x="20" y="294">surviving rows against selectivity, at ef_search 40</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>expected rows</span><span><i class="sw-alarm"></i>the ten you asked for</span></div>
+    <figcaption>The arithmetic drawn out. Derived from pgvector's documented behaviour rather than measured, and the marked point at 10% is the example its README works through.
+    <b>Any filter tighter than one row in four cannot fill a top ten at the default, and the query still reports success.</b></figcaption>
+  </figure>
+
+  <figure class="diagram calc" id="filter-survivors">
+    <div class="fig-cap">How many rows survive</div>
+    <div class="fig-claim">Selectivity times candidates is what you actually get.</div>
+
+    <div class="build-controls">
+      <label>ef_search <input type="range" data-var="e" min="10" max="400" step="10" value="40"></label>
+      <label>selectivity, rows per 1000 <input type="range" data-var="s" min="1" max="1000" step="1" value="100"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>expected surviving rows <b data-calc="scale" data-of="e s" data-by="0.001" data-decimals="1">4.0</b></span>
+      <span>candidates scanned <b data-calc="product" data-of="e">40</b></span>
+    </div>
+    <figcaption>The committed defaults are pgvector's own worked example: <code>ef_search</code> at its default of 40 and a condition matching 100 rows per thousand, which is 10%. Move the right slider down to a 1% filter and read the first number.
+    <b>Any filter tighter than about one row in twenty returns nothing usable at the default, and the query reports success.</b></figcaption>
+  </figure>
+
+  <h2 id="the-fixes">4. Three fixes, and what each costs</h2>
+  <p><b>Iterative scans</b>, added in pgvector 0.8.0, are the general answer: the index keeps scanning until enough rows are found or a cap is reached. <code>SET hnsw.iterative_scan = strict_order</code> preserves exact distance order; <code>relaxed_order</code> allows slight reordering and the README says it gives better recall. You pay in latency, variably, and the variance is the part to watch.</p>
+  <p><b>A partial index</b> suits a filter over a few known values: build a separate HNSW index per value, and each query scans an index containing only matching rows, so the filter costs nothing at query time. You pay in index count and in the fact that a new value needs a new index.</p>
+  <p><b>Partitioning</b> is the same idea when there are many distinct values, and you pay in schema complexity.</p>
+  <p>There is a fourth option worth naming because it is often correct: <b>put the filter in the ranking rather than in the query</b>. Retrieve without a filter, then drop non-matching rows and take the top ten of what remains. That works when the filter is loose and fails exactly where the problem was, which is when the filter is tight.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Which fix, and its bill</div>
+    <div class="fig-claim">The right fix depends on how many distinct filter values exist.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="Three fixes drawn as boxes across a horizontal axis of the number of distinct filter values, from few to many. Partial indexes sit at the few end, partitioning at the many end, and iterative scans span the whole range with a note that its cost is variable latency.">
+      <text class="d-mono" x="16" y="24">choose by the number of distinct filter values</text>
+
+      <rect class="d-keep" x="12" y="44" width="188" height="60" rx="5"/>
+      <text class="lbl-b" x="106" y="68" text-anchor="middle">a partial index</text>
+      <text class="d-mono" x="106" y="90" text-anchor="middle">cost: one index per value</text>
+
+      <rect class="d-box" x="220" y="44" width="188" height="60" rx="5"/>
+      <text class="lbl-b" x="314" y="68" text-anchor="middle">filter after ranking</text>
+      <text class="d-mono" x="314" y="90" text-anchor="middle">cost: fails on tight filters</text>
+
+      <rect class="d-keep" x="428" y="44" width="200" height="60" rx="5"/>
+      <text class="lbl-b" x="528" y="68" text-anchor="middle">partitioning</text>
+      <text class="d-mono" x="528" y="90" text-anchor="middle">cost: schema complexity</text>
+
+      <rect class="d-focus" x="12" y="122" width="616" height="52" rx="5"/>
+      <text class="lbl-b" x="26" y="144">iterative scans, at any number of values</text>
+      <text class="d-mono" x="26" y="164">cost: variable latency, and the variance is the part that pages you</text>
+
+      <line class="axis" x1="12" y1="196" x2="628" y2="196"/>
+      <text class="lbl-sm" x="12" y="216">a few distinct values</text>
+      <text class="lbl-sm" x="628" y="216" text-anchor="end">many distinct values</text>
+
+      <text class="read" x="320" y="246" text-anchor="middle">Only the highlighted one needs no knowledge of your filter's shape.</text>
+    </svg>
+    <figcaption>The four responses laid out against the one property that decides between them. The two green boxes remove the cost from the query path entirely; the middle one keeps it and is the one that quietly stops working as filters tighten.
+    <b>The general fix is the slowest, which is why the specific ones are worth the schema work when the filter is known in advance.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    The four-row figure and the default <code>ef_search</code> of 40 are pgvector's own documentation at tag <code>v0.8.6</code>, describing pgvector's behaviour.
+    Other vector stores apply filters at different points in the scan and some do it during traversal rather than after it, so the number does not transfer.
+    What transfers is the question: <b>ask your store where in the scan the filter is applied</b>, and treat "after" as a recall budget you are spending twice.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A filtered query on pgvector asks for ten rows and returns four. What happened?</div>
+      <button class="q-opt">Only four rows in the table match</button>
+      <button class="q-opt">The filter ran on the scan's candidates</button>
+      <button class="q-opt">The index was built with too small an m</button>
+      <button class="q-opt">Four rows fell outside the distance cap</button>
+      <div class="q-fb">Filtering is applied after the index scan, so a 10% condition over the 40 candidates a default ef_search returns leaves about four. Too few matching rows is possible but is the case you would have noticed; the point is that thousands can match and you still get four. The m parameter changes graph connectivity and recall broadly, not this specific interaction. pgvector applies no distance cap of its own.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your filter has three possible values and is used on every query. Which fix costs least at query time?</div>
+      <button class="q-opt">Raise ef_search until enough rows come back</button>
+      <button class="q-opt">Turn on iterative scans in relaxed order</button>
+      <button class="q-opt">Retrieve unfiltered, then drop non-matches</button>
+      <button class="q-opt">Build one partial index for each value</button>
+      <div class="q-fb">Three known values is exactly the shape a partial index suits: each query scans an index holding only matching rows, so the filter costs nothing during the scan. Raising ef_search scans more of the graph on every query, filter or not. Iterative scans work and add variable latency, which is why they are the general rather than the cheapest answer. Filtering after ranking still pays the same recall cost that caused the problem.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 35 minutes, with a database</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill easy">foundation</span></div>
+
+    <div class="p-stem">
+      <p>Reproduce the four-row result on your own data, then fix it and price the fix.</p>
+      <p>Index your corpus with HNSW. Add a metadata column - source directory, document type, whatever your corpus actually has - and confirm roughly what fraction of rows each value covers. Run a query with <code>LIMIT 10</code> and a filter matching about a tenth of the table, and count the rows you get back.</p>
+      <p>Then <code>SET hnsw.iterative_scan = strict_order</code>, run the identical query, and record both the row count and the latency, before and after. <b>Both numbers, not just the first.</b></p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Use <code>EXPLAIN ANALYZE</code> rather than a stopwatch, and run each query several times so you are reading a warm cache in both cases. The first execution after an index build measures the disk, not the fix.</p>
+      <p>If your table is small enough that the planner chooses a sequential scan, the trap will not reproduce, because there is no approximate index in the plan to filter after. Check the plan before concluding the documentation is wrong.</p></details>
+
+    <details class="solution"><summary>Show what the experiment should produce</summary>
+      <ol class="worked">
+        <li><b>The row count before the fix should be near your selectivity times 40.</b> A filter matching a tenth gives about four; a filter matching a twentieth gives about two. If you get ten, check the plan: a sequential scan has no candidate set to truncate, and you have not reproduced the condition.</li>
+        <li><b>The latency after the fix is the number worth keeping.</b> Iterative scanning keeps going until it has enough rows, so its cost depends on how rare the matching rows are. A filter matching one row in a hundred can cost many times the unfiltered query, and that is a p99 problem rather than a p50 one.</li>
+        <li><b>Compare against exact search while your corpus is still small enough to allow it.</b> Turn the index off, run the same query as a sequential scan, and you have ground truth for what the approximate index missed. That comparison is impossible later and is the only way to know your recall rather than assume it.</li>
+        <li><b>Write the chosen <code>ef_search</code> into the charter with the reason.</b> It is a parameter with a default that suits nobody in particular, and an unrecorded value is one somebody will change during an incident.</li>
+        <li><b>Add one filtered question to your golden set.</b> Lesson 0160 builds that set properly. A filtered question in it means this defect can never come back silently, which is the whole reason the set exists.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> After enabling iterative scans you should get your full ten rows and a higher, more variable latency. If the row count is still four, the setting did not apply to the session you measured in; if the latency did not move at all, you are probably reading a cached plan rather than a fresh execution.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to write the query that, for one of your filter values, returns the rows the approximate index missed: the set difference between an exact sequential scan and the indexed query. Read a few of them. If any of them would have answered a question in your golden set, you have a number for what the index costs you rather than a feeling.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The behaviour, the defaults and the fixes, from the store itself: <a href="https://github.com/pgvector/pgvector">pgvector</a> at tag <code>v0.8.6</code>, particularly the Filtering and Iterative Index Scans sections, which carry the four-row arithmetic quoted here. For the structure underneath it, <a href="https://arxiv.org/abs/1603.09320">Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs</a>, Malkov and Yashunin, at <code>v4</code>. The concept-level treatment of vector databases is <a href="../../ai-system-design-course/lessons/0001-rag-and-retrieval.html#vector-databases">Vector databases</a> in AI System Design.</p>
+
+  <div class="pager">
+    <a class="prv" href="0130-an-embedding-is-a-lossy-address-not-a-meaning.html"><span class="dir">&larr; Previous</span><span class="ttl">An embedding is a lossy address, not a meaning</span></a>
+    <a class="nxt" href="0150-a-rag-trace-has-a-retrieval-span.html"><span class="dir">Next &rarr;</span><span class="ttl">A RAG trace has a retrieval span, and that is where you look first</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0140 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

@@ -17,6 +17,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "01",
+      "title": "Foundations",
+      "lessons": [
+        {
+          "title": "The lifecycle is a loop with a measurement in it",
+          "href": "lessons/0100-the-lifecycle-is-a-loop-with-a-measurement-in-it.html"
+        },
+        {
+          "title": "The environment is a lockfile, a key and a trace",
+          "href": "lessons/0110-the-environment-is-a-lockfile-a-key-and-a-trace.html"
+        },
+        {
+          "title": "RAG is a search problem wearing a generation costume",
+          "href": "lessons/0120-rag-is-a-search-problem-wearing-a-generation-costume.html"
+        },
+        {
+          "title": "An embedding is a lossy address, not a meaning",
+          "href": "lessons/0130-an-embedding-is-a-lossy-address-not-a-meaning.html"
+        },
+        {
+          "title": "A vector index trades recall for latency, and a filter breaks it",
+          "href": "lessons/0140-a-vector-index-trades-recall-for-latency.html"
+        },
+        {
+          "title": "A RAG trace has a retrieval span, and that is where you look first",
+          "href": "lessons/0150-a-rag-trace-has-a-retrieval-span.html"
+        },
+        {
+          "title": "Measure the retrieval before the model is involved",
+          "href": "lessons/0160-measure-the-retrieval-before-the-model-is-involved.html"
+        },
+        {
+          "title": "A generation metric is a judge, and a judge needs its own eval",
+          "href": "lessons/0170-a-generation-metric-is-a-judge.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Deployment, optimization and reliability",
       "lessons": [
