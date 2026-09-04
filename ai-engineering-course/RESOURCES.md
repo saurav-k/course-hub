@@ -3,9 +3,9 @@
 The sources this course trusts.
 A page cites from here; anything new goes in here first, in the same pull request.
 
-**This file is seeded, not finished.**
+**This file is complete.**
 It carries the canon the three research reports opened, at the version each was read at, so that no module writer has to re-establish a version number.
-The per-module supporting lists are filled by each module writer inside their own pull request, and the whole file is tidied by the integrator in one pass after the eight modules land, for the same reason `reference/glossary.html` is: every module would otherwise append to one alphabetical list and conflict with every sibling.
+The per-module lists below were assembled by the integrator in one pass after the eight modules landed, for the same reason `reference/glossary.html` was: every module would otherwise append to one list and conflict with every sibling.
 
 A version recorded here is the version the source was **opened** at. If you cite a source, open it again and correct the row if it has moved.
 
@@ -87,23 +87,115 @@ Primary for what that organisation did, and never a third-party benchmark. Every
 
 ## Supporting sources
 
-Cited once or twice, by page. **Each module writer adds their own rows here, inside their own pull request.**
+Every external source the course cites, by the module that introduces it, with the lessons that cite it.
+**Generated from the pages themselves** rather than kept by hand, so it cannot drift from what the lessons actually link. A source marked as also cited later is one the course returns to; its version note is in the canon above.
+
+### Lesson 0000
+
+- [GenAI spans](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md) - cited by `0000`, `0110`, `0150`, `0250`, `0670`. *(also cited by a later module)*
+
 
 ### Module 01 - Foundations
 
+- [BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models](https://arxiv.org/abs/2104.08663) - cited by `0160`, `0270`. *(also cited by a later module)*
+- [Efficient and robust approximate nearest neighbor search using Hierarchical Navigable Small World graphs](https://arxiv.org/abs/1603.09320) - cited by `0140`.
+- [GenAI metrics](https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-metrics.md) - cited by `0150`, `0620`. *(also cited by a later module)*
+- [Hidden Technical Debt in Machine Learning Systems](https://papers.nips.cc/paper/2015/hash/86df7dcfd896fcaf2674f757a2463eba-Abstract.html) - cited by `0100`.
+- [Judging LLM-as-a-Judge with MT-Bench and Chatbot Arena](https://arxiv.org/abs/2306.05685) - cited by `0170`.
+- [MTEB: Massive Text Embedding Benchmark](https://arxiv.org/abs/2210.07316) - cited by `0130`.
+- [pgvector v0.8.6](https://github.com/pgvector/pgvector) - cited by `0140`.
+- [Precise Zero-Shot Dense Retrieval without Relevance Labels](https://arxiv.org/abs/2212.10496) - cited by `0130`.
+- [Ragas documentation](https://docs.ragas.io/en/stable/concepts/metrics/available_metrics/) - cited by `0170`.
+- [Ragas: Automated Evaluation of Retrieval Augmented Generation](https://arxiv.org/abs/2309.15217) - cited by `0170`.
+- [Retrieval-Augmented Generation for Knowledge-Intensive NLP Tasks](https://arxiv.org/abs/2005.11401) - cited by `0120`.
+- [Software Engineering for Machine Learning: A Case Study](https://www.microsoft.com/en-us/research/publication/software-engineering-for-machine-learning-a-case-study/) - cited by `0100`.
+- [The Probabilistic Relevance Framework: BM25 and Beyond](https://doi.org/10.1561/1500000019) - cited by `0160`.
+- [the uv documentation](https://docs.astral.sh/uv/) - cited by `0110`.
+
+
 ### Module 02 - Retrieval quality and context engineering
+
+- [arXiv:1901.04085](https://arxiv.org/abs/1901.04085) - cited by `0270`.
+- [Docling Technical Report](https://arxiv.org/abs/2408.09869) - cited by `0200`.
+- [Is Semantic Chunking Worth the Computational Cost?](https://arxiv.org/abs/2410.13070) - cited by `0220`.
+- [Late Chunking: Contextual Chunk Embeddings Using Long-Context Embedding Models](https://arxiv.org/abs/2409.04701) - cited by `0230`.
+- [Let Me Speak Freely? A Study on the Impact of Format Restrictions on Performance of Large Language Models](https://arxiv.org/abs/2408.02442) - cited by `0210`.
+- [Lost in the Middle: How Language Models Use Long Contexts](https://arxiv.org/abs/2307.03172) - cited by `0240`.
+- [Not what you've signed up for: Compromising Real-World LLM-Integrated Applications with Indirect Prompt Injection](https://arxiv.org/abs/2302.12173) - cited by `0280`.
+- [Reciprocal Rank Fusion outperforms Condorcet and individual Rank Learning Methods](https://plg.uwaterloo.ca/~gvcormac/cormacksigir09-rrf.pdf) - cited by `0260`.
+
 
 ### Module 03 - Agents and agentic systems
 
+- [Building effective agents](https://www.anthropic.com/engineering/building-effective-agents) - cited by `0300`, `0700`. *(also cited by a later module)*
+- [Effective context engineering for AI agents](https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents) - cited by `0350`, `0450`, `0500`. *(also cited by a later module)*
+- [Generative Agents](https://arxiv.org/abs/2304.03442) - cited by `0340`.
+- [Handle tool calls](https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls) - cited by `0330`.
+- [LangGraph persistence](https://docs.langchain.com/oss/python/langgraph/persistence) - cited by `0340`, `0530`. *(also cited by a later module)*
+- [Large Language Models Cannot Self-Correct Reasoning Yet](https://arxiv.org/abs/2310.01798) - cited by `0360`.
+- [MCP schema at revision 2026-07-28](https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.ts) - cited by `0320`, `0330`.
+- [Memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool) - cited by `0350`.
+- [OpenTelemetry GenAI semantic conventions](https://github.com/open-telemetry/semantic-conventions-genai) - cited by `0340`, `0440`, `0520`, `0550`. *(also cited by a later module)*
+- [Reflexion](https://arxiv.org/abs/2303.11366) - cited by `0360`.
+- [Running agents](https://openai.github.io/openai-agents-python/running_agents/) - cited by `0310`.
+- [Self-Refine](https://arxiv.org/abs/2303.17651) - cited by `0360`.
+- [tau-bench](https://arxiv.org/abs/2406.12045) - cited by `0370`.
+- [Tool use with Claude](https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview) - cited by `0320`.
+- [Why Do Multi-Agent LLM Systems Fail?](https://arxiv.org/abs/2503.13657) - cited by `0310`, `0530`, `0550`. *(also cited by a later module)*
+
+
 ### Module 04 - From basic to agentic RAG
+
+- [Corrective Retrieval Augmented Generation](https://arxiv.org/abs/2401.15884) - cited by `0410`.
+- [How we built our multi-agent research system](https://www.anthropic.com/engineering/multi-agent-research-system) - cited by `0430`, `0450`, `0500`, `0700`. *(also cited by a later module)*
+- [Human-in-the-loop with interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts) - cited by `0420`.
+- [ReAct: Synergizing Reasoning and Acting in Language Models](https://arxiv.org/abs/2210.03629) - cited by `0400`.
+- [Self-RAG: Learning to Retrieve, Generate, and Critique through Self-Reflection](https://arxiv.org/abs/2310.11511) - cited by `0400`, `0410`.
+- [the Model Context Protocol specification](https://modelcontextprotocol.io/specification/latest) - cited by `0440`.
+
 
 ### Module 05 - Multi-agent systems
 
+- [A2A specification](https://a2a-protocol.org/latest/specification/) - cited by `0540`.
+- [a2a.proto at v1.0.1](https://github.com/a2aproject/A2A/blob/v1.0.1/specification/a2a.proto) - cited by `0540`.
+- [Don't Build Multi-Agents](https://cognition.ai/blog/dont-build-multi-agents) - cited by `0500`.
+- [google/adk-python at v2.8.0](https://github.com/google/adk-python/tree/v2.8.0/src/google/adk/agents) - cited by `0510`.
+- [GOVERNANCE.md](https://github.com/a2aproject/A2A/blob/main/GOVERNANCE.md) - cited by `0540`.
+- [Handoffs](https://openai.github.io/openai-agents-python/handoffs/) - cited by `0510`.
+- [llm_agent.py at v2.8.0](https://github.com/google/adk-python/blob/v2.8.0/src/google/adk/agents/llm_agent.py) - cited by `0530`.
+- [Magentic-One: A Generalist Multi-Agent System for Solving Complex Tasks](https://arxiv.org/abs/2411.04468) - cited by `0520`.
+- [Orchestrating multiple agents](https://openai.github.io/openai-agents-python/multi_agent/) - cited by `0510`.
+
+
 ### Module 06 - Deployment, optimization and reliability
+
+- [Claude API errors](https://platform.claude.com/docs/en/api/errors) - cited by `0610`.
+- [Concurrency and async / await](https://fastapi.tiangolo.com/async/) - cited by `0600`.
+- [Configure probes](https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/) - cited by `0610`.
+- [Design Patterns for Securing LLM Agents against Prompt Injections](https://arxiv.org/abs/2506.08837) - cited by `0650`.
+- [Events that trigger workflows](https://docs.github.com/en/actions/using-workflows/events-that-trigger-workflows) - cited by `0660`.
+- [GPTCache: An Open-Source Semantic Cache for LLM Applications](https://aclanthology.org/2023.nlposs-1.24/) - cited by `0640`.
+- [Message Batches API](https://platform.claude.com/docs/en/build-with-claude/batch-processing) - cited by `0600`.
+- [Prompt caching](https://platform.claude.com/docs/en/build-with-claude/prompt-caching) - cited by `0630`.
+
 
 ### Module 07 - Agentic AI system design
 
+- [Claude API pricing](https://platform.claude.com/docs/en/about-claude/pricing) - cited by `0720`.
+- [Musings on building a Generative AI product](https://www.linkedin.com/blog/engineering/generative-ai/musings-on-building-a-generative-ai-product) - cited by `0710`.
+- [QueryGPT](https://www.uber.com/en-US/blog/query-gpt/) - cited by `0710`.
+
+
 ### Module 08 - Final delivery
+
+- [Model Cards for Model Reporting](https://arxiv.org/abs/1810.03993) - cited by `0810`.
+- [pytest monkeypatch](https://docs.pytest.org/en/stable/how-to/monkeypatch.html) - cited by `0800`.
+- [Scorecard checks](https://github.com/ossf/scorecard/blob/v5.5.0/docs/checks.md) - cited by `0810`.
+
+
+### Capstone track
+
+Cites only sources listed above, and this course's own pages.
 
 ## Wisdom
 
