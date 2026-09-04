@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A deep research agent is a retrieval loop with a citation contract - End-to-End AI Engineering</title>
+<meta name="description" content="A research agent is not a smarter retriever. It is a loop that keeps searching until a written plan is satisfied, its notes live outside the context window, and its output is only usable if every claim carries its source.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; From basic to agentic RAG &middot; Lesson 0450</div>
+  <h1>The loop is cheap to describe and the bill is the design</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">12 min</span>
+    Token multipliers and the citation mechanism are Anthropic's own account of a system they run, measured on their internal evaluation.
+    &middot; <a href="https://www.anthropic.com/engineering/multi-agent-research-system">How we built our multi-agent research system</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A research agent is not a better retriever. It is a loop that <b>keeps searching until a written plan is satisfied</b>, and the plan is the thing that terminates it.</li>
+      <li>Four moves: plan, search, read, note. <b>The notes live outside the context window</b>, which is what stops the loop drowning in its own findings.</li>
+      <li>The <b>citation contract</b> is what makes the output usable. Anthropic runs a dedicated pass that locates where each claim's citation belongs.</li>
+      <li>The bill is the design constraint, and it is published: agents at roughly <b>4x the tokens of a chat</b>, multi-agent at roughly <b>15x</b>, with token usage explaining <b>80% of the variance</b> in their results.</li>
+      <li>Evaluation is module 1's harness with two new columns, one of which is <b>citation accuracy</b>.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The loop runs many searches against one written plan.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Single-shot retrieval on the left as one query and one answer. On the right, a research loop drawn at the same scale: a plan box, then a cycle of search, read and note, with notes written to a store outside the context window, and a synthesise box at the end reading from that store.">
+      <text class="d-mono" x="16" y="24">single shot, from modules 01 and 02</text>
+      <rect class="d-box" x="12" y="36" width="108" height="40" rx="4"/>
+      <text class="lbl-sm" x="66" y="61" text-anchor="middle">one query</text>
+      <path class="d-flow" d="M120 56 L142 56"/>
+      <rect class="d-box" x="148" y="36" width="108" height="40" rx="4"/>
+      <text class="lbl-sm" x="202" y="61" text-anchor="middle">one answer</text>
+      <text class="d-mono" x="270" y="61">about 4,300 tokens</text>
+
+      <text class="d-mono" x="16" y="112">the research loop, same scale</text>
+      <rect class="d-bound" x="12" y="122" width="616" height="122" rx="6"/>
+
+      <rect class="d-focus" x="28" y="146" width="106" height="44" rx="4"/>
+      <text class="lbl-b" x="81" y="166" text-anchor="middle">plan</text>
+      <text class="d-mono" x="81" y="182" text-anchor="middle">the exit test</text>
+      <path class="d-flow" d="M134 168 L158 168"/>
+
+      <rect class="d-box" x="164" y="146" width="94" height="44" rx="4"/>
+      <text class="lbl-sm" x="211" y="172" text-anchor="middle">search</text>
+      <path class="d-flow" d="M258 168 L280 168"/>
+      <rect class="d-box" x="286" y="146" width="94" height="44" rx="4"/>
+      <text class="lbl-sm" x="333" y="172" text-anchor="middle">read</text>
+      <path class="d-flow" d="M380 168 L402 168"/>
+      <rect class="d-box" x="408" y="146" width="94" height="44" rx="4"/>
+      <text class="lbl-sm" x="455" y="172" text-anchor="middle">note</text>
+      <path class="d-flow s-signal" d="M455 192 C 455 218, 211 220, 211 194"/>
+      <text class="d-mono" x="286" y="216">until the plan is satisfied</text>
+
+      <rect class="d-keep" x="522" y="146" width="94" height="44" rx="4"/>
+      <text class="lbl-sm" x="569" y="166" text-anchor="middle">notes</text>
+      <text class="d-mono" x="569" y="182" text-anchor="middle">outside</text>
+      <path class="d-flow" d="M502 168 L518 168"/>
+
+      <text class="read" x="320" y="272" text-anchor="middle">The plan is the only thing that stops it, which is why a vague plan is a runaway bill.</text>
+    </svg>
+    <figcaption>Single-shot retrieval drawn beside the loop at the same scale. The store on the right is the important difference: notes accumulate outside the window, so the loop can run longer than the context it is allowed to hold.
+    <b>Every box here you have already built, and what is new is that nothing terminates the loop except a plan you wrote.</b></figcaption>
+  </figure>
+
+  <h2 id="the-shape">1. Four moves, and the one that is not obvious</h2>
+  <p>Plan, search, read, note. Three of those you have. The fourth is what makes the loop possible.</p>
+  <p>A loop that keeps its findings in the context window fills it, and lesson 0240 already established what happens to a model's recall as its window grows.
+  So the notes go outside: a store the loop writes to and reads back from, deliberately, rather than a transcript it accumulates.
+  Anthropic names this <b>structured note-taking</b> in its own account of context engineering, alongside compaction and sub-agents, and describes it as the agent persisting notes outside the context window and retrieving them later. Module 3's <a href="0340-memory-is-four-stores-with-four-lifetimes.html">Memory is four stores with four lifetimes</a> is where that store is designed properly.</p>
+  <p>The plan is the other half. A single-shot system terminates because it has one query. A loop terminates because a written plan says what "done" is, and the honest version of this is that <b>a vague plan is an unbounded bill</b> rather than a poor answer.</p>
+
+  <h2 id="citations">2. The citation contract</h2>
+  <p>This is the part that separates a research agent from a long answer, and it is where most implementations stop short.</p>
+  <p>After many searches, the synthesis is written from notes rather than from passages that are still in the window. That is exactly the condition under which a model will produce fluent text whose provenance nobody can check, and the whole value of the output depends on being able to check it.</p>
+  <p>Anthropic's system runs a dedicated pass for it: an agent that processes the documents to <b>identify the specific locations where citations belong</b>, so that all claims are attributed to their sources.
+  Whether you run it as a separate pass or as part of synthesis matters less than the contract itself: <b>a claim without a source is a defect, not a stylistic choice</b>, and it is checkable by machine.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What a claim carries</div>
+    <div class="fig-claim">Three links, and only the last one is checkable.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="A chain of four boxes read left to right: a claim in the final report, the note it was written from, the passage the note came from, and the source document with an offset. Arrows connect them. A band beneath says only the final link can be verified by machine, by checking the quoted span still exists at that offset.">
+      <text class="d-mono" x="16" y="24">one sentence in the report, traced back</text>
+
+      <rect class="d-box" x="12" y="40" width="140" height="52" rx="4"/>
+      <text class="lbl-sm" x="82" y="64" text-anchor="middle">a claim</text>
+      <text class="d-mono" x="82" y="82" text-anchor="middle">in the report</text>
+      <path class="d-flow" d="M152 66 L174 66"/>
+
+      <rect class="d-box" x="180" y="40" width="140" height="52" rx="4"/>
+      <text class="lbl-sm" x="250" y="64" text-anchor="middle">the note</text>
+      <text class="d-mono" x="250" y="82" text-anchor="middle">written mid-loop</text>
+      <path class="d-flow" d="M320 66 L342 66"/>
+
+      <rect class="d-box" x="348" y="40" width="140" height="52" rx="4"/>
+      <text class="lbl-sm" x="418" y="64" text-anchor="middle">the passage</text>
+      <text class="d-mono" x="418" y="82" text-anchor="middle">with its id</text>
+      <path class="d-flow" d="M488 66 L510 66"/>
+
+      <rect class="d-keep" x="516" y="40" width="112" height="52" rx="4"/>
+      <text class="lbl-sm" x="572" y="64" text-anchor="middle">the source</text>
+      <text class="d-mono" x="572" y="82" text-anchor="middle">id and offset</text>
+
+      <rect class="d-bound" x="12" y="118" width="616" height="66" rx="5"/>
+      <text class="lbl-sm" x="26" y="142">a machine can check the last link and not the first three</text>
+      <text class="d-mono" x="26" y="164">does the quoted text still exist at that offset in that document</text>
+
+      <text class="read" x="320" y="216" text-anchor="middle">So the contract is that every claim carries the last box, not merely a document name.</text>
+    </svg>
+    <figcaption>The chain from a sentence in the report back to a location in a document. Only the final link is verifiable without a human, which is the argument for carrying an offset rather than a filename.
+    <b>A citation naming a document proves nothing; a citation naming a location can be checked by a script on every run.</b></figcaption>
+  </figure>
+
+  <h2 id="the-bill">3. The bill, stated honestly</h2>
+  <p>Anthropic publishes the cost shape, and it is the most useful number in this lesson because it decides whether the technique is appropriate at all.</p>
+  <p>In their account, agents use about <b>four times</b> the tokens of a chat interaction, and multi-agent systems about <b>fifteen times</b>. They also report that token usage alone explains about <b>80% of the variance</b> in their evaluation results, and they say plainly that the approach is viable only where the value of the task is high enough to pay for the increased performance.</p>
+  <p>Every one of those figures is <b>Anthropic's measurement of Anthropic's system on Anthropic's internal evaluation</b>, which is not public. They are evidence that the cost multiple is real and large. They are not a prediction about your loop, and none of them is a target.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What the loop multiplies</div>
+    <div class="fig-claim">The multiplier is the reason to bound the plan.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A bar chart of relative token usage for three shapes: a chat interaction at one times, an agent at about four times, and a multi-agent system at about fifteen times. The multi-agent bar is highlighted. A note names Anthropic as the measurer and says the figures are from their own system.">
+      <line class="grid" x1="180" y1="40" x2="180" y2="196"/>
+      <line class="grid" x1="320" y1="40" x2="320" y2="196"/>
+      <line class="grid" x1="460" y1="40" x2="460" y2="196"/>
+      <line class="grid" x1="600" y1="40" x2="600" y2="196"/>
+      <line class="axis" x1="150" y1="196" x2="620" y2="196"/>
+
+      <text class="lbl-sm" x="142" y="72" text-anchor="end">a chat turn</text>
+      <rect class="m-noise" x="150" y="56" width="30" height="30"/>
+      <text class="lbl-sm" x="190" y="76">1x</text>
+
+      <text class="lbl-sm" x="142" y="122" text-anchor="end">an agent</text>
+      <rect class="m-signal" x="150" y="106" width="120" height="30"/>
+      <text class="lbl-sm" x="280" y="126">about 4x</text>
+
+      <text class="lbl-sm" x="142" y="172" text-anchor="end">multi-agent</text>
+      <rect class="m-alarm" x="150" y="156" width="450" height="30"/>
+      <text class="lbl-on" x="590" y="176" text-anchor="end">about 15x</text>
+
+      <text class="lbl-sm" x="150" y="216">0</text>
+      <text class="lbl-sm" x="320" y="216" text-anchor="middle">6x</text>
+      <text class="lbl-sm" x="460" y="216" text-anchor="middle">10x</text>
+      <text class="lbl-sm" x="620" y="216" text-anchor="end">15x</text>
+      <text class="lbl-sm" x="20" y="244">Anthropic's measurement of their own research system, on their own</text>
+      <text class="lbl-sm" x="20" y="262">internal evaluation, which is not published. Evidence, not a target.</text>
+      <text class="ttl" x="20" y="288">tokens per task, relative to one chat turn</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-noise"></i>chat</span><span><i class="sw-signal"></i>agent</span><span><i class="sw-alarm"></i>multi-agent</span></div>
+    <figcaption>The published multiples, with the measurer named on the canvas. The multi-agent bar belongs to module 5, which decides whether to pay it; this lesson stops at the single-agent loop and its four-fold shape.
+    <b>Four times the tokens for one task is affordable occasionally and ruinous by default, which is why the plan has to bound the loop.</b></figcaption>
+  </figure>
+
+  <figure class="diagram stepper" id="research-loop">
+    <div class="fig-cap">One question, one loop</div>
+    <div class="fig-claim">Two searches in, the notes are already larger than the window would hold.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user" data-cost="30">
+        <span class="step-role">the question</span>
+        <span class="step-body">"What changed in our expense policy over the last three revisions, and why?"</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="420">
+        <span class="step-role">plan</span>
+        <span class="step-body">Writes four sub-questions and the test for done. <b>This is the only thing that will stop the loop.</b></span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="4000">
+        <span class="step-role">search and read</span>
+        <span class="step-body">Ten passages for sub-question one. Read, and a 90-token note is written outside the window.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="4000">
+        <span class="step-role">search and read</span>
+        <span class="step-body">Sub-question two. Another note. <b>The passages are discarded; only the note survives.</b></span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="8000">
+        <span class="step-role">two more</span>
+        <span class="step-body">Sub-questions three and four. Four notes now exist, totalling under 400 tokens.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="900">
+        <span class="step-role">synthesise and cite</span>
+        <span class="step-body">Writes from the notes, then locates a source and offset for every claim.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">6</b></span>
+      <span>tokens spent <b data-step-out="cost">30</b></span>
+    </div>
+    <figcaption>Play it and compare the final counter with the 4,300 of a single-shot request from the orientation figure. A worked trace at this course's usual token sizes, not a measurement of any system.
+    <b>Sixteen thousand tokens of reading collapse into four hundred tokens of notes, which is the only reason the synthesis fits at all.</b></figcaption>
+  </figure>
+
+  <h2 id="evaluating">4. Evaluating it is your harness plus two columns</h2>
+  <p>You do not need a new evaluation system for this. Anthropic describes judging their research output on a rubric covering <b>factual accuracy, citation accuracy, completeness, source quality and tool efficiency</b>, and three of those five are already in your harness from module 1.</p>
+  <p>The two that are new are worth adding carefully.
+  <b>Citation accuracy</b> is the one you can check without a judge at all: take every claim's cited location, go to the document, and confirm the quoted text is there. That is a script, it is deterministic, and it is the cheapest quality gate in this module.
+  <b>Tool efficiency</b> is searches per question from lesson <a href="0400-retrieval-becomes-a-tool-the-model-decides-to-call.html">0400</a>, which you are already recording, read against whether the extra searches changed the answer, and module 3's <a href="0370-grade-the-path-not-only-the-answer.html">Grade the path, not only the answer</a> is the page that makes it a metric.</p>
+  <p>And the caution from the same source applies here more than anywhere: they keep human evaluation in the loop because it catches what automation misses. A research report is long, and a judge scoring long text is exactly where lesson 0170's verbosity bias lives.</p>
+
+  <div class="callout warn">
+    Multi-agent orchestration, and the arithmetic for refusing a second agent, belong to module 5.
+    This page uses one fact from that territory - the published token multiple - as evidence that a loop's cost grows fast, and stops there.
+    A research loop is a <b>single agent</b> unless module 5 convinces you otherwise, and its own account says the approach pays only where the task's value is high enough.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why do a research loop's notes live outside the context window?</div>
+      <button class="q-opt">So the loop can outrun what the window holds</button>
+      <button class="q-opt">So the notes can be cached between requests</button>
+      <button class="q-opt">Because the provider rejects long transcripts</button>
+      <button class="q-opt">To let a second agent read them in parallel</button>
+      <div class="q-fb">Accumulating every passage in the window fills it and degrades recall of what is already there, so the loop writes compact notes to a store and discards the passages, which is what lets it run more searches than the window could hold. Caching is a separate optimisation that module 6 covers. Providers accept long transcripts up to their limit; the problem is that the model uses them poorly. Parallel readers are a multi-agent concern from module 5.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Which part of the research rubric can be checked without a judge?</div>
+      <button class="q-opt">Completeness against the written plan</button>
+      <button class="q-opt">Source quality of each document used</button>
+      <button class="q-opt">Citation accuracy, by opening the source</button>
+      <button class="q-opt">Factual accuracy of the synthesised claims</button>
+      <div class="q-fb">A citation naming a document and an offset is verifiable by a script: go there and confirm the quoted text exists, deterministically and for free. Completeness is a judgement against a plan written in prose. Source quality is an editorial assessment. Factual accuracy needs either a reference answer or a judge, which is the expensive path this one avoids.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 60 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Build the smallest honest research loop over your own corpus, and price it.</p>
+      <p>Take one question that genuinely needs several lookups. Have the model write a plan of three or four sub-questions with a stated test for done. Loop: search, read, write a note of under 100 tokens to a store outside the window, repeat until the plan is satisfied or <b>a hard cap you set</b> is reached. Then synthesise from the notes only.</p>
+      <p>Require every claim to carry a source id and an offset, and <b>write the script that checks them</b>: for each citation, open the document and confirm the quoted text is there. Report tokens spent, searches made, and the fraction of claims whose citation resolves.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Set the hard cap before you run it once. A loop with no cap and a vague plan is how a single question costs more than a day of normal traffic, and you will not be watching when it happens.</p>
+      <p>Make the notes short on purpose. If a note is a paragraph, you have moved the context problem into the store rather than solving it. Under a hundred tokens forces the model to decide what mattered, which is the work.</p></details>
+
+    <details class="solution"><summary>Show what the three numbers mean together</summary>
+      <ol class="worked">
+        <li><b>Expect roughly four times a single-shot request, and check that against the published multiple.</b> If yours is much lower, the plan is probably terminating early and the answer will be thin. If it is much higher, the plan has no real exit test and the cap is what stopped it, which is a plan defect rather than a loop defect.</li>
+        <li><b>The citation check will fail more often than you expect on the first run</b>, usually because the model paraphrased a passage and cited it as a quotation. That is the useful finding: it is exactly the failure the contract exists to catch, and it is invisible to a reader who trusts the footnote.</li>
+        <li><b>A claim with no citation at all is the other common outcome</b>, and it is worse. Make the synthesis prompt refuse to emit an uncited claim, and count how many claims disappear. If most of the report vanishes, the notes were too thin to support it.</li>
+        <li><b>Compare against single-shot on the same question.</b> Sometimes the loop wins clearly. Sometimes one good retrieval answered it and you paid four times as much for the same paragraph, and knowing which is the point of running both.</li>
+        <li><b>Put the citation check in continuous integration.</b> It needs no model call, it is deterministic, and it is the only gate in this module that costs nothing to run on every change.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> The fraction of resolving citations should be high but not one on the first run; a perfect score usually means the checker is matching too loosely, so try it against a citation you have deliberately corrupted and confirm it fails. A checker that never fails is not a gate.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to take your loop's final report and, for each claim, say whether it is supported by the notes it was written from, using only the notes. The claims it cannot support from the notes are the ones the model invented during synthesis, and that count is a cleaner measure of the loop's honesty than any judge score. Then ask what note would have been needed, and compare it with what the loop actually wrote.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The organisation's own account of a research system, carrying the token multiples, the citation pass and the rubric quoted here: <a href="https://www.anthropic.com/engineering/multi-agent-research-system">How we built our multi-agent research system</a>. Read it noting that every figure in it is measured on an internal evaluation that is not published. The note-taking technique is in <a href="https://www.anthropic.com/engineering/effective-context-engineering-for-ai-agents">Effective context engineering for AI agents</a>. For a research loop you can read at a commit rather than infer, <code>langchain-ai/open_deep_research</code> is MIT-licensed and small enough to follow end to end.</p>
+
+  <div class="pager">
+    <a class="prv" href="0440-your-rag-app-is-a-host.html"><span class="dir">&larr; Back</span><span class="ttl">Your RAG app is a host, and its best source is one you did not write</span></a>
+    <a class="nxt" href="1030-the-retriever-other-people-can-call.html"><span class="dir">Next &rarr;</span><span class="ttl">The retriever other people can call</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0450 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

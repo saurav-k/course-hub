@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A failed tool call is a result, not an exception - End-to-End AI Engineering</title>
+<meta name="description" content="An error the model can see is an error the model can correct. An error that unwinds the loop throws away everything the run has already paid for, and the protocol says which errors go where.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Agents and agentic systems &middot; Lesson 0330</div>
+  <h1>An error the model cannot see is an error the model cannot correct</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    The rule and the annotation defaults are read from the Model Context Protocol schema at revision <code>2026-07-28</code>, which states both in its own comments.
+    &middot; <a href="https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.ts">MCP schema</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Two kinds of failure look identical in your code and are opposite in the loop: one the model reads, one that unwinds the run.</li>
+      <li>The protocol is unusually direct about it. A tool's own error belongs <b>inside the result</b>, marked, so "the LLM would not be able to see that an error occurred and self-correct" is not what happens.</li>
+      <li>A protocol-level error is reserved for failures in <b>finding</b> the tool, not in running it.</li>
+      <li>Aborting a run throws away everything you already paid for. On the arithmetic below, returning the error instead is cheaper <b>per delivered answer</b> at every failure rate.</li>
+      <li>Before you let the model retry, read the four annotation hints. Two of them default to the dangerous answer.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">The call now exists, so its failure has to go somewhere.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Three panels. On the left, the bound tool from lesson 0320 with its schema. In the middle, highlighted, the two return paths from a failed call: one back into the conversation where the model reads it, and one out of the loop entirely. On the right, what it enables: a run that survives a bad argument, which is what module 4's grader and refusal path are built on.">
+      <text class="d-mono" x="16" y="24">what you have</text>
+      <rect class="d-bound" x="12" y="34" width="156" height="132" rx="5"/>
+      <rect class="d-box" x="26" y="62" width="128" height="26" rx="4"/>
+      <text class="lbl-sm" x="90" y="80" text-anchor="middle">one bound tool</text>
+      <text class="d-mono" x="26" y="112">a name, prose</text>
+      <text class="d-mono" x="26" y="134">and a schema</text>
+
+      <path class="d-flow" d="M170 100 L194 100"/>
+
+      <text class="d-mono" x="200" y="24">this lesson</text>
+      <rect class="d-focus" x="198" y="34" width="244" height="132" rx="5"/>
+      <text class="lbl-b" x="320" y="58" text-anchor="middle">the call failed</text>
+      <rect class="d-keep" x="212" y="72" width="104" height="58" rx="4"/>
+      <text class="lbl-sm" x="264" y="90" text-anchor="middle">into the result</text>
+      <text class="d-mono" x="264" y="106" text-anchor="middle">it reads</text>
+      <text class="d-mono" x="264" y="122" text-anchor="middle">and retries</text>
+      <rect class="d-drop" x="326" y="72" width="104" height="58" rx="4"/>
+      <text class="lbl-sm" x="378" y="90" text-anchor="middle">out of the loop</text>
+      <text class="d-mono" x="378" y="106" text-anchor="middle">the run</text>
+      <text class="d-mono" x="378" y="122" text-anchor="middle">is over</text>
+      <text class="d-mono" x="320" y="146" text-anchor="middle">your code chooses, every time</text>
+
+      <path class="d-flow" d="M444 100 L468 100"/>
+
+      <text class="d-mono" x="474" y="24">what it enables</text>
+      <rect class="d-absent" x="472" y="34" width="156" height="132" rx="5"/>
+      <text class="lbl-b" x="550" y="72" text-anchor="middle">module 04</text>
+      <text class="lbl-sm" x="550" y="100" text-anchor="middle">a grader that can</text>
+      <text class="lbl-sm" x="550" y="122" text-anchor="middle">refuse and be read</text>
+      <text class="d-mono" x="550" y="148" text-anchor="middle">not yet written</text>
+
+      <text class="read" x="320" y="204" text-anchor="middle">A refusal is only useful if it lands somewhere the model is looking.</text>
+      <text class="lbl-sm" x="320" y="232" text-anchor="middle">The green path costs one more turn. The red path costs every turn you already spent and returns nothing.</text>
+      <text class="lbl-sm" x="320" y="258" text-anchor="middle">Both are one line of your code, and the default in most codebases is the red one.</text>
+    </svg>
+    <figcaption>The tool you bound last lesson, the fork this one puts under it, and why module 4's refusal path depends on getting the fork right. The two boxes in the middle are the same exception seen twice.
+    <b>Whether a failure teaches the model anything is a routing decision, and you make it in a try block.</b></figcaption>
+  </figure>
+
+  <h2 id="the-rule">1. The rule, and the one exception to it</h2>
+  <p>The Model Context Protocol at revision <code>2026-07-28</code> states this in the schema itself rather than in a guide, which is why it is worth quoting. Errors that originate from the tool "SHOULD be reported inside the result object, with <code>isError</code> set to true, <i>not</i> as an MCP protocol-level error response. Otherwise, the LLM would not be able to see that an error occurred and self-correct."</p>
+  <p>The same comment gives the exception: "any errors in <i>finding</i> the tool, an error indicating that the server does not support tool calls, or any other exceptional conditions, should be reported as an MCP error response."</p>
+  <p>So the line is not about severity, and this is the part people get backwards. It is about <b>whose mistake it is</b>. A malformed argument, a query that matched nothing, a rate limit, a record that does not exist: all of those are things the model could do differently next turn, so they go where it can read them. A tool that is not mounted, or a transport that is down, is not something the model can fix by rewording, so it belongs to your error handling.</p>
+  <p>Claude's Messages API has the same shape under different names: a <code>tool_result</code> block carries an <code>is_error</code> flag, and the content beside it is what the model reads. Two spellings, one design.</p>
+
+  <figure class="diagram stepper" id="one-recovered-call">
+    <div class="fig-cap">One bad argument, recovered</div>
+    <div class="fig-claim">The error costs one turn; hiding it would have cost the whole run.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user" data-cost="20">
+        <span class="step-role">the question</span>
+        <span class="step-body">Which policies changed the notice period, and when did each change take effect?</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="520">
+        <span class="step-role">first call</span>
+        <span class="step-body">Asks <code>search_policies</code> for the notice period with <code>top_k</code> of 200, which the schema does not allow.</span>
+      </li>
+      <li class="step" data-actor="error" data-cost="70">
+        <span class="step-role">refused, visibly</span>
+        <span class="step-body">Your code returns a result with the error flag set and one readable sentence: <b>top_k must be between 1 and 20</b>.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="640">
+        <span class="step-role">second call</span>
+        <span class="step-body">Reads the refusal in its own history and calls again with <code>top_k</code> of 20. No prompt of yours changed.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="420">
+        <span class="step-role">passages</span>
+        <span class="step-body">Twelve passages come back with their source ids, which is the shape the tool promised in its description.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="300">
+        <span class="step-role">the answer</span>
+        <span class="step-body">An answer that cites three of the twelve, produced two turns later than the happy path.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">6</b></span>
+      <span>context <b data-step-out="cost">20</b> tokens</span>
+    </div>
+    <figcaption>Stop on step three and read it as your code sees it: an exception. Everything after step three exists only because that exception was written into the conversation instead of thrown out of it. The token figures follow the assumptions in lesson 0310.
+    <b>Step three is the whole lesson, and in most codebases it is a raise.</b></figcaption>
+  </figure>
+
+  <h2 id="the-arithmetic">2. What abandoning a run actually costs</h2>
+  <p>Take the assumptions from lesson 0310 and put a failure in the middle. A six-turn run costs 11,370 prompt tokens. A run that dies at turn four has spent 5,380 and returns nothing at all. A run that reads the error and finishes one turn later than it would have costs 15,190 and returns an answer.</p>
+  <p>The comparison that matters is not per run, because the failed run produced nothing to compare. It is <b>cost per delivered answer</b>. With a tool-failure rate <i>f</i>, aborting gives ((1&nbsp;&minus;&nbsp;<i>f</i>)&nbsp;&times;&nbsp;11,370 + <i>f</i>&nbsp;&times;&nbsp;5,380) &divide; (1&nbsp;&minus;&nbsp;<i>f</i>), because you still pay for the failures and only the successes deliver. Recovering gives (1&nbsp;&minus;&nbsp;<i>f</i>)&nbsp;&times;&nbsp;11,370 + <i>f</i>&nbsp;&times;&nbsp;15,190, and everything delivers.</p>
+  <p>At a failure rate of <span class="keynum">20%</span> that is 12,715 tokens per answer against <span class="keynum">12,134</span>. Recovery is cheaper and it is also complete, which is the unusual case where the careful thing is also the cheap one.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Cost per delivered answer</div>
+    <div class="fig-claim">Aborting pays for failures and delivers none of them.</div>
+    <svg class="chart" viewBox="0 0 640 320" role="img" aria-label="A line chart of prompt tokens per delivered answer against the tool failure rate from zero to fifty percent. Both lines start together at about eleven thousand four hundred tokens. The abort line rises steeply to about sixteen thousand seven hundred at a fifty percent failure rate. The recover line rises gently to about thirteen thousand three hundred. The gap between them widens across the whole range.">
+      <line class="grid" x1="90" y1="200" x2="600" y2="200"/>
+      <line class="grid" x1="90" y1="140" x2="600" y2="140"/>
+      <line class="grid" x1="90" y1="80" x2="600" y2="80"/>
+      <line class="axis" x1="90" y1="248" x2="600" y2="248"/>
+
+      <path class="s-alarm thick" d="M90 229 L190 210 L290 187 L390 158 L490 118 L590 63"/>
+      <path class="s-signal thick" d="M90 229 L190 217 L290 205 L390 193 L490 182 L590 170"/>
+
+      <circle class="m-alarm" cx="290" cy="187" r="4"/>
+      <text class="lbl-sm" x="298" y="182">12,715 aborting</text>
+      <circle class="m-signal" cx="290" cy="205" r="4"/>
+      <text class="lbl-sm" x="298" y="222">12,134 recovering</text>
+      <text class="lbl-on" x="592" y="52" text-anchor="end">3,470 tokens apart at one failure in two</text>
+
+      <text class="lbl-sm" x="82" y="252" text-anchor="end">11k</text>
+      <text class="lbl-sm" x="82" y="204" text-anchor="end">13k</text>
+      <text class="lbl-sm" x="82" y="144" text-anchor="end">15k</text>
+      <text class="lbl-sm" x="82" y="84" text-anchor="end">17k</text>
+      <text class="lbl-sm" x="90" y="268" text-anchor="middle">0%</text>
+      <text class="lbl-sm" x="290" y="268" text-anchor="middle">20%</text>
+      <text class="lbl-sm" x="490" y="268" text-anchor="middle">40%</text>
+      <text class="lbl-sm" x="345" y="288" text-anchor="middle">tool failure rate</text>
+      <text class="ttl" x="20" y="308">prompt tokens per delivered answer, derived from the arithmetic in section 2</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>error unwinds the run</span><span><i class="sw-signal"></i>error returned as a result</span></div>
+    <figcaption>This page's arithmetic over lesson 0310's assumptions, with one further assumption stated in the callout below: that the model's retry succeeds. Nothing here is measured, and the ordering rather than the magnitude is the claim.
+    <b>The failed runs are on your bill either way, and only one of the two lines has anything to show for them.</b></figcaption>
+  </figure>
+
+  <h2 id="retry-safety">3. Before you let it try again</h2>
+  <p>Recovery means the model calls your function a second time, so the second call has to be safe. The protocol schema carries four hints that describe exactly this, and two of their documented defaults are the cautious-sounding answer rather than the safe-sounding one.</p>
+  <p><code>readOnlyHint</code> defaults to <b>false</b>: unless you say otherwise, the tool is assumed to modify something.
+  <code>destructiveHint</code> defaults to <b>true</b>, so a tool that is not read-only is assumed to be able to destroy.
+  <code>idempotentHint</code> defaults to <b>false</b>, so repeating a call is assumed to have an additional effect.
+  <code>openWorldHint</code> defaults to <b>true</b>, so the tool is assumed to reach an open world of external entities.</p>
+  <p>That is a well-chosen set of defaults and it has a consequence: <b>an unannotated tool is one that nothing may safely retry</b>. Your retrieval tool is read-only and idempotent and closed-world, and saying so is four lines that let every layer above it retry with confidence.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four hints, four defaults</div>
+    <div class="fig-claim">An unannotated tool claims it may destroy something on retry.</div>
+    <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="Four labelled rows showing each tool annotation hint, the value it defaults to, and what that default claims. Read only hint defaults to false meaning it may write. Destructive hint defaults to true meaning it may destroy. Idempotent hint defaults to false meaning a repeat has an extra effect. Open world hint defaults to true meaning it may reach outside. The two rows whose default is the unsafe reading are marked.">
+      <text class="d-mono" x="16" y="24">what an unset hint claims</text>
+
+      <rect class="d-box" x="12" y="36" width="200" height="34" rx="4"/>
+      <text class="d-mono" x="24" y="58">readOnlyHint</text>
+      <rect class="d-drop" x="222" y="36" width="72" height="34" rx="4"/>
+      <text class="lbl-sm" x="258" y="58" text-anchor="middle">false</text>
+      <text class="lbl-sm" x="308" y="58">it may write to something</text>
+
+      <rect class="d-box" x="12" y="80" width="200" height="34" rx="4"/>
+      <text class="d-mono" x="24" y="102">destructiveHint</text>
+      <rect class="d-drop" x="222" y="80" width="72" height="34" rx="4"/>
+      <text class="lbl-sm" x="258" y="102" text-anchor="middle">true</text>
+      <text class="lbl-sm" x="308" y="102">it may destroy what it writes</text>
+
+      <rect class="d-box" x="12" y="124" width="200" height="34" rx="4"/>
+      <text class="d-mono" x="24" y="146">idempotentHint</text>
+      <rect class="d-drop" x="222" y="124" width="72" height="34" rx="4"/>
+      <text class="lbl-sm" x="258" y="146" text-anchor="middle">false</text>
+      <text class="lbl-sm" x="308" y="146">a repeat does more, not less</text>
+
+      <rect class="d-box" x="12" y="168" width="200" height="34" rx="4"/>
+      <text class="d-mono" x="24" y="190">openWorldHint</text>
+      <rect class="d-drop" x="222" y="168" width="72" height="34" rx="4"/>
+      <text class="lbl-sm" x="258" y="190" text-anchor="middle">true</text>
+      <text class="lbl-sm" x="308" y="190">it reaches outside your system</text>
+
+      <text class="read" x="320" y="228" text-anchor="middle">Your retrieval tool is none of these, and only you can say so.</text>
+    </svg>
+    <figcaption>The four hints with their documented defaults, read from the schema at revision 2026-07-28. Every default is drawn as the unsafe reading because that is what an omitted annotation actually claims, which is the opposite of how omission usually feels.
+    <b>Annotating a safe tool is not documentation, it is the thing that makes a retry permissible.</b></figcaption>
+  </figure>
+
+  <p>One line travels with those hints and the schema states it plainly: annotations are untrusted unless the server is, and a client "should never make tool use decisions based on <code>ToolAnnotations</code> received from untrusted servers". That matters the moment your agent mounts a server somebody else runs, which is where module 4 picks this up.</p>
+  <p>The same caution applies to what comes back. A tool result is text from outside your prompt, arriving inside it, and module 2's lesson on the retrieved document as untrusted input is the same seam seen one stage earlier. A tool that returns a document has all of that problem and a tool that returns an error string has a smaller version of it: keep your error messages your own words, never an unfiltered upstream body.</p>
+
+  <div class="callout warn">
+    The chart in section 2 assumes <b>the retry succeeds</b>, and that assumption is doing real work. At the time this course was researched, no primary source could be found that measured how often a model recovers from a visible tool error, so this page argues the effect from the mechanism and the arithmetic rather than from a measurement. If you measure it on your own system, your number is better than this page's reasoning - and it is the kind of number worth writing down.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your retrieval tool is called with a filter that matches no documents. Where does that failure belong?</div>
+      <button class="q-opt">As a protocol-level error</button>
+      <button class="q-opt">Into the exception handler</button>
+      <button class="q-opt">Silently, retry it once</button>
+      <button class="q-opt">Into the result, isError true</button>
+      <div class="q-fb">An empty match is the tool working correctly on a query the model can reword, so it goes in the result where the model reads it. A protocol-level error is reserved for failures in finding the tool at all. An exception handler is the same thing said in your language, and it ends the run. Retrying silently repeats the same filter and hides from the model the one fact it needed.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A tool ships an annotations object with every hint unset. What do the schema's documented defaults then claim about it?</div>
+      <button class="q-opt">read-only and closed world</button>
+      <button class="q-opt">destructive and open world</button>
+      <button class="q-opt">idempotent and read-only</button>
+      <button class="q-opt">nothing at all is claimed</button>
+      <div class="q-fb">readOnlyHint defaults to false and destructiveHint to true, so an unset tool is assumed to be able to destroy, and openWorldHint defaults to true. The first option inverts both. The third inverts idempotentHint, which defaults to false. Something is very much claimed, which is the point: omission is a claim, and it is the cautious one.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Make your capstone's tool fail two ways and watch the loop behave differently.</p>
+      <p><b>Split your tool's error handling in two.</b> Domain failures - an out-of-range argument, an empty result set, a filter that does not parse - return a result with the error flag set and one sentence the model can act on. Infrastructure failures - the index is unreachable, the credential expired - keep raising.</p>
+      <p><b>Then trigger each one.</b> Ask a question that provokes an out-of-range <code>top_k</code>, and separately point the tool at a dead index. Capture both traces.</p>
+      <p><b>Record two numbers</b> in <code>docs/shape.md</code>: the turns and prompt tokens the recovered run spent, and the turns and prompt tokens the aborted run spent before it died. Then annotate the tool with all four hints and say in one line why each value is what it is.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The error sentence is a prompt, so write it as one. "top_k must be between 1 and 20" gets a corrected call. "ValidationError: 1 validation error for SearchArgs" gets an apology and a second identical attempt.</p>
+      <p>If the model does not retry at all, check that your error result is attached to the tool call rather than appended as a fresh user message. A result the runtime cannot correlate is a result the model reads as unrelated.</p></details>
+
+    <details class="solution"><summary>Show what a good split looks like</summary>
+      <ol class="worked">
+        <li><b>The split is by who can fix it, not by how bad it is.</b> A 429 from your vector store is recoverable by waiting, which is your job, not the model's, so it raises. An empty result set is recoverable by asking differently, which is the model's job, so it returns.</li>
+        <li><b>One sentence, in your own words, naming the constraint and the allowed range.</b> Echoing an upstream exception message is how somebody else's text ends up inside your prompt, which is the seam module 2 spends a lesson on.</li>
+        <li><b>The aborted run's token count is the number to put in front of people.</b> It is money you spent and cannot show anybody, and it is usually larger than expected because the failure lands mid-run rather than at the start.</li>
+        <li><b>Annotating is four lines and it changes what is allowed above you.</b> A retrieval tool marked read-only, idempotent and closed-world can be retried by any layer without a conversation. The same tool unannotated is one that a careful caller must refuse to retry, and the schema's defaults say so.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your recovered run should take exactly one or two more turns than the happy path, not five. A run that spends four extra turns is a run where the model never understood the constraint, and the fix is the sentence rather than the retry budget.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Paste your tool's error strings to your assistant and ask it, for each one, what it would do next if it received that as a tool result. The useful answers are the ones where it names a specific corrected call. Where it says it would apologise or ask the user, the sentence is not carrying the constraint, and rewriting it is cheaper than any change to the loop.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The rule, the exception to it, and the four annotation defaults, all in the comments of one file: the <code>CallToolResult</code> and <code>ToolAnnotations</code> definitions in the <a href="https://github.com/modelcontextprotocol/modelcontextprotocol/blob/main/schema/2026-07-28/schema.ts">MCP schema at revision 2026-07-28</a>. For the same shape in the Messages API, including the <code>is_error</code> flag on a <code>tool_result</code>, see <a href="https://platform.claude.com/docs/en/agents-and-tools/tool-use/handle-tool-calls">Handle tool calls</a>.</p>
+
+  <div class="pager">
+    <a class="prv" href="0320-a-tool-call-is-the-only-verb-an-agent-has.html"><span class="dir">&larr; Back</span><span class="ttl">A tool call is the only verb an agent has</span></a>
+    <a class="nxt" href="0340-memory-is-four-stores-with-four-lifetimes.html"><span class="dir">Next &rarr;</span><span class="ttl">Memory is four stores with four lifetimes</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0330 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

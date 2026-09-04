@@ -103,6 +103,47 @@ The other two are gates: `validate_site.py` fails a label over five words, on th
 Nothing fails a figure with no label at all, and nothing must: requiring one would fail every figure written before the widget existed, and a generated label is worse than none.
 A page you are writing now is held to the bar; a page you are not touching is not.
 
+## Interaction
+
+A diagram is read and a quiz is answered.
+An interactive figure is **operated**, which is a third thing, and it is the one the counts above miss.
+
+| Bar | Value |
+|---|---|
+| interactive figures on a page with something to manipulate | **1 minimum** |
+| interactive figures on a page with nothing to manipulate | **0**; a widget with no state to move is decoration with a control on it |
+| distinct interactive shapes across the course | **3 minimum** of the five, on a course of ten pages or more |
+| interactive figures whose committed default values are wrong | **0** |
+| interactive figures that break when the script is blocked | **0** |
+| interactive figures with no `figcaption` telling the reader what to move first | **0** |
+
+**"Something to manipulate" is a state, a budget, a file, a score, or a boundary**, and the test is whether the page already argues about one.
+A lesson that walks a trace has a state.
+A lesson that says a cost is linear in two numbers has a budget.
+A lesson that tells the reader what belongs in a file has a file.
+A lesson that judges a thing on several dimensions at once has a score.
+A lesson about who wrote which part of a request has a boundary.
+A lesson with none of the five owes no interactive figure, and adding one anyway produces a control that does nothing a paragraph did not.
+
+**Which interaction answers which confusion**, read the same way as the diagram-kind table above:
+
+| The reader is confused about | Reach for |
+|---|---|
+| a trace, a loop, an exchange that goes round twice | the **stepper** |
+| a file they are about to write, and what each part of it costs | the **assembler** |
+| a number they will argue with, at their own inputs | the **calculator** |
+| a judgement that has several dimensions and one answer | the **scorecard** |
+| where the trust boundary is inside one thing | the **taint map** |
+| whether the idea landed | a **quiz**, which is the reveal they already know |
+| whether they can use it | a **practice problem**, whose `details.solution` is the other reveal |
+
+The markup for the five is in [`widgets.md`](widgets.md), "Five figures a reader operates", and the shapes are shared: no course writes a line of JavaScript to use one and no course invents a sixth.
+
+**None of this bar is machine-checked, and none of it can be.**
+`check_pages.py` counts an interactive figure as a `<figure>` and holds it to the caption bar, which is the whole of what a script can say: whether a lesson has a budget in it is a reading of the lesson.
+The one number a machine could report is the one that would be gamed.
+Measured on the course this bar comes from: 83 lessons carrying 80 interactive figures - 25 steppers, 22 calculators, 15 assemblers, 15 scorecards and 3 taint maps - which is about one a page and five kinds across the course, and it is the shape to match rather than the total.
+
 ## Cognitive load
 
 The learner should never have to hold more than one new thing at a time, and never have to fill a gap you skipped.
@@ -191,3 +232,35 @@ One sentence saying what the answer should roughly be and why lets them catch th
 
 A number you derived yourself is welcome, and it must show its arithmetic and name its assumptions, so the reader can tell your derivation from someone else's measurement.
 A claim with no citable source goes in `RESOURCES.md` under `## Gaps`, not into the page with a hedge.
+
+### A quoted file states where it came from and whether it may be here
+
+A citation says where a claim came from.
+**A sample is different, because the page is not citing the file, it is redistributing it**, and a hub page is published on the open web.
+
+| Bar | Value |
+|---|---|
+| quoted config, file or code samples with no source, licence and verdict above the block | **0** |
+| samples whose licence could not be established | **0** on the page; paraphrased, or left out |
+| samples shown with an ellipsis where the reader needs the whole file | **0** |
+
+The four facts go in the `.code-cap` directly above the block, in this order, because that is a line that travels with the sample when it is collected onto a gallery page:
+
+```html
+<div class="code-cap">AGENTS.md &middot; cloudflare/agents &middot; MIT &middot; reproduced verbatim</div>
+```
+
+1. **What it is**, including the filename it belongs at.
+2. **Where it came from**, as a source the reader can open.
+3. **Its licence**, named. Not "open source": the licence.
+4. **The verdict**: `reproduced verbatim`, or `paraphrased`.
+
+**A sample whose licence cannot be established is paraphrased or omitted**, never shown with the licence field left vague.
+"No LICENSE file in the repository" is an answer and the answer is paraphrase.
+Where a licence permits reproduction with attribution, the caption *is* the attribution and it is not optional.
+
+**This repository is the exception that costs nothing.** Its content is CC BY 4.0 and its code MIT, so a course may quote its own hub in full.
+
+**A course that quotes real files enough to lose track of them owes a gallery**, which is one reference page collecting each artefact complete, with the same four facts unchanged, and a table of what is there against where each one is developed.
+`ai-software-developer-course/reference/samples.html` is the pattern.
+The gallery is why the four facts live in the caption rather than in prose beside the block: prose does not survive being collected.

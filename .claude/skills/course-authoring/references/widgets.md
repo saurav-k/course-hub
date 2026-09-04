@@ -493,11 +493,12 @@ These eleven classes are that gap closed.
 | `d-mono` | text in the mono face, small and soft | machine text: an offset, a key, a wire value, a file name |
 | `read` | italic text in full ink | the sentence the figure says out loud |
 
-Three things about them, and each is the reason a rule is written the way it is.
+Four things about them, and each is the reason a rule is written the way it is.
 
 - **Fill is a state, not decoration.** A row of `d-keep` cells with one `d-absent` at the end is a claim about the row. That is why the charting paint rule is scoped to charts and does not reach here.
 - **A connector takes its colour from a paired `s-*` class, and the arrowhead follows.** `class="d-flow s-alarm"` is a red line with a red head; `class="d-flow"` alone is a neutral one. The head fills with `context-stroke`, so it can never disagree with the line it sits on, and you never state a colour to get one.
 - **`d-mono` is what makes a drawing read as a machine.** The reference corpus uses a mono face inside a figure 504 times; before this we had no way to.
+- **Text inside a `d-*` box is `lbl-b`, never `lbl-on`.** `lbl-on` is `fill: var(--surface)`, the page's own ground, and it is meant for a saturated `m-*` mark. Every `d-*` fill is a `-soft` tint of that same ground, so a label written `lbl-on` inside one is near-invisible in both modes, at every palette, and nothing reports it: the element is in the DOM and the contrast matrix only measures the tokens, not which label was put on which fill.
 
 #### The worked example
 
@@ -664,6 +665,20 @@ Five properties hold across all five, and each one is a rule rather than a habit
 The caption pair and the `figcaption` are not optional here.
 A figure a reader can operate still has to say what it is, what it proves, and what they should have noticed.
 
+**Give the figure an `id`.**
+`hub.js` names the region a control acts on by borrowing the figure's own id - `agents-md-builder` becomes `agents-md-builder-file` - and writes `aria-controls` on every checkbox and every button pointing at it.
+A figure with no `id` gets no `aria-controls` at all, silently: it looks identical, it validates, and a screen reader is left with a checkbox that changes something unnamed.
+Every markup block below carries one for that reason and not for the link.
+
+**The accessible state is the runtime's, and there are two ways to break it from a page.**
+`hub.js` marks the `.build-readout` `aria-live="polite"`, so whatever the reader moved is announced without taking focus off the control they are still holding: write the readout as words around the number - `step 1 of 3`, not a bare `1` - because the announcement is the whole row.
+And **never write `disabled` on a control in one of these**. A disabled button drops out of the tab order under the reader's finger; the runtime marks a control that cannot act `aria-disabled` and leaves it focusable, and a `disabled` attribute in the page would undo that on the one control the reader was about to press.
+
+**Every one of these is operated by keyboard before it is done.**
+The controls are native, so the behaviour is the platform's and there is nothing to build - which is exactly why it goes unchecked.
+Tab to each control, drive it from the keyboard, and confirm the ring: `scripts/focus_walk.py` proves the ring exists and nothing proves the figure responds.
+[`verify.md`](verify.md) carries the pass, one page per shape.
+
 **What `scripts/check_pages.py` makes of one.**
 An interactive figure is a `<figure>`, so it counts toward the page's diagram floor and toward the
 words-per-figure ceiling, and it is held to the same caption bar: a `figcaption` with a bolded
@@ -764,6 +779,7 @@ src/      one module per directory, no index barrels</template>
 - **`[data-asm-out]`** takes `tokens`, `chars`, `lines` and `parts`. The token count is characters divided by four and is an estimate: say "about" wherever you print one, because no tokeniser ships in `hub.js` and none is going to.
 - **`hub.js` appends a `.asm-cost` chip to each label** showing what that part costs. You write no chip.
 - The copy button on the `<pre>` is the one `hub.js` puts on every `<pre>`, so it needs no code here.
+- **The assembled file is written into `.asm-out pre code`, named through the `pre`.** So a `.code-cap` above it is free to name its file in `<code>`, which is how a caption should name a file. It was not always: the runtime took `.asm-out code`, the first `code` in the block, and on the one page whose caption used one the 773-character file was written into the caption line while the `<pre>` never moved from what the page committed. The readout beside both updated correctly, so every check passed and the figure was wrong on first paint. The rule is now the runtime's rather than the author's, and it is written here because the shape of the defect is the lesson: an interactive figure can be inert and still report the right numbers.
 
 ### The calculator, for an arithmetic claim at the reader's own numbers
 
