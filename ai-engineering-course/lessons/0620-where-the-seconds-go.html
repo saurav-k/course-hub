@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Where the seconds go - End-to-End AI Engineering</title>
+<meta name="description" content="Latency is not one number. It is time to first token plus output tokens times the time between them, and the term teams bound is not the term that hurts them.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deployment &middot; Lesson 0620</div>
+  <h1>The number you bounded is not the number that hurt them</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Metric names from the OpenTelemetry GenAI semantic conventions, read at commit <code>fee465db</code>, where all twelve are marked Development.
+    &middot; <a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-metrics.md">GenAI metrics</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A generated response has <b>two latencies, not one</b>: how long until the first token, and how long between every token after it.</li>
+      <li>Total time is roughly <b>time to first token plus output tokens times the time between tokens</b>. The second term dominates and is the one nobody bounds.</li>
+      <li>LinkedIn's engineering team bounded the first and not the second, and wrote that they "neglected that TBT would hurt us much more".</li>
+      <li>Of the three terms, <b>only output length is genuinely yours</b>. This is why "be concise" in a prompt is a latency change and not a style change.</li>
+      <li>Streaming moves when value arrives and changes no term at all. It is the largest improvement on this page and it appears in no total-duration dashboard.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Five stages produce one duration, and you own three of them.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A left to right chain of five stages that make up one request's latency: retrieve, pack, wait for the first token, generate the remaining tokens, and post-process. The first two and the last are marked as owned by the reader. The two middle stages, first token and generation, are marked as belonging to the provider, and generation is highlighted as the largest of the five.">
+      <text class="d-mono" x="16" y="24">one request, five stages</text>
+
+      <rect class="d-box" x="12" y="46" width="104" height="54" rx="4"/>
+      <text class="lbl-b" x="64" y="70" text-anchor="middle">retrieve</text>
+      <text class="d-mono" x="64" y="88" text-anchor="middle">yours</text>
+      <path class="d-flow" d="M118 73 L130 73"/>
+
+      <rect class="d-box" x="132" y="46" width="104" height="54" rx="4"/>
+      <text class="lbl-b" x="184" y="70" text-anchor="middle">pack</text>
+      <text class="d-mono" x="184" y="88" text-anchor="middle">yours</text>
+      <path class="d-flow" d="M238 73 L250 73"/>
+
+      <rect class="d-box" x="252" y="46" width="104" height="54" rx="4"/>
+      <text class="lbl-b" x="304" y="70" text-anchor="middle">first token</text>
+      <text class="d-mono" x="304" y="88" text-anchor="middle">theirs</text>
+      <path class="d-flow" d="M358 73 L370 73"/>
+
+      <rect class="d-focus" x="372" y="46" width="140" height="54" rx="4"/>
+      <text class="lbl-b" x="442" y="70" text-anchor="middle">generate</text>
+      <text class="d-mono" x="442" y="88" text-anchor="middle">theirs, times yours</text>
+      <path class="d-flow" d="M514 73 L526 73"/>
+
+      <rect class="d-box" x="528" y="46" width="100" height="54" rx="4"/>
+      <text class="lbl-b" x="578" y="70" text-anchor="middle">post</text>
+      <text class="d-mono" x="578" y="88" text-anchor="middle">yours</text>
+
+      <rect class="d-bound" x="12" y="126" width="616" height="62" rx="6"/>
+      <text class="lbl-sm" x="26" y="148">the one lever inside the highlighted box</text>
+      <text class="d-mono" x="26" y="170">how many tokens you asked it to write</text>
+
+      <text class="read" x="320" y="222" text-anchor="middle">Three stages are yours and are usually milliseconds.</text>
+      <text class="read" x="320" y="246" text-anchor="middle">The fourth is seconds, and its length is a number you chose.</text>
+      <text class="read" x="320" y="270" text-anchor="middle">Lesson 0630 attacks the third; this page attacks the fourth.</text>
+    </svg>
+    <figcaption>The chain from lesson 0600's streamed endpoint, split into the five stages a trace can separate. Only the highlighted box is measured in seconds, and its size is the product of a rate you do not control and a length you do.
+    <b>Every optimisation on this page is an argument about the width of one box.</b></figcaption>
+  </figure>
+
+  <h2 id="two-latencies">1. Two latencies wearing one name</h2>
+  <p>Ask an ordinary service how long a request took and there is one honest answer. Ask a generating service and there are two, because the response does not arrive, it accumulates.</p>
+  <p><b>Time to first token</b> is how long the reader stares at nothing. Everything before generation is inside it: your retrieval, your prompt assembly, the network, and whatever the provider does before the first token is emitted.</p>
+  <p><b>The time between tokens</b> is the rate afterwards. It goes by three names and they mean the same quantity: inter-token latency, time between tokens, and in the OpenTelemetry conventions <code>gen_ai.client.operation.time_per_output_chunk</code>. Knowing that they are one thing matters, because a vendor page, your dashboard and your team can each use a different one in the same conversation.</p>
+  <p>Total time is then approximately <b>time to first token, plus output tokens multiplied by the time between them</b>. That is an approximation and worth saying so: the rate is not perfectly constant and a long prompt lengthens the first term. But it is close enough to reason with, and it makes the imbalance obvious. At forty milliseconds a token, six hundred tokens is twenty-four seconds, and no plausible time to first token comes anywhere near that.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One request, split five ways</div>
+    <div class="fig-claim">One stage is most of the duration, and not the one you tuned.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A horizontal stacked bar of one request's twenty-six point three seconds, split into five segments drawn to scale: retrieval at zero point four seconds, packing at zero point one, time to first token at one point two, generation at twenty-four, and post-processing at zero point six. The generation segment is by far the widest and is the only one marked as belonging to the provider's rate times the reader's chosen length.">
+      <line class="axis" x1="40" y1="150" x2="620" y2="150"/>
+
+      <rect class="m-stat" x="40" y="86" width="9" height="56"/>
+      <rect class="m-stat" x="49" y="86" width="2" height="56"/>
+      <rect class="m-signal" x="51" y="86" width="26" height="56"/>
+      <rect class="m-alarm" x="77" y="86" width="530" height="56"/>
+      <rect class="m-stat" x="607" y="86" width="13" height="56"/>
+
+      <text class="lbl-on" x="342" y="120" text-anchor="middle">generate: 24.0 s</text>
+
+      <text class="lbl-sm" x="44" y="80">retrieve 0.4</text>
+      <text class="lbl-sm" x="44" y="64">pack 0.1</text>
+      <text class="lbl-sm" x="64" y="176">first token 1.2</text>
+      <text class="lbl-sm" x="616" y="176" text-anchor="end">post 0.6</text>
+
+      <line class="tick" x1="40" y1="150" x2="40" y2="158"/>
+      <line class="tick" x1="77" y1="150" x2="77" y2="158"/>
+      <line class="tick" x1="607" y1="150" x2="607" y2="158"/>
+
+      <text class="lbl-sm" x="40" y="212" text-anchor="middle">0 s</text>
+      <text class="lbl-sm" x="342" y="212" text-anchor="middle">13 s</text>
+      <text class="lbl-sm" x="620" y="212" text-anchor="end">26.3 s</text>
+
+      <text class="read" x="320" y="252" text-anchor="middle">Halving retrieval saves 0.2 seconds.</text>
+      <text class="read" x="320" y="276" text-anchor="middle">Halving the answer's length saves twelve.</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>rate times length</span><span><i class="sw-signal"></i>time to first token</span><span><i class="sw-stat"></i>your own code</span></div>
+    <figcaption>Derived from four stated assumptions - 600 output tokens, 40 ms a token, 1.2 s to first token, and a second of your own code either side - and not measured on any system. Substitute your own numbers and the proportions barely move.
+    <b>The three segments you can profile with ordinary tools add up to about four per cent of the request.</b></figcaption>
+  </figure>
+
+  <h2 id="the-linkedin-mistake">2. The mistake a team documented so you do not have to make it</h2>
+  <p>LinkedIn's engineering team published an account of building their generative AI product, and one paragraph of it is the best argument for this page that exists.
+  They bounded time to first token, because that is the number that maps to what a member waits for. Then chain-of-thought prompting arrived, output got longer, and the term they had not bounded became the term that mattered. In their own words: <i>"we initially only bounded TTFT as that mapped to member latency directly for our initial product. As we tackled hallucinations and Chain of Thought became prominent in our prompts, we neglected that TBT would hurt us much more"</i>.</p>
+  <p>They also give the arithmetic for why. <i>"any 'reasoning' token would multiply member latency (e.g. for a 200-token reasoning step, even a 10ms TBT increase means an extra 2s of latency)"</i>.
+  Read that as a multiplication rather than an anecdote: reasoning tokens are output tokens, output tokens multiply the per-token time, and a change in the per-token time that would be invisible on a short answer is two seconds on a long one.</p>
+  <p>That is LinkedIn's measurement on LinkedIn's product, and it is evidence that the effect is real rather than a target for your system. What transfers is the shape: <b>the term you did not bound is the term that will move.</b></p>
+
+  <figure class="diagram calc" id="generation-time">
+    <div class="fig-cap">What the answer's length costs</div>
+    <div class="fig-claim">Generation time is linear in tokens and in the rate, and you set only one.</div>
+
+    <div class="build-controls">
+      <label>output tokens <input type="range" data-var="n" min="100" max="2000" step="50" value="600"></label>
+      <label>ms per token <input type="range" data-var="m" min="10" max="120" step="5" value="40"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>generation <b data-calc="product" data-of="n m">24,000</b> ms</span>
+      <span>which is <b data-calc="scale" data-of="n m" data-by="0.001" data-decimals="1" data-suffix=" s">24.0 s</b></span>
+    </div>
+    <figcaption>Move the left slider first: it is the only one of the two you can change without changing provider. Then move the right one by ten milliseconds and watch what it does at 2,000 tokens against what it does at 100, which is LinkedIn's point in one gesture. Time to first token adds a roughly constant amount on top of both readings.
+    <b>The same ten-millisecond change is worth one second or twenty depending on a number you wrote in a prompt.</b></figcaption>
+  </figure>
+
+  <h2 id="streaming">3. Streaming changes the experience and no metric you have</h2>
+  <p>Lesson 0600 chose the streamed shape. This is where it pays, and where it hides.</p>
+  <p>Streaming does not make generation faster. The twenty-four seconds still happen. What changes is that the reader begins reading at 1.7 seconds rather than at 26.3, so the wait they experience is the first two terms and not the sum of all five. Nothing else on this page produces an improvement of that size.</p>
+  <p>The trap is that your total-duration metric is identical before and after. If your dashboard shows <code>gen_ai.client.operation.duration</code> and nothing else, you shipped the single largest latency improvement available to you and your monitoring reported no change. That is why the conventions publish <code>gen_ai.client.operation.time_to_first_chunk</code> as a separate metric, and why a system that streams and does not record it cannot demonstrate its own best property.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Buffered against streamed</div>
+    <div class="fig-claim">Identical work, and the reader starts twenty-four seconds earlier.</div>
+    <div class="mermaid">
+sequenceDiagram
+  participant R as Reader
+  participant S as Your service
+  participant P as Provider
+  Note over R,P: buffered
+  R->>S: ask
+  S->>P: generate
+  P-->>S: first token
+  P-->>S: ...598 more
+  P-->>S: last token
+  S-->>R: the whole answer&lt;br/&gt;at 26.3 s
+  Note over R,P: streamed
+  R->>S: ask
+  S->>P: generate
+  P-->>S: first token
+  S-->>R: first token&lt;br/&gt;at 1.7 s - reading starts
+  P-->>S: the rest, as they come
+  S-->>R: the rest, as they come
+    </div>
+    <figcaption>The same two exchanges with the provider in both halves, and a different promise to the reader. Everything after the highlighted moment in the lower half happens while somebody is already reading.
+    <b>The only difference between the halves is where your service chooses to wait.</b></figcaption>
+  </figure>
+
+  <h2 id="the-p95">4. Measure the tail, and measure it per shape</h2>
+  <p>One more rule and it is not specific to AI, only sharper here. <b>Report the p95 rather than the mean.</b> A generating system's duration distribution has a long right tail by construction, because output length varies per request and duration is linear in it. A mean over that distribution describes a request nobody made.</p>
+  <p>The conventions record all four numbers you need as histograms rather than gauges, which is what makes a percentile computable at all: <code>gen_ai.client.token.usage</code>, <code>gen_ai.client.operation.duration</code>, <code>gen_ai.client.operation.time_to_first_chunk</code> and <code>gen_ai.client.operation.time_per_output_chunk</code>. All twelve metrics in that document are marked <b>Status: Development</b> and the repository publishes no release or tag, so what you are committing to is the shape - four separate histograms rather than one duration number - and a rename costs one file of constants.</p>
+  <p>Split the percentiles by the request shape from lesson 0600, because a streamed endpoint and a queued one have different promises and averaging them together describes neither. Serving-side percentiles, load testing and the knee of the curve belong to <a href="../../llm-inference-course/lessons/0013-load-testing-1000-concurrent.html">LLM Inference Optimization, <i>Load testing at a thousand concurrent</i></a>.</p>
+
+  <div class="callout warn">
+    Every quoted number on this page is somebody's measurement of their own system. LinkedIn's two-second figure is LinkedIn's arithmetic about LinkedIn's product, and the five-segment split is this page's arithmetic over four assumptions it states rather than a profile of anything.
+    Your own time to first token and time between tokens depend on the model, the prompt length, the region and the hour. Measure them; do not inherit them from this page.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">You add a reasoning step that produces 200 extra output tokens. At 40 ms a token, roughly what does that add?</div>
+      <button class="q-opt">Nothing, reasoning is internal</button>
+      <button class="q-opt">About 40 ms, one token's worth</button>
+      <button class="q-opt">About 1.2 s, one first token</button>
+      <button class="q-opt">About 8 s, tokens times rate</button>
+      <div class="q-fb">Reasoning tokens are output tokens, so 200 of them at 40 ms each is 8 seconds added to every request that takes the reasoning path. The first option is the belief this section exists to remove: whether or not the tokens are shown to the reader, they are generated and they are paid for in time. Forty milliseconds is one token rather than two hundred. The 1.2 seconds is time to first token, which the reasoning step does not change.</div>
+    </div>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">You ship streaming. Your total-duration dashboard is unchanged. What has actually happened?</div>
+      <button class="q-opt">Streaming failed and needs debugging</button>
+      <button class="q-opt">It worked, and duration cannot see it</button>
+      <button class="q-opt">Duration rose but noise hid the rise</button>
+      <button class="q-opt">The provider ignored the stream flag</button>
+      <div class="q-fb">Streaming changes when the first token reaches the reader and not how long the whole response takes, so an unchanged total duration is the expected result rather than a symptom. Seeing the improvement requires the separate time-to-first-chunk histogram, which is exactly why the conventions publish it. Debugging a working system because the wrong metric was flat is the failure this question is about, and checking the provider is the reflex it produces.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, with your traces</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Module 1 gave your pipeline a trace with one span per stage. This exercise turns that trace into a latency budget, which is a document rather than a dashboard.</p>
+      <p><b>Record the four numbers</b> for your own ask endpoint, over at least fifty real requests: time to first token, time between tokens, output tokens, and total duration. The first three are the conventions' own metrics; the fourth is the one you already have.</p>
+      <p><b>Write the five-segment split</b> for your p50 request and again for your p95 request, in seconds, the way the chart in section 1 does. Two rows, five columns.</p>
+      <p><b>Then answer one question in writing</b>: which single change to your system would remove the most seconds, and how many? If the answer is not "shorten the output", say why not, because for most readers it is.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>If you are not streaming yet you cannot measure time to first token at all, and that is itself the finding. Turn streaming on for the measurement even if you keep it off in the product.</p>
+      <p>Fifty requests is enough for a p50 and thin for a p95. Say so on the document rather than presenting the p95 as if it were solid; a number with no sample size is the thing module 1 told you not to write down.</p></details>
+
+    <details class="solution"><summary>Show what a finished budget looks like</summary>
+      <ol class="worked">
+        <li><b>Two rows, not one.</b> The p50 and p95 rows usually differ almost entirely in the generation segment, because that segment is linear in output length and output length is what varies between requests. If your two rows differ mostly somewhere else, that somewhere else is your actual problem and it is a more interesting finding than this lesson.</li>
+        <li><b>Your own code should be a small share.</b> Retrieval, packing and post-processing together are typically a few per cent. If retrieval is ten per cent or more of the p95, the vector index work in module 1 is where your seconds are, not here.</li>
+        <li><b>The largest available saving is almost always output length.</b> A max-tokens cap, a shorter output format, or removing a reasoning step you added while chasing quality. Each is a quality trade and each should be re-run against the golden set from module 1 rather than shipped on the latency argument alone.</li>
+        <li><b>Streaming is a separate row and is not a saving.</b> Record perceived wait beside total duration so the document distinguishes them, because the next person to read it will otherwise conclude that streaming did nothing.</li>
+        <li><b>Commit the budget beside the endpoint table from lesson 0600.</b> Lesson 0630 subtracts cache hits from these numbers and lesson 0670 alerts on them, and both start here.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Multiply your median output tokens by your median time between tokens. That product should account for most of your median total duration - commonly the large majority. If it accounts for less than half, either your output is unusually short or a stage you have not instrumented is eating the difference, and finding that stage is worth more than any tuning on this page.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the two latencies still collapse into one in your head, ask your agent to take one of your own slowest requests and write out the five segments with real numbers from your trace, then to say which segment it would attack first and what quality risk that carries. If the streaming argument felt like sleight of hand, ask it to state precisely which metric changes, which does not, and which one your alerting currently uses.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The twelve metric names, their instruments and their units: <a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-metrics.md">GenAI metrics</a>, in the OpenTelemetry semantic conventions repository. Note that every one of them is a Histogram rather than a Gauge, and ask yourself which of the percentiles that makes possible you are currently throwing away.</p>
+
+  <div class="pager">
+    <a class="prv" href="0610-the-provider-is-a-dependency-you-do-not-own.html"><span class="dir">&larr; Back</span><span class="ttl">The provider is a dependency you do not own</span></a>
+    <a class="nxt" href="0630-four-caches-and-only-two-of-them-are-yours.html"><span class="dir">Next &rarr;</span><span class="ttl">Four caches, and only two of them are yours</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0620 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

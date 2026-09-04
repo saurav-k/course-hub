@@ -1,0 +1,285 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The provider is a dependency you do not own - End-to-End AI Engineering</title>
+<meta name="description" content="A liveness probe that calls the model turns a provider outage into a restart storm you inflicted on yourself. What each of the three probes controls, what readiness may test, and which errors you must not retry.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deployment &middot; Lesson 0610</div>
+  <h1>A health check that calls the model is a way to fail twice</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Probe defaults read from the Kubernetes source at tag <code>v1.37.0</code>, in <code>SetDefaults_Probe</code>, rather than from prose about them.
+    &middot; <a href="https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/">Configure probes</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A health check answers <b>one question about your process</b>. The moment it also asks a question about somebody else's service, an outage over there becomes a self-inflicted outage over here.</li>
+      <li>The three probes control three different things and only one of them can kill you: <b>liveness restarts, readiness withdraws traffic, startup delays the other two</b>.</li>
+      <li>With the shipped defaults, a liveness probe that calls the provider kills the container after <b>three failures ten seconds apart</b>, which is thirty seconds into an outage nobody could have fixed.</li>
+      <li>Readiness may test anything you own. <b>Liveness may test almost nothing</b>, and the shorter it is the better it works.</li>
+      <li>Your SDK already retries. Anthropic's retry transient failures <b>twice by default with exponential backoff</b>, so a retry loop you write on top is a multiplier, not a policy.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Everything inside the boundary is yours to fix; the one box outside it is not.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A boundary labelled your deployment contains four boxes: the API process, the job worker, the vector index and the job store. Outside the boundary, connected by a dashed arrow, sits a single box labelled the model provider, marked as the one dependency the reader does not operate. Three probe labels point at the boundary from the left, and a note says only the provider box can be down while every box inside is healthy.">
+      <text class="d-mono" x="16" y="24">your deployment</text>
+      <rect class="d-bound" x="12" y="34" width="392" height="170" rx="6"/>
+
+      <rect class="d-box" x="30" y="54" width="166" height="46" rx="4"/>
+      <text class="lbl-b" x="113" y="82" text-anchor="middle">the API process</text>
+      <rect class="d-box" x="216" y="54" width="170" height="46" rx="4"/>
+      <text class="lbl-b" x="301" y="82" text-anchor="middle">the job worker</text>
+      <rect class="d-box" x="30" y="118" width="166" height="46" rx="4"/>
+      <text class="lbl-b" x="113" y="146" text-anchor="middle">the vector index</text>
+      <rect class="d-box" x="216" y="118" width="170" height="46" rx="4"/>
+      <text class="lbl-b" x="301" y="146" text-anchor="middle">the job store</text>
+      <text class="d-mono" x="30" y="186">you operate all four</text>
+
+      <path class="d-flow ref s-alarm" d="M406 120 L470 120"/>
+      <text class="d-mono" x="412" y="112">every call</text>
+
+      <rect class="d-drop" x="478" y="94" width="150" height="52" rx="4"/>
+      <text class="lbl-b" x="553" y="118" text-anchor="middle">the provider</text>
+      <text class="d-mono" x="553" y="136" text-anchor="middle">somebody else runs it</text>
+
+      <text class="d-mono" x="478" y="172">no probe you write</text>
+      <text class="d-mono" x="478" y="190">can repair this box</text>
+
+      <text class="read" x="320" y="240" text-anchor="middle">A probe exists to decide what to do about a box you can fix.</text>
+      <text class="read" x="320" y="264" text-anchor="middle">Pointing one at the box you cannot fix only adds a second failure.</text>
+    </svg>
+    <figcaption>The four components lesson 0600 left you with, and the one that sits outside the boundary. The dashed connector is the only edge that crosses it, and it is the edge every probe on this page is careful not to test.
+    <b>Restarting your own process has never once fixed somebody else's outage.</b></figcaption>
+  </figure>
+
+  <h2 id="three-probes">1. Three probes, three different verbs</h2>
+  <p>Kubernetes gives a container three health checks and they are not three severities of the same idea. They are three different actions.</p>
+  <p><b>Liveness</b> restarts. If it fails, the kubelet kills the container and starts it again. The only question it should ever ask is "is this process wedged in a way that only a restart fixes" - a deadlock, a corrupted in-memory state, an event loop that stopped turning. Almost nothing qualifies.</p>
+  <p><b>Readiness</b> withdraws traffic. If it fails, the pod is removed from the service's endpoints and no request is routed to it. Nothing is killed and nothing is lost, so this is where you may be generous: the index has not finished loading, the job store is unreachable, the worker is saturated. A pod that fails readiness is resting, not broken.</p>
+  <p><b>Startup</b> gates the other two. While it is failing, liveness and readiness are suspended, which is what lets a container that takes two minutes to load an index avoid being killed at second thirty by a liveness probe that was written for a container that starts in one second.</p>
+  <p>The defaults matter here because they are what you get if you write no numbers, and they are in the Kubernetes source rather than in folklore. <code>SetDefaults_Probe</code> at tag <code>v1.37.0</code> sets <code>timeoutSeconds</code> to <b>1</b>, <code>periodSeconds</code> to <b>10</b>, <code>successThreshold</code> to <b>1</b> and <code>failureThreshold</code> to <b>3</b>. So a default liveness probe declares a container dead after three consecutive failures ten seconds apart, and that arithmetic is the whole of the next section.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">One pod, three gates</div>
+    <div class="fig-claim">Only one of the three transitions destroys work in progress.</div>
+    <div class="mermaid">
+stateDiagram-v2
+  [*] --> Starting
+  Starting --> Warming: container up
+  Warming --> Warming: startup probe failing&lt;br/&gt;liveness and readiness suspended
+  Warming --> Serving: startup probe passes
+  Serving --> Resting: readiness fails&lt;br/&gt;traffic withdrawn, process alive
+  Resting --> Serving: readiness passes again
+  Serving --> Killed: liveness fails 3 times&lt;br/&gt;in-flight requests destroyed
+  Resting --> Killed: liveness fails 3 times
+  Killed --> Starting: kubelet restarts it
+    </div>
+    <figcaption>The states one pod moves through and which probe drives each edge. Note that Resting and Serving are two-way, and the edge into Killed is not.
+    <b>Readiness is reversible and liveness is not, which is the whole reason for putting a doubtful check in the reversible one.</b></figcaption>
+  </figure>
+
+  <h2 id="the-restart-storm">2. The restart storm, in arithmetic</h2>
+  <p>Here is the failure this page exists to prevent, and it is written by somebody sensible.
+  You want your health check to be meaningful, so you make <code>/healthz</code> send a one-token request to the model. It passes in development, it looks rigorous in review, and it is wired to liveness because that is the endpoint everyone wires to liveness.</p>
+  <p>Now the provider has an incident and starts returning <code>529 overloaded_error</code>. Your process is fine. Your index is fine. Your job store is fine. But every pod's liveness probe is now failing, and with the shipped defaults every pod is killed thirty seconds later - three failures at ten-second intervals. Each one restarts, comes back, fails again, and is killed again.</p>
+  <p>Take a fleet of six pods and a provider outage lasting ten minutes. Before the change, capacity during the outage is six pods that cannot generate but can still serve everything that does not need the model: cached answers, retrieval-only endpoints, the job status endpoint from lesson 0600, and a clear error message. After the change, capacity is zero, and it stays zero for a while after the provider recovers because the pods are in a restart cycle rather than serving.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Capacity through a provider outage</div>
+    <div class="fig-claim">The fleet that probes the provider also loses what still worked.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A line chart of pods able to serve traffic over sixteen minutes. A provider outage runs from minute two to minute twelve, marked by a shaded band. One line, for a liveness probe that tests only the process, stays flat at six pods throughout. The other line, for a liveness probe that calls the provider, drops to zero at minute two and a half and only returns to six after the outage ends and the pods finish restarting.">
+      <rect class="f-prob" x="163" y="40" width="287" height="182"/>
+      <text class="lbl-sm" x="306" y="58" text-anchor="middle">provider outage, 10 minutes</text>
+
+      <line class="grid" x1="106" y1="40" x2="106" y2="222"/>
+      <line class="grid" x1="220" y1="40" x2="220" y2="222"/>
+      <line class="grid" x1="335" y1="40" x2="335" y2="222"/>
+      <line class="grid" x1="450" y1="40" x2="450" y2="222"/>
+      <line class="grid" x1="565" y1="40" x2="565" y2="222"/>
+      <line class="axis" x1="49" y1="222" x2="620" y2="222"/>
+      <line class="axis" x1="49" y1="40" x2="49" y2="222"/>
+
+      <path class="s-signal thick" d="M49 70 L620 70"/>
+      <text class="lbl-sm" x="470" y="88">liveness tests the process only</text>
+
+      <path class="s-alarm thick" d="M49 70 L163 70 L177 222 L479 222 L508 70 L620 70"/>
+      <text class="lbl-sm" x="200" y="212">liveness calls the provider</text>
+
+      <text class="lbl-sm" x="41" y="75" text-anchor="end">6</text>
+      <text class="lbl-sm" x="41" y="151" text-anchor="end">3</text>
+      <text class="lbl-sm" x="41" y="227" text-anchor="end">0</text>
+      <text class="lbl-sm" x="49" y="242" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="220" y="242" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="335" y="242" text-anchor="middle">6</text>
+      <text class="lbl-sm" x="450" y="242" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="565" y="242" text-anchor="middle">14</text>
+      <text class="lbl-sm" x="335" y="262" text-anchor="middle">minutes</text>
+      <text class="ttl" x="20" y="288">pods able to serve any request at all</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-signal"></i>probe tests your process</span><span><i class="sw-alarm"></i>probe tests the provider</span></div>
+    <figcaption>Drawn from the shipped probe defaults - three failures at ten-second intervals - over a six-pod fleet and a ten-minute outage. The shapes are the arithmetic; the exact width of the recovery tail depends on your container's start time.
+    <b>The red line's worst property is not that it reaches zero, but that it is still at zero after the provider has recovered.</b></figcaption>
+  </figure>
+
+  <h2 id="what-readiness-may-test">3. What each probe is allowed to know</h2>
+  <p>The rule that falls out is short. <b>Liveness tests only what a restart could fix.</b> In practice that is an endpoint that returns 200 if the process can execute a handler at all, and it is allowed to be as boring as it sounds. If you cannot name the wedged state your liveness probe detects, delete the probe rather than making it clever.</p>
+  <p><b>Readiness tests everything you own and nothing you do not.</b> The index is loaded, the job store answers, the queue depth is below the point where another request would simply time out. All three are yours, all three are recoverable without a restart, and withdrawing traffic from a pod that fails any of them is exactly the right response.</p>
+  <p>The provider belongs in neither. What the provider's health should drive is a <b>degraded mode</b>, which is an application decision rather than a probe: serve from the cache in lesson <a href="0630-four-caches-and-only-two-of-them-are-yours.html">0630</a>, queue the request as lesson 0600 taught, return retrieval results with no generated summary, or return a clear error. All four keep the pod serving, and none of them is a restart.</p>
+
+  <figure class="diagram scorecard" id="probe-survival-score" data-bands="0.5 0.85" data-band-names="a self-inflicted outage is waiting|one edit away|survives an outage you did not cause">
+    <div class="fig-cap">Will your probes survive</div>
+    <div class="fig-claim">Each point is one line of a manifest, and every fix is reversible.</div>
+
+    <ol class="score-rows">
+      <li class="score-row" data-weight="3">
+        <span class="score-q">The liveness endpoint makes no network call to the model provider.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="pb-1" value="0"> no</label>
+          <label><input type="radio" name="pb-1" value="1"> not sure</label>
+          <label><input type="radio" name="pb-1" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Split the endpoint in two. <code>/healthz</code> returns 200 from the process; anything that reaches outward moves to <code>/readyz</code> or out of the probes entirely.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">The readiness endpoint checks the index and the job store, and reports which one failed.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="pb-2" value="0"> no</label>
+          <label><input type="radio" name="pb-2" value="1"> partly</label>
+          <label><input type="radio" name="pb-2" value="2"> yes</label>
+        </span>
+        <span class="score-fix">A readiness check that returns a bare 503 tells the on-call engineer nothing. Name the failing dependency in the body.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">A startup probe covers the slowest thing the container does before it can serve.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="pb-3" value="0"> no</label>
+          <label><input type="radio" name="pb-3" value="1"> partly</label>
+          <label><input type="radio" name="pb-3" value="2"> yes</label>
+        </span>
+        <span class="score-fix">Time a cold start, then set <code>failureThreshold</code> times <code>periodSeconds</code> comfortably above it. Without this the liveness default kills a slow loader at thirty seconds.</span>
+      </li>
+      <li class="score-row" data-weight="3">
+        <span class="score-q">The application has a named degraded mode when the provider is unavailable.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="pb-4" value="0"> no</label>
+          <label><input type="radio" name="pb-4" value="1"> in one place</label>
+          <label><input type="radio" name="pb-4" value="2"> everywhere</label>
+        </span>
+        <span class="score-fix">Pick one per endpoint: serve cached, queue it, return retrieval without generation, or fail with a message that says the model is down and this is not your fault.</span>
+      </li>
+      <li class="score-row" data-weight="2">
+        <span class="score-q">You know how many times your SDK retries before your code sees an error.</span>
+        <span class="score-opts">
+          <label><input type="radio" name="pb-5" value="0"> no</label>
+          <label><input type="radio" name="pb-5" value="1"> roughly</label>
+          <label><input type="radio" name="pb-5" value="2"> exactly</label>
+        </span>
+        <span class="score-fix">Set the client's max-retries option explicitly, even if you set it to the value it already had. An unstated default becomes a mystery multiplier during an incident.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>score <b data-score-out="points">0</b> of <b data-score-out="max">24</b></span>
+      <span><b data-score-out="band">a self-inflicted outage is waiting</b></span>
+    </div>
+    <figcaption>Answer for the manifests you have deployed today rather than the ones you intend to write. The first and fourth rows carry the heaviest weight because they are the two that decide whether an outage elsewhere becomes an outage here.
+    <b>Four of the five fixes are a manifest edit; the fourth is a product decision and is the one that takes a week.</b></figcaption>
+  </figure>
+
+  <h2 id="retries">4. Which errors to retry, and the retries you already have</h2>
+  <p>The published error codes tell you what to do without much interpretation. <code>400 invalid_request_error</code> is your bug and retrying it produces the same 400 at the same price. <code>401</code> and <code>403</code> are credentials and permissions, which no amount of waiting repairs. <code>429 rate_limit_error</code> and <code>529 overloaded_error</code> are the two that genuinely mean "later", and <code>500 api_error</code> carries the documentation's own instruction to "retry the request with exponential backoff".</p>
+  <p>The part that surprises people is that this is already happening. Anthropic documents that the official SDKs "automatically retry transient failures (such as connection errors, rate limits, and 5xx server errors) with exponential backoff, twice by default, honoring the <code>retry-after</code> header when present". So the retry loop you wrap around the client does not add retries, it multiplies them: three of your attempts around a client that retries twice is nine requests, and the wall-clock time your caller waits is the product rather than the sum.</p>
+  <p>Set the client's maximum-retries option explicitly to whatever you actually want, and put your own policy at one level only. The general mechanism - backoff, jitter, circuit breakers, budgets - belongs to <a href="../../production-systems-course/lessons/0001-resilience-patterns.html">Production Systems, <i>Resilience patterns</i></a>, and the whiteboard framing to <a href="../../ai-system-design-course/lessons/0005-reliability-and-security.html">AI System Design, <i>Reliability and security</i></a>. What is specific to this course is only that the retried call is expensive and non-idempotent, so a retry storm here has a bill attached that a retry storm on a database read does not.</p>
+
+  <div class="callout warn">
+    The probe defaults on this page were read from <code>SetDefaults_Probe</code> in the Kubernetes source at tag <code>v1.37.0</code>, because two attempts to read them out of the documentation prose returned values hedged as "standard configuration" rather than quoted.
+    The error codes and the SDK retry behaviour are Anthropic's published documentation for its own API. Neither set transfers to another provider without checking, and the six-pod outage chart is this page's arithmetic over those defaults rather than an incident anybody measured.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your index takes ninety seconds to load and pods are being killed during deployment. Which probe change fixes it without weakening anything?</div>
+      <button class="q-opt">Add a startup probe covering the load</button>
+      <button class="q-opt">Raise the liveness failure threshold</button>
+      <button class="q-opt">Remove the liveness probe entirely</button>
+      <button class="q-opt">Point readiness at the loaded index</button>
+      <div class="q-fb">A startup probe suspends liveness and readiness until the slow work finishes, which is precisely the case it exists for, and it leaves the steady-state liveness setting untouched. Raising the liveness threshold also stops the killing and does it by making genuine wedges take longer to detect for the life of the pod. Removing liveness fixes the symptom and gives up the one thing liveness is for. Pointing readiness at the index is correct and separate: it stops traffic arriving early and does nothing about being killed, because readiness never kills.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">You wrap the SDK in your own loop of three attempts. The provider returns 529 for a minute. How many requests reach the provider per call?</div>
+      <button class="q-opt">Three, because your loop bounds it</button>
+      <button class="q-opt">Two, because the SDK bounds it</button>
+      <button class="q-opt">Nine, because the two compose</button>
+      <button class="q-opt">One, since 529 is not retried</button>
+      <div class="q-fb">The documented SDK behaviour is two automatic retries on transient failures, so each of your three attempts is three requests and the total is nine. Your loop bounds only your own layer, and the SDK's bound is per call rather than per operation. The last option inverts the documentation: 529 overloaded_error is exactly the class that is retried, while 400 invalid_request_error is the one that should not be.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 40 minutes, with a cluster or a local equivalent</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>The point of this exercise is that you have <b>seen</b> the failure rather than read about it, because the restart storm is entirely convincing in prose and entirely forgettable until you have watched the restart counter climb.</p>
+      <p><b>Write the three probes</b> for your capstone. Liveness on an endpoint that touches nothing external. Readiness on an endpoint that checks the index and the job store and names whichever failed. A startup probe sized from a timed cold start.</p>
+      <p><b>Then induce a provider outage.</b> Point your application at a local proxy that returns <code>529</code> for everything, and leave it there for five minutes with your real probes running. Record the restart count per pod and whether any endpoint still served.</p>
+      <p><b>Then repeat it with the liveness probe deliberately wrong</b> - have it call the model - and record the same two numbers. Keep both numbers; they are the evidence for the manifest you keep.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>You do not need a real cluster. Anything that runs the same probe semantics is enough, and even a shell loop that curls the two endpoints every ten seconds and counts three consecutive failures reproduces the arithmetic.</p>
+      <p>The proxy is twenty lines. It needs to return the status code and a body of the right shape, because your SDK's typed exception is chosen from the status and the error type.</p></details>
+
+    <details class="solution"><summary>Show what the two runs should tell you</summary>
+      <ol class="worked">
+        <li><b>The correct manifest restarts zero times.</b> The process was never unhealthy, so nothing kills it. That is the number to keep, and it should be exactly zero rather than low.</li>
+        <li><b>The correct manifest still serves something.</b> At minimum the job status endpoint and any retrieval-only path. If yours served nothing, your degraded mode is the missing piece rather than your probes, and that is the fourth row of the scorecard.</li>
+        <li><b>The wrong manifest restarts repeatedly and serves nothing.</b> Expect the first kill about thirty seconds in, from the three-failure default at ten-second intervals. The exact count afterwards depends on your start time and on the kubelet backing off between restarts.</li>
+        <li><b>The recovery is the part worth watching.</b> Turn the proxy off and time how long until each fleet serves again. The correct one is serving immediately, because it never stopped. That gap is the real cost of the mistake and it is invisible in the outage window itself.</li>
+        <li><b>Write the four numbers and the manifest into the repository.</b> Restarts and served-endpoints for each run. Lesson 0670 turns "did anything serve" into an alert, and it needs to know what normal looks like.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If both runs restarted zero times, your induced outage did not reach the probe: check that the probe endpoint really calls the proxy and that the proxy really returns a non-2xx. If the correct run restarted even once, something in your liveness path reaches outward that you did not intend, and finding it is the whole exercise.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the liveness and readiness split still feels arbitrary, ask your agent for five checks your service could plausibly make and have it assign each to liveness, readiness or neither, giving the restart-would-fix-it test as its reason each time. If the retry multiplication surprised you, ask it to read your own client construction and say exactly how many requests one call can become before your code sees an exception.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The status codes this page's retry rule is built on, with the documentation's own instructions per code: <a href="https://platform.claude.com/docs/en/api/errors">Claude API errors</a>. Read the paragraph on automatic SDK retries and then go and look at how your own client is constructed, because the default is only a default until somebody has looked.</p>
+
+  <div class="pager">
+    <a class="prv" href="0600-four-shapes-for-a-request-that-takes-thirty-seconds.html"><span class="dir">&larr; Back</span><span class="ttl">Four shapes for a request that takes thirty seconds</span></a>
+    <a class="nxt" href="0620-where-the-seconds-go.html"><span class="dir">Next &rarr;</span><span class="ttl">Where the seconds go</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0610 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>

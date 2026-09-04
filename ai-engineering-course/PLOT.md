@@ -204,14 +204,14 @@ Working rung, and the heaviest module in the course. Six syllabus bullets that a
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0600 | Four shapes for a request that takes thirty seconds | reserved | Synchronous, streamed, queued with a handle, offline batch; picking the wrong one is what makes a demo unshippable. |
-| 0610 | The provider is a dependency you do not own | reserved | A liveness probe that calls the model turns a provider outage into a restart storm you inflicted on yourself. |
-| 0620 | Where the seconds go | reserved | Latency is time to first token plus tokens times inter-token latency, and only one of the three terms is yours. |
-| 0630 | Four caches, and only two of them are yours | reserved | Caching names four mechanisms at four layers, and confusing them is why a team pays for a cache it is not using. |
-| 0640 | Semantic caching, and the false hit you have to measure | reserved | A semantic cache answers a question nobody asked, at a rate you can measure and must measure. |
-| 0650 | What a prompt injection is allowed to do | reserved | You cannot make a general-purpose agent injection-proof, so the design decision is what it may do after it reads untrusted text. |
-| 0660 | CI when the unit test is a distribution | reserved | A prompt change is a code change with no compiler, so the gate is a threshold on a measured score. |
-| 0670 | Monitoring a system whose failures are quiet | reserved | The signals worth alerting on are token counts, finish reasons and eval scores rather than 500s. |
+| 0600 | Four shapes for a request that takes thirty seconds | written | Synchronous, streamed, queued with a handle, offline batch; picking the wrong one is what makes a demo unshippable. |
+| 0610 | The provider is a dependency you do not own | written | A liveness probe that calls the model turns a provider outage into a restart storm you inflicted on yourself. |
+| 0620 | Where the seconds go | written | Latency is time to first token plus tokens times inter-token latency, and only one of the three terms is yours. |
+| 0630 | Four caches, and only two of them are yours | written | Caching names four mechanisms at four layers, and confusing them is why a team pays for a cache it is not using. |
+| 0640 | Semantic caching, and the false hit you have to measure | written | A semantic cache answers a question nobody asked, at a rate you can measure and must measure. |
+| 0650 | What a prompt injection is allowed to do | written | You cannot make a general-purpose agent injection-proof, so the design decision is what it may do after it reads untrusted text. |
+| 0660 | CI when the unit test is a distribution | written | A prompt change is a code change with no compiler, so the gate is a threshold on a measured score. |
+| 0670 | Monitoring a system whose failures are quiet | written | The signals worth alerting on are token counts, finish reasons and eval scores rather than 500s. |
 | 0680 | Free position | reserved | Held for a lesson a module 6 writer discovers they need. |
 
 <!-- module-06:end -->

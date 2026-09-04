@@ -1,0 +1,289 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Monitoring a system whose failures are quiet - End-to-End AI Engineering</title>
+<meta name="description" content="An AI system fails with a 200 and a fluent paragraph. The signals worth waking somebody for are token counts, finish reasons and eval scores, and they already have standard names.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deployment &middot; Lesson 0670</div>
+  <h1>Your worst outage returns 200 on every request</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    Span and metric names read at commit <code>fee465db</code>, where every GenAI document is marked Development and the repository has published no release or tag.
+    &middot; <a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md">GenAI spans</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Every failure mode in this course - a bad retrieval, a false cache hit, a truncated answer, an injected instruction - returns <b>HTTP 200 with a fluent paragraph</b>.</li>
+      <li>So the signals worth alerting on are not error rates. They are <b>token counts, finish reasons, cache hit shares and eval scores</b>.</li>
+      <li>All of them already have names. The GenAI conventions publish the span shape and twelve metrics, and adopting the names is cheaper than inventing them.</li>
+      <li><code>gen_ai.input.messages</code> is <b>Opt-In</b>, and that is a privacy decision rather than a verbosity setting: switching it on writes user text into your traces.</li>
+      <li>Scale on <b>queue depth, not CPU</b>. A worker waiting on a socket is idle by every measure a Resource metric can see.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One trace id can span three systems, and you operate one of them.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A span tree crossing three ownership boundaries. On the left, a boundary labelled yours contains a root request span with a retrieval span and an inference span nested inside it. In the middle, a boundary labelled a third party's MCP server contains an execute tool span, reached by an arrow marked traceparent in underscore meta. On the right, a boundary labelled a peer agent contains an invoke agent span, reached by an arrow marked A2A. A note says one trace id covers all three.">
+      <text class="d-mono" x="16" y="22">yours</text>
+      <rect class="d-bound" x="12" y="32" width="212" height="152" rx="6"/>
+      <rect class="d-focus" x="26" y="46" width="184" height="30" rx="4"/>
+      <text class="lbl-sm" x="38" y="66">the request</text>
+      <rect class="d-box" x="40" y="84" width="170" height="30" rx="4"/>
+      <text class="lbl-sm" x="52" y="104">Retrievals</text>
+      <rect class="d-box" x="40" y="122" width="170" height="30" rx="4"/>
+      <text class="lbl-sm" x="52" y="142">Inference</text>
+      <text class="d-mono" x="26" y="170">you emit these</text>
+
+      <path class="d-flow s-signal" d="M226 100 L268 100"/>
+      <text class="d-mono" x="230" y="92">_meta</text>
+      <text class="d-mono" x="230" y="122">traceparent</text>
+
+      <text class="d-mono" x="274" y="22">a third party's MCP server</text>
+      <rect class="d-bound" x="270" y="32" width="184" height="152" rx="6"/>
+      <rect class="d-box" x="284" y="84" width="156" height="30" rx="4"/>
+      <text class="lbl-sm" x="296" y="104">Execute tool</text>
+      <text class="d-mono" x="284" y="146">they emit this</text>
+      <text class="d-mono" x="284" y="164">into your trace</text>
+
+      <path class="d-flow s-signal" d="M456 100 L498 100"/>
+      <text class="d-mono" x="460" y="92">A2A</text>
+
+      <text class="d-mono" x="504" y="22">a peer agent</text>
+      <rect class="d-bound" x="500" y="32" width="128" height="152" rx="6"/>
+      <rect class="d-box" x="512" y="84" width="104" height="30" rx="4"/>
+      <text class="lbl-sm" x="522" y="104">Invoke agent</text>
+      <text class="d-mono" x="512" y="146">also yours to</text>
+      <text class="d-mono" x="512" y="164">read, if they send</text>
+
+      <text class="read" x="320" y="228" text-anchor="middle">Three owners, three deploy schedules, one trace id.</text>
+      <text class="read" x="320" y="252" text-anchor="middle">Module 1 started that id. This page is where it pays off.</text>
+      <text class="read" x="320" y="276" text-anchor="middle">The one thing you cannot see is why the answer was wrong.</text>
+    </svg>
+    <figcaption>The trace from module 1, extended across two boundaries the rest of the course adds. MCP revision <code>2026-07-28</code> propagates trace context through the <code>_meta</code> keys <code>traceparent</code>, <code>tracestate</code> and <code>baggage</code>, and A2A <code>1.0</code> names tracing an enterprise-readiness requirement.
+    <b>Distributed tracing solved the "which service" question years ago; nothing solves "which passage" except the attributes you choose to record.</b></figcaption>
+  </figure>
+
+  <h2 id="what-a-200-hides">1. Everything in this module fails with a 200</h2>
+  <p>Walk back through the module and count the failures that produce an error. There are none.</p>
+  <p>A retrieval that returns the wrong ten passages returns 200. A false hit from lesson 0640's semantic cache returns 200, faster than usual. An answer truncated because it hit the output limit returns 200 with a complete-looking paragraph that simply stops. An injected instruction obeyed as in lesson 0650 returns 200. A silent fallback to a cheaper model returns 200. A provider degradation that shortens answers returns 200.</p>
+  <p>So the ordinary monitoring reflex - error rate, latency, saturation - detects none of it, and worse, several of them make your dashboard look <b>better</b>. A cache serving wrong answers cuts latency and cost at once. A model that truncates answers is faster than one that finishes them.</p>
+  <p>The signals that do move are all about content rather than about transport, and there are four of them worth a page at three in the morning:</p>
+  <ul>
+    <li><b>Output token distribution.</b> A sudden fall means truncation or a model swap; a sudden rise means a prompt change or a loop.</li>
+    <li><b>Finish reasons.</b> A rise in the length-limit reason is truncation, arriving as successful responses.</li>
+    <li><b>Cache hit share.</b> A jump means your prefix stopped moving or your semantic threshold drifted; a collapse means the prefix started moving and lesson 0630's saving just evaporated.</li>
+    <li><b>The nightly eval score</b> from lesson 0660, which is the only one of the four that can tell you the answers got worse.</li>
+  </ul>
+
+  <h2 id="the-names">2. Use the names somebody has already argued about</h2>
+  <p>You do not need to invent this vocabulary. The OpenTelemetry GenAI semantic conventions define the span shape and the attributes, and adopting them costs a file of constants and buys you a chance that your tooling already understands your traces.</p>
+  <p>An inference span is named <code>{gen_ai.operation.name} {gen_ai.request.model}</code>. Two attributes are <b>Required</b>: <code>gen_ai.operation.name</code> and <code>gen_ai.provider.name</code>. Several are <b>Recommended</b>, including <code>gen_ai.usage.input_tokens</code>, <code>gen_ai.usage.output_tokens</code> and <code>gen_ai.response.finish_reasons</code> - which is three of the four signals above, already named. The twelve metrics are all Histograms, which is what makes the percentiles from lesson 0620 computable at all.</p>
+  <p>The caveat travels with the names every time this course prints one. Every document in that repository is marked <b>Status: Development</b>, and the repository has published <b>no release and no tag</b>; these names were read at commit <code>fee465db</code>. What you are committing to is the shape - one span per stage, tokens and finish reasons recorded on the inference span - and a rename costs you one file of constants, which is exactly why the constants belong in one file.</p>
+  <p>Then there is the group marked <b>Opt-In</b>, and it is not opt-in because it is verbose. <code>gen_ai.input.messages</code>, <code>gen_ai.output.messages</code> and <code>gen_ai.system_instructions</code> carry the actual text: the user's question, the retrieved passages, your system prompt. Turning them on writes customer data and your own corpus into whatever your traces are stored in, for however long that retains, readable by everybody with access to your observability tool. That is a decision with a data-protection answer, and the honest middle path is to sample it, redact before export, and keep it off by default.</p>
+
+  <figure class="diagram assembler" id="genai-attributes">
+    <div class="fig-cap">The attribute set, assembled</div>
+    <div class="fig-claim">One of these four blocks is a privacy decision rather than a monitoring one.</div>
+
+    <div class="build-controls">
+      <label><input type="checkbox" data-part="required" checked> Required on every span</label>
+      <label><input type="checkbox" data-part="recommended" checked> Recommended: the alertable numbers</label>
+      <label><input type="checkbox" data-part="optin"> Opt-In: the message content</label>
+      <label><input type="checkbox" data-part="metrics"> the four client metrics</label>
+    </div>
+
+    <div class="asm-out">
+      <div class="code-cap"><code>telemetry/names.py</code> &middot; assembled from the boxes above &middot; written for this course &middot; reproduced verbatim</div>
+      <pre><code># Required on every inference span. Development status, read at fee465db.
+GEN_AI_OPERATION_NAME = "gen_ai.operation.name"
+GEN_AI_PROVIDER_NAME = "gen_ai.provider.name"
+SPAN_NAME = "{operation} {model}"
+
+# Recommended. These are the numbers an alert can actually use.
+GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
+GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
+GEN_AI_RESPONSE_FINISH_REASONS = "gen_ai.response.finish_reasons"
+SERVER_ADDRESS = "server.address"
+</code></pre>
+    </div>
+
+    <template data-part="required">
+      # Required on every inference span. Development status, read at fee465db.
+      GEN_AI_OPERATION_NAME = "gen_ai.operation.name"
+      GEN_AI_PROVIDER_NAME = "gen_ai.provider.name"
+      SPAN_NAME = "{operation} {model}"
+    </template>
+    <template data-part="recommended">
+      # Recommended. These are the numbers an alert can actually use.
+      GEN_AI_USAGE_INPUT_TOKENS = "gen_ai.usage.input_tokens"
+      GEN_AI_USAGE_OUTPUT_TOKENS = "gen_ai.usage.output_tokens"
+      GEN_AI_RESPONSE_FINISH_REASONS = "gen_ai.response.finish_reasons"
+      SERVER_ADDRESS = "server.address"
+    </template>
+    <template data-part="optin">
+      # Opt-In, and a privacy decision rather than a verbosity setting:
+      # this writes user text and retrieved documents into your traces.
+      GEN_AI_INPUT_MESSAGES = "gen_ai.input.messages"
+      GEN_AI_OUTPUT_MESSAGES = "gen_ai.output.messages"
+      GEN_AI_SYSTEM_INSTRUCTIONS = "gen_ai.system_instructions"
+    </template>
+    <template data-part="metrics">
+      # The four client metrics. All Histograms, so percentiles are computable.
+      TOKEN_USAGE = "gen_ai.client.token.usage"
+      OPERATION_DURATION = "gen_ai.client.operation.duration"
+      TIME_TO_FIRST_CHUNK = "gen_ai.client.operation.time_to_first_chunk"
+      TIME_PER_OUTPUT_CHUNK = "gen_ai.client.operation.time_per_output_chunk"
+    </template>
+
+    <div class="build-readout">
+      <span><b data-asm-out="parts">2</b> of 4 blocks</span>
+      <span><b data-asm-out="lines">10</b> lines of constants</span>
+    </div>
+    <figcaption>Tick the third box and read the comment that arrives with it before you decide. The whole reason this course keeps the names in one file is the Development status: a rename upstream is a diff in this file and nowhere else.
+    <b>Two blocks give you every alert on this page, and the third gives you a data-retention conversation.</b></figcaption>
+  </figure>
+
+  <h2 id="scaling-signal">3. Scale on the queue, because the CPU is lying</h2>
+  <p>The last piece is the one that surprises people who have scaled ordinary services.</p>
+  <p>A worker that is waiting twenty-four seconds for a provider to finish generating is doing no work. It holds a socket and a little memory, and its CPU utilisation is close to nothing. So a Horizontal Pod Autoscaler targeting CPU sees an idle fleet at exactly the moment every worker is occupied and new requests are queueing.</p>
+  <p>The HPA's algorithm is not the problem; it is doing what it says. Kubernetes documents it as <code>desiredReplicas = ceil(currentReplicas &times; currentMetricValue / desiredMetricValue)</code>, with a default tolerance of <b>0.1</b> that skips scaling when the ratio is close to 1. Feed it a CPU number that stays near zero under load and the ratio never leaves the tolerance band, so it never scales.</p>
+  <p>The fix is the metric rather than the algorithm. HPA supports four metric types - per-pod resource metrics, per-pod custom metrics, object metrics and external metrics - and the signal you want is <b>in-flight requests per pod</b> or <b>queue depth</b>, which arrives as a custom or external metric rather than a Resource one. Lesson 0600's queued shape makes this easy, because the job store's pending count is already the number you need.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two signals, one load</div>
+    <div class="fig-claim">The metric you scaled on never leaves its tolerance band.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A line chart over twelve minutes of rising load. Queue depth climbs steadily from near zero to a high value. CPU utilisation stays almost flat near ten per cent throughout. A shaded band around the CPU target marks the HPA tolerance of zero point one, and the CPU line never leaves it, so no scaling is triggered while the queue grows.">
+      <line class="grid" x1="180" y1="40" x2="180" y2="230"/>
+      <line class="grid" x1="290" y1="40" x2="290" y2="230"/>
+      <line class="grid" x1="400" y1="40" x2="400" y2="230"/>
+      <line class="grid" x1="510" y1="40" x2="510" y2="230"/>
+      <line class="axis" x1="70" y1="230" x2="620" y2="230"/>
+      <line class="axis" x1="70" y1="40" x2="70" y2="230"/>
+
+      <rect class="f-noise" x="70" y="196" width="540" height="26"/>
+      <text class="lbl-sm" x="84" y="190">the HPA tolerance band around a CPU target</text>
+
+      <path class="s-alarm thick" d="M70 224 C 200 216, 340 120, 610 48"/>
+      <text class="lbl-sm" x="616" y="44" text-anchor="end">queue depth</text>
+
+      <path class="s-signal thick" d="M70 216 C 250 212, 420 210, 610 208"/>
+      <text class="lbl-sm" x="616" y="226" text-anchor="end">CPU utilisation</text>
+
+      <text class="lbl-sm" x="62" y="45" text-anchor="end">high</text>
+      <text class="lbl-sm" x="62" y="235" text-anchor="end">0</text>
+      <text class="lbl-sm" x="70" y="252" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="290" y="252" text-anchor="middle">4</text>
+      <text class="lbl-sm" x="510" y="252" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="340" y="272" text-anchor="middle">minutes of rising load</text>
+      <text class="ttl" x="20" y="292">what each signal reports while the fleet saturates</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>queue depth</span><span><i class="sw-signal"></i>CPU utilisation</span></div>
+    <figcaption>An illustration of the mechanism rather than a measurement: a worker blocked on a network read consumes almost no CPU, so the resource metric stays inside the default tolerance of 0.1 and the autoscaler correctly does nothing about a fleet that is completely occupied.
+    <b>The autoscaler is not broken; it is answering a question about processors in a system whose bottleneck is somebody else's GPU.</b></figcaption>
+  </figure>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each alert can see</div>
+    <div class="fig-claim">Only the bottom row can tell you the answers got worse.</div>
+    <div class="mermaid">
+flowchart LR
+  A["error rate&lt;br/&gt;and latency"] --> A1["catches: the service is down&lt;br/&gt;misses: every failure in module 6"]
+  B["token counts&lt;br/&gt;and finish reasons"] --> B1["catches: truncation, model swap&lt;br/&gt;misses: a wrong but complete answer"]
+  C["cache hit share"] --> C1["catches: the prefix started moving&lt;br/&gt;misses: whether the hits were right"]
+  D["the nightly eval&lt;br/&gt;from lesson 0660"] --> D1["catches: the answers got worse&lt;br/&gt;costs: minutes and money, once a day"]
+    </div>
+    <figcaption>Four signals against what each one can and cannot see. The rows are ordered by cost, and the coverage they add is ordered the same way, which is why none of them replaces the one below it.
+    <b>A dashboard made only of the first row is a dashboard that will be green throughout your worst week.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    Every attribute and metric name here is marked <b>Status: Development</b> in a repository that has published no release and no tag, and was read at commit <code>fee465db</code>. Names can change; the shape is the durable part.
+    The two charts are illustrations of mechanisms - a blocked worker's CPU, a threshold inside a tolerance band - rather than measurements of any system, and the HPA formula and its 0.1 default are Kubernetes documentation at v1.37.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Overnight your p95 latency fell 40% and your cost per request fell by a third. What should you check first?</div>
+      <button class="q-opt">Nothing, this is a good deployment</button>
+      <button class="q-opt">Whether traffic simply dropped overnight</button>
+      <button class="q-opt">Output tokens and finish reasons</button>
+      <button class="q-opt">Whether a new region came online</button>
+      <div class="q-fb">Latency and cost both falling together is the exact signature of answers getting shorter, so the first check is the output-token distribution and the finish reasons: a rise in the length-limit reason means truncation and a fall in tokens with no reason change means a model or prompt change. Traffic volume is worth ruling out and does not change per-request cost. A new region changes latency and not token counts. Treating it as good news is the failure mode the whole page is about.</div>
+    </div>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Which HPA metric type does "in-flight requests per pod" arrive as, and why not the usual one?</div>
+      <button class="q-opt">Custom or external, since CPU stays idle</button>
+      <button class="q-opt">Resource, since it is a per-pod number</button>
+      <button class="q-opt">Object, since the queue is one object</button>
+      <button class="q-opt">Resource, since concurrency is memory</button>
+      <div class="q-fb">Resource metrics are CPU and memory from the resource metrics API, and neither moves when a worker is blocked on a network read, so concurrency has to arrive as a per-pod custom metric or an external one. Being per-pod does not make a number a Resource metric; the type is about where it comes from. Object metrics describe a single object and are the right shape for a shared queue's depth, which is a reasonable alternative, but concurrency per pod is not one.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 50 minutes, with your traces and a dashboard</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>This is the last increment module 6 makes to the capstone, and it closes the loop the course opened in module 1.</p>
+      <p><b>Emit the constants file</b> from the assembler above, with the Opt-In block left off, and confirm that one request produces an inference span carrying the operation, the provider, both token counts and the finish reason.</p>
+      <p><b>Build one dashboard with four panels</b>: output token distribution, finish reasons by kind, cache hit share from lesson 0630, and the latest nightly eval score from lesson 0660. Four panels, not fourteen.</p>
+      <p><b>Then break each of them on purpose</b> and confirm the panel moves. Lower <code>max_tokens</code> until answers truncate. Add a per-request value to the top of your prompt so the cache stops hitting. Point at a different model id. Each takes two minutes and each proves one panel is wired.</p>
+      <p><b>Finally, set one alert</b>, on the signal you would actually want to be woken for, and write down what the on-call person should do when it fires.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>If your finish-reason panel is empty, your client is probably discarding the field before you see it. It is on the raw response object rather than on the convenience accessor in several SDKs.</p>
+      <p>Resist adding panels. A dashboard with four panels that somebody reads beats one with fourteen that nobody does, and everything else is already queryable from the trace when you have a specific question.</p></details>
+
+    <details class="solution"><summary>Show what a finished monitoring setup looks like</summary>
+      <ol class="worked">
+        <li><b>Four panels, each tied to a failure you have actually caused.</b> The deliberate breaks are the point: a panel nobody has ever seen move is a panel nobody will trust at three in the morning, and half of them are usually wired wrongly the first time.</li>
+        <li><b>Output tokens as a distribution, never a mean.</b> Truncation shows as the right tail being cut off while the mean barely moves, so a mean-only panel misses precisely the failure this page opened with.</li>
+        <li><b>One alert, not four.</b> For most capstones the honest choice is a fall in the output-token p50 or a rise in the length-limit finish reason, because those catch truncation and model swaps and both are silent. The eval score is a daily report rather than a page.</li>
+        <li><b>The runbook line matters as much as the alert.</b> "Check whether the model id changed, then check whether the prompt changed, then run the golden set" is a runbook. "Investigate" is not.</li>
+        <li><b>Keep the Opt-In block off, and write down why.</b> One sentence in the repository saying that message content is not exported, and what you would need to change to sample it safely, is the artefact that keeps the decision from being re-made accidentally.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> After lowering <code>max_tokens</code>, your latency and cost panels should both improve while the finish-reason panel deteriorates. If you see the improvement and not the deterioration, your dashboard is currently capable of showing a truncation outage as a successful optimisation, which is exactly the state this lesson exists to leave behind.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the four signals feel arbitrary, ask your agent to list the ways your own system can return a wrong answer and, for each, which of your existing panels would move. The ones that move nothing are your gaps. If the Opt-In decision is genuinely open, ask it to draft the two-sentence data-retention note both ways and take the pair to whoever owns that question where you work.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The span shape, the requirement levels and the Opt-In group, all in one document: <a href="https://github.com/open-telemetry/semantic-conventions-genai/blob/main/docs/gen-ai/gen-ai-spans.md">GenAI spans</a>. Read the requirement-level column rather than the attribute list, because the interesting information is which attributes the authors thought were safe to require and which they deliberately did not.</p>
+
+  <div class="pager">
+    <a class="prv" href="0660-ci-when-the-unit-test-is-a-distribution.html"><span class="dir">&larr; Back</span><span class="ttl">CI when the unit test is a distribution</span></a>
+    <a class="nxt" href="../index.html"><span class="dir">Next &rarr;</span><span class="ttl">Course map</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0670 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
