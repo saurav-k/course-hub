@@ -217,6 +217,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Solution, graded 1: counting and sampling",
           "href": "lessons/0092-solution-graded-1-counting-and-sampling.html"
+        },
+        {
+          "title": "Solution: graded 2, independence four ways",
+          "href": "lessons/0093-solution-graded-2-independence.html"
         }
       ]
     },
