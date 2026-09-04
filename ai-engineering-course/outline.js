@@ -97,6 +97,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "The document you retrieved is untrusted input",
           "href": "lessons/0280-the-document-you-retrieved-is-untrusted-input.html"
+        },
+        {
+          "title": "The same thirty questions, six changes later",
+          "href": "lessons/1010-the-same-thirty-questions-six-changes-later.html"
         }
       ]
     },
@@ -169,6 +173,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "A deep research agent is a retrieval loop with a citation contract",
           "href": "lessons/0450-a-deep-research-agent-is-a-retrieval-loop.html"
+        },
+        {
+          "title": "The retriever other people can call",
+          "href": "lessons/1030-the-retriever-other-people-can-call.html"
         }
       ]
     },
@@ -199,6 +207,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Read the trace before you touch a prompt",
           "href": "lessons/0550-read-the-trace-before-you-touch-a-prompt.html"
+        },
+        {
+          "title": "The second agent you decided against",
+          "href": "lessons/1040-the-second-agent-you-decided-against.html"
         }
       ]
     },
@@ -263,6 +275,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "The design review: six questions, on your own system",
           "href": "lessons/0730-the-design-review-six-questions.html"
+        },
+        {
+          "title": "Priced and reviewed",
+          "href": "lessons/1070-priced-and-reviewed.html"
         }
       ]
     },
@@ -281,6 +297,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "The delivery: what replaces demo day",
           "href": "lessons/0820-the-delivery-what-replaces-demo-day.html"
+        },
+        {
+          "title": "Deliver it",
+          "href": "lessons/1060-deliver-it.html"
         }
       ]
     }

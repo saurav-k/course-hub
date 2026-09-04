@@ -62,6 +62,7 @@ The capstone pages are numbered `1000` upward because nothing published may be r
 | `1030` - The retriever other people can call | Module 4 |
 | `1040` - The second agent you decided against | Module 5 |
 | `1050` - Ship it | Module 6 |
+| `1070` - Priced and reviewed | Module 7 |
 | `1060` - Deliver it | Module 8 |
 
 While nothing in the track is written, the seven entries are grouped in one `Capstone track` section of the course map so the integrator has a single registration block.
@@ -76,7 +77,7 @@ One table per module, wrapped in that module's registration markers.
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0000 | Your demo works and you cannot prove it | **written** | The gold page. The pipeline in one picture, the same request as a trace, the first number, and the eight modules read as edits to that picture. |
+| 0000 | Your demo works and you cannot prove it | written | The gold page. The pipeline in one picture, the same request as a trace, the first number, and the eight modules read as edits to that picture. |
 
 ### Module 01 - Foundations
 
@@ -110,22 +111,22 @@ Working rung, and the module whose whole promise is a number that moved. No less
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0200 | Ingestion is a pipeline, and every chunk needs an identity | **written** | A chunk that cannot name its source, its offset and its checksum cannot be re-ingested or cited. |
-| 0210 | A schema is a contract the model has to satisfy | **written** | One object in three forms: a Python class, a JSON Schema, and a wire payload you can validate at the boundary. |
-| 0220 | Chunking is a boundary decision, and the boundary is where meaning is lost | **written** | Retrieval precision and generation sufficiency pull in opposite directions, and the sweep settles it. |
-| 0230 | A chunk that cannot say where it came from cannot be found | **written** | Two repairs for the orphan chunk, with their bills: context written in, against embed then split. |
-| 0240 | The window is an attention budget, not a container | **written** | More retrieved passages raise the chance the answer is present and lower the chance it is attended to. |
-| 0250 | A prompt is a versioned artefact with a name | **written** | A prompt with no name and no version makes a regression unattributable, which is the Tuesday nobody enjoys. |
-| 0260 | Two rankings beat one, and RRF is the cheapest way to add them | **written** | Reciprocal rank fusion needs no scores, no tuning and no training, and its k barely matters. |
-| 0270 | A reranker is a second, more expensive opinion on twenty documents | **written** | A cross-encoder buys ranking quality with latency, linearly, and the funnel is where you choose how much. |
-| 0280 | The document you retrieved is untrusted input | **written** | The retrieved passage is somebody else's text inside your prompt, and the model cannot see the seam. |
+| 0200 | Ingestion is a pipeline, and every chunk needs an identity | written | A chunk that cannot name its source, its offset and its checksum cannot be re-ingested or cited. |
+| 0210 | A schema is a contract the model has to satisfy | written | One object in three forms: a Python class, a JSON Schema, and a wire payload you can validate at the boundary. |
+| 0220 | Chunking is a boundary decision, and the boundary is where meaning is lost | written | Retrieval precision and generation sufficiency pull in opposite directions, and the sweep settles it. |
+| 0230 | A chunk that cannot say where it came from cannot be found | written | Two repairs for the orphan chunk, with their bills: context written in, against embed then split. |
+| 0240 | The window is an attention budget, not a container | written | More retrieved passages raise the chance the answer is present and lower the chance it is attended to. |
+| 0250 | A prompt is a versioned artefact with a name | written | A prompt with no name and no version makes a regression unattributable, which is the Tuesday nobody enjoys. |
+| 0260 | Two rankings beat one, and RRF is the cheapest way to add them | written | Reciprocal rank fusion needs no scores, no tuning and no training, and its k barely matters. |
+| 0270 | A reranker is a second, more expensive opinion on twenty documents | written | A cross-encoder buys ranking quality with latency, linearly, and the funnel is where you choose how much. |
+| 0280 | The document you retrieved is untrusted input | written | The retrieved passage is somebody else's text inside your prompt, and the model cannot see the seam. |
 | 0290 | Free position | reserved | Held for a lesson a module 2 writer discovers they need. |
 
 <!-- module-02:end -->
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1010 | The capstone: the same thirty questions, six changes later | reserved | **Read here**, at the foot of module 2. One row per change and the delta it produced. A row with a zero or a negative delta is required. The integrator writes it, not a module writer. |
+| 1010 | The capstone: the same thirty questions, six changes later | written | **Read here**, at the foot of module 2. One row per change and the delta it produced. A row with a zero or a negative delta is required. The integrator writes it, not a module writer. |
 
 ### Module 03 - Agents and agentic systems
 
@@ -135,14 +136,14 @@ Working rung. What an agent loop is, what bounds it, what a tool call actually c
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0300 | Five shapes, and the one that loops | **written** | Most systems people call agents are workflows with predefined code paths; only one shape hands the model the path. |
-| 0310 | A loop you did not write is still a loop you must stop | **written** | A framework's agent loop has exactly one exit you control, and choosing it is a product decision. |
-| 0320 | A tool call is the only verb an agent has | **written** | The model emits a name and a JSON object and executes nothing; everything happens in your code. |
-| 0330 | A failed tool call is a result, not an exception | **written** | An error the model cannot see is an error the model cannot correct. |
-| 0340 | Memory is four stores with four lifetimes | **written** | The context window is one of four, and the other three are the ones nobody in this hub has drawn. |
-| 0350 | Give the agent a memory it maintains, and a path it cannot escape | **written** | A file-backed memory is a store you own, which makes path validation part of the design. |
-| 0360 | Reflection works when the feedback comes from outside | **written** | Two peer-reviewed results disagree, and the difference between them is where the signal came from. |
-| 0370 | Grade the path, not only the answer | **written** | A right answer reached by four redundant calls is a bill you will pay every day. |
+| 0300 | Five shapes, and the one that loops | written | Most systems people call agents are workflows with predefined code paths; only one shape hands the model the path. |
+| 0310 | A loop you did not write is still a loop you must stop | written | A framework's agent loop has exactly one exit you control, and choosing it is a product decision. |
+| 0320 | A tool call is the only verb an agent has | written | The model emits a name and a JSON object and executes nothing; everything happens in your code. |
+| 0330 | A failed tool call is a result, not an exception | written | An error the model cannot see is an error the model cannot correct. |
+| 0340 | Memory is four stores with four lifetimes | written | The context window is one of four, and the other three are the ones nobody in this hub has drawn. |
+| 0350 | Give the agent a memory it maintains, and a path it cannot escape | written | A file-backed memory is a store you own, which makes path validation part of the design. |
+| 0360 | Reflection works when the feedback comes from outside | written | Two peer-reviewed results disagree, and the difference between them is where the signal came from. |
+| 0370 | Grade the path, not only the answer | written | A right answer reached by four redundant calls is a bill you will pay every day. |
 | 0380 | Free position | reserved | Held for a lesson a module 3 writer discovers they need. |
 
 <!-- module-03:end -->
@@ -171,7 +172,7 @@ Working rung, and the join. Module 2's pipeline and module 3's loop become one s
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1030 | The capstone: the retriever other people can call | reserved | **Read here**, at the foot of module 4. The refusal path, the resumable approval, the feedback endpoint, and a golden set bigger than the reader wrote by hand. The integrator writes it, not a module writer. |
+| 1030 | The capstone: the retriever other people can call | written | **Read here**, at the foot of module 4. The refusal path, the resumable approval, the feedback endpoint, and a golden set bigger than the reader wrote by hand. The integrator writes it, not a module writer. |
 
 ### Module 05 - Multi-agent systems
 
@@ -181,12 +182,12 @@ Working rung, and the module a reader may correctly finish by deciding against. 
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0500 | The second agent is a cost before it is a capability | **written** | The token multiplier is measured and published, so the decision can be arithmetic rather than taste. |
-| 0510 | Delegation is a tool call | **written** | A handoff is an ordinary tool call with a history filter on it, and the filter is the design. |
-| 0520 | Planning is a ledger the orchestrator rewrites | **written** | An outer loop that rewrites a durable plan is what survives a stall; a plan held in the window does not. |
-| 0530 | Shared state is what they actually disagree about | **written** | Three sharing mechanisms, and only one of them is still there after a restart. |
-| 0540 | An agent that is not a tool | **written** | MCP goes down to tools and A2A goes across to peers, and the Agent Card is a list of promises. |
-| 0550 | Read the trace before you touch a prompt | **written** | A multi-agent failure has a category, and the category names the design change. |
+| 0500 | The second agent is a cost before it is a capability | written | The token multiplier is measured and published, so the decision can be arithmetic rather than taste. |
+| 0510 | Delegation is a tool call | written | A handoff is an ordinary tool call with a history filter on it, and the filter is the design. |
+| 0520 | Planning is a ledger the orchestrator rewrites | written | An outer loop that rewrites a durable plan is what survives a stall; a plan held in the window does not. |
+| 0530 | Shared state is what they actually disagree about | written | Three sharing mechanisms, and only one of them is still there after a restart. |
+| 0540 | An agent that is not a tool | written | MCP goes down to tools and A2A goes across to peers, and the Agent Card is a list of promises. |
+| 0550 | Read the trace before you touch a prompt | written | A multi-agent failure has a category, and the category names the design change. |
 | 0560 | Reserved: in the field, the orchestrator-worker research system | reserved | Held, not written. The strongest available page here rests on an evaluation set that is not published, so it would have to be written as what the company says it measured. Module 7 uses the same post as one of two priced case studies instead. |
 | 0570 | Free position | reserved | Held for a lesson a module 5 writer discovers they need. |
 
@@ -194,7 +195,7 @@ Working rung, and the module a reader may correctly finish by deciding against. 
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1040 | The capstone: the second agent you decided against | reserved | **Read here**, at the foot of module 5. The measured single-agent cost, the projected multi-agent cost, and the go or no-go. Deciding against it correctly is a pass. The integrator writes it, not a module writer. |
+| 1040 | The capstone: the second agent you decided against | written | **Read here**, at the foot of module 5. The measured single-agent cost, the projected multi-agent cost, and the go or no-go. Deciding against it correctly is a pass. The integrator writes it, not a module writer. |
 
 ### Module 06 - Deployment, optimization and reliability
 
@@ -228,11 +229,12 @@ Frontier rung. Two case studies built from those organisations' own public mater
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0700 | In the field: an orchestrator and its workers | **written** | A fan-out research system buys quality with tokens at a rate the organisation published, and the multiplier is the design decision. |
-| 0710 | In the field: a text-to-SQL agent people actually use | **written** | Two independent teams arrived at the same three-stage decomposition, and every stage exists to shrink the search space. |
-| 0720 | Sizing a system you have not built | **written** | Five numbers price an agentic system before it is written, and the sensitivity says which of the five actually moves the answer. |
-| 0730 | The design review: six questions, on your own system | **written** | The transferable skill is a review you can run on any agentic system, including one you did not build. |
+| 0700 | In the field: an orchestrator and its workers | written | A fan-out research system buys quality with tokens at a rate the organisation published, and the multiplier is the design decision. |
+| 0710 | In the field: a text-to-SQL agent people actually use | written | Two independent teams arrived at the same three-stage decomposition, and every stage exists to shrink the search space. |
+| 0720 | Sizing a system you have not built | written | Five numbers price an agentic system before it is written, and the sensitivity says which of the five actually moves the answer. |
+| 0730 | The design review: six questions, on your own system | written | The transferable skill is a review you can run on any agentic system, including one you did not build. |
 | 0740 | Free position | reserved | Held for a lesson a module 7 writer discovers they need. |
+| 1070 | The capstone: priced and reviewed | written | **Read here**, at the foot of module 7. The six-question review run on the reader's own system, the tail cost of one request and the bill at ten times the traffic. **This position was not reserved by the scaffold**; it was added by the integrator on the captain's instruction, because module 7's own lesson 0730 runs the review on the reader's capstone and the two numbers it produces are what lesson 0820's design record quotes. |
 
 <!-- module-07:end -->
 
@@ -244,16 +246,16 @@ Frontier rung. Three tiers of test for a system that answers differently every t
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0800 | Three tiers of test for a system that answers differently every time | **written** | Non-determinism does not excuse a system from testing; it decides which tier each assertion belongs in. |
-| 0810 | The repository a stranger can run | **written** | Four artefacts carry the promise that somebody else can reproduce your result. |
-| 0820 | The delivery: what replaces demo day | **written** | The demo is an artefact rather than an event, and the rehearsal is of the failure rather than the happy path. |
+| 0800 | Three tiers of test for a system that answers differently every time | written | Non-determinism does not excuse a system from testing; it decides which tier each assertion belongs in. |
+| 0810 | The repository a stranger can run | written | Four artefacts carry the promise that somebody else can reproduce your result. |
+| 0820 | The delivery: what replaces demo day | written | The demo is an artefact rather than an event, and the rehearsal is of the failure rather than the happy path. |
 | 0830 | Free position | reserved | Held for a lesson a module 8 writer discovers they need. |
 
 <!-- module-08:end -->
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 1060 | The capstone: Deliver it | reserved | **Read here**, at the foot of module 8. A public repository, three test tiers, the six-question design record, and a recorded five-minute walkthrough. The integrator writes it, not a module writer. |
+| 1060 | The capstone: Deliver it | written | **Read here**, at the foot of module 8. A public repository, three test tiers, the six-question design record, and a recorded five-minute walkthrough. The integrator writes it, not a module writer. |
 
 
 ## Reference sheets
@@ -269,7 +271,9 @@ Read alongside, not positions in the sequence. All four are the integrator's fin
 
 ## Planned but unwritten
 
-Everything above marked `reserved`: fifty-two lessons, nine free positions at the tail of the eight module blocks, the held module 5 in-the-field position `0560`, four capstone pages. All four reference sheets are written.
+Everything above marked `reserved`, and there is no unwritten lesson or capstone position left:
+**eight free positions** at the tail of the eight module blocks, which are numbering headroom rather than planned pages, and **one held position**, `0560`.
+All 61 pages of the course and all four reference sheets are written.
 
 `0560` deserves its own line, because it is held rather than free.
 The strongest available page there is the orchestrator-worker research system, and its evaluation set is not published, so the page would have to be written as *what the company says it measured* rather than as a result.
