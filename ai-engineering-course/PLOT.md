@@ -244,9 +244,9 @@ Frontier rung. Three tiers of test for a system that answers differently every t
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0800 | Three tiers of test for a system that answers differently every time | reserved | Non-determinism does not excuse a system from testing; it decides which tier each assertion belongs in. |
-| 0810 | The repository a stranger can run | reserved | Four artefacts carry the promise that somebody else can reproduce your result. |
-| 0820 | The delivery: what replaces demo day | reserved | The demo is an artefact rather than an event, and the rehearsal is of the failure rather than the happy path. |
+| 0800 | Three tiers of test for a system that answers differently every time | **written** | Non-determinism does not excuse a system from testing; it decides which tier each assertion belongs in. |
+| 0810 | The repository a stranger can run | **written** | Four artefacts carry the promise that somebody else can reproduce your result. |
+| 0820 | The delivery: what replaces demo day | **written** | The demo is an artefact rather than an event, and the rehearsal is of the failure rather than the happy path. |
 | 0830 | Free position | reserved | Held for a lesson a module 8 writer discovers they need. |
 
 <!-- module-08:end -->
