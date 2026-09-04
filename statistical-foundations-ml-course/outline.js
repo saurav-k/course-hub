@@ -223,6 +223,10 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0093-solution-graded-2-independence.html"
         },
         {
+          "title": "Solution: graded 3, Bonferroni bounds",
+          "href": "lessons/0094-solution-graded-3-bonferroni-bounds.html"
+        },
+        {
           "title": "Solution: graded 4, the alternating dice game",
           "href": "lessons/0095-solution-graded-4-the-alternating-dice-game.html"
         }
