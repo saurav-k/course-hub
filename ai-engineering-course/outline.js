@@ -51,6 +51,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "A generation metric is a judge, and a judge needs its own eval",
           "href": "lessons/0170-a-generation-metric-is-a-judge.html"
+        },
+        {
+          "title": "The baseline you will argue with",
+          "href": "lessons/1000-the-baseline-you-will-argue-with.html"
         }
       ]
     },
@@ -89,6 +93,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Monitoring a system whose failures are quiet",
           "href": "lessons/0670-monitoring-a-system-whose-failures-are-quiet.html"
+        },
+        {
+          "title": "Ship it",
+          "href": "lessons/1050-ship-it.html"
         }
       ]
     }
@@ -97,6 +105,14 @@ window.COURSE_OUTLINE = {
     {
       "title": "Glossary",
       "href": "reference/glossary.html"
+    },
+    {
+      "title": "Eval Harness",
+      "href": "reference/eval-harness.html"
+    },
+    {
+      "title": "Figures",
+      "href": "reference/figures.html"
     }
   ]
 };
