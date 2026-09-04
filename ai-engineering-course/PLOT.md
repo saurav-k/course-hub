@@ -110,15 +110,15 @@ Working rung, and the module whose whole promise is a number that moved. No less
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0200 | Ingestion is a pipeline, and every chunk needs an identity | reserved | A chunk that cannot name its source, its offset and its checksum cannot be re-ingested or cited. |
-| 0210 | A schema is a contract the model has to satisfy | reserved | One object in three forms: a Python class, a JSON Schema, and a wire payload you can validate at the boundary. |
-| 0220 | Chunking is a boundary decision, and the boundary is where meaning is lost | reserved | Retrieval precision and generation sufficiency pull in opposite directions, and the sweep settles it. |
-| 0230 | A chunk that cannot say where it came from cannot be found | reserved | Two repairs for the orphan chunk, with their bills: context written in, against embed then split. |
-| 0240 | The window is an attention budget, not a container | reserved | More retrieved passages raise the chance the answer is present and lower the chance it is attended to. |
-| 0250 | A prompt is a versioned artefact with a name | reserved | A prompt with no name and no version makes a regression unattributable, which is the Tuesday nobody enjoys. |
-| 0260 | Two rankings beat one, and RRF is the cheapest way to add them | reserved | Reciprocal rank fusion needs no scores, no tuning and no training, and its k barely matters. |
-| 0270 | A reranker is a second, more expensive opinion on twenty documents | reserved | A cross-encoder buys ranking quality with latency, linearly, and the funnel is where you choose how much. |
-| 0280 | The document you retrieved is untrusted input | reserved | The retrieved passage is somebody else's text inside your prompt, and the model cannot see the seam. |
+| 0200 | Ingestion is a pipeline, and every chunk needs an identity | **written** | A chunk that cannot name its source, its offset and its checksum cannot be re-ingested or cited. |
+| 0210 | A schema is a contract the model has to satisfy | **written** | One object in three forms: a Python class, a JSON Schema, and a wire payload you can validate at the boundary. |
+| 0220 | Chunking is a boundary decision, and the boundary is where meaning is lost | **written** | Retrieval precision and generation sufficiency pull in opposite directions, and the sweep settles it. |
+| 0230 | A chunk that cannot say where it came from cannot be found | **written** | Two repairs for the orphan chunk, with their bills: context written in, against embed then split. |
+| 0240 | The window is an attention budget, not a container | **written** | More retrieved passages raise the chance the answer is present and lower the chance it is attended to. |
+| 0250 | A prompt is a versioned artefact with a name | **written** | A prompt with no name and no version makes a regression unattributable, which is the Tuesday nobody enjoys. |
+| 0260 | Two rankings beat one, and RRF is the cheapest way to add them | **written** | Reciprocal rank fusion needs no scores, no tuning and no training, and its k barely matters. |
+| 0270 | A reranker is a second, more expensive opinion on twenty documents | **written** | A cross-encoder buys ranking quality with latency, linearly, and the funnel is where you choose how much. |
+| 0280 | The document you retrieved is untrusted input | **written** | The retrieved passage is somebody else's text inside your prompt, and the model cannot see the seam. |
 | 0290 | Free position | reserved | Held for a lesson a module 2 writer discovers they need. |
 
 <!-- module-02:end -->

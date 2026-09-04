@@ -59,6 +59,48 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "02",
+      "title": "Retrieval quality and context engineering",
+      "lessons": [
+        {
+          "title": "Ingestion is a pipeline, and every chunk needs an identity",
+          "href": "lessons/0200-ingestion-is-a-pipeline-and-every-chunk-needs-an-identity.html"
+        },
+        {
+          "title": "A schema is a contract the model has to satisfy",
+          "href": "lessons/0210-a-schema-is-a-contract-the-model-has-to-satisfy.html"
+        },
+        {
+          "title": "Chunking is a boundary decision, and the boundary is where meaning is lost",
+          "href": "lessons/0220-chunking-is-a-boundary-decision-and-the-boundary-is-where-meaning-is-lost.html"
+        },
+        {
+          "title": "A chunk that cannot say where it came from cannot be found",
+          "href": "lessons/0230-a-chunk-that-cannot-say-where-it-came-from-cannot-be-found.html"
+        },
+        {
+          "title": "The window is an attention budget, not a container",
+          "href": "lessons/0240-the-window-is-an-attention-budget-not-a-container.html"
+        },
+        {
+          "title": "A prompt is a versioned artefact with a name",
+          "href": "lessons/0250-a-prompt-is-a-versioned-artefact-with-a-name.html"
+        },
+        {
+          "title": "Two rankings beat one, and RRF is the cheapest way to add them",
+          "href": "lessons/0260-two-rankings-beat-one-and-rrf-is-the-cheapest-way-to-add-them.html"
+        },
+        {
+          "title": "A reranker is a second, more expensive opinion on twenty documents",
+          "href": "lessons/0270-a-reranker-is-a-second-more-expensive-opinion-on-twenty-documents.html"
+        },
+        {
+          "title": "The document you retrieved is untrusted input",
+          "href": "lessons/0280-the-document-you-retrieved-is-untrusted-input.html"
+        }
+      ]
+    },
+    {
       "n": "03",
       "title": "Agents and agentic systems",
       "lessons": [
