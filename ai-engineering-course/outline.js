@@ -159,6 +159,24 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0730-the-design-review-six-questions.html"
         }
       ]
+    },
+    {
+      "n": "08",
+      "title": "Final delivery",
+      "lessons": [
+        {
+          "title": "Three tiers of test for a system that answers differently every time",
+          "href": "lessons/0800-three-tiers-of-test.html"
+        },
+        {
+          "title": "The repository a stranger can run",
+          "href": "lessons/0810-the-repository-a-stranger-can-run.html"
+        },
+        {
+          "title": "The delivery: what replaces demo day",
+          "href": "lessons/0820-the-delivery-what-replaces-demo-day.html"
+        }
+      ]
     }
   ],
   "extras": [
