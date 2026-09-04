@@ -1,0 +1,275 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory is four stores with four lifetimes - End-to-End AI Engineering</title>
+<meta name="description" content="Memory names four different stores that differ by lifetime and by who writes them. Most bugs described as memory bugs are one fact sitting in the wrong one, and the context window is the most expensive place to put it.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 03 &middot; Agents and agentic systems &middot; Lesson 0340</div>
+  <h1>Most memory bugs are one fact sitting in the wrong store</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">9 min</span>
+    The two-store split is quoted from LangGraph <code>1.2.x</code>, which names both; the span vocabulary is from the OpenTelemetry GenAI conventions, marked Development throughout.
+    &middot; <a href="https://docs.langchain.com/oss/python/langgraph/persistence">LangGraph persistence</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>"Memory" is four stores, and they differ by <b>how long a fact lives</b> and <b>who is allowed to write it</b>.</li>
+      <li>The context window is one of them, and it is the one that charges you rent every turn. The other three charge once.</li>
+      <li>Every runtime ships the same split under different nouns: a <b>thread</b>-scoped checkpoint and a <b>cross-thread</b> store.</li>
+      <li>Putting twenty remembered facts in the system prompt costs about <b>eight times</b> as much over ten turns as fetching the two you need, on the arithmetic below.</li>
+      <li>Retrieving from memory is retrieval, so everything module 1 and module 2 taught you about recall applies here unchanged.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Tool calls gave the agent hands; this gives it somewhere to put things.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="Three panels. On the left, what you have: a bounded loop with one bound tool that forgets everything between requests. In the middle, highlighted, four stores drawn as nested lifetimes around a single turn: the context window, the thread checkpoint, the cross-thread store and files. On the right, what it enables: lesson 0350, where the agent writes its own memory, and module 4, where the pause a human resumes is a checkpoint.">
+      <text class="d-mono" x="16" y="24">what you have</text>
+      <rect class="d-bound" x="12" y="34" width="152" height="134" rx="5"/>
+      <rect class="d-box" x="26" y="58" width="124" height="26" rx="4"/>
+      <text class="lbl-sm" x="88" y="76" text-anchor="middle">a tool-using loop</text>
+      <text class="d-mono" x="26" y="106">it answers, then</text>
+      <text class="d-mono" x="26" y="126">forgets everything</text>
+      <text class="d-mono" x="26" y="150">including the fix</text>
+
+      <path class="d-flow" d="M166 100 L190 100"/>
+
+      <text class="d-mono" x="196" y="24">this lesson</text>
+      <rect class="d-focus" x="194" y="34" width="252" height="134" rx="5"/>
+      <rect class="d-box" x="208" y="52" width="106" height="30" rx="4"/>
+      <text class="lbl-sm" x="261" y="72" text-anchor="middle">the window</text>
+      <rect class="d-box" x="324" y="52" width="106" height="30" rx="4"/>
+      <text class="lbl-sm" x="377" y="72" text-anchor="middle">the thread</text>
+      <rect class="d-box" x="208" y="90" width="106" height="30" rx="4"/>
+      <text class="lbl-sm" x="261" y="110" text-anchor="middle">the store</text>
+      <rect class="d-box" x="324" y="90" width="106" height="30" rx="4"/>
+      <text class="lbl-sm" x="377" y="110" text-anchor="middle">files</text>
+      <text class="d-mono" x="320" y="146" text-anchor="middle">one turn  &middot;  one chat  &middot;  one user  &middot;  forever</text>
+
+      <path class="d-flow" d="M448 100 L472 100"/>
+
+      <text class="d-mono" x="478" y="24">what it enables</text>
+      <rect class="d-absent" x="476" y="34" width="152" height="134" rx="5"/>
+      <text class="lbl-b" x="552" y="70" text-anchor="middle">0350 and 04</text>
+      <text class="lbl-sm" x="552" y="98" text-anchor="middle">a memory it writes</text>
+      <text class="lbl-sm" x="552" y="120" text-anchor="middle">a pause it resumes</text>
+      <text class="d-mono" x="552" y="148" text-anchor="middle">both need a store</text>
+
+      <text class="read" x="320" y="206" text-anchor="middle">Only the first of the four is re-sent on every turn, and only it is charged for that.</text>
+      <text class="lbl-sm" x="320" y="234" text-anchor="middle">Choosing a store is choosing a lifetime, and a fact in the wrong lifetime is either lost or paid for forever.</text>
+      <text class="lbl-sm" x="320" y="260" text-anchor="middle">The four are not layers. They are four answers to how long should this last.</text>
+    </svg>
+    <figcaption>The forgetful loop you have, the four places a fact can live, and the two later lessons that both depend on picking correctly. Nothing in the middle panel is a framework feature; every runtime has all four under different names.
+    <b>A memory decision is a lifetime decision, and the window is the shortest and most expensive of them.</b></figcaption>
+  </figure>
+
+  <h2 id="four-stores">1. Four stores, and what each one is actually for</h2>
+  <p><b>The context window</b> holds this turn. Everything in it is re-sent on the next turn, so a fact you put here is a fact you pay for once per turn for the rest of the run. Module 2's lesson on the window as an attention budget is the other half of this: it costs money and it also costs attention.</p>
+  <p><b>Thread state</b> holds this conversation. It survives between turns without being in the prompt, and it survives a process restart if you back it with a database. It does not survive the conversation ending, and it is invisible to a second conversation with the same person.</p>
+  <p><b>A cross-thread store</b> holds this user, or this tenant, indefinitely. It is the first store where a fact learned on Tuesday can be used in December, and it is the first one where you have to decide what may be forgotten.</p>
+  <p><b>Files the agent writes</b> hold the project, and they have a property none of the others do: <b>a person can open them</b>. That is worth more than it sounds when something goes wrong, and it is why the next lesson is about them specifically.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four lifetimes, one fact</div>
+    <div class="fig-claim">Each store answers a different question about how long this matters.</div>
+    <svg class="chart" viewBox="0 0 640 260" role="img" aria-label="Four horizontal bands showing how long a fact survives in each store. The context window band ends at the end of the turn and is marked as re-sent every turn. The thread checkpoint band ends when the conversation ends and survives a restart. The cross-thread store band runs the full width and is marked as surviving both. The files band runs the full width and is marked as the only one a person can open.">
+      <text class="d-mono" x="16" y="22">a fact written now, and how far it reaches</text>
+
+      <text class="lbl-sm" x="150" y="56" text-anchor="end">context window</text>
+      <rect class="d-drop" x="160" y="40" width="86" height="26" rx="4"/>
+      <text class="d-mono" x="256" y="58">gone at the end of the turn, and billed on every one</text>
+
+      <text class="lbl-sm" x="150" y="100" text-anchor="end">thread checkpoint</text>
+      <rect class="d-box" x="160" y="84" width="220" height="26" rx="4"/>
+      <text class="d-mono" x="384" y="102">survives a restart, not a new chat</text>
+
+      <text class="lbl-sm" x="150" y="144" text-anchor="end">cross-thread store</text>
+      <rect class="d-keep" x="160" y="128" width="460" height="26" rx="4"/>
+      <text class="d-mono" x="176" y="146">survives both, and now you must decide what to forget</text>
+
+      <text class="lbl-sm" x="150" y="188" text-anchor="end">a file it writes</text>
+      <rect class="d-keep" x="160" y="172" width="460" height="26" rx="4"/>
+      <text class="d-mono" x="176" y="190">survives both, and a person can open it and correct it</text>
+
+      <text class="read" x="320" y="228" text-anchor="middle">The top band is the only one that is re-sent, and the only one with a per-turn price.</text>
+      <text class="lbl-sm" x="320" y="250" text-anchor="middle">Nothing here is a hierarchy. A fact belongs in exactly one band, chosen by how long it should last.</text>
+    </svg>
+    <figcaption>The same fact written into each of the four, drawn against how far it reaches. The bottom two look identical in reach and differ entirely in who can inspect them, which is usually the deciding property.
+    <b>Ask how long this should last and who should be able to correct it, and the store is chosen for you.</b></figcaption>
+  </figure>
+
+  <h2 id="named">2. The same split, under two names</h2>
+  <p>You do not have to take the four-way split on trust, because runtimes ship it. LangGraph at <code>1.2.x</code> names two of them and defines each in one sentence: checkpointers "persist a thread's graph state as checkpoints" and are for "short-term, thread-scoped memory", while stores "persist application-defined data outside the graph state" and are for "long-term, cross-thread memory". The thread id is what selects the first.</p>
+  <p>That library is a fixture on this page and not its subject. What matters is that the distinction is forced on anybody who builds this: a conversation needs somewhere to keep its own state, and a user needs somewhere that outlives conversations, and those are different stores with different keys, different growth and different deletion rules. If your own implementation has only one of them, one of the two jobs is being done badly.</p>
+
+  <h2 id="the-price">3. What keeping it in the prompt costs</h2>
+  <p>Here is the arithmetic that decides the design, and it uses one assumption you should replace with your own. Say you have twenty remembered facts about a user or a tenant, each about 200 tokens, and a typical request needs two of them.</p>
+  <p>Keeping all twenty in the system prompt costs 4,000 tokens on every turn. Over a ten-turn run that is <span class="keynum">40,000</span> tokens, and nineteen twentieths of them were never relevant.
+  Fetching two on demand costs 400 tokens a turn, plus roughly 100 for the search call, so the same ten turns cost about <span class="keynum">5,000</span>. That is an <span class="keynum">8&times;</span> difference on the memory alone, before the retrieved passages your pipeline was already sending.</p>
+  <p>Anthropic's write-up on context engineering names the effect behind the other half of this, which is not about money: as the number of tokens in the window rises, "the model's ability to accurately recall information from that context decreases". So the expensive option is also the one that dilutes what you kept.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Up front against on demand</div>
+    <div class="fig-claim">Twenty remembered facts cost eight times more kept in the prompt.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A line chart of cumulative tokens spent on remembered facts against turn number from one to ten. The line for keeping all twenty facts in the system prompt rises steeply and straight to forty thousand tokens at turn ten. The line for fetching the two needed facts on demand rises gently to about five thousand. The two are labelled with their totals at turn ten.">
+      <line class="grid" x1="90" y1="200" x2="600" y2="200"/>
+      <line class="grid" x1="90" y1="140" x2="600" y2="140"/>
+      <line class="grid" x1="90" y1="80" x2="600" y2="80"/>
+      <line class="axis" x1="90" y1="248" x2="600" y2="248"/>
+
+      <path class="s-alarm thick" d="M90 230 L147 212 L204 194 L261 176 L318 158 L375 140 L432 122 L489 104 L546 86 L600 68"/>
+      <path class="s-signal thick" d="M90 246 L147 244 L204 242 L261 240 L318 237 L375 235 L432 233 L489 231 L546 229 L600 227"/>
+
+      <text class="lbl-on" x="596" y="58" text-anchor="end">40,000 kept in the prompt</text>
+      <text class="lbl-sm" x="596" y="221" text-anchor="end">5,000 fetched on demand</text>
+
+      <text class="lbl-sm" x="82" y="252" text-anchor="end">0</text>
+      <text class="lbl-sm" x="82" y="204" text-anchor="end">10k</text>
+      <text class="lbl-sm" x="82" y="144" text-anchor="end">25k</text>
+      <text class="lbl-sm" x="82" y="84" text-anchor="end">37k</text>
+      <text class="lbl-sm" x="90" y="268" text-anchor="middle">1</text>
+      <text class="lbl-sm" x="318" y="268" text-anchor="middle">5</text>
+      <text class="lbl-sm" x="600" y="268" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="345" y="288" text-anchor="middle">turn number</text>
+      <text class="ttl" x="20" y="298">cumulative tokens on remembered facts, derived from the assumptions in section 3</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>all twenty in the system prompt</span><span><i class="sw-signal"></i>the two you need, fetched</span></div>
+    <figcaption>This page's arithmetic over one stated assumption - twenty facts of 200 tokens, two needed per turn - rather than a measurement. Change the ratio of facts held to facts needed and the gap changes; change nothing else and the shape holds.
+    <b>The gap is the cost of not knowing which two facts mattered, and a store is how you find out.</b></figcaption>
+  </figure>
+
+  <h2 id="retrieval-again">4. Fetching from memory is retrieval, with all of module 2 attached</h2>
+  <p>The moment you fetch two facts out of twenty, you have a retrieval problem: recall, ranking, and a question about what happens when the right fact is not returned. That is the same problem module 2 spent nine lessons on, and the same measurements apply.</p>
+  <p>Park et al.'s generative-agents paper (arXiv <code>2304.03442v2</code>) is the primary source worth reading here, and the useful part is the ablation rather than the simulation: they remove observation, planning and reflection in turn and report that each contributes to the behaviour. In other words the store was never the interesting part. <b>The retrieval policy over the store is what carries the behaviour</b>, which is exactly what module 2 would have predicted.</p>
+  <p>Packer et al.'s MemGPT paper (arXiv <code>2310.08560v2</code>) supplies the other framing: memory tiers moved in and out of a limited window, borrowed from how an operating system provides the appearance of more memory than it has. Read it for the analogy and not for the implementation.</p>
+
+  <h2 id="the-vocabulary">5. There is already a vocabulary for the spans</h2>
+  <p>You do not have to invent names for what your memory layer does. The OpenTelemetry semantic conventions for generative AI register memory operations alongside the model ones: <code>create_memory</code>, <code>search_memory</code>, <code>update_memory</code>, <code>upsert_memory</code> and <code>delete_memory</code>, plus <code>create_memory_store</code> and <code>delete_memory_store</code> for the store's own lifecycle.</p>
+  <p>Two things travel with those names every time this course quotes them. They live in a repository that publishes <b>no release and no tag at all</b>, and every document in it is marked <b>Status: Development</b>, so attribute spellings can change. What you are committing to is the shape - one span per memory operation, on the same trace as the model call that needed it - and a rename costs you one file of constants. That is the same bargain module 1 made when it instrumented the retrieval span.</p>
+
+  <figure class="diagram stepper" id="one-fact-four-stores">
+    <div class="fig-cap">One fact, three sessions</div>
+    <div class="fig-claim">Only two of the four stores still hold it on Thursday.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user" data-cost="0">
+        <span class="step-role">monday, turn one</span>
+        <span class="step-body">Somebody says their team is only bound by the 2019 policy set, not the 2024 one. Useful, and true for every future question they ask.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="0">
+        <span class="step-role">written four ways</span>
+        <span class="step-body">Imagine it recorded in all four stores at once: the window, the thread checkpoint, the cross-thread store and a file.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="0">
+        <span class="step-role">monday, turn six</span>
+        <span class="step-body">All four still have it. The window copy has now been re-sent six times and is the only one that has cost anything.</span>
+      </li>
+      <li class="step" data-actor="error" data-cost="0">
+        <span class="step-role">the conversation ends</span>
+        <span class="step-body">The window copy is gone. Nothing announced this, and no test covers it.</span>
+      </li>
+      <li class="step" data-actor="error" data-cost="0">
+        <span class="step-role">the process restarts</span>
+        <span class="step-body">The thread checkpoint survives if you backed it with a database and vanishes if you left it in memory. This is a deployment decision masquerading as a memory one.</span>
+      </li>
+      <li class="step" data-actor="user" data-cost="0">
+        <span class="step-role">thursday, a new chat</span>
+        <span class="step-body">The thread checkpoint is keyed to Monday's thread, so it is unreachable. <b>The store and the file are the only two that answer.</b></span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">6</b></span>
+      <span>stores that still hold it: four, then two</span>
+    </div>
+    <figcaption>Play it to step six and notice that nothing failed. Every store did exactly what it promised, and the bug is that somebody chose the wrong one on Monday.
+    <b>The question is never where can I put this, it is how long should this outlive the conversation it came from.</b></figcaption>
+  </figure>
+
+  <div class="callout warn">
+    The chart in section 3 is <b>this page's arithmetic over one stated assumption</b>, not a measurement. The claim that recall falls as the window grows is <b>Anthropic's</b>, reported in its own context-engineering write-up on its own models, and it is evidence that the effect is real rather than a threshold for your system. If you want a number for your own corpus, module 1's harness is where it comes from.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A fact must still be available in a brand-new conversation next month. Which store is the one that guarantees it?</div>
+      <button class="q-opt">the context window</button>
+      <button class="q-opt">a cross-thread store</button>
+      <button class="q-opt">the thread checkpoint</button>
+      <button class="q-opt">the system prompt</button>
+      <div class="q-fb">A cross-thread store is keyed to the user or tenant rather than to the conversation, so a new thread can read it. The context window ends with the turn. The thread checkpoint survives a restart but is keyed to the old thread id, which is exactly the trap: it looks durable and is unreachable. The system prompt is the context window with extra steps, and it charges rent on every turn.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">You want one agreed span vocabulary for reads and writes against your memory store. What do the GenAI conventions offer?</div>
+      <button class="q-opt">nothing, it is model-only</button>
+      <button class="q-opt">one generic memory span</button>
+      <button class="q-opt">named memory operations</button>
+      <button class="q-opt">a metric, not a span name</button>
+      <div class="q-fb">The conventions register create, search, update, upsert and delete as distinct memory operation names, plus two for the store's own lifecycle, so a search and a write are told apart in the trace. They are not model-only. One generic span would lose the distinction that makes the trace worth having. Metrics exist too, and the operation names are span operations, which is what the question asked for.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 30 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Move one fact out of your prompt, and prove it survived.</p>
+      <p><b>Find a fact your capstone currently keeps in the system prompt</b> that is really about one user, one tenant or one corpus rather than about the service. There is almost always one: a default document set, a preferred citation style, a team's own vocabulary.</p>
+      <p><b>Write it into a cross-thread store</b> keyed by user or tenant, and fetch it at request time instead. Wrap the read and the write in spans, using the operation names from section 5.</p>
+      <p><b>Then restart the process and open a new conversation</b>, and confirm the fact is still applied. Record in <code>docs/shape.md</code> the tokens your system prompt lost, and the number of memory spans one request now produces.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Do not build a memory service. A table with a tenant key, a name, a value and an updated timestamp is a cross-thread store, and it is the right size for this exercise.</p>
+      <p>If you cannot find a fact to move, look at the sentences in your system prompt that begin with "always" or "this team". Those are usually facts about one caller wearing a rule's clothes.</p></details>
+
+    <details class="solution"><summary>Show what a good first move looks like</summary>
+      <ol class="worked">
+        <li><b>The fact you find is usually a default, not a preference.</b> "Cite the 2019 policy set unless asked otherwise" reads like an instruction and is a fact about one tenant, which is why it was in the prompt: instructions go there and facts do not.</li>
+        <li><b>The read has to be conditional or you have moved nothing.</b> Fetching every stored fact on every request is the system prompt again, in a slower place. The read should be keyed on the request, and if you cannot key it yet, that is what module 4's retrieval-as-a-tool lesson solves.</li>
+        <li><b>The spans are what make the next decision arguable.</b> Once a request shows one search_memory span returning two rows, you can ask whether the right two came back, which is a recall question and one your module 1 harness already knows how to answer.</li>
+        <li><b>The restart is the test that matters, and it is the one people skip.</b> A store held in a process dictionary passes every unit test and loses everything on the first deploy. Restarting before you believe it takes ten seconds.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your system prompt should have got measurably shorter and your request should now carry one or two memory spans. If the prompt is the same length, you copied the fact rather than moving it, and you are now paying for it twice.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Paste your current system prompt to your assistant and ask it to split every line into two lists: instructions about how the service should behave, and facts about a particular user, tenant or corpus. Then ask which of the four stores each fact belongs in, and why. The disagreements are the interesting part - especially any fact it puts in a file rather than a store, because that is the one somebody will eventually need to correct by hand.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The two-store split in the words of a runtime that implements both: <a href="https://docs.langchain.com/oss/python/langgraph/persistence">Persistence</a>, LangGraph <code>1.2.x</code>. For memory as an architecture rather than a store, with the ablation that shows the retrieval policy is what carries the behaviour: <a href="https://arxiv.org/abs/2304.03442">Generative Agents</a>, Park et al., <code>v2</code>. For the span names, read them with the Development banner in view: the <a href="https://github.com/open-telemetry/semantic-conventions-genai">OpenTelemetry GenAI semantic conventions</a>.</p>
+
+  <div class="pager">
+    <a href="0330-a-failed-tool-call-is-a-result-not-an-exception.html"><span class="dir">&larr; Previous</span><span class="ttl">A failed tool call is a result, not an exception</span></a>
+    <a class="nxt" href="0350-give-the-agent-a-memory-it-maintains.html"><span class="dir">Next &rarr;</span><span class="ttl">Give the agent a memory it maintains, and a path it cannot escape</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0340 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
