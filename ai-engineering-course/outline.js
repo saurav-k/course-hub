@@ -169,6 +169,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "05",
+      "title": "Multi-agent systems",
+      "lessons": [
+        {
+          "title": "The second agent is a cost before it is a capability",
+          "href": "lessons/0500-the-second-agent-is-a-cost-before-it-is-a-capability.html"
+        },
+        {
+          "title": "Delegation is a tool call",
+          "href": "lessons/0510-delegation-is-a-tool-call.html"
+        },
+        {
+          "title": "Planning is a ledger the orchestrator rewrites",
+          "href": "lessons/0520-planning-is-a-ledger-the-orchestrator-rewrites.html"
+        },
+        {
+          "title": "Shared state is what they actually disagree about",
+          "href": "lessons/0530-shared-state-is-what-they-actually-disagree-about.html"
+        },
+        {
+          "title": "An agent that is not a tool",
+          "href": "lessons/0540-an-agent-that-is-not-a-tool.html"
+        },
+        {
+          "title": "Read the trace before you touch a prompt",
+          "href": "lessons/0550-read-the-trace-before-you-touch-a-prompt.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Deployment, optimization and reliability",
       "lessons": [
