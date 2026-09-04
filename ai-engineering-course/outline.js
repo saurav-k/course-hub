@@ -97,6 +97,36 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "04",
+      "title": "From basic to agentic RAG",
+      "lessons": [
+        {
+          "title": "Retrieval becomes a tool the model decides to call",
+          "href": "lessons/0400-retrieval-becomes-a-tool-the-model-decides-to-call.html"
+        },
+        {
+          "title": "A retrieval you do not trust is one you can correct",
+          "href": "lessons/0410-a-retrieval-you-do-not-trust-is-one-you-can-correct.html"
+        },
+        {
+          "title": "A pause is a state you saved, not a thread you blocked",
+          "href": "lessons/0420-a-pause-is-a-state-you-saved.html"
+        },
+        {
+          "title": "A thumb down is a row in the golden set",
+          "href": "lessons/0430-a-thumb-down-is-a-row-in-the-golden-set.html"
+        },
+        {
+          "title": "Your RAG app is a host, and its best source is one you did not write",
+          "href": "lessons/0440-your-rag-app-is-a-host.html"
+        },
+        {
+          "title": "A deep research agent is a retrieval loop with a citation contract",
+          "href": "lessons/0450-a-deep-research-agent-is-a-retrieval-loop.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Deployment, optimization and reliability",
       "lessons": [

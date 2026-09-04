@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A retrieval you do not trust is one you can correct - End-to-End AI Engineering</title>
+<meta name="description" content="Grade the retrieval before you generate from it, and give the system somewhere to go when the grade is bad. A refusal is a designed exit with its own eval cases, not a failure.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 04 &middot; From basic to agentic RAG &middot; Lesson 0410</div>
+  <h1>A system that cannot refuse will always answer</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">11 min</span>
+    Grounded in the paper that put a lightweight evaluator between retrieval and generation, read at <code>v3</code>.
+    &middot; <a href="https://arxiv.org/abs/2401.15884">Corrective RAG</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>The pipeline you have will answer every question, including the ones your corpus cannot answer. Fluently. That is the failure this lesson closes.</li>
+      <li>Corrective RAG puts a <b>lightweight retrieval evaluator</b> between the two halves, returning a confidence degree that triggers different retrieval actions.</li>
+      <li>The evaluator buys you a <b>refusal path</b>, and the design move is to make "I could not find this" a first-class answer with its own eval cases rather than an error.</li>
+      <li>The same principle governs tool errors: an error the model cannot see is an error it cannot correct, so a failed retrieval belongs <b>in the result</b>, not in an exception.</li>
+      <li>The evaluator is a second model call on the request path, so it has a bill and this page works it out.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">One grader between the halves buys three exits instead of one.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A pipeline where retrieve feeds a highlighted grader box, which has three outgoing paths: answer from the passages, search again more broadly, and refuse with a stated reason. Beneath, a note says only the first of the three exists without the grader.">
+      <text class="d-mono" x="16" y="24">what the grader adds</text>
+
+      <rect class="d-box" x="12" y="42" width="118" height="46" rx="4"/>
+      <text class="lbl-sm" x="71" y="70" text-anchor="middle">retrieve</text>
+      <path class="d-flow" d="M130 65 L158 65"/>
+      <rect class="d-focus" x="164" y="34" width="140" height="62" rx="5"/>
+      <text class="lbl-b" x="234" y="60" text-anchor="middle">grade what</text>
+      <text class="lbl-b" x="234" y="78" text-anchor="middle">came back</text>
+
+      <path class="d-flow s-signal" d="M304 50 L364 44"/>
+      <rect class="d-keep" x="370" y="24" width="258" height="40" rx="4"/>
+      <text class="lbl-sm" x="384" y="42">answer from these passages</text>
+      <text class="d-mono" x="384" y="58">the only exit you have today</text>
+
+      <path class="d-flow s-signal" d="M304 66 L364 96"/>
+      <rect class="d-box" x="370" y="76" width="258" height="40" rx="4"/>
+      <text class="lbl-sm" x="384" y="94">search again, differently</text>
+      <text class="d-mono" x="384" y="110">a broader query, or another source</text>
+
+      <path class="d-flow s-alarm" d="M304 84 L364 148"/>
+      <rect class="d-drop" x="370" y="128" width="258" height="40" rx="4"/>
+      <text class="lbl-sm" x="384" y="146">say you could not find it</text>
+      <text class="d-mono" x="384" y="162">a designed answer, not an error</text>
+
+      <rect class="d-bound" x="12" y="196" width="616" height="56" rx="5"/>
+      <text class="lbl-sm" x="26" y="218">without the grader there is one exit, so every question gets an answer</text>
+      <text class="d-mono" x="26" y="238">including the ones the corpus cannot answer at all</text>
+
+      <text class="read" x="320" y="280" text-anchor="middle">The red path is the one nobody builds and the one users trust the system for.</text>
+    </svg>
+    <figcaption>The grader and its three exits, with the single exit you have today drawn at the top. Adding the middle path is a quality improvement; adding the bottom one is a change in what the product claims about itself.
+    <b>A system with one exit is not choosing to answer, it is incapable of doing anything else.</b></figcaption>
+  </figure>
+
+  <h2 id="the-failure">1. The failure this closes</h2>
+  <p>Your retrieval is good now. Recall at ten moved through module 2 and you can defend it. And on any question whose answer is simply not in the corpus, the pipeline still returns ten passages, and the model still writes a confident paragraph out of the nearest ones.</p>
+  <p>This is not a hallucination in the sense people mean. The model did what it was asked: it wrote an answer grounded in the passages it was given. The passages were wrong for the question, and nothing in the system was responsible for noticing.</p>
+  <p>Lesson 0170's metric for it is <b>noise sensitivity</b>, which asks how much an irrelevant retrieved passage degrades the answer. This lesson is what moves that number.</p>
+
+  <h2 id="crag">2. The published shape</h2>
+  <p>Corrective RAG adds what its abstract calls a lightweight retrieval evaluator: it assesses the overall quality of the retrieved documents for a query and returns a <b>confidence degree</b>, on which different knowledge retrieval actions are triggered.</p>
+  <p>The paper describes <b>three outcomes</b> from that confidence, and this course does not name its three labels, because the abstract does not enumerate them and nobody here has read the paper's body. What the abstract does state is two of the mechanisms: large-scale web search is used as an extension when the internal retrieval is not good enough, and a <b>decompose-then-recompose</b> step selectively keeps the key information from retrieved documents and filters the rest.</p>
+  <p>The transferable design is smaller than the paper and easier to build: <b>score the retrieved set before generating, and branch on the score.</b> A cheap model, or even a cross-encoder you already have from lesson 0270, is enough to say whether these ten passages plausibly contain an answer to this question.</p>
+
+  <h2 id="the-refusal">3. The refusal is the point</h2>
+  <p>Of the three exits, the one that changes the product is the refusal, and it is the one teams leave out because it feels like admitting defeat.</p>
+  <p>It is the opposite. A system that says "I could not find this in the handbook" is more useful than one that guesses, because a user can act on it: they escalate, they search themselves, they tell you the document is missing. A confident wrong answer costs them the time to discover it is wrong, plus whatever they did in the meantime.</p>
+  <p><b>Make it a first-class answer with its own eval cases.</b> Add unanswerable questions to the golden set from lesson <a href="0160-measure-the-retrieval-before-the-model-is-involved.html">0160</a>, with the expected behaviour being a refusal, and now refusing correctly is something you measure rather than hope for.
+  Without those rows, every change you make will quietly push the system back toward answering everything, because that is what every other metric rewards.</p>
+
+  <h2 id="errors">4. A failed retrieval is a result, not an exception</h2>
+  <p>The fault-tolerance half of this lesson is one rule with a wide reach. When the store times out, the reranker fails, or the grader itself errors, the temptation is to raise an exception and return a 500.</p>
+  <p>Inside a tool-using loop that is the wrong shape, and the reason is stated plainly in the Model Context Protocol specification at revision <code>2026-07-28</code>: an error originating in the tool should be reported inside the result with an error flag set, <b>not as a protocol-level error response</b>, because otherwise the model cannot see that an error occurred and self-correct.
+  <a href="0330-a-failed-tool-call-is-a-result-not-an-exception.html">A failed tool call is a result, not an exception</a> is where that argument is made in full; this page is where it lands on retrieval.</p>
+  <p>So: a store timeout comes back to the model as "the search failed, no results", and the model can try a narrower query or refuse. A store timeout raised as an exception ends the request and tells the user nothing.
+  Everything else about retries, timeouts and circuit breakers is general engineering that <a href="../../production-systems-course/lessons/0001-resilience-patterns.html">Resilience Patterns</a> owns, and module 6's lesson <a href="0610-the-provider-is-a-dependency-you-do-not-own.html">0610</a> owns what is different when the dependency is a model provider.</p>
+
+  <h2 id="the-bill">5. What the grader costs</h2>
+  <p>The grader is a model call on the request path, so it adds latency to every question and money to every question, including the ones that did not need it.</p>
+  <p>The arithmetic is worth doing before you build it. A grader that reads ten passages is reading roughly the same input as the generator: call it 4,000 input tokens for the passages plus a short instruction, and perhaps 10 output tokens if you ask for a single score.
+  Against a generation call of the same 4,000 input and 300 output, the grader is close to a <b>doubling of input tokens</b> and almost no extra output.</p>
+
+  <figure class="diagram calc" id="grader-bill">
+    <div class="fig-cap">What grading adds</div>
+    <div class="fig-claim">Grading nearly doubles input tokens and adds no output.</div>
+
+    <div class="build-controls">
+      <label>passages graded <input type="range" data-var="k" min="1" max="30" step="1" value="10"></label>
+      <label>tokens per passage <input type="range" data-var="p" min="100" max="1200" step="50" value="400"></label>
+      <label>questions per day <input type="range" data-var="q" min="100" max="20000" step="100" value="2000"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>extra input tokens per question <b data-calc="product" data-of="k p">4,000</b></span>
+      <span>added daily, at $3 per Mtok <b data-calc="scale" data-of="k p q" data-by="0.000003" data-decimals="2" data-prefix="$">$24.00</b></span>
+    </div>
+    <figcaption>The grader re-reads the passages, so its input is your retrieved set again. Drop the first slider to three and watch the bill: grading only the top three is usually enough to tell whether the set contains an answer.
+    <b>The cheapest correct grader reads fewer passages than the generator does, and deciding how many is the whole design.</b></figcaption>
+  </figure>
+
+  <p>Three ways to make it affordable, in the order worth trying. <b>Grade fewer passages</b> than you generate from, because deciding whether an answer is present needs less evidence than writing one.
+  <b>Use a smaller model</b>, since this is a classification task and not a writing task. <b>Reuse the reranker</b> you already run: a cross-encoder score below a threshold you calibrate on your golden set is a grader with no extra model call at all, and it is the version to build first.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where the branch goes</div>
+    <div class="fig-claim">Two of the three exits loop, and one of them terminates.</div>
+    <div class="mermaid">
+flowchart TD
+  R["Retrieved set"] --> G{"Grader confidence"}
+  G -- high --> A["Answer from these passages"]
+  G -- middling --> B["Search again, broader query&lt;br/&gt;or another source"]
+  G -- low --> C["Refuse, and say why&lt;br/&gt;an eval case of its own"]
+  B --> G
+  A --> D["Record the grade on the span"]
+  C --> D
+    </div>
+    <figcaption>The branch drawn as a state machine, with the loop back from the middle exit. The recording step at the bottom is what makes the grade something you can tune later rather than a decision that vanishes.
+    <b>Without a cap on the loop, the middle exit is how a question costs forty times what you budgeted.</b></figcaption>
+  </figure>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Your store times out inside a tool-using loop. What should the model receive?</div>
+      <button class="q-opt">A result saying the search failed</button>
+      <button class="q-opt">A protocol error ending the request</button>
+      <button class="q-opt">An empty passage list with no note</button>
+      <button class="q-opt">The previous question's cached passages</button>
+      <div class="q-fb">An error the model cannot see is an error it cannot correct, so the failure belongs in the result where the model can read it and try a narrower query or refuse. A protocol error ends the turn and the model never learns anything happened. An empty list with no explanation is indistinguishable from a corpus that has no answer, which sends the model down the wrong branch. Serving another question's passages is a correctness bug, not a fallback.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Why does the refusal path need its own rows in the golden set?</div>
+      <button class="q-opt">Refusals are slower and need timing data</button>
+      <button class="q-opt">The judge scores refusals more reliably</button>
+      <button class="q-opt">Every other metric rewards answering</button>
+      <button class="q-opt">Refusals cannot be graded automatically</button>
+      <div class="q-fb">Recall, faithfulness and relevance all improve when the system answers, so without cases where refusing is the correct behaviour, every future change quietly pushes it back toward answering everything. Refusals are usually faster, not slower, and timing is not why. A judge is no more reliable on refusals than on anything else. Refusals are easy to grade automatically, which is precisely why adding the rows is cheap.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>Give the system a way to refuse, and prove it uses it.</p>
+      <p>First, <b>add five unanswerable questions to your golden set</b>: questions in your domain whose answer is genuinely not in your corpus. Record the expected behaviour as a refusal. Run them now, before building anything, and record how many produce a confident answer. That number is what this lesson is fixing.</p>
+      <p>Then build the grader as a threshold on the reranker score you already compute, calibrated on your golden set, with three branches. Re-run the whole set, and report <b>recall at 10 unchanged, refusals correct out of five, and false refusals on the answerable questions</b>.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Calibrate the threshold on the answerable questions first: find the score below which your known-good passage almost never sits. That is your floor, and starting from the score distribution you already have costs nothing and beats guessing a number.</p>
+      <p>Watch the false refusals harder than the correct ones. A grader that refuses everything scores five out of five on the new rows and has destroyed the product.</p></details>
+
+    <details class="solution"><summary>Show what the two numbers together mean</summary>
+      <ol class="worked">
+        <li><b>Before the grader, expect four or five of the five unanswerable questions to get a confident answer.</b> That is the normal, healthy-looking state of a pipeline that has no refusal path, and seeing it on your own corpus is the point of running them first.</li>
+        <li><b>Report correct refusals and false refusals as a pair, always.</b> Either number alone is gameable in opposite directions: a threshold at the top refuses everything, a threshold at the bottom refuses nothing, and only the pair shows you the trade. This is the same discipline as recall and precision and it is the same mistake if you drop one.</li>
+        <li><b>A false refusal on a question the system used to answer correctly is a regression, even though the answer is now honest.</b> Treat it as one. If the threshold costs you more correct answers than it prevents wrong ones, it is set too high, and your golden set is what tells you.</li>
+        <li><b>Grade fewer passages than you generate from.</b> Start at three. If grading the top three gives the same verdict as grading ten on your golden set, you have the same quality at a third of the added input cost, and the calculator above shows what that is worth per day.</li>
+        <li><b>Record the grade on the retrieval span.</b> It is the input to lesson 0430's triage: a wrong answer that the grader rated highly is a different defect from one it rated poorly and answered anyway.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If your grader refuses zero of the five unanswerable questions, the threshold is below the noise floor of your scores and is doing nothing; if it refuses any of your original thirty, check those by hand before adjusting, because one or two of them may genuinely be unanswerable and you have found a defect in the golden set rather than in the grader.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to write five questions that sound exactly like your corpus but whose answers are not in it. Those are much harder than obviously out-of-domain questions and they are what your users will actually ask. Then ask it to look at the retrieval scores for those five beside five answerable ones, and to propose the threshold. Check its reasoning against your own distribution rather than taking the number.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The paper that put a confidence-scored evaluator between retrieval and generation, and added web search and a decompose-then-recompose step behind it: <a href="https://arxiv.org/abs/2401.15884">Corrective Retrieval Augmented Generation</a>, Yan et al., at <code>v3</code>. Read the abstract for the evaluator's role, and note that it does not name the three actions, which is why this page does not either. The self-critiquing alternative is <a href="https://arxiv.org/abs/2310.11511">Self-RAG</a> at <code>v1</code>. For the general resilience patterns this page deliberately does not re-teach, <a href="../../production-systems-course/lessons/0001-resilience-patterns.html">Resilience Patterns</a>.</p>
+
+  <div class="pager">
+    <a class="prv" href="0400-retrieval-becomes-a-tool-the-model-decides-to-call.html"><span class="dir">&larr; Previous</span><span class="ttl">Retrieval becomes a tool the model decides to call</span></a>
+    <a class="nxt" href="0420-a-pause-is-a-state-you-saved.html"><span class="dir">Next &rarr;</span><span class="ttl">A pause is a state you saved, not a thread you blocked</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0410 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
