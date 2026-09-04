@@ -15,6 +15,44 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0000-your-demo-works-and-you-cannot-prove-it.html"
         }
       ]
+    },
+    {
+      "n": "06",
+      "title": "Deployment, optimization and reliability",
+      "lessons": [
+        {
+          "title": "Four shapes for a request that takes thirty seconds",
+          "href": "lessons/0600-four-shapes-for-a-request-that-takes-thirty-seconds.html"
+        },
+        {
+          "title": "The provider is a dependency you do not own",
+          "href": "lessons/0610-the-provider-is-a-dependency-you-do-not-own.html"
+        },
+        {
+          "title": "Where the seconds go",
+          "href": "lessons/0620-where-the-seconds-go.html"
+        },
+        {
+          "title": "Four caches, and only two of them are yours",
+          "href": "lessons/0630-four-caches-and-only-two-of-them-are-yours.html"
+        },
+        {
+          "title": "Semantic caching, and the false hit you have to measure",
+          "href": "lessons/0640-semantic-caching-and-the-false-hit-you-have-to-measure.html"
+        },
+        {
+          "title": "What a prompt injection is allowed to do",
+          "href": "lessons/0650-what-a-prompt-injection-is-allowed-to-do.html"
+        },
+        {
+          "title": "CI when the unit test is a distribution",
+          "href": "lessons/0660-ci-when-the-unit-test-is-a-distribution.html"
+        },
+        {
+          "title": "Monitoring a system whose failures are quiet",
+          "href": "lessons/0670-monitoring-a-system-whose-failures-are-quiet.html"
+        }
+      ]
     }
   ],
   "extras": [

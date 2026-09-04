@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Four shapes for a request that takes thirty seconds - End-to-End AI Engineering</title>
+<meta name="description" content="A model call is slow, streamed, expensive and non-idempotent. Each endpoint of an AI system is one of four request shapes, and picking the wrong one is what makes a demo unshippable.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 06 &middot; Deployment &middot; Lesson 0600</div>
+  <h1>Nobody waits thirty seconds for a page that is still thinking</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">10 min</span>
+    Framed against FastAPI's own account of what it does with <code>def</code> and <code>async def</code>, read at <code>0.141.x</code>, and the Message Batches API limits as Anthropic publishes them.
+    &middot; <a href="https://fastapi.tiangolo.com/async/">Concurrency and async / await</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>Everything that makes an AI service different from an ordinary one falls out of a single fact: <b>a model call is a slow, expensive, non-idempotent call to a machine you do not own</b>.</li>
+      <li>There are <b>four request shapes</b> and no fifth: synchronous, streamed, queued with a handle, and offline batch. Every endpoint you have is one of them, whether or not you chose.</li>
+      <li>The question that picks the shape is not technical. It is <b>does the caller wait, and does the answer have to be fresh</b>.</li>
+      <li>Your demo is synchronous everywhere because that is the default, and the default is wrong for at least one endpoint you already have.</li>
+      <li>Anthropic prices the batch shape at <b>50% of standard</b>, so the shape is not only an availability decision.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Modules 1 to 5 made it right; module 6 is where it survives other people.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A diagram in two bands. The upper band shows what modules one to five built: a pipeline, a golden set, an agent loop, drawn as three boxes inside a boundary labelled works on your machine. An arrow leads down to the lower band, labelled module six, which holds eight small boxes for lessons 0600 to 0670. The first box, request shapes, is highlighted as where the reader is now.">
+      <text class="d-mono" x="16" y="24">what you already have</text>
+      <rect class="d-bound" x="12" y="34" width="616" height="76" rx="6"/>
+      <rect class="d-box" x="28" y="52" width="170" height="40" rx="4"/>
+      <text class="lbl-b" x="113" y="77" text-anchor="middle">a pipeline</text>
+      <rect class="d-box" x="216" y="52" width="170" height="40" rx="4"/>
+      <text class="lbl-b" x="301" y="77" text-anchor="middle">a golden set</text>
+      <rect class="d-box" x="404" y="52" width="208" height="40" rx="4"/>
+      <text class="lbl-b" x="508" y="77" text-anchor="middle">an agent that uses both</text>
+      <text class="d-mono" x="440" y="46">one caller: you</text>
+
+      <path class="d-flow s-signal" d="M320 112 L320 142"/>
+      <text class="d-mono" x="332" y="132">other people arrive</text>
+
+      <text class="d-mono" x="16" y="164">module 06</text>
+      <rect class="d-focus" x="12" y="174" width="146" height="46" rx="4"/>
+      <text class="lbl-b" x="85" y="194" text-anchor="middle">request shapes</text>
+      <text class="d-mono" x="85" y="211" text-anchor="middle">0600</text>
+      <rect class="d-box" x="166" y="174" width="146" height="46" rx="4"/>
+      <text class="lbl-b" x="239" y="194" text-anchor="middle">health</text>
+      <text class="d-mono" x="239" y="211" text-anchor="middle">0610</text>
+      <rect class="d-box" x="320" y="174" width="146" height="46" rx="4"/>
+      <text class="lbl-b" x="393" y="194" text-anchor="middle">latency and cost</text>
+      <text class="d-mono" x="393" y="211" text-anchor="middle">0620 0630 0640</text>
+      <rect class="d-box" x="474" y="174" width="154" height="46" rx="4"/>
+      <text class="lbl-b" x="551" y="194" text-anchor="middle">safety and proof</text>
+      <text class="d-mono" x="551" y="211" text-anchor="middle">0650 0660 0670</text>
+
+      <text class="read" x="320" y="256" text-anchor="middle">Nothing below changes what your system answers.</text>
+      <text class="read" x="320" y="278" text-anchor="middle">All of it changes whether the answer arrives.</text>
+    </svg>
+    <figcaption>The three artefacts modules 1 to 5 leave you with, and the eight lessons that stand between them and a second user. This page is the first box, and it is the one the other seven assume.
+    <b>Module 6 is the first module that is not about the quality of the answer.</b></figcaption>
+  </figure>
+
+  <h2 id="the-thirty-second-request">1. The request that does not fit the shape you have</h2>
+  <p>Your service works. You call it, it thinks for a while, and it returns an answer you are pleased with.
+  Then a second person calls it while you are still waiting, and a third one gives up after fifteen seconds and clicks the button again, and now there are two of the same expensive request in flight and one of them will be thrown away.</p>
+  <p>Nothing in that paragraph is about model quality, and none of it happens to a service that returns in eighty milliseconds.
+  It happens because a model call has four properties an ordinary database read does not have, and every one of them breaks an assumption the default request shape is built on.
+  It is <b>slow</b>, in seconds rather than milliseconds. It is <b>incremental</b>, because tokens arrive one at a time and the first one is available long before the last. It is <b>expensive</b>, so a request you throw away costs real money rather than a little CPU. And it is <b>non-idempotent</b>: the retry your client library performs for you does not return the earlier answer, it pays for a second one.</p>
+  <p>Those four properties are the whole of this module's premise, so it is worth being precise about which one hurts where. Slow decides whether the caller can hold a connection. Incremental decides whether they have to. Expensive decides what a duplicate costs. Non-idempotent decides whether a retry is safe, and it is the one people discover last.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Four shapes, one axis</div>
+    <div class="fig-claim">The caller's connection is the thing being traded away, one step at a time.</div>
+    <svg class="chart" viewBox="0 0 640 320" role="img" aria-label="Four request shapes drawn as four rows. Each row shows a caller box, the connection held during the request, and what comes back. Synchronous holds the connection for the whole generation. Streamed holds it too but the first token arrives early. Queued returns a handle immediately and the caller polls later. Batch has no caller waiting at all, and its row is drawn with a dropped connection.">
+      <text class="d-mono" x="16" y="22">shape</text>
+      <text class="d-mono" x="150" y="22">the caller's connection</text>
+      <text class="d-mono" x="516" y="22">what returns</text>
+
+      <text class="lbl-b" x="16" y="56">synchronous</text>
+      <rect class="d-drop" x="150" y="38" width="330" height="26" rx="4"/>
+      <text class="d-mono" x="315" y="56" text-anchor="middle">held, whole generation</text>
+      <rect class="d-box" x="500" y="38" width="128" height="26" rx="4"/>
+      <text class="d-mono" x="564" y="56" text-anchor="middle">the answer</text>
+
+      <text class="lbl-b" x="16" y="112">streamed</text>
+      <rect class="d-drop" x="150" y="94" width="330" height="26" rx="4"/>
+      <text class="d-mono" x="315" y="112" text-anchor="middle">held, but useful at once</text>
+      <path class="d-flow s-signal" d="M182 84 L182 66"/>
+      <text class="d-mono" x="192" y="82">first token here</text>
+      <rect class="d-box" x="500" y="94" width="128" height="26" rx="4"/>
+      <text class="d-mono" x="564" y="112" text-anchor="middle">tokens, in order</text>
+
+      <text class="lbl-b" x="16" y="168">queued</text>
+      <rect class="d-keep" x="150" y="150" width="70" height="26" rx="4"/>
+      <text class="d-mono" x="185" y="168" text-anchor="middle">brief</text>
+      <rect class="d-absent" x="228" y="150" width="252" height="26" rx="4"/>
+      <text class="d-mono" x="354" y="168" text-anchor="middle">released, work continues</text>
+      <rect class="d-box" x="500" y="150" width="128" height="26" rx="4"/>
+      <text class="d-mono" x="564" y="168" text-anchor="middle">a job handle</text>
+
+      <text class="lbl-b" x="16" y="224">batch</text>
+      <rect class="d-ghost" x="150" y="206" width="330" height="26" rx="4"/>
+      <text class="d-mono" x="315" y="224" text-anchor="middle">nobody is waiting</text>
+      <rect class="d-box" x="500" y="206" width="128" height="26" rx="4"/>
+      <text class="d-mono" x="564" y="224" text-anchor="middle">a file, later</text>
+
+      <line class="axis" x1="150" y1="248" x2="628" y2="248"/>
+      <text class="lbl-sm" x="150" y="266">caller present</text>
+      <text class="lbl-sm" x="628" y="266" text-anchor="end">caller gone</text>
+      <text class="read" x="320" y="298" text-anchor="middle">Every row down the page gives up a promise and buys back a resource.</text>
+    </svg>
+    <figcaption>The four shapes as one progression rather than four options. Red marks a connection held open, green a connection held briefly, dashed one deliberately released, and the faded row is the shape where no caller exists at all.
+    <b>You are not choosing an implementation; you are choosing what you promise the caller about waiting.</b></figcaption>
+  </figure>
+
+  <h2 id="the-four-shapes">2. The four shapes, and the question that picks one</h2>
+  <p><b>Synchronous</b> is what you already have. The caller opens a connection, you generate, you reply. It is correct whenever generation is genuinely short and the caller genuinely cannot proceed without the whole answer, and it is the wrong default for everything else because it makes the caller's patience your capacity limit.</p>
+  <p><b>Streamed</b> holds the same connection and changes what the caller experiences, because the first token can be on their screen a second in while the last is twenty seconds away. Nothing about the total work changes. This is the one shape that improves a number you cannot improve any other way, and lesson <a href="0620-where-the-seconds-go.html">0620</a> is about that number.</p>
+  <p><b>Queued with a handle</b> is the shape people skip. The caller posts the work, you return an identifier immediately, and the work happens without anybody holding a socket. It costs you a job store and a way to report progress, and it buys the only thing that actually survives a slow provider: your service stops being slow when the model is.</p>
+  <p><b>Offline batch</b> is the shape where no caller exists. You accumulate work and submit it as a block. Anthropic's Message Batches API charges <span class="keynum">50%</span> of standard prices for exactly this, caps a batch at <b>100,000 requests or 256 MB</b>, expires anything unfinished after <b>24 hours</b>, and keeps results downloadable for <b>29 days</b>. Those are the vendor's published limits, not a measurement, and they are the shape of the promise: cheaper, bounded, and no use at all to somebody waiting.</p>
+  <p>The question that picks the shape is two words long. <b>Does the caller wait?</b> If no, you are in the bottom two rows and the only remaining question is whether the answer has to be fresh. If yes, the second question is whether a partial answer is worth anything, and if it is, you stream.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Two questions, four leaves</div>
+    <div class="fig-claim">Neither question is about the model, and both are answered by the product.</div>
+    <div class="mermaid">
+flowchart TD
+  S["An endpoint that calls a model"] --> A{"Is a caller&lt;br/&gt;waiting on it?"}
+  A -- no --> B{"Does the answer&lt;br/&gt;have to be fresh?"}
+  B -- no --> BATCH["Offline batch&lt;br/&gt;half price, no deadline"]
+  B -- yes --> QUEUE["Queued with a handle&lt;br/&gt;a job store and a poll"]
+  A -- yes --> C{"Is a partial answer&lt;br/&gt;worth anything?"}
+  C -- yes --> STREAM["Streamed&lt;br/&gt;same work, earlier value"]
+  C -- no --> SYNC["Synchronous&lt;br/&gt;only if generation is short"]
+    </div>
+    <figcaption>The decision as it actually runs. Both questions are about what the product promises rather than about how the model behaves, which is why an engineer cannot answer them alone.
+    <b>Three of the four leaves are unreachable from a codebase where every handler is synchronous.</b></figcaption>
+  </figure>
+
+  <h2 id="what-the-caller-waits">3. What the caller actually holds open</h2>
+  <p>The arithmetic is worth doing once, on assumptions you can replace with your own.
+  Take a request that generates 600 output tokens, a model that produces about 25 tokens a second, and a time to first token of about 1.2 seconds. Generation is then 600 / 25 = 24 seconds, and the whole request is about 25.2 seconds.</p>
+  <p>Under the synchronous shape the caller holds a connection for all 25.2 of those seconds and sees nothing until the end. Streamed, the same 25.2 seconds of work produce something readable at 1.2 seconds. Queued, the caller's own request is a write to a job store and returns in well under a second; the 25.2 seconds still happen, on your side, where a timeout is yours to set. Those three numbers are this page's arithmetic over the three assumptions above, and every one of them moves if your model or your output length differs.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">Seconds until something useful</div>
+    <div class="fig-claim">Two shapes do identical work and differ twenty-fold in what the caller feels.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A horizontal bar chart of seconds before the caller sees anything useful, for three request shapes. Synchronous is twenty-five point two seconds, streamed is one point two seconds, and queued is zero point one seconds. A dashed reference line marks the total work of twenty-five point two seconds, which every shape still pays somewhere.">
+      <line class="grid" x1="255" y1="30" x2="255" y2="222"/>
+      <line class="grid" x1="370" y1="30" x2="370" y2="222"/>
+      <line class="grid" x1="485" y1="30" x2="485" y2="222"/>
+      <line class="grid" x1="600" y1="30" x2="600" y2="222"/>
+      <line class="axis" x1="140" y1="222" x2="620" y2="222"/>
+
+      <text class="lbl-sm" x="132" y="62" text-anchor="end">synchronous</text>
+      <rect class="m-alarm" x="140" y="42" width="460" height="30"/>
+      <text class="lbl-on" x="588" y="62" text-anchor="end">25.2 s</text>
+
+      <text class="lbl-sm" x="132" y="122" text-anchor="end">streamed</text>
+      <rect class="m-stat" x="140" y="102" width="22" height="30"/>
+      <text class="lbl-sm" x="172" y="121">1.2 s</text>
+
+      <text class="lbl-sm" x="132" y="182" text-anchor="end">queued</text>
+      <rect class="m-stat" x="140" y="162" width="3" height="30"/>
+      <text class="lbl-sm" x="152" y="181">0.1 s</text>
+
+      <line class="s-noise ref" x1="600" y1="34" x2="600" y2="222"/>
+      <text class="lbl-sm" x="596" y="242" text-anchor="end">total work, 25.2 s, paid by all three</text>
+
+      <text class="lbl-sm" x="140" y="262" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="370" y="262" text-anchor="middle">10</text>
+      <text class="lbl-sm" x="600" y="262" text-anchor="middle">20</text>
+      <text class="ttl" x="20" y="288">seconds before the caller sees anything, by shape</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-alarm"></i>caller sees nothing</span><span><i class="sw-stat"></i>caller sees something</span></div>
+    <figcaption>Derived from three stated assumptions - 600 output tokens, 25 tokens a second, 1.2 seconds to first token - and not measured on any system. The dashed line is the work itself, which no shape removes.
+    <b>Streaming does not make the request faster; it makes twenty-four of its seconds happen after the reader is already reading.</b></figcaption>
+  </figure>
+
+  <figure class="diagram stepper" id="queued-job-trace">
+    <div class="fig-cap">One request, queued</div>
+    <div class="fig-claim">The caller's own request is over before the model has been called at all.</div>
+
+    <ol class="step-list">
+      <li class="step" data-actor="user" data-cost="0">
+        <span class="step-role">post the work</span>
+        <span class="step-body">The caller sends the question and nothing else. No model has been touched.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="0">
+        <span class="step-role">store and return</span>
+        <span class="step-body">You write a job row, return <code>202</code> with an id, and the caller's connection closes. <b>Their request is now complete.</b></span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="4000">
+        <span class="step-role">a worker picks it up</span>
+        <span class="step-body">Retrieval runs and the prompt is packed. The 4,000 tokens of retrieved text enter the request here.</span>
+      </li>
+      <li class="step" data-actor="model" data-cost="600">
+        <span class="step-role">generate</span>
+        <span class="step-body">Twenty-four seconds of generation, on your side of the boundary, where your own timeout applies.</span>
+      </li>
+      <li class="step" data-actor="tool" data-cost="0">
+        <span class="step-role">write the result</span>
+        <span class="step-body">The answer lands on the job row. Nothing is lost if the caller has closed their laptop.</span>
+      </li>
+      <li class="step" data-actor="user" data-cost="0">
+        <span class="step-role">collect</span>
+        <span class="step-body">The caller asks about the id and gets the answer, or a status. This request is fast whatever the model did.</span>
+      </li>
+    </ol>
+
+    <div class="build-readout">
+      <span>step <b data-step-out="index">1</b> of <b data-step-out="total">6</b></span>
+      <span>tokens spent so far <b data-step-out="cost">0</b></span>
+    </div>
+    <figcaption>Play it through and watch where the caller appears: at the first step and the last, and nowhere in between. The token figures use the same worked assumptions as the chart above.
+    <b>A retry of step one costs nothing, which is the property the synchronous shape cannot offer.</b></figcaption>
+  </figure>
+
+  <h2 id="the-python-part">4. The one thing FastAPI will do behind your back</h2>
+  <p>There is a specific way to build the queued shape and lose all of its benefit, and it is common enough to be worth naming.
+  FastAPI documents that a path operation declared with plain <code>def</code> "is run in an external threadpool that is then awaited", while one declared <code>async def</code> is awaited directly on the event loop.
+  That is the whole rule, and the consequence is that a blocking call - a synchronous provider SDK, a synchronous database driver - inside an <code>async def</code> handler blocks the loop and therefore every other request in the process, including the cheap poll that was supposed to be fast.</p>
+  <p>So the shape is not only about your route table. An endpoint that returns a job handle in one line still stalls the whole worker if that one line is a blocking write on the event loop. Declare the handler <code>def</code> and let the framework give it a thread, or use a client that genuinely awaits. Both are correct; mixing them is what is not.</p>
+  <p>This is a service-design concern rather than an AI one, and <a href="../../backend-engineering-course/lessons/1300-concurrency-is-how-a-server-waits.html">Backend Engineering, <i>Concurrency is how a server waits</i></a> is where the general mechanism lives.</p>
+
+  <div class="callout warn">
+    The batch limits on this page - 50% of standard pricing, 100,000 requests or 256 MB, a 24-hour expiry and 29 days of result retention - are Anthropic's published product limits for its own API, read at the documentation linked below.
+    They are not a measurement, they are not a benchmark, and they are not a claim about any other provider. Gemini's batch behaviour is documented separately and differs; check it rather than assuming this transfers.
+  </div>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="1">
+      <div class="q-stem">A user reloads your page after fifteen seconds because nothing has appeared. Which property of a model call makes that reload expensive rather than merely untidy?</div>
+      <button class="q-opt">That generation is slow, in seconds</button>
+      <button class="q-opt">That the call is not idempotent</button>
+      <button class="q-opt">That tokens arrive one at a time</button>
+      <button class="q-opt">That the provider is a third party</button>
+      <div class="q-fb">Non-idempotence is what turns the reload into a second paid generation rather than a second read of the same answer. Slowness is why they reloaded, which is the cause and not the cost. Incremental arrival is the property streaming exploits, and it would have prevented the reload rather than made it cheap. That the provider is external matters for outages, covered in 0610, and not for this.</div>
+    </div>
+
+    <div class="q" data-answer="3">
+      <div class="q-stem">Your nightly job re-summarises every document that changed. Which shape does the two-question test in section 2 select, and on which answer?</div>
+      <button class="q-opt">Streamed, because output is long</button>
+      <button class="q-opt">Synchronous, because it is simplest</button>
+      <button class="q-opt">Queued, because the work is slow</button>
+      <button class="q-opt">Batch, because nobody is waiting</button>
+      <div class="q-fb">The first question is whether a caller is waiting, and for a nightly job nobody is, which reaches the batch leaf directly and at half the price on the published rates. Streaming is about a waiting reader, and there is none. Synchronous is what the job probably is today and it is the shape being replaced. Queued is the right answer only when a caller does come back for the result on a human timescale, which the second question is there to separate.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, in your own repository</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>This is module 6's first increment to the capstone, and it is a sorting exercise before it is a coding one.</p>
+      <p><b>List every endpoint your application exposes</b> that ends in a model call. Most readers find between three and six: an ask endpoint, an ingest or re-index endpoint, something that summarises, and at least one thing a scheduled job calls.</p>
+      <p><b>For each one, answer the two questions</b> from section 2 in writing - does a caller wait, and is a partial answer worth anything - and write down the shape that falls out. Then compare that list with what your code does today. The gap is the exercise.</p>
+      <p><b>Then implement the two that differ most</b>: convert your main ask endpoint to a streamed response, and convert one endpoint that no caller waits on into a queued job that returns an identifier.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>The job store does not have to be a queue broker. A table with an id, a status, a result and a created timestamp is enough to prove the shape, and swapping it for a real broker later changes no caller.</p>
+      <p>If every endpoint you have comes out synchronous, you have probably answered "does a caller wait" for the HTTP client rather than for a person. A scheduled job is an HTTP client that is not waiting for anything.</p></details>
+
+    <details class="solution"><summary>Show what a finished sort looks like</summary>
+      <ol class="worked">
+        <li><b>The ask endpoint is streamed, not synchronous.</b> A caller waits and a partial answer is worth a great deal, because reading starts at the first token. This is the single change on this page that a user notices, and it changes no cost.</li>
+        <li><b>Re-indexing is queued.</b> A caller triggers it and then does something else, so it returns an id and a status. Making this synchronous is what causes the ten-minute request that a load balancer eventually kills, and the kill leaves the index half written.</li>
+        <li><b>The nightly summary is batch.</b> Nobody is waiting and freshness is measured in a day, so it takes the published half price. This is the one endpoint whose shape is a cost decision rather than an availability decision.</li>
+        <li><b>One endpoint stays synchronous, and you should be able to name it.</b> Usually something short and cheap - a classification, a routing decision - where the caller genuinely cannot continue and generation is under a second. If nothing on your list qualifies, that is a finding rather than a mistake.</li>
+        <li><b>Write the four-row table into the repository.</b> Endpoint, shape, and the sentence that justified it. Lesson 0610 sets timeouts per shape and lesson 0620 sets a latency budget per shape, and both start from this table.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> If your streamed endpoint's total time went down, you measured wrong: streaming moves when value arrives and does not reduce the work. Time to first token should fall by roughly the generation time, and total time should be unchanged within noise. If total time rose slightly, that is the streaming overhead and it is expected.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> If the four shapes still feel like three, ask your agent for a real endpoint in your own code and have it argue both sides of "does the caller wait" for that specific route, naming who the caller is in each argument. If the FastAPI rule in section 4 felt abstract, ask it to write the two-line handler that blocks the event loop and the corrected version beside it, and to say which one your current code resembles.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The published limits behind every batch claim on this page, including the discount, the size caps and the expiry: <a href="https://platform.claude.com/docs/en/build-with-claude/batch-processing">Message Batches API</a>. Read the limits section first and note which of them is a hard cap and which is a "most batches" statement, because the difference decides whether the shape is safe for work with a deadline.</p>
+
+  <div class="pager">
+    <a class="prv" href="../index.html"><span class="dir">&larr; Back</span><span class="ttl">Course map</span></a>
+    <a class="nxt" href="0610-the-provider-is-a-dependency-you-do-not-own.html"><span class="dir">Next &rarr;</span><span class="ttl">The provider is a dependency you do not own</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0600 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
