@@ -1,0 +1,258 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>A reranker is a second, more expensive opinion on twenty documents - End-to-End AI Engineering</title>
+<meta name="description" content="Retrieval optimises recall over a large set and reranking optimises precision over a small one. The split is what makes a cross-encoder affordable, and its cost is linear in the shortlist.">
+<link rel="stylesheet" href="../../assets/hub.css">
+<script src="../../assets/hub.js"></script>
+<script src="../outline.js"></script>
+</head>
+<body>
+<nav class="spine"><div class="spine-inner">
+  <a class="home" href="../index.html">END-TO-END AI ENGINEERING</a>
+  <a class="hide-sm" href="../index.html">Course map</a>
+  <a class="hide-sm" href="../reference/glossary.html">Glossary</a>
+  <a href="../../index.html">Course Hub</a>
+  <span class="sp"></span>
+</div></nav>
+
+<main class="wrap">
+  <div class="eyebrow">Module 02 &middot; Retrieval quality and context engineering &middot; Lesson 0270</div>
+  <h1>Retrieve wide, rerank narrow, and price the shortlist</h1>
+  <p class="paper-meta">
+    <span class="pill med">working</span>
+    <span class="pill">8 min</span>
+    Grounded in the cross-encoder reranking paper, read at <code>arXiv:1901.04085v5</code>, and in BEIR's zero-shot comparison, read at <code>arXiv:2104.08663v4</code>.
+    &middot; <a href="https://arxiv.org/abs/1901.04085">arXiv:1901.04085</a>
+  </p>
+
+  <div class="card tldr">
+    <h2 class="h-label">The one-minute version</h2>
+    <ul>
+      <li>A retriever must score a whole corpus, so it scores query and document <b>separately</b> and precomputes half the work. That is what limits how good it can be.</li>
+      <li>A cross-encoder reads the query and the document <b>together</b> and cannot precompute anything, which is what makes it better and what makes it unaffordable on a corpus.</li>
+      <li>The funnel is the whole idea: <b>retrieve a hundred cheaply, rescore them expensively, pass what fits</b>.</li>
+      <li>Its cost is <b>linear in the shortlist</b> and it lands on the request path, so this is a latency decision before it is a quality one.</li>
+      <li>It sits on top of a real tension: one published result prefers <b>top-20 over top-5</b>, another says the middle of a long context is where answers are missed. Measure, do not pick.</li>
+    </ul>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Where this sits</div>
+    <div class="fig-claim">Two scorers, at two stages, on two very different set sizes.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A funnel drawn as four stacked bars of decreasing width: the whole corpus, the top one hundred after fused retrieval, the top twenty after reranking, and what is finally packed into the prompt. The first narrowing is labelled cheap and per corpus, the second is labelled expensive and per document, and a note beneath says only the second one runs a model on the request path.">
+      <text class="d-mono" x="16" y="24">one query, two narrowings</text>
+
+      <rect class="d-box" x="60" y="40" width="520" height="34" rx="4"/>
+      <text class="lbl-b" x="320" y="62" text-anchor="middle">the whole corpus</text>
+
+      <path class="d-flow" d="M320 78 L320 96"/>
+      <text class="d-mono" x="336" y="92">cheap, and it touches everything</text>
+
+      <rect class="d-box" x="160" y="100" width="320" height="34" rx="4"/>
+      <text class="lbl-b" x="320" y="122" text-anchor="middle">top 100, fused - lesson 0260</text>
+
+      <path class="d-flow s-alarm" d="M320 138 L320 156"/>
+      <text class="d-mono" x="336" y="152">expensive, linear in the shortlist</text>
+
+      <rect class="d-focus" x="220" y="160" width="200" height="34" rx="4"/>
+      <text class="lbl-b" x="320" y="182" text-anchor="middle">top 20, reranked</text>
+
+      <path class="d-flow" d="M320 198 L320 216"/>
+      <text class="d-mono" x="336" y="212">as much as your 0240 budget allows</text>
+
+      <rect class="d-keep" x="250" y="220" width="140" height="34" rx="4"/>
+      <text class="lbl-b" x="320" y="242" text-anchor="middle">what is packed</text>
+
+      <text class="read" x="320" y="278" text-anchor="middle">Only the second narrowing runs a model while the reader waits.</text>
+    </svg>
+    <figcaption>The funnel this module has been building, with the two scorers at their stages and the cost of each narrowing named beside it. Everything above the highlighted bar has already happened by the time a reranker is asked for an opinion.
+    <b>Reranking is affordable only because retrieval already threw away 99.9% of the corpus for free.</b></figcaption>
+  </figure>
+
+  <h2 id="two-scorers">1. Why the second scorer can be better</h2>
+  <p>The retriever you have been improving is a bi-encoder. It turns a document into a vector without ever seeing a query, which is exactly what lets you compute every document's vector once at ingest and then answer a query with a nearest-neighbour search. The cost of that arrangement is that the document's representation cannot depend on the question: whatever the vector kept, it kept before anybody asked anything.</p>
+  <p>A cross-encoder does the opposite. It takes the query and one document as a single input and reads them together, so the model can attend from a word in the question to a word in the passage. Nothing can be precomputed, because the input does not exist until the question arrives. That is a strictly better position for judging relevance and a strictly worse position for scale.</p>
+
+  <figure class="diagram">
+    <div class="fig-cap">What each scorer can precompute</div>
+    <div class="fig-claim">One does its work at ingest, the other cannot start until you ask.</div>
+    <svg class="chart" viewBox="0 0 640 250" role="img" aria-label="Two panels. On the left, the bi-encoder: the document is encoded at ingest into a stored vector, the query is encoded once per request, and the score is a single arithmetic comparison. On the right, the cross-encoder: nothing is stored, and every query and document pair is a fresh model pass, so a shortlist of N documents costs N passes on the request path.">
+      <text class="d-mono" x="16" y="22">what happens before the question arrives</text>
+
+      <rect class="d-bound" x="12" y="34" width="300" height="150" rx="6"/>
+      <text class="lbl-b" x="26" y="58">bi-encoder - the retriever</text>
+      <rect class="d-keep" x="26" y="70" width="272" height="26" rx="4"/>
+      <text class="d-mono" x="38" y="88">document encoded at ingest, stored</text>
+      <rect class="d-box" x="26" y="102" width="272" height="26" rx="4"/>
+      <text class="d-mono" x="38" y="120">query encoded once per request</text>
+      <rect class="d-box" x="26" y="134" width="272" height="26" rx="4"/>
+      <text class="d-mono" x="38" y="152">score is one arithmetic comparison</text>
+      <text class="lbl-sm" x="26" y="176">scales to a corpus</text>
+
+      <rect class="d-bound" x="328" y="34" width="300" height="150" rx="6"/>
+      <text class="lbl-b" x="342" y="58">cross-encoder - the reranker</text>
+      <rect class="d-absent" x="342" y="70" width="272" height="26" rx="4"/>
+      <text class="d-mono" x="354" y="88">nothing can be stored in advance</text>
+      <rect class="d-drop" x="342" y="102" width="272" height="26" rx="4"/>
+      <text class="d-mono" x="354" y="120">one model pass per query and document</text>
+      <rect class="d-drop" x="342" y="134" width="272" height="26" rx="4"/>
+      <text class="d-mono" x="354" y="152">N documents is N passes, while you wait</text>
+      <text class="lbl-sm" x="342" y="176">scales to a shortlist</text>
+
+      <text class="read" x="320" y="212" text-anchor="middle">The reranker is better because it refuses the shortcut the retriever takes.</text>
+      <text class="lbl-sm" x="320" y="234" text-anchor="middle">Both are models; only one of them can answer before the question is asked.</text>
+    </svg>
+    <figcaption>The two scorers read as what each can do before a question exists. Green is work already done, red is work that lands on the request, and the dashed box is the storage the cross-encoder cannot have.
+    <b>The property that makes the cross-encoder accurate is the same property that makes it impossible to run over a corpus.</b></figcaption>
+  </figure>
+
+  <p>The evidence that the second pass is worth having is old and clear. Nogueira and Cho's re-implementation of BERT as a passage reranker was "the top entry in the leaderboard of the MS MARCO passage retrieval task, outperforming the previous state of the art by 27% (relative) in MRR@10". BEIR's later comparison, over eighteen zero-shot datasets, finds that "re-ranking and late-interaction-based models on average achieve the best zero-shot performances, however, at high computational costs" - which is this lesson's whole argument in one sentence, including the second half.</p>
+
+  <h2 id="the-bill">2. The bill, which is linear and lands on the request</h2>
+  <p>Reranking N documents is N cross-encoder passes, so the added latency is N times the per-pass cost. There is no batching trick that removes the linearity; batching improves the constant.</p>
+
+  <div class="math">
+    added_latency = N &times; per_pass_ms
+    <span class="gloss">Read as: the milliseconds a reranker adds to one request is the number of documents in the shortlist, multiplied by the milliseconds one query-and-document pass takes on your hardware. Measure the second term rather than taking it from a benchmark.</span>
+  </div>
+
+  <figure class="diagram">
+    <div class="fig-cap">Latency by shortlist size</div>
+    <div class="fig-claim">A latency budget picks the shortlist size for you.</div>
+    <svg class="chart" viewBox="0 0 640 300" role="img" aria-label="A line chart of milliseconds added to a request against the number of documents reranked, from zero to two hundred, at a stated four milliseconds per document. The line rises straight from zero to eight hundred milliseconds. A dashed reference line marks a three hundred millisecond budget, which the line crosses at about seventy-five documents.">
+      <line class="grid" x1="100" y1="190" x2="610" y2="190"/>
+      <line class="grid" x1="100" y1="140" x2="610" y2="140"/>
+      <line class="grid" x1="100" y1="90" x2="610" y2="90"/>
+      <line class="axis" x1="100" y1="40" x2="100" y2="240"/>
+      <line class="axis" x1="100" y1="240" x2="610" y2="240"/>
+
+      <line class="s-alarm ref" x1="100" y1="165" x2="610" y2="165"/>
+      <text class="lbl-sm" x="300" y="158">a 300 ms budget is spent at 75 documents</text>
+
+      <polyline class="s-stat" points="100,240 151,220 228,190 355,140 610,40"/>
+      <circle class="m-stat" cx="151" cy="220" r="4"/>
+      <circle class="m-stat" cx="228" cy="190" r="4"/>
+      <circle class="m-stat" cx="355" cy="140" r="4"/>
+      <circle class="m-stat" cx="610" cy="40" r="4"/>
+
+      <text class="lbl-sm" x="92" y="244" text-anchor="end">0</text>
+      <text class="lbl-sm" x="92" y="194" text-anchor="end">200</text>
+      <text class="lbl-sm" x="92" y="144" text-anchor="end">400</text>
+      <text class="lbl-sm" x="92" y="94" text-anchor="end">600</text>
+      <text class="lbl-sm" x="92" y="44" text-anchor="end">800</text>
+
+      <text class="lbl-sm" x="100" y="262" text-anchor="middle">0</text>
+      <text class="lbl-sm" x="151" y="262" text-anchor="middle">20</text>
+      <text class="lbl-sm" x="228" y="262" text-anchor="middle">50</text>
+      <text class="lbl-sm" x="355" y="262" text-anchor="middle">100</text>
+      <text class="lbl-sm" x="610" y="262" text-anchor="middle">200</text>
+      <text class="lbl-sm" x="355" y="284" text-anchor="middle">documents reranked</text>
+      <text class="ttl" x="20" y="288">milliseconds added</text>
+    </svg>
+    <div class="chart-legend"><span><i class="sw-stat"></i>latency added</span><span><i class="sw-alarm"></i>a stated budget</span></div>
+    <figcaption>Derived from one stated assumption of four milliseconds a document, which is a placeholder until you have measured your own. The line is straight because the relationship is a multiplication, and no configuration changes that.
+    <b>Choose the budget first and read the shortlist size off the line, rather than choosing a round number and discovering the latency later.</b></figcaption>
+  </figure>
+
+  <figure class="diagram calc" id="rerank-bill">
+    <div class="fig-cap">What the shortlist costs</div>
+    <div class="fig-claim">Latency is linear in the shortlist and in the per-pass cost.</div>
+
+    <div class="build-controls">
+      <label>documents reranked <input type="range" data-var="n" min="10" max="200" step="10" value="100"></label>
+      <label>ms per document <input type="range" data-var="m" min="1" max="10" step="1" value="4"></label>
+      <label>questions per day <input type="range" data-var="q" min="100" max="10000" step="100" value="1000"></label>
+    </div>
+
+    <div class="build-readout">
+      <span>added per question <b data-calc="product" data-of="n m">400</b> ms</span>
+      <span>reranker compute seconds per day <b data-calc="scale" data-of="n m q" data-by="0.001">400</b></span>
+    </div>
+    <figcaption>Halve the shortlist from 100 to 50 and both numbers halve. Then ask whether the twenty documents you finally pack were ever likely to come from ranks 51 to 100.
+    <b>The shortlist you rerank is a cost you pay on every question, for a difference that shows up on a few.</b></figcaption>
+  </figure>
+
+  <h2 id="the-tension">3. How many to pass on, which is genuinely unsettled</h2>
+  <p>Reranking gives you a better-ordered shortlist. How much of it to put in the prompt is a separate question, and the two best-evidenced answers this course could open point in opposite directions.</p>
+  <p>Anthropic's retrieval work reports that "passing the top-20 chunks to the model is more effective than just the top-10 or top-5", measured on their own corpora. Lesson 0240's sources say the recall of a long context degrades as it grows, and that the middle is where information is missed. Both can be true, because they are claims about different things - whether the answer is present, and whether it is used - and the balance between them depends on how long your passages are and how good your ordering now is.</p>
+  <p>What a good reranker changes about that argument is the ordering, and the ordering is what the position finding cares about. That is the reason to do the two together: a reranked top-20, packed with the strongest passage adjacent to the question, is a different experiment from an unreranked top-20 in retriever order.</p>
+
+  <div class="callout warn">
+    Both of those results were measured by their authors on their own corpora with their own models, and neither is a setting for your system. This course cannot tell you whether 5, 10 or 20 is right for your questions, and any page that does is quoting somebody else's corpus at you. The experiment is four runs and you have the harness for it.
+  </div>
+
+  <h2 id="what-moved">4. What this changed</h2>
+  <p>Reranking is the last rung of the published ladder from lesson 0230, and the ladder is worth re-reading before you spend anything: the first two rungs took the failure rate from 5.7% to 2.9% at ingest-time cost, and the reranker took it from 2.9% to 1.9% at request-time cost. That is the smallest of the three gains, and it is the only one your users wait for.</p>
+  <p>So record two numbers together or the row is meaningless. Run the golden set with the reranker over your fused top 100, and record <b>recall@10 and p95 latency</b>, before and after. A reranker that adds four points of recall and 400 milliseconds is a decision for whoever owns the product's latency, and your job is to hand them both halves rather than the flattering one.</p>
+  <p>Then vary the shortlist. Reranking 100 and reranking 50 usually differ less than the arithmetic suggests, because the documents at ranks 51 to 100 rarely survive to the top 20 anyway - and if that is true on your corpus you have just halved the cost for nothing.</p>
+  <p>The whiteboard framing of the same stage is <a href="../../ai-system-design-course/lessons/0001-rag-and-retrieval.html#reranking">Reranking</a> in AI System Design for Staff+ Interviews.</p>
+
+  <h2>Check yourself</h2>
+  <div class="quiz">
+    <h3 class="h-label">Retrieval practice</h3>
+    <p class="note-sm">Answer from memory before revealing.</p>
+
+    <div class="q" data-answer="0">
+      <div class="q-stem">Why can a cross-encoder not simply replace your retriever?</div>
+      <button class="q-opt">It cannot precompute, so it must score every document live</button>
+      <button class="q-opt">It scores relevance worse than a vector search does</button>
+      <button class="q-opt">It needs the corpus to be indexed in a second database</button>
+      <button class="q-opt">It returns a ranking rather than a similarity score value</button>
+      <div class="q-fb">The cross-encoder reads query and document together, so nothing about a document can be computed before the question exists, and scoring a corpus would mean a model pass per document per query. It scores relevance better, which is the reason to want it. It needs no extra store, because it reads the text you already have. Both scorers produce a number you can sort by, so the output shape is not the obstacle.</div>
+    </div>
+
+    <div class="q" data-answer="2">
+      <div class="q-stem">Your reranker improves recall@10 by four points and adds 400 ms at p95. What belongs in the capstone table?</div>
+      <button class="q-opt">The recall gain, since latency belongs in module 6</button>
+      <button class="q-opt">The latency, since the recall gain is inside the noise</button>
+      <button class="q-opt">Both numbers, because the change bought one with the other</button>
+      <button class="q-opt">Neither, until the shortlist size has also been swept</button>
+      <div class="q-fb">The whole point of the module's rule is that a change is recorded with what it cost, and this is the first change in the module whose cost lands on every request a user waits for. Deferring latency to a later module is how a system arrives at deployment already too slow. Four points on thirty questions is a real move, not noise. Sweeping the shortlist is the next experiment, not a precondition for recording this one.</div>
+    </div>
+  </div>
+
+  <h2>Practice <span class="note-sm">about 45 minutes, with a terminal</span></h2>
+
+  <div class="practice">
+    <div class="p-head"><span class="tag">Practice 1</span><span class="pill med">working</span></div>
+
+    <div class="p-stem">
+      <p>This is the module's last retrieval change and the first one whose cost your users feel.</p>
+      <p><b>Measure the per-pass cost first.</b> Score one query against one document with your chosen cross-encoder, a hundred times, and take the median. That number replaces the placeholder in this page's arithmetic and decides everything below.</p>
+      <p><b>Rerank the fused top 100</b> from lesson 0260 down to 20, and pack those 20 with the strongest passage adjacent to the question, as lesson 0240 established.</p>
+      <p><b>Record recall@10 and p95 latency together</b>, before and after, on the same thirty questions.</p>
+      <p><b>Then halve the shortlist</b> to 50 and re-run. If the quality is unchanged, take the cheaper one and write down that you did.</p>
+      <p><b>Finally, sweep what you pass on</b>: 5, 10 and 20 reranked passages, and see whether your own corpus prefers the larger set.</p>
+    </div>
+
+    <details class="hint"><summary>Hint</summary>
+      <p>Measure the per-pass cost with the shortlist you will actually use, batched the way you will actually batch it. A single-pair timing on a cold model overstates it by a lot, and a fully batched timing on a warm one understates the tail your p95 will see.</p>
+      <p>Reranking and reordering are two changes. Run the reranker in retriever-packing order first, then change the packing order, so you can attribute whatever moves.</p></details>
+
+    <details class="solution"><summary>Show what a good result looks like</summary>
+      <ol class="worked">
+        <li><b>The per-pass number is the one that makes the rest real.</b> At 4 ms a document, a shortlist of 100 is 400 ms, which is a serious fraction of a two-second answer. At 0.5 ms it is 50 ms and the decision is easy. You cannot know which case you are in without measuring it.</li>
+        <li><b>Expect the ladder's shape, not its numbers.</b> The published ladder gained about a point of failure rate from reranking after gaining nearly three from ingest-time work. A reranker that transforms your results usually means the earlier stages were leaving something on the table, which is worth chasing before you pay per request.</li>
+        <li><b>Compare 100 and 50 on the questions that changed.</b> If the answer for every golden-set question came from the fused top 50, then reranking 100 is scoring 50 documents that could never have been packed, and halving it costs nothing at all.</li>
+        <li><b>Write the row with both halves.</b> "rerank top 100 to 20: recall@10 0.79 to 0.83, p95 620 ms to 1,010 ms" is a complete row and it is the one that lets somebody decide. The same row with the latency left out is the reason systems arrive at module 6 unshippable.</li>
+      </ol>
+      <p class="p-check"><b>Sanity check.</b> Your added latency should be close to the shortlist size times the per-pass cost you measured. If it is much larger, the reranker is being loaded or the passages are being re-fetched per pass; if it is much smaller, some of the shortlist is being skipped, and the recall number you just recorded is for a different configuration than you think.</p></details>
+  </div>
+
+  <div class="teacher-note"><b>Your teacher.</b> Ask your agent to time one cross-encoder pass on your own hardware and to put that number into the arithmetic on this page rather than the placeholder. Then ask it to find, across your thirty questions, the deepest fused rank that any finally-packed passage came from. That single number tells you how much of your shortlist is doing work, and it is usually much smaller than the shortlist.</div>
+
+  <h2 class="h-label">Primary source to go deeper</h2>
+  <p>The comparison that puts reranking in context rather than in isolation: <a href="https://arxiv.org/abs/2104.08663">BEIR: A Heterogenous Benchmark for Zero-shot Evaluation of Information Retrieval Models</a>, read at <code>v4</code>. It evaluates ten systems over eighteen datasets and states both halves of this lesson's claim in one sentence, including "at high computational costs".</p>
+
+  <div class="pager">
+    <a href="0260-two-rankings-beat-one-and-rrf-is-the-cheapest-way-to-add-them.html"><span class="dir">&larr; Previous</span><span class="ttl">Two rankings beat one, and RRF is the cheapest way to add them</span></a>
+    <a class="nxt" href="0280-the-document-you-retrieved-is-untrusted-input.html"><span class="dir">Next &rarr;</span><span class="ttl">The document you retrieved is untrusted input</span></a>
+  </div>
+
+  <footer><p>End-to-End AI Engineering &middot; Lesson 0270 &middot; <a href="../reference/glossary.html">Glossary</a></p></footer>
+</main>
+</body>
+</html>
