@@ -221,6 +221,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Solution: graded 2, independence four ways",
           "href": "lessons/0093-solution-graded-2-independence.html"
+        },
+        {
+          "title": "Solution: graded 4, the alternating dice game",
+          "href": "lessons/0095-solution-graded-4-the-alternating-dice-game.html"
         }
       ]
     },
