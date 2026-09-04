@@ -181,12 +181,12 @@ Working rung, and the module a reader may correctly finish by deciding against. 
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0500 | The second agent is a cost before it is a capability | reserved | The token multiplier is measured and published, so the decision can be arithmetic rather than taste. |
-| 0510 | Delegation is a tool call | reserved | A handoff is an ordinary tool call with a history filter on it, and the filter is the design. |
-| 0520 | Planning is a ledger the orchestrator rewrites | reserved | An outer loop that rewrites a durable plan is what survives a stall; a plan held in the window does not. |
-| 0530 | Shared state is what they actually disagree about | reserved | Three sharing mechanisms, and only one of them is still there after a restart. |
-| 0540 | An agent that is not a tool | reserved | MCP goes down to tools and A2A goes across to peers, and the Agent Card is a list of promises. |
-| 0550 | Read the trace before you touch a prompt | reserved | A multi-agent failure has a category, and the category names the design change. |
+| 0500 | The second agent is a cost before it is a capability | **written** | The token multiplier is measured and published, so the decision can be arithmetic rather than taste. |
+| 0510 | Delegation is a tool call | **written** | A handoff is an ordinary tool call with a history filter on it, and the filter is the design. |
+| 0520 | Planning is a ledger the orchestrator rewrites | **written** | An outer loop that rewrites a durable plan is what survives a stall; a plan held in the window does not. |
+| 0530 | Shared state is what they actually disagree about | **written** | Three sharing mechanisms, and only one of them is still there after a restart. |
+| 0540 | An agent that is not a tool | **written** | MCP goes down to tools and A2A goes across to peers, and the Agent Card is a list of promises. |
+| 0550 | Read the trace before you touch a prompt | **written** | A multi-agent failure has a category, and the category names the design change. |
 | 0560 | Reserved: in the field, the orchestrator-worker research system | reserved | Held, not written. The strongest available page here rests on an evaluation set that is not published, so it would have to be written as what the company says it measured. Module 7 uses the same post as one of two priced case studies instead. |
 | 0570 | Free position | reserved | Held for a lesson a module 5 writer discovers they need. |
 
