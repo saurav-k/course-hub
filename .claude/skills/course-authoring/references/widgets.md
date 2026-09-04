@@ -493,11 +493,12 @@ These eleven classes are that gap closed.
 | `d-mono` | text in the mono face, small and soft | machine text: an offset, a key, a wire value, a file name |
 | `read` | italic text in full ink | the sentence the figure says out loud |
 
-Three things about them, and each is the reason a rule is written the way it is.
+Four things about them, and each is the reason a rule is written the way it is.
 
 - **Fill is a state, not decoration.** A row of `d-keep` cells with one `d-absent` at the end is a claim about the row. That is why the charting paint rule is scoped to charts and does not reach here.
 - **A connector takes its colour from a paired `s-*` class, and the arrowhead follows.** `class="d-flow s-alarm"` is a red line with a red head; `class="d-flow"` alone is a neutral one. The head fills with `context-stroke`, so it can never disagree with the line it sits on, and you never state a colour to get one.
 - **`d-mono` is what makes a drawing read as a machine.** The reference corpus uses a mono face inside a figure 504 times; before this we had no way to.
+- **Text inside a `d-*` box is `lbl-b`, never `lbl-on`.** `lbl-on` is `fill: var(--surface)`, the page's own ground, and it is meant for a saturated `m-*` mark. Every `d-*` fill is a `-soft` tint of that same ground, so a label written `lbl-on` inside one is near-invisible in both modes, at every palette, and nothing reports it: the element is in the DOM and the contrast matrix only measures the tokens, not which label was put on which fill.
 
 #### The worked example
 
