@@ -129,6 +129,28 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0670-monitoring-a-system-whose-failures-are-quiet.html"
         }
       ]
+    },
+    {
+      "n": "07",
+      "title": "Agentic AI system design",
+      "lessons": [
+        {
+          "title": "In the field: an orchestrator and its workers",
+          "href": "lessons/0700-in-the-field-an-orchestrator-and-its-workers.html"
+        },
+        {
+          "title": "In the field: a text-to-SQL agent people actually use",
+          "href": "lessons/0710-in-the-field-a-text-to-sql-agent-people-actually-use.html"
+        },
+        {
+          "title": "Sizing a system you have not built",
+          "href": "lessons/0720-sizing-a-system-you-have-not-built.html"
+        },
+        {
+          "title": "The design review: six questions, on your own system",
+          "href": "lessons/0730-the-design-review-six-questions.html"
+        }
+      ]
     }
   ],
   "extras": [
