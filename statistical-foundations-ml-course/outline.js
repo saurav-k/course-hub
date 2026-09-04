@@ -213,6 +213,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Practice: processes and modelling",
           "href": "lessons/0044-practice-processes-and-modelling.html"
+        },
+        {
+          "title": "Solution, graded 1: counting and sampling",
+          "href": "lessons/0092-solution-graded-1-counting-and-sampling.html"
         }
       ]
     },
@@ -437,6 +441,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Glossary",
       "href": "reference/glossary.html"
+    },
+    {
+      "title": "Lecture 2 Formula Sheet",
+      "href": "reference/lecture-2-formula-sheet.html"
     },
     {
       "title": "Lecture 3 Formula Sheet",
