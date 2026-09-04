@@ -135,14 +135,14 @@ Working rung. What an agent loop is, what bounds it, what a tool call actually c
 
 | # | Position | Status | Notes |
 |---|---|---|---|
-| 0300 | Five shapes, and the one that loops | reserved | Most systems people call agents are workflows with predefined code paths; only one shape hands the model the path. |
-| 0310 | A loop you did not write is still a loop you must stop | reserved | A framework's agent loop has exactly one exit you control, and choosing it is a product decision. |
-| 0320 | A tool call is the only verb an agent has | reserved | The model emits a name and a JSON object and executes nothing; everything happens in your code. |
-| 0330 | A failed tool call is a result, not an exception | reserved | An error the model cannot see is an error the model cannot correct. |
-| 0340 | Memory is four stores with four lifetimes | reserved | The context window is one of four, and the other three are the ones nobody in this hub has drawn. |
-| 0350 | Give the agent a memory it maintains, and a path it cannot escape | reserved | A file-backed memory is a store you own, which makes path validation part of the design. |
-| 0360 | Reflection works when the feedback comes from outside | reserved | Two peer-reviewed results disagree, and the difference between them is where the signal came from. |
-| 0370 | Grade the path, not only the answer | reserved | A right answer reached by four redundant calls is a bill you will pay every day. |
+| 0300 | Five shapes, and the one that loops | **written** | Most systems people call agents are workflows with predefined code paths; only one shape hands the model the path. |
+| 0310 | A loop you did not write is still a loop you must stop | **written** | A framework's agent loop has exactly one exit you control, and choosing it is a product decision. |
+| 0320 | A tool call is the only verb an agent has | **written** | The model emits a name and a JSON object and executes nothing; everything happens in your code. |
+| 0330 | A failed tool call is a result, not an exception | **written** | An error the model cannot see is an error the model cannot correct. |
+| 0340 | Memory is four stores with four lifetimes | **written** | The context window is one of four, and the other three are the ones nobody in this hub has drawn. |
+| 0350 | Give the agent a memory it maintains, and a path it cannot escape | **written** | A file-backed memory is a store you own, which makes path validation part of the design. |
+| 0360 | Reflection works when the feedback comes from outside | **written** | Two peer-reviewed results disagree, and the difference between them is where the signal came from. |
+| 0370 | Grade the path, not only the answer | **written** | A right answer reached by four redundant calls is a bill you will pay every day. |
 | 0380 | Free position | reserved | Held for a lesson a module 3 writer discovers they need. |
 
 <!-- module-03:end -->

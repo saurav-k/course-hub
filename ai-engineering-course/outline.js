@@ -55,6 +55,44 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "03",
+      "title": "Agents and agentic systems",
+      "lessons": [
+        {
+          "title": "Five shapes, and the one that loops",
+          "href": "lessons/0300-five-shapes-and-the-one-that-loops.html"
+        },
+        {
+          "title": "A loop you did not write is still a loop you must stop",
+          "href": "lessons/0310-a-loop-you-did-not-write-is-still-a-loop-you-must-stop.html"
+        },
+        {
+          "title": "A tool call is the only verb an agent has",
+          "href": "lessons/0320-a-tool-call-is-the-only-verb-an-agent-has.html"
+        },
+        {
+          "title": "A failed tool call is a result, not an exception",
+          "href": "lessons/0330-a-failed-tool-call-is-a-result-not-an-exception.html"
+        },
+        {
+          "title": "Memory is four stores with four lifetimes",
+          "href": "lessons/0340-memory-is-four-stores-with-four-lifetimes.html"
+        },
+        {
+          "title": "Give the agent a memory it maintains, and a path it cannot escape",
+          "href": "lessons/0350-give-the-agent-a-memory-it-maintains.html"
+        },
+        {
+          "title": "Reflection works when the feedback comes from outside",
+          "href": "lessons/0360-reflection-works-when-the-feedback-comes-from-outside.html"
+        },
+        {
+          "title": "Grade the path, not only the answer",
+          "href": "lessons/0370-grade-the-path-not-only-the-answer.html"
+        }
+      ]
+    },
+    {
       "n": "06",
       "title": "Deployment, optimization and reliability",
       "lessons": [
