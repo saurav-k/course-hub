@@ -135,6 +135,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Grade the path, not only the answer",
           "href": "lessons/0370-grade-the-path-not-only-the-answer.html"
+        },
+        {
+          "title": "The agent that knows when to stop",
+          "href": "lessons/1020-the-agent-that-knows-when-to-stop.html"
         }
       ]
     },
@@ -263,6 +267,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Figures",
       "href": "reference/figures.html"
+    },
+    {
+      "title": "Troubleshooting",
+      "href": "reference/troubleshooting.html"
     }
   ]
 };
