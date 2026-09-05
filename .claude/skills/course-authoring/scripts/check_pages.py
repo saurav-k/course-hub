@@ -284,7 +284,11 @@ OUTLINE_ASSIGNMENT = re.compile(r"window\.COURSE_OUTLINE\s*=\s*(\{.*\})\s*;", re
 
 # A card on a course map or on the hub landing page, and the count line inside
 # a hub card. The count is a fact about the repository and is checked as one.
+# A parts list is the other way a map registers a page - a lecture hub's card
+# followed by its parts - and each line of it owes what a card owes.
 LCARD = re.compile(r'<a class="lcard"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
+PARTS_LIST = re.compile(r'<ul class="parts"[^>]*>(.*?)</ul>', re.S)
+PART_LINE = re.compile(r"<li\b[^>]*>(.*?)</li>", re.S)
 CARD_COUNT = re.compile(r'<div class="ln">(.*?)</div>', re.S)
 PAGE_COUNT = re.compile(r"(\d+)\s+(?:lessons|pages|chapters|labs|parts)\b", re.I)
 # A duration stated in the hero of a course map: "about 14 hours", "20 min".
@@ -334,8 +338,16 @@ def plain(fragment: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
 
 
+# The folders a course keeps teaching pages in. `lessons/` is the house shape;
+# `problems/` is a second pool one course keeps for its problem sets, each a
+# page a learner works and pays for, and a page in it owes what a lesson owes.
+# `reference/` is not here: a sheet is read alongside a course, not through it.
+CONTENT_FOLDERS: frozenset[str] = frozenset({"lessons", "problems"})
+
+
 def is_lesson(page: Path) -> bool:
-    return page.parent.name == "lessons"
+    """A numbered teaching page, in either pool, and never a pool's own index."""
+    return page.parent.name in CONTENT_FOLDERS and page.name != "index.html"
 
 
 def is_content_page(page: Path) -> bool:
@@ -1132,7 +1144,15 @@ def check_navigation(page: Path, src: str) -> list[Finding]:
         return []
     names = [name for name, _ in sequence]
     if page.name not in names:
-        return []
+        # The rail and the fixed chapter bar are built from the outline, so a
+        # teaching page the outline does not name has no position on either:
+        # the reader sees no "7 of 96" and no lit entry in the rail. A page in
+        # a second pool gets here because the generator reads only `lessons/`.
+        return [
+            Finding(rel(page), "WARN",
+                    "the course outline does not name this page, so it has no rail position and no "
+                    "chapter bar; register it on the course map, or say where the reader finds their place")
+        ]
     index = names.index(page.name)
     found: list[Finding] = []
     pager = PAGER_BLOCK.search(src)
@@ -1288,6 +1308,21 @@ def check_course_map(course: Path) -> list[Finding]:
             Finding(rel(course), "WARN",
                     f"{len(untimed)} of {len(lesson_cards)} lesson cards carry no reading-time pill; "
                     "a reader chooses a page by what it costs")
+        )
+    part_lines = [line for block in PARTS_LIST.findall(src) for line in PART_LINE.findall(block)]
+    untimed_parts = [line for line in part_lines if not READING_PILL.search(line)]
+    if untimed_parts:
+        found.append(
+            Finding(rel(course), "WARN",
+                    f"{len(untimed_parts)} of {len(part_lines)} parts-list lines carry no reading-time "
+                    "pill; a part is a page, and a reader chooses it by what it costs")
+        )
+    unrunged_parts = [line for line in part_lines if not RUNG_PILL.search(line)]
+    if unrunged_parts:
+        found.append(
+            Finding(rel(course), "WARN",
+                    f"{len(unrunged_parts)} of {len(part_lines)} parts-list lines carry no rung pill; "
+                    "the ladder is claimed page by page")
         )
     hero_start = src.find('<div class="hero">')
     if hero_start >= 0:
