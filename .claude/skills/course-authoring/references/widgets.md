@@ -189,9 +189,30 @@ Do not add a second rule under the heading to go with the badge; the sheet ships
 
 Inline markup inside a numbered heading behaves exactly as it does in any other heading: the badge hangs in a gutter beside the block rather than turning the heading into a row of boxes, so `Practice <span class="note-sm">about 15 minutes</span>` still reads as one line and still wraps.
 
+## The learning contract
+
+Sits directly under `.paper-meta`, above the one-minute version, on every content page.
+It is about the reader where the one-minute version is about the idea: what they can do after this page, and which pages they need first.
+A stranger decides whether the page is theirs from these two lines before they read a word of it.
+
+```html
+<div class="card outcomes">
+  <h2 class="h-label">After this page</h2>
+  <ul>
+    <li>You can compute the mean and the median of ten numbers and say which one an outlier moved.</li>
+  </ul>
+  <p class="prereq">Before you start: <a href="0001-two-engines.html">Two engines</a>, for what a summary is. Or: nothing beyond the course's starting point.</p>
+</div>
+```
+
+One to three `<li>`, each an action a reader could be watched doing, each starting with a verb after "You can".
+The `.prereq` line links the pages the reader needs, with the one thing each gives them, or says plainly that nothing is needed; it is never omitted, because "no prerequisites" is information and a missing line is not.
+Nothing inside it is a `<div>`: a heading, a list and a paragraph is the whole shape, and `check_pages.py` relies on that to find its end.
+The counts are in [`pedagogy.md`](pedagogy.md).
+
 ## The one-minute version
 
-Opens every page. Three to five bullets, each a claim, each bolding its own key term.
+Follows the learning contract. Three to five bullets, each a claim, each bolding its own key term.
 
 ```html
 <div class="card tldr">
@@ -1162,9 +1183,32 @@ Two more small shapes live in the hub sheet and are worth knowing, because both 
 - **`.note-sm`** is the quiet line under a heading: the instruction above a quiz, the time estimate beside a `Practice` heading, an aside under a module title.
 - **`.module-note`** is a paragraph of prose under a `.module-h` on a course map, where a `.sub` would be unstyled because `.sub` is only styled inside a `.hero`.
 
+## The recap
+
+Closes the argument on every content page: after the practice, before the teacher note.
+The one-minute version is read before the idea and the recap after it, so the two are written from different sides: a recap point is something the reader can now say or do unprompted, never a copy of a bullet from the top of the page.
+The next step is the one thing the pager cannot carry, which is the reason to go there.
+
+```html
+<div class="card recap">
+  <h2 class="h-label">Carry this away</h2>
+  <ul>
+    <li>The mean moves with every value and the median moves with the middle one, so one outlier drags the mean past nine of ten days.</li>
+    <li>A summary that a single day can move is a summary you cannot set a credit limit on.</li>
+  </ul>
+  <p class="next-step">Next: <a href="0003-why-the-median-survives-outliers.html">Why the median survives outliers</a>, which takes this picture and proves it with the breakdown point.</p>
+</div>
+```
+
+Two to four `<li>`.
+Exactly one `.next-step`, carrying one link; `check_pages.py` fails a recap without it, because a recap that points nowhere is a summary and a summary is the page again.
+The last page of a course points at `../index.html` and says what to read next in the hub.
+Nothing inside it is a `<div>`, for the reason the learning contract gives.
+The counts are in [`pedagogy.md`](pedagogy.md).
+
 ## Page foot
 
-In this order, every page:
+In this order, every page, after the recap:
 
 ```html
 <div class="teacher-note"><b>Your teacher.</b> What to ask an agent next if a step did not land.</div>
