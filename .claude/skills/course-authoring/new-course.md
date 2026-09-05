@@ -23,15 +23,18 @@ Where an answer is genuinely derivable from the existing hub, derive it and say 
 
 **What done means.**
 
-4. What can the learner do at the end that they cannot do now? Five capabilities, each phrased as an action, not a topic.
+4. What can the learner do at the end that they cannot do now? Five capabilities, each phrased as an action, not a topic. They go into the hero of the course map, and every page's `.card.outcomes` draws its one to three outcomes from this list; a capability here that no page delivers is a gap in the map.
 5. What would make this course a failure even if every page were accurate?
 
 **Shape.**
 
 6. How many pages, and what is a page? A lesson, a chapter that indexes many topics, or a lecture split into parts. The three shapes are described in [`references/page-contracts.md`](references/page-contracts.md); pick one and stay in it.
+6a. Which other kinds of page will the course carry - tutorial parts, question pages, solution pages, practice sets, problem sets, reference sheets - and **where does a worked solution live**: in the disclosure on the page, on a separate solution page the disclosure links, or withheld by policy with only the sanity check shown? One answer for the whole course, written into `MISSION.md`; "Pages that are problems" in [`references/page-contracts.md`](references/page-contracts.md) says what each answer costs.
 6b. Is there genuinely more than one order in which this course should be read? If yes, and only if yes, it is a **routed** course: one pool of lessons declared once in a `routes.js` manifest and travelled several ways. `llm-evolution-course` is the only one, `llm-evolution-course/routes/README.md` is the reference, and the cost is real: `gen_outline.py` refuses to run against a routed course, every lesson owes a committed pager naming its owning route, and `validate_site.py` checks all of it. Answer no unless the several orders were the reason for the course.
 7. What is the level ladder, rung by rung? See the level ladder in [`references/pedagogy.md`](references/pedagogy.md). A course with no ladder is a reference, and a reference should say so rather than pretend to be a progression.
 8. How long is one page in prose words? This sets the grain. 900 to 1,400 is one sitting and 1,800 is the ceiling; a page that wants 4,000 is three pages wearing one title. The count excludes the figures, the code and the quizzes, because prose is what the reader has to hold. See [`references/pedagogy.md`](references/pedagogy.md).
+8a. How long is the whole course, in hours, and what does one page cost in minutes? Both go into the hero of the course map, and the second goes onto every card as the reading-time pill. A learner buys the course on those two numbers before they open a page.
+8b. What does each page need before it? Every page's `.prereq` line names the pages it needs or says that none is needed, so the ladder from question 7 has to be answered page by page, not only rung by rung.
 
 **Order.**
 
@@ -73,7 +76,7 @@ Turn the interview into a lesson map before writing a lesson.
 Write the map as the course `index.html` directly, not as a list in a markdown file.
 `index.html` is the deployed artefact, the validator checks it, and a second copy of the map in `BUILDER-SPEC.md` is the duplication that put the six existing specs out of step with their own courses.
 
-The map states, for every page: its number, its slug, its title, its module, its level rung, and its reading time.
+The map states, for every page: its number, its slug, its title, its module, its level rung, and its reading time, on its card or on its line in a `ul.parts` list; the hero states the total time in hours and what one page costs; and `reference/glossary.html` exists from the first pull request, because a page's glossary link has to resolve on the day the page ships.
 Pages that are planned but unwritten sit in a `.roadmap` list as plain text.
 **A roadmap entry must never be a link**, because a link to a file that does not exist fails the validator.
 
@@ -193,7 +196,7 @@ Empty blocks in the scaffold are what makes the rule enforceable: a writer given
 
 - `reference/glossary.html` and `RESOURCES.md` are written in **one final pass** after the modules land. Every module adds terms alphabetically into one list, so every module conflicts on it, and the terms are better chosen once the whole course exists anyway.
 - `outline.js` is **generated and never merged**. Regenerate it with `scripts/gen_outline.py <course>` after every rebase and commit the result. Hand-resolving it is resolving a build artefact against itself.
-- The **previous slice's last lesson** is the one nobody expects: adding module `N` changes the "next" pager on the last page of module `N-1`, so two slices are not independent even when their lesson blocks are disjoint. Give that edit to the integrator too, or make the pager fix the first act of the later slice.
+- The **previous slice's last lesson** is the one nobody expects: adding module `N` changes the "next" pager and the recap's `.next-step` on the last page of module `N-1`, so two slices are not independent even when their lesson blocks are disjoint. Give that edit to the integrator too, or make the pager fix the first act of the later slice.
 
 **Pass each agent only its own slice.**
 Its lesson numbers and slugs, the block markers it owns, the section of the research report that carries its content, and the rules above.
@@ -212,12 +215,19 @@ Lesson zero is load-bearing twice over.
 It is the on-ramp the learner meets first, and it is the page every later lesson in this course is matched against.
 A shortcut taken here is taken forty more times.
 
+Lesson zero carries everything a later page will be matched against: the learning contract under `.paper-meta`, the orientation figure before the first section, a worked instance before the first formula, two quizzes, a practice problem with a revealable solution, and the recap with its next step.
+`check_pages.py` reports zero warnings on it, not only zero failures, because every warning it reports here is forty warnings later.
+
 Then run the gate over the whole scaffold:
 
 ```bash
 python3 scripts/gen_outline.py <course>
 python3 scripts/validate_site.py
+python3 scripts/check_pages_gate.py
 python3 .claude/skills/course-authoring/scripts/check_pages.py <course>
+python3 .claude/skills/course-authoring/scripts/check_pages.py <course> --links
+python3 scripts/render_sweep.py <course> --narrow
 ```
 
-Both checkers green before the pull request, and the page itself opened in a browser in both render states.
+All of them green before the pull request, and the page itself opened in a browser in both render states, read as the learner named in `MISSION.md`.
+A new course joins `EXTENDED_BAR_COURSES` in `check_pages.py` in its scaffold pull request, so the practice and chart floors are failures from its first page rather than warnings it grows used to.

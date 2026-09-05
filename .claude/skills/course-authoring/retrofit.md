@@ -91,6 +91,23 @@ Never add a line to it by hand and never leave a line in it that your course no 
 The format is below.
 It goes in the pull request body, in full, and a copy goes in `<course>/learning-records/NNNN-retrofit-report.md` so the next worker on this course starts from it.
 
+## Page kinds, and what each one owes
+
+A course that follows a lecture series carries more than lessons, and the rubric is filled per kind rather than bent per page.
+`statistical-foundations-ml-course` carries every kind below; a course with fewer kinds skips the rows for the ones it lacks.
+
+| Kind | How it is recognised | What it owes beyond the shared rows |
+|---|---|---|
+| **Lecture or session hub** | `lessons/NNNN-*-start-here.html` | It is a map, not a lesson: the one-minute version, an orientation figure that is the map of its parts, the logistics, the parts in order, and a pager to part one. `check_pages.py` exempts it from the quiz, practice, contract and recap rows, so rows 9, 14, 15 and 16 are scored n/a. |
+| **Lecture part** | a lesson under a lecture hub | Every row. The `.prereq` line names the part before it and the hub. |
+| **Tutorial part** | a lesson under a TA-session hub | Every row. The problems it works are `.practice` blocks with a hint, a worked solution and a `.p-check`, and the quiz asks about the method rather than the answer. |
+| **Question page** | a homework or graded problem, explained and not solved | Every row. The problem is a `.practice` block; where the worked solution is a separate page, the `details.solution` links that page and still carries the `.p-check`, so a reader working alone has the sanity check and the route. The page links its solution page and the solution page links back. |
+| **Solution page** | `*-solution-*` | Every row. Each route is an `ol.worked`, the routes agree in a `.p-check`, and the pager points at the question and at the next solution. Where the map places the solutions at the end of the module and the pager reads question to question, the map is changed to seat each solution beside its question, or the row-18 warning stands with that reason in the report. |
+| **Practice-set page** | problems grouped by concept, unsolved by course policy | Every row. Each problem is a `.practice` block; where the course withholds full solutions by policy, the `details.solution` carries the `.p-check` and the one-line route rather than the arithmetic, and `MISSION.md` states the policy. A `.p-check` with no disclosure around it fails row 15. |
+| **Problem set** | a page under `problems/` | Every row, because `check_pages.py` counts `problems/` as a second pool of teaching pages. Today the outline generator reads only `lessons/`, so a problem set has no rail position and no chapter bar and row 18 warns; register the sets on the course map when the generator learns `problems/`, and until then the set's own pager and set map are where the reader finds their place, stated in the report. The set map, `problems/index.html`, is held to the course-map rows below. |
+| **Reference sheet** | `reference/*.html` | Not a content page and not in the rubric: no pager, no quiz. It owes a card on the map, a link from every lesson it serves, a print check, and a `.gloss` on every formula it states. |
+| **The course map and a second map** | `index.html`, `problems/index.html` | Every card and every `ul.parts` line carries a rung pill reading the rung word and a reading-time pill; the hero states the total time in hours and what one page costs; the glossary and every promised sheet exist. |
+
 ## The per-page rubric
 
 Fill one per page.
@@ -122,7 +139,7 @@ A page ships at 30; a page below 30 ships only when every missed row has a reaso
 | 15 | 1 or more .practice under an h2 Practice, each with details.solution ending in a .p-check | M | | |
 | 16 | .card.recap after the practice: 2 to 4 points, none a copy of a tldr bullet, and a .next-step link with its reason | M+J | | |
 | 17 | .teacher-note, then Primary source to go deeper with a link opened this session | M+J | | |
-| 18 | .pager points at the neighbours the course map gives the page; the last page points at the map | M | | |
+| 18 | .pager points at the neighbours the course map gives the page; the last page points at the map; the outline names the page, so it has a rail position and a chapter bar | M | | |
 | **Reading load** | | | | |
 | 19 | 1,800 prose words or fewer, 400 or fewer per figure | M | | |
 | 20 | no paragraph over 120 words | M | | |
@@ -172,7 +189,9 @@ Pages audited: N lessons, M reference sheets, 1 course map.
 | pages over 1,800 prose words | | |
 | rung pills not reading the rung word | | |
 | pagers disagreeing with the course map | | |
-| lesson cards on the map with no reading-time pill | | |
+| content pages the outline does not name | | |
+| lesson cards and parts-list lines on the map with no reading-time pill or no rung pill | | |
+| hub card page count against the folder | | |
 
 ## What the course map now tells a learner
 

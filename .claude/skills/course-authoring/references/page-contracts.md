@@ -101,6 +101,17 @@ A **lab page** carries at least one `.lab` with a real goal, real commands, and 
 Prefer invocations that actually run. Note where a flag is version-sensitive.
 The lab classes live in `assets/hub.css`, promoted there from `llm-inference-course`'s own sheet when a second course wanted them; any course may use them and no course restyles them. See [`widgets.md`](widgets.md).
 
+### Pages that are problems
+
+A course that follows a lecture series also carries tutorial parts, question pages, solution pages, practice sets and problem sets, and each is a content page that owes everything above.
+What differs is where the worked solution lives, and the rule is the same for all of them: **the problem is a `.practice` block, and its `details.solution` carries the `.p-check` wherever the arithmetic is.**
+A tutorial part works the solution in the disclosure.
+A question page whose worked solution is a separate page links that page from the disclosure and the solution page links back, so the two are one problem written on two pages.
+A practice set that withholds solutions by course policy puts the `.p-check` and the one-line route in the disclosure and states the policy in `MISSION.md`.
+A solution page works each route as an `ol.worked` and closes with the `.p-check` that shows the routes agree.
+`check_pages.py` counts `problems/` as a second pool of content pages beside `lessons/`; the outline generator reads only `lessons/`, so a page in the second pool has no rail position until it is registered on the map, and the checker says so.
+The retrofit procedure, [`../retrofit.md`](../retrofit.md), tabulates these kinds against the rubric.
+
 ## A lecture hub page
 
 Only for courses that nest a level deeper, where one source lecture is too much for one sitting.

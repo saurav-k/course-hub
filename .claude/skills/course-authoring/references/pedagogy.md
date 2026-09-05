@@ -33,6 +33,7 @@ One to three outcomes, because a page has one idea and an outcome is one thing t
 Two to four recap points, because a recap longer than the one-minute version is the page again.
 The next step carries the one thing the pager cannot: why to go there.
 The markup for both is in [`widgets.md`](widgets.md); a lecture hub page, named `*-start-here.html`, is a map rather than a lesson and owes neither.
+A page under `problems/` is a content page and owes both, exactly as a page under `lessons/` does.
 
 ## The orientation figure
 
@@ -295,6 +296,8 @@ The map is what the learner buys before they open a page, and it is counted too.
 |---|---|
 | lesson cards without a reading-time pill | **0**; a reader chooses a page by what it costs |
 | lesson cards without a rung pill | **0** |
+| `ul.parts` lines without a rung pill and a reading-time pill | **0**; a part is a page, and a line in a parts list is its card |
+| content pages the generated outline does not name | **0**; a page the outline misses has no rail position and no chapter bar |
 | course maps whose hero does not state the total time in hours and what one page costs | **0** |
 | courses without a `reference/glossary.html` | **0** |
 | hub cards whose page count differs from the folder | **0**, a FAIL |
