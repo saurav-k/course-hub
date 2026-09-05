@@ -3,15 +3,37 @@
 Counts, not qualities.
 "Diagram-heavy" is an aspiration and every course claims it; "three diagrams, two kinds, one quantitative" is a bar a page either clears or does not.
 
-Everything here is checked by `.claude/skills/course-authoring/scripts/check_pages.py`, either as a failure or as a warning.
+Every row a script can count is counted by `.claude/skills/course-authoring/scripts/check_pages.py`, as a failure or as a warning, and the rows it cannot see say so where they stand: whether an outcome is an action, whether a worked instance is the right one, whether a source says what the page says it says.
+The rubric in [`../retrofit.md`](../retrofit.md) marks each row `M` or `J` for the same reason.
 
 The shape those counts add up to:
 
 ```
-eyebrow -> h1 -> paper-meta -> one-minute version -> ORIENTATION FIGURE -> the sections -> quizzes
-                                                     where this sits        the detail
-                                                      in the whole
+eyebrow -> h1 -> paper-meta -> LEARNING CONTRACT -> one-minute version -> ORIENTATION FIGURE -> the sections -> quizzes -> practice -> RECAP
+                               what you can do                             where this sits        the detail                            what to carry,
+                               afterwards, and                             in the whole                                                  and where next
+                               what you need first
 ```
+
+## The learning contract and the recap
+
+A stranger opens a page and needs two answers before the idea and two after it: is this page mine and what do I need first; what do I now carry and where do I go.
+Two cards answer them, and both are counted.
+
+| Bar | Value |
+|---|---|
+| content pages without a `.card.outcomes` directly under `.paper-meta` | **0** |
+| learning outcomes per page | **1 to 3**, each an action the reader could be watched doing |
+| `.card.outcomes` without a `.prereq` line | **0**; "nothing needed" is stated, never implied |
+| content pages without a `.card.recap` after the practice | **0** |
+| recap points per page | **2 to 4**, none of them a copy of a one-minute-version bullet |
+| recaps without a `.next-step` that links the next page and gives the reason | **0**, and the missing link is a FAIL |
+
+One to three outcomes, because a page has one idea and an outcome is one thing the reader can do with it.
+Two to four recap points, because a recap longer than the one-minute version is the page again.
+The next step carries the one thing the pager cannot: why to go there.
+The markup for both is in [`widgets.md`](widgets.md); a lecture hub page, named `*-start-here.html`, is a map rather than a lesson and owes neither.
+A page under `problems/` is a content page and owes both, exactly as a page under `lessons/` does.
 
 ## The orientation figure
 
@@ -42,9 +64,14 @@ The page carries its meaning in figures and short prose, not in paragraphs the r
 |---|---|
 | prose words per content page | **1,800 maximum**, 900 to 1,400 typical |
 | prose words per figure | **400 maximum** |
+| words in one paragraph | **120 maximum**; measured over 16,920 hub paragraphs, the median is 41 and the 99th percentile 141 |
+| `.callout.warn` per page | **1 maximum**; a page with three warnings has no warning |
+| pages in a course with a glossary that do not link it | **0**; a reader stalled on a term needs one click, not a search |
 
 **When a paragraph and a figure say the same thing, the paragraph goes.**
 Not both, and not the figure.
+
+A paragraph over the ceiling is two ideas wearing one indent, and the fix is a split at the idea boundary rather than a cut.
 
 Prose is what is left of the reading column once the figures, the code, the quizzes and the page chrome are taken out.
 It is the quantity the reader has to hold, which is why it is the quantity the bars are stated in.
@@ -153,7 +180,11 @@ The learner should never have to hold more than one new thing at a time, and nev
 | new named concepts per paragraph | **1** |
 | `.math` blocks without a `.gloss` | **0** |
 | symbols used before being named in words *on this page* | **0** |
-| formula appearing before its picture | **0** |
+| formula appearing before the page's first figure | **0**; the reader gets the picture before the symbols |
+| pages that state a formula and work no instance of it in an `ol.worked` | **0**; a worked example comes before, or beside, the general statement |
+
+The last two are what "a worked example before the abstract statement" comes to when a script counts it: the first `.math` on the page sits after the first `<figure>`, and a page with a formula on it has at least one `ol.worked`.
+Whether the worked instance is the right one is a reading of the page.
 
 **A bar the neighbouring pages miss is still a bar.**
 Most pages in this hub predate this file and carry no rung pill, no reading-time pill, and no orientation figure.
@@ -174,13 +205,33 @@ Three rungs, and the class names already exist in `assets/hub.css`:
 
 The ladder is a claim about *dependencies*, so it is checkable: read the map in order and confirm no page needs a page that comes later.
 
-Two rules keep it honest:
+Three rules keep it honest, and the first is a FAIL rather than a bar:
 
-- **Every lesson card carries exactly one rung pill,** and the pill text is the rung word. The class is not a colour: `pill easy` reading "labs" tells the reader nothing about difficulty and burns the only signal the card has.
-- **Every page carries its rung and its reading time** in `.paper-meta`, so a reader who arrived from a search result knows what they walked into.
+- **The rung pill's text is the rung word** - `foundation`, `working` or `frontier` - and nothing else. The class is not a colour: `pill easy` reading "labs" or `pill med` reading "first real arithmetic" tells the reader nothing about difficulty and burns the only signal the page has. `check_pages.py` fails any other text.
+- **Every lesson card carries exactly one rung pill,** and the course map is counted against its lessons.
+- **Every page carries its rung and its reading time** in `.paper-meta`, rung first, so a reader who arrived from a search result knows what they walked into.
+
+| Bar | Value |
+|---|---|
+| rung pills whose text is not the rung word | **0**, a FAIL |
+| pages with the reading-time pill before the rung pill | **0** |
+| pages whose `<h1>` repeats the lesson's name from the course map | **0**; the h1 is the one idea as a claim with a verb in it, and the card is the name |
 
 A course with no genuine progression is a reference work.
 That is a fine thing to be, and `MISSION.md` should say so plainly rather than claim a ladder the pages do not have.
+
+## Navigation
+
+A reader knows where they are from three things the page did not write: the eyebrow, the fixed chapter bar, and the sidebar rail.
+The rail and the bar are built from the generated outline, and the pager is written by hand, so the pager is the one that can disagree.
+
+| Bar | Value |
+|---|---|
+| content pages without a `.pager` | **0**, a FAIL |
+| pagers whose previous or next is not the neighbour the course map gives the page | **0**; the chapter bar follows the map, so a pager that does not shows two different "next" links at the foot of one page |
+| pages with no link to `../index.html` | **0**; the spine carries it on every page today |
+
+A course that deliberately reads a page out of map order - a solution page whose "next" is the matching practice set - states the reason in the pull request, and the warning stands until the map is changed to agree.
 
 ## Active recall
 
@@ -208,12 +259,13 @@ A quiz checks that the idea landed. A problem checks that the reader can use it.
 | Bar | Value |
 |---|---|
 | practice problems per content page | **1 minimum** |
-| problems without a `details.solution` | **0** |
-| problems without a `.p-check` sanity line | **0** |
+| problems without a `details.solution` | **0**, a FAIL on every course |
+| problems without a `.p-check` sanity line | **0**, a FAIL on every course |
 | inline `svg.chart` per content page | **1 minimum** |
 
-These four are newer than the seven courses that predate this file, so a course **opts into them by name** in `EXTENDED_BAR_COURSES` at the top of `check_pages.py` rather than inheriting them and turning every legacy page red.
-Joining that set is the last step of a retrofit, not the first.
+The two floors are newer than the seven courses that predate this file, so a course **opts into them by name** in `EXTENDED_BAR_COURSES` at the top of `check_pages.py`: there a page with no problem or no chart is a FAIL, and everywhere else it is a WARN the retrofit rubric still counts.
+The shape of a problem that is there is held on every course alike, because a problem with no solution fails the reader working alone wherever it sits.
+Joining the set is the last step of a retrofit, not the first.
 
 The chart floor is the one that decides whether a quantitative course is quantitative.
 A page that states a distribution, a magnitude or a spread and draws only boxes and arrows has made a claim it did not show, and Mermaid cannot draw any of the three.
@@ -226,12 +278,32 @@ One sentence saying what the answer should roughly be and why lets them catch th
 | Bar | Value |
 |---|---|
 | technical claims with no linked source | **0** |
+| content pages with no external link anywhere in the reading column | **0**; the one proxy a script has for the row above |
 | sources cited without being fetched this session | **0** |
+| dead or redirected-to-nothing links, by `check_pages.py <course> --links` | **0** after a second try, and the try is stated in the pull request; a 403, 406 or 429 is a site refusing robots and is opened in a browser instead |
 | numbers attributed to a source but not present in it | **0** |
 | blog posts cited where the primary source exists | **0** |
 
 A number you derived yourself is welcome, and it must show its arithmetic and name its assumptions, so the reader can tell your derivation from someone else's measurement.
 A claim with no citable source goes in `RESOURCES.md` under `## Gaps`, not into the page with a hedge.
+A page built entirely from a source the course itself owns - a homework solution whose source is the homework - links that page and says so; it is still a link.
+
+## The course map, as a learner reads it
+
+The map is what the learner buys before they open a page, and it is counted too.
+
+| Bar | Value |
+|---|---|
+| lesson cards without a reading-time pill | **0**; a reader chooses a page by what it costs |
+| lesson cards without a rung pill | **0** |
+| `ul.parts` lines without a rung pill and a reading-time pill | **0**; a part is a page, and a line in a parts list is its card |
+| content pages the generated outline does not name | **0**; a page the outline misses has no rail position and no chapter bar |
+| course maps whose hero does not state the total time in hours and what one page costs | **0** |
+| courses without a `reference/glossary.html` | **0** |
+| hub cards whose page count differs from the folder | **0**, a FAIL |
+| reference sheets the hero or a card promises that do not exist | **0**; `validate_site.py` fails the dead link, and a promise made in prose is yours to check |
+
+What the hero says the learner will be able to do is a reading, not a count: it is phrased as actions, and it is the same list `MISSION.md` calls success.
 
 ### A quoted file states where it came from and whether it may be here
 

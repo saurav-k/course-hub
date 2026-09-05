@@ -15,10 +15,11 @@ A useful distinction to write down where it applies: someone can be a beginner i
 
 ## Cadence
 
-What one page is: prose words, diagram count, quiz count.
+What one page is: prose words, minutes, diagram count, quiz count, practice count.
 What the orientation figure on a page of this course draws, since that is the part every page shares.
-Where a page ends and the next begins.
-Whether quizzes come after the idea is worked, which they should.
+What the learning contract on a page of this course names as prerequisites: the part before it and the hub, or the pages the ladder in `MISSION.md` says.
+Where a page ends and the next begins, and what the recap's next step says about why.
+Whether quizzes come after the idea is worked, which they should, and the practice after the quizzes.
 
 ## Teaching preferences
 
