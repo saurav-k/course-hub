@@ -15,6 +15,7 @@ Owes: a `.hero`, a `section.module` per subject with its `.module-h` count kept 
 
 The count in `.mcount` and the count in each card's `.ln` are facts about the repository.
 A card claiming "38 lessons" beside a folder holding 39 is the cheapest kind of wrong and the easiest to avoid: count the files.
+`check_pages.py` now counts them for you and fails the card that disagrees with its folder.
 
 ## The course map
 
@@ -22,12 +23,14 @@ A card claiming "38 lessons" beside a folder holding 39 is the cheapest kind of 
 
 Owes:
 
-- A `.hero` whose `<h1>` is a claim rather than the course name repeated, and whose `.sub` says who the course is for and where to start.
+- A `.hero` whose `<h1>` is a claim rather than the course name repeated, and whose `.sub` says who the course is for, what they will be able to do, how long the whole course takes in hours and what one page costs, and where to start.
 - One `section.module` per module, in teaching order, each with an accurate `.mcount`.
-- One `.lcard` per page, carrying a rung pill and a reading-time pill.
+- One `.lcard` per page, carrying a rung pill whose text is the rung word and a reading-time pill. `check_pages.py` counts the cards that miss either.
 - A `.roadmap` list for anything planned and unwritten, in **plain text, never a link**.
-- A card for each `reference/` sheet.
+- A card for each `reference/` sheet, and a `reference/glossary.html` to have a card for: a course without one has nowhere to send a reader stalled on a term.
 - A footer linking the glossary, any sibling course, and `../index.html`.
+
+Every reference sheet the hero or a card promises exists on disk; `validate_site.py` fails the dead link, and a promise made in prose is checked by reading the hero against `reference/`.
 
 **A lesson has a name and a claim, and they are different objects.**
 
@@ -58,20 +61,23 @@ Whether it is called a lesson, a chapter, or a part is the course's own word for
 Owes, in this order:
 
 1. `.eyebrow`: module, module name, and position.
-2. `<h1>`: the one idea, phrased as a claim with a verb in it rather than a topic.
-3. `.paper-meta`: rung pill, reading-time pill, and the attribution or framing line.
+2. `<h1>`: the one idea, phrased as a claim with a verb in it rather than a topic, and therefore never the card's name repeated.
+3. `.paper-meta`: rung pill first, its text the rung word, then the reading-time pill, then the attribution or framing line.
+3b. `.card.outcomes`: **the learning contract**, one to three things the reader can do afterwards and the pages they need first.
 4. `.card.tldr`: the one-minute version.
 5. **The orientation figure**: where this idea sits in the whole, before any body section.
-6. The mental model, before any formula.
+6. The mental model, before any formula, and a worked instance in an `ol.worked` before or beside the general statement.
 7. The mechanism, every symbol named in words.
 8. The trade-off, named in the same section as the technique that incurs it.
 9. Quizzes, after the idea is fully worked.
-9b. **Practice problems**, under their own `<h2>Practice</h2>`, after the quizzes.
+9b. **Practice problems**, under their own `<h2>Practice</h2>`, after the quizzes, each with a revealable solution and a sanity line.
+9c. `.card.recap`: **the recap**, two to four things the reader can now say, and the next page as a link with the reason to go there.
 10. `.teacher-note`.
 11. `Primary source to go deeper`.
-12. `.pager`.
+12. `.pager`, pointing at the neighbours the course map gives this page.
 13. `<footer>`.
 
+Items 3b and 9c bracket the page and are counted in [`pedagogy.md`](pedagogy.md), "The learning contract and the recap": the first is what a stranger reads to decide whether the page is theirs, the second is what they leave with.
 Item 9b comes after item 9 because the two ask different things of the reader.
 A quiz is a conceptual check answered in the head, so it can close a reading session.
 A practice problem needs paper and several minutes, so a reader can leave after the quizzes and come back for it.
@@ -94,6 +100,17 @@ A chapter that cannot hold its topics under the ceiling is several chapters, and
 A **lab page** carries at least one `.lab` with a real goal, real commands, and a measurable outcome, and closes with a `ul.checklist` rather than only a quiz.
 Prefer invocations that actually run. Note where a flag is version-sensitive.
 The lab classes live in `assets/hub.css`, promoted there from `llm-inference-course`'s own sheet when a second course wanted them; any course may use them and no course restyles them. See [`widgets.md`](widgets.md).
+
+### Pages that are problems
+
+A course that follows a lecture series also carries tutorial parts, question pages, solution pages, practice sets and problem sets, and each is a content page that owes everything above.
+What differs is where the worked solution lives, and the rule is the same for all of them: **the problem is a `.practice` block, and its `details.solution` carries the `.p-check` wherever the arithmetic is.**
+A tutorial part works the solution in the disclosure.
+A question page whose worked solution is a separate page links that page from the disclosure and the solution page links back, so the two are one problem written on two pages.
+A practice set that withholds solutions by course policy puts the `.p-check` and the one-line route in the disclosure and states the policy in `MISSION.md`.
+A solution page works each route as an `ol.worked` and closes with the `.p-check` that shows the routes agree.
+`check_pages.py` counts `problems/` as a second pool of content pages beside `lessons/`; the outline generator reads only `lessons/`, so a page in the second pool has no rail position until it is registered on the map, and the checker says so.
+The retrofit procedure, [`../retrofit.md`](../retrofit.md), tabulates these kinds against the rubric.
 
 ## A lecture hub page
 

@@ -48,6 +48,13 @@ Nobody else pushes `prod`, and no coding agent goes near it.
 
    Both must pass. The same two run on your pull request and gate the merge.
 
+   If you touched a figure, or swept a whole course, also run the render sweep. It needs Chrome and
+   the network, and it is the machine half of looking at every diagram in both render states:
+
+   ```bash
+   python3 scripts/render_sweep.py <course-or-page> --narrow
+   ```
+
    If you changed `assets/hub.css`, `assets/hub.js` or a course's
    `course-extras.css`, run the computed-style harness as well. It needs Chrome
    and takes a few minutes:
@@ -96,6 +103,7 @@ index.html                  the hub landing page; every course is a card here
 assets/                     the hub design system: hub.css, hub.js, fonts/. Every page links these.
 scripts/validate_site.py    the structure and link checker that gates every pull request
 scripts/check_pages_gate.py runs the house-standard page checker against its recorded baseline
+scripts/render_sweep.py     renders every page of a course in both render states and reports error boxes and overflow; needs Chrome
 scripts/style_snapshot.py   the computed-style harness; proves a stylesheet change moved nothing
 scripts/style-sample.txt    the fixed sample of pages the harness loads
 scripts/style-baseline/     the committed snapshot the harness compares against

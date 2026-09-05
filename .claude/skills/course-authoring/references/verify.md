@@ -8,16 +8,25 @@ A page is done when all three pass, and not when the draft reads well.
 ```bash
 python3 scripts/gen_outline.py <course>     # skip on a routed course; it refuses
 python3 scripts/validate_site.py
+python3 scripts/check_pages_gate.py
 python3 .claude/skills/course-authoring/scripts/check_pages.py <course-or-file>
+python3 .claude/skills/course-authoring/scripts/check_pages.py <course> --links   # fetches every external link once
+python3 scripts/render_sweep.py <course-or-file> --narrow                          # needs Chrome and the network
 ```
 
 `validate_site.py` gates the pull request.
 It checks registration, links, that no page links a local `.md` file, and that each course `outline.js` names exactly the lessons on disk.
 On a routed course it also checks the route manifest, every committed pager against its owning route, and the living-document metadata.
 
-`check_pages.py` checks the house standard: the design-system links, the Mermaid traps, widget shapes, the orientation figure, the word ceilings, the diagram and quiz counts, the answer-index distribution, and the rung and reading-time pills.
-Both green before you open the pull request.
+`check_pages.py` checks the house standard: the design-system links, the Mermaid traps, widget shapes, the learning contract and the recap, the orientation figure, a worked instance before the formula, the word and paragraph ceilings, the diagram, quiz and practice counts, the answer-index distribution, the rung word on the rung pill, the pager against the course map, and that the page links a source at all.
+`check_pages_gate.py` is the same checker as a gate on the difference from `scripts/check-pages-baseline.txt`, and it is what CI runs; a FAIL you fixed turns it red until the baseline is refreshed, which is the last commit of a retrofit.
+All green before you open the pull request.
 A warning from `check_pages.py` is a decision you must be able to defend in the pull request body, not a line to scroll past.
+
+`render_sweep.py` is the machine half of layer two below.
+It renders every page in headless Chrome with the network on, counts Mermaid error boxes and blank renders, reads every diagram's label text, and checks that the body does not scroll sideways; then it presses the reader's own light-and-dark control, waits for the repaint, and does all of it again.
+With `--narrow` it also lays each page out at 360px.
+It cannot read a drawing, so it replaces the counting in layer two and none of the looking.
 
 One of those warnings is an estimate rather than a reading, and it is worth knowing which.
 **The label-edge warning** measures where each `<text>` in a hand-drawn `svg.chart` ends and says so when the estimate puts it outside the figure's own `viewBox`, which is where the browser cuts it.
@@ -45,12 +54,11 @@ Walk this list. Every item has been a live defect on this site.
 
 This is the check that catches the most and is skipped the most.
 
-Two classes of diagram defect exist and they are visible at opposite times.
-A `<pre class="mermaid">` is broken on **first paint**, because the copy button `hub.js` appends has already become the last line of graph source.
-A literal `<br/>` in a label is correct on first paint and broken on **every repaint after it**, because the runtime stashes the graph source as `textContent` in order to redraw it, and `textContent` has no `BR` in it, so the two halves join with no space and a sequence diagram can merge two statements into a red error box.
+The runtime redraws every diagram on a mode or palette change, from a stash of the graph source it took as `textContent` before the first render, with every colour token re-resolved against the new ground.
+A literal `<br/>` in a label is therefore joined with no space in both states - the stash never had the `BR` - and the browser is where you see `first halfsecond half`; a colour that reads on cream and vanishes on near-black, and a repaint that never happens, are visible only after the switch.
 
 So: load the page, look at every figure, then change the mode or the palette from the Appearance control, and look at every figure again.
-Checking one state catches neither class reliably.
+`scripts/render_sweep.py` does the counting half of that for a whole course; the looking is still yours.
 
 **Counting the SVGs proves nothing**, because a Mermaid error box is itself an SVG.
 When you check by machine, match `.error-icon`:
@@ -61,10 +69,11 @@ document.querySelectorAll('.mermaid .error-icon, .mermaid text.error-text').leng
 
 Then look anyway. A diagram that parses can still say the wrong thing.
 
-**What the repaint is actually compared on is the rendered label text.**
-Read every label out of every diagram on first paint, repaint, read them again, and diff the two lists.
-That is what catches the `<br/>` class, because the defect is two words joining rather than an error box, and neither an error-box count nor an SVG count can see it.
+**What the repaint is compared on is the rendered label text.**
+Read every label out of every diagram on first paint, repaint, read them again, and diff the two lists; `render_sweep.py` does exactly this.
+A difference means the stash and the authored source disagree, which is the shape every repaint defect takes, and it is what an error-box count cannot see.
 One trap in the diff: Mermaid writes its `classDef` colours into the SVG's own `<style>` element, which changes with the palette by design, so strip that element before comparing or every palette switch reports two false positives.
+And one limit: a `<br/>` joined on first paint is joined the same way after it, so the diff is quiet and the static FAIL in `check_pages.py` is the catch, with your eyes on the label as the proof.
 
 **Twice over, on two different palettes, when the sweep is a whole course.**
 Seven palettes and two modes exist and a repaint is a repaint, so one switch proves the mechanism; a second switch to a different palette is what catches a colour that only fails on one ground.
@@ -92,6 +101,8 @@ Read the page start to finish as the learner in `MISSION.md`, not as its author.
 - **Read each figure's two lines without looking at the drawing.** The label should name a subject and the claim should state something you could argue with. If the claim only describes the picture, the figure has a title and no point; if the label argues, the two lines have swapped jobs.
 
 - **Cover the page and look only at the h1 and the orientation figure.** Can you say what this page is about and why it exists? That is the whole test, and it is the one the machine cannot run. If the answer is no, the figure is decoration and the page has no big picture.
+- **Read the learning contract as a stranger.** Could you be watched doing each outcome? Does the prerequisite line name a page you could open, or say plainly that none is needed? An outcome that names a topic rather than an action - "understand attention" - is the one-minute version wearing the wrong card.
+- **Read the recap against the one-minute version.** No point repeats a bullet from the top, every point is something the reader can now say unprompted, and the next step gives a reason and not only a title.
 - **Which paragraph does a figure already say?** Read every paragraph beside the figure nearest it. Where the two say the same thing, the paragraph goes. This is where a page comes down under the word ceiling, and cutting here costs the reader nothing.
 - **Is there one idea?** If the summary needs "and", it is two pages.
 - **Does anything arrive before its scaffold?** A symbol before its name, a formula before its picture, a mechanism before its model.

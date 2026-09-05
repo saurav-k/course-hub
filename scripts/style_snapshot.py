@@ -451,7 +451,7 @@ class Chrome:
     the only trick is getting the two ends onto those numbers in the child.
     """
 
-    def __init__(self, binary: str) -> None:
+    def __init__(self, binary: str, offline: bool = True) -> None:
         self._profile = tempfile.mkdtemp(prefix="hub-style-harness-")
         command_read, self._command_write = os.pipe()
         self._reply_read, reply_write = os.pipe()
@@ -476,11 +476,13 @@ class Chrome:
                 "--font-render-hinting=none",
                 f"--window-size={VIEWPORT[0]},{VIEWPORT[1]}",
                 f"--user-data-dir={self._profile}",
-                # Nothing but the loopback server answers, so the run is offline
-                # and the Mermaid CDN can never make it flaky.
-                "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1",
-                "about:blank",
             ]
+            # Nothing but the loopback server answers, so the run is offline
+            # and the Mermaid CDN can never make it flaky. `render_sweep.py` is
+            # the one caller that turns this off, because looking at a diagram
+            # needs the diagram to render.
+            + (["--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE 127.0.0.1"] if offline else [])
+            + ["about:blank"]
             # Chrome's own sandbox refuses to start as root, which is what a
             # container build gets. A developer machine keeps it.
             + (["--no-sandbox"] if os.geteuid() == 0 else []),

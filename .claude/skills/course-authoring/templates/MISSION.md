@@ -29,10 +29,16 @@ The learner can:
 
 And the failure that would still be a failure even if every page were accurate.
 
+This list is the hero of the course map, and every page's `.card.outcomes` draws its one to three outcomes from it.
+A capability here that no page delivers is a gap in the map; an outcome on a page that is not on this list is a page teaching something the course did not promise.
+
 ## Structure
 
 The page shape: lesson, chapter, or lecture split into parts. One shape, held for the whole course.
-How many pages, how many modules, and what one page costs in prose words.
+How many pages, how many modules, what one page costs in prose words and in minutes, and what the whole course costs in hours; the last two are what the hero states.
+
+The other kinds of page the course carries - tutorial parts, question pages, solution pages, practice sets, problem sets, reference sheets - and **where a worked solution lives**: in the disclosure on the page, on a separate solution page the disclosure links, or withheld by policy with only the sanity check shown.
+One answer for the whole course.
 
 ## The ladder
 
