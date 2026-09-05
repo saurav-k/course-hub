@@ -85,8 +85,26 @@ Lecture 6 carries five more, all named on its hub page 0077:
 12. **The geometric's words and its formula disagree.** "Number of coin tosses before first heads" against `p(1-p)^(k-1)`, which counts the toss the first head lands on. Page 0086 follows the formula and leaves the sentence as written.
 13. **The letter N means two different sets one paragraph apart.** The geometric needs it to start at 1 and the Poisson at 0. Page 0087 runs both sums and lets the arithmetic settle each reading.
 
+Lecture 7 carries five more, all named on its hub page 0096:
+
+14. **Two of the three error probabilities the session quotes belong to a different sample size than the one written beside them.** The board says `.25` at n = 21 and `.03` at n = 101; recomputed, the binomial gives 0.1744 and 0.0209, and the quoted figures are the values at n = 20 and n = 100 (0.2447 and 0.0271). A student computed 0.17 live and challenged it, and the lecturer answered that he had probably computed it for 20, was unsure of the figure, and was sure of the formula - correct on all three counts. Page 0098 quotes the board, works the recomputation, and says which sample size each number belongs to. This is the first time in this course that a source's stated number has been shown to come from a *neighbouring* parameter rather than being simply wrong, and it is worth the extra sentence on the page: the lecture's method is sound and only the substitution slipped.
+15. **One identity was written wrong on the board and corrected live.** `P(X > 4) = 1 - F_X(3)` became `1 - F_X(4)` after a student caught it, and the class notes carry the corrected form. Page 0101 names the slip rather than quietly printing the right version, because that off-by-one is the mistake a reader is about to make alone.
+16. **Three results are asserted, and one of them is only sketched**: that a continuous CDF is differentiable almost everywhere, that the Gaussian CDF has no closed form, and that every exact value carries probability zero, the last argued from a shrinking band rather than proved. All three are taught as stated.
+17. **Memorylessness is proved in one direction only.** Row 11 of Lecture 6's notes recorded that the exponential's uniqueness was asserted with "prove it" in the margin. This session proves the exponential *is* memoryless, which is the easy direction and a genuine addition; uniqueness remains unproved anywhere in the course, and page 0107 keeps the two claims apart.
+18. **The Gaussian is offered for a quantity it does not fit.** A student objected that heights are never negative while a Gaussian puts weight across the whole real line. The lecturer agreed, said practitioners use it anyway when the negative tail carries almost nothing, and offered the repair - model the deviation from the sample mean. Page 0108 carries the objection and the repair together.
+
+A sixth thing about Lecture 7 is not an honesty note but is worth recording: **mu, sigma and lambda arrive with no definition on purpose**. The lecturer said, when asked directly, that mu is the expected value, sigma squared the variance and the exponential's mean 1/lambda, then said the course has not reached those ideas and moved on. These pages do the same, and page 0096 says so under its own heading rather than letting a reader think it was overlooked.
+
+## Deliberate repetition, which this course had not had before
+
+Lecture 7 is the first session in this course that covers ground an earlier lecture already covered.
+Lecture 6 came from the lecturer's pre-class notes and defined the density, the uniform, the exponential and the Gaussian; Lecture 7 is the same material delivered live.
+The policy settled on, and the one to follow if it happens again: **keep both, at their true positions, and make every overlapping page link to its counterpart and say what is new here.**
+Nothing was merged and nothing was renumbered.
+What the delivered session adds is what a pre-class note cannot carry - two examples worked from a sentence about the world down to a number, the room's own objections, a proof left earlier as an exercise, and the modelling judgement at the end - and the hub page 0096 states that argument once so no individual page has to defend itself.
+
 ## Open threads
 
-- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6, thirteen for Lecture 7. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4, 5 and 6. Keep one per lecture rather than growing a single sheet that nobody prints.
+- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4, 5, 6 and 7. Keep one per lecture rather than growing a single sheet that nobody prints.
