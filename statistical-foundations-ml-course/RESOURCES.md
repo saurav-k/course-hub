@@ -68,6 +68,19 @@ Prefer a textbook or a primary paper over a blog summarising one.
   The textbook behind the MIT OCW RES.6-012 course already listed in the canon. Freely available from the authors' course materials.
   Use for: the set-theory chapter and the probability-axioms section of Lecture 2 (parts 0010 to 0015), and in particular the Section 1.2 footnote on why uncountable sample spaces cannot put a probability on every subset.
 
+- **[NIST e-Handbook 1.3.6.2, Related Distributions - the cumulative distribution function](https://www.itl.nist.gov/div898/handbook/eda/section3/eda362.htm)**.
+  The CDF stated as `Pr[X <= x]`, in both its discrete summed form and its continuous integral form, together with the survival function `S(x) = 1 - F(x)`.
+  Use for: the CDF definition on Lecture 7 parts 0097 and 0101, and the survival identity the board corrected live on part 0101.
+
+- **[NIST e-Handbook 1.3.6.6.18, The Binomial Distribution](https://www.itl.nist.gov/div898/handbook/eda/section3/eda366i.htm)**.
+  Use for: the binomial's cumulative form on Lecture 7 parts 0097 and 0098, where the poll's error probability is a binomial CDF.
+
+- **[NIST e-Handbook 1.3.6.6.1, 1.3.6.6.2 and 1.3.6.6.7, the normal, uniform and exponential distributions](https://www.itl.nist.gov/div898/handbook/eda/section3/eda366.htm)**.
+  Use for: the three continuous densities and their CDFs on Lecture 7 parts 0105, 0106 and 0108, including the handbook's own statement that the normal CDF integral has no simple closed form and is computed numerically, and that the maximum likelihood estimator of the exponential's scale parameter is the sample mean.
+
+- **[Wolfram MathWorld, "Multinomial Distribution"](https://mathworld.wolfram.com/MultinomialDistribution.html)**.
+  A reference entry rather than a primary source, and cited for one sentence only: the multinomial is the binomial extended from two outcomes to several. Lecture 7 part 0099 names it because a student asked what happens with more than two candidates, and the lecture names it without developing it. Nothing further is built on it.
+
 - **[MIT 6.436J Lecture 1, "Probabilistic Models and Probability Measures", Fall 2018](https://ocw.mit.edu/courses/6-436j-fundamentals-of-probability-fall-2018/c37dc8b61cdf6bde689a627bfa5b4942_MIT6_436JF18_lec01.pdf)** - Yury Polyanskiy, MIT OpenCourseWare.
   Graduate-level lecture notes, linked from Lecture 2 only to show the precise three-axiom sigma-field definition the course paraphrases.
   Use for: Definition 2, the sigma-field axioms with countable unions stated outright, on part 0013. Not a reading recommendation for this course's audience.
@@ -82,3 +95,5 @@ Prefer a textbook or a primary paper over a blog summarising one.
 - The lecture's three case studies (the new-to-credit limit, the button A/B test, the leading-indicator search) are teaching constructions. The data is invented to make a point. Nothing in them should be cited as evidence about real fintech behaviour, and the pages say so.
 - Lecture 5's two source documents are the lecturer's own: a typeset examples handout and five pages of handwritten class notes, both watermarked for personal use. Neither is reproduced anywhere on the site and neither is linkable, so pages 0058 to 0068 cite them by description rather than by link. Two marks on the handwritten notes could not be read, and both are named on the pages that would otherwise have used them.
 - The correlation slide's normalising constants do not reproduce from the table printed on the slide immediately before it. Page 0007 quotes the deck and then shows the arithmetic the table itself gives. There is no source that resolves the difference, so the page names it rather than picking a side.
+- Lecture 7's two source documents are six pages of class notes taken during the session and the full recording of that session. Neither is public, neither is reproduced anywhere on the site, and neither is linkable, so pages 0096 to 0109 cite them by description. Two of the three error probabilities the session quotes belong to a neighbouring sample size rather than the one written beside them; page 0098 carries both the quoted figure and this course's recomputation rather than choosing between them.
+- **The lecture ties ordinary least squares to the Gaussian noise assumption and does not derive it.** The claim, made at the end of Lecture 7, is that modelling the regression error as `N(0, sigma^2)` is what the usual least-squares fit "comes naturally from". It is asserted with no derivation in the session, and no source in this canon was found that states it in a form these pages could cite: the NIST process-modelling chapter develops least squares without ever tying it to normal errors. Page 0108 carries it as the lecture's own claim, marked as asserted rather than shown. **The maximum-likelihood argument that closes the gap is not in these pages and should be added with a citation when a suitable source is read**, rather than reconstructed from memory.

@@ -443,6 +443,68 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0091-light-tails-against-heavy-tails.html"
         }
       ]
+    },
+    {
+      "n": "L7",
+      "title": "Lecture 7: the shapes, spent on decisions",
+      "lessons": [
+        {
+          "title": "Lecture 7: start here",
+          "href": "lessons/0096-lecture-7-start-here.html"
+        },
+        {
+          "title": "A poll is a binomial in disguise",
+          "href": "lessons/0097-a-poll-is-a-binomial-in-disguise.html"
+        },
+        {
+          "title": "How many people must you poll",
+          "href": "lessons/0098-how-many-people-must-you-poll.html"
+        },
+        {
+          "title": "What the polling model assumes",
+          "href": "lessons/0099-what-the-polling-model-assumes.html"
+        },
+        {
+          "title": "A recommendation list is a PMF",
+          "href": "lessons/0100-a-recommendation-list-is-a-pmf.html"
+        },
+        {
+          "title": "Two CDF questions a product team asks",
+          "href": "lessons/0101-two-cdf-questions-a-product-team-asks.html"
+        },
+        {
+          "title": "When the staircase becomes a curve",
+          "href": "lessons/0102-when-the-staircase-becomes-a-curve.html"
+        },
+        {
+          "title": "A density is not a probability",
+          "href": "lessons/0103-a-density-is-not-a-probability.html"
+        },
+        {
+          "title": "Every single point has probability zero",
+          "href": "lessons/0104-every-single-point-has-probability-zero.html"
+        },
+        {
+          "title": "The uniform, and the bus you just missed",
+          "href": "lessons/0105-the-uniform-and-the-bus-you-just-missed.html"
+        },
+        {
+          "title": "The exponential, and the loan decision",
+          "href": "lessons/0106-the-exponential-and-the-loan-decision.html"
+        },
+        {
+          "title": "Memorylessness, proved not asserted",
+          "href": "lessons/0107-memorylessness-proved-not-asserted.html"
+        },
+        {
+          "title": "The Gaussian as a noise model",
+          "href": "lessons/0108-the-gaussian-as-a-noise-model.html"
+        },
+        {
+          "title": "Choosing a distribution for a quantity",
+          "href": "lessons/0109-choosing-a-distribution-for-a-quantity.html"
+        }
+      ]
     }
   ],
   "extras": [
@@ -473,6 +535,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Lecture 6 Formula Sheet",
       "href": "reference/lecture-6-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 7 Formula Sheet",
+      "href": "reference/lecture-7-formula-sheet.html"
     }
   ]
 };
