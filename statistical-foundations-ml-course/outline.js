@@ -179,16 +179,32 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0035-graded-1-counting-and-sampling.html"
         },
         {
+          "title": "Solution, graded 1: counting and sampling",
+          "href": "lessons/0092-solution-graded-1-counting-and-sampling.html"
+        },
+        {
           "title": "Graded 2: independence",
           "href": "lessons/0036-graded-2-independence.html"
+        },
+        {
+          "title": "Solution: graded 2, independence four ways",
+          "href": "lessons/0093-solution-graded-2-independence.html"
         },
         {
           "title": "Graded 3: Bonferroni bounds",
           "href": "lessons/0037-graded-3-bonferroni-bounds.html"
         },
         {
+          "title": "Solution: graded 3, Bonferroni bounds",
+          "href": "lessons/0094-solution-graded-3-bonferroni-bounds.html"
+        },
+        {
           "title": "Graded 4: the alternating dice game",
           "href": "lessons/0038-graded-4-the-alternating-dice-game.html"
+        },
+        {
+          "title": "Solution: graded 4, the alternating dice game",
+          "href": "lessons/0095-solution-graded-4-the-alternating-dice-game.html"
         },
         {
           "title": "Practice: independence and conditioning",
@@ -213,22 +229,6 @@ window.COURSE_OUTLINE = {
         {
           "title": "Practice: processes and modelling",
           "href": "lessons/0044-practice-processes-and-modelling.html"
-        },
-        {
-          "title": "Solution, graded 1: counting and sampling",
-          "href": "lessons/0092-solution-graded-1-counting-and-sampling.html"
-        },
-        {
-          "title": "Solution: graded 2, independence four ways",
-          "href": "lessons/0093-solution-graded-2-independence.html"
-        },
-        {
-          "title": "Solution: graded 3, Bonferroni bounds",
-          "href": "lessons/0094-solution-graded-3-bonferroni-bounds.html"
-        },
-        {
-          "title": "Solution: graded 4, the alternating dice game",
-          "href": "lessons/0095-solution-graded-4-the-alternating-dice-game.html"
         }
       ]
     },
