@@ -71,6 +71,14 @@ If you are looking at a hub page with no bar, you are looking at the live site.
    no longer happens also fails, and it prints the one command that takes it out of the file; that is
    how the list only ever gets shorter.
 
+   A pull request that touches a figure, or sweeps a whole course, also runs the render sweep, which
+   needs Chrome and the network and is the machine half of looking at every diagram in both render
+   states:
+
+   ```bash
+   python3 scripts/render_sweep.py <course-or-page> --narrow
+   ```
+
    Touching `assets/hub.css`, `assets/hub.js` or a course's `course-extras.css` adds four more
    commands, in the order the style job runs them, and they need Chrome:
 
@@ -119,6 +127,7 @@ Do not infer the house style from this file. Infer it from the lessons.
 - One tight idea per lesson, mental model first, then the mechanism, then the trade-offs.
 - Full normal prose. Complete sentences. No terse fragments in published content, whatever style the chat conversation is using.
 - Include active-recall widgets. Copy the exact markup documented in the `assets/hub.js` header; do not invent your own widget shape.
+- Bracket the page: a `.card.outcomes` learning contract under `.paper-meta`, at least one `.practice` problem with a revealable solution after the quizzes, and a `.card.recap` with a linked next step after the practice. The counts are in `.claude/skills/course-authoring/references/pedagogy.md` and `check_pages.py` counts them.
 - A figure carries two lines above the drawing: `.fig-cap` names the subject in two to five
   words and `.fig-claim` says in one sentence what the drawing proves, so the picture answers a
   question the reader has already asked. Both are direct children of `figure.diagram`, because
@@ -676,12 +685,13 @@ Thirteen traps in that design system, all found on the published site:
   big it looks. Fix a broken heading order by retagging the heading and adding the matching class -
   never by leaving the tag wrong because the right one looks wrong.
 - **A Mermaid line break must be written `&lt;br/&gt;`, never `<br/>`.** A literal `<br/>` inside a
-  `<div class="mermaid">` is parsed by the browser as a real `BR` element. Mermaid's first render
-  survives that, but `hub.js` stashes the graph source as `node.textContent` in order to repaint on
-  a theme or palette change, and `textContent` drops the `BR` and joins the two halves **with no
-  break and no space**. So the diagram is correct until the reader touches the appearance controls,
-  and mangled from then on: `Hand-written rulesabout 1950 to 1990`. In a sequence diagram the join
-  can merge two statements and the figure becomes a red error box instead. Writing the entity puts
+  `<div class="mermaid">` is parsed by the browser as a real `BR` element. `hub.js` stashes the graph
+  source as `node.textContent` before the first render, in order to repaint on a theme or palette
+  change, and `textContent` drops the `BR` and joins the two halves **with no break and no space**.
+  So the diagram is mangled on first paint and on every repaint - `Hand-written rulesabout 1950 to
+  1990` - and it reaches no console; measured on 2026-09-05 with a probe page, first paint and repaint
+  alike. In a sequence diagram the join can merge two statements and the figure becomes a red error
+  box instead. Writing the entity puts
   the literal characters into the text node, so Mermaid sees the tag it expects on every render.
   Relatedly, **a semicolon inside a Mermaid label is a statement separator** and breaks the diagram
   the same way; use a dash.
@@ -787,8 +797,9 @@ When updating this file, preserve this bar for all agents and keep entries conci
 
 ## What "done" looks like
 
-- The validator passes.
+- The validator and the page gate pass.
 - You opened the page in a browser, clicked every link you touched, and answered every quiz you added.
+- You looked at every figure you touched in both render states, and `scripts/render_sweep.py` reports zero on the pages you touched.
 - Commits are conventional, self-describing, and free of agent co-author trailers.
 - The pull request explains what changed, why, and what you verified.
 - You stopped at the open pull request and left the merge to a human.

@@ -5,8 +5,13 @@
 links and outlines. That is the gate on the pull request. This checks that a
 page is one of these courses: the design-system links it must carry, the four
 ways a Mermaid diagram breaks silently, the widget shapes in
-``references/widgets.md``, the counts in ``references/pedagogy.md``, and the
-label a hand-drawn figure paints outside its own frame.
+``references/widgets.md``, the counts in ``references/pedagogy.md``, the label
+a hand-drawn figure paints outside its own frame, and the shape a paying
+learner needs from a page - the learning contract at its head, the recap and
+next step at its foot, a worked instance before the general statement, a
+practice problem with a revealable solution, a pager that agrees with the
+course map, a rung word on the rung pill, a paragraph a reader can hold, and
+at least one linked source.
 
 The caption pair splits across the two: whether a ``.fig-cap`` and a
 ``.fig-claim`` are in the right place is structural and belongs to
@@ -21,16 +26,28 @@ Deterministic and offline, no dependencies. Two severities:
     python3 .claude/skills/course-authoring/scripts/check_pages.py            # whole hub
     python3 .claude/skills/course-authoring/scripts/check_pages.py <course>   # one course
     python3 .claude/skills/course-authoring/scripts/check_pages.py <file.html>
+    python3 .claude/skills/course-authoring/scripts/check_pages.py <course> --links
+
+``--links`` is the one flag, and it is the one check that leaves the machine:
+every external URL the targeted pages link is fetched once and a dead one is
+reported as a WARN naming the pages that carry it. It is off by default so the
+plain run stays offline and deterministic, and it is a WARN rather than a FAIL
+because a server that is down for a minute is not a defect in the page.
 """
 
 from __future__ import annotations
 
+import functools
 import html
+import json
 import re
 import sys
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
+from urllib import request as urlrequest
+from urllib.error import HTTPError, URLError
 
 # .claude/skills/course-authoring/scripts/check_pages.py -> the repository root.
 REPO_ROOT: Path = Path(__file__).resolve().parents[4]
@@ -44,13 +61,16 @@ MIN_QUIZZES_PER_PAGE: int = 2
 MAX_ANSWER_INDEX_SHARE: float = 0.40
 
 # The orientation figure: the big picture, before the detail. It sits between
-# the one-minute version and the first body section, so at most one <h2> - the
-# one-minute version's own - may open before it. The word cap is the backstop
-# for a page that puts its whole essay under a single heading: the longest
-# one-minute version in the hub is 206 words, so 250 leaves a framing sentence
-# and nothing more. Three content lines is what "where this sits in the whole"
-# costs at minimum: what came before, this, what it enables.
-MAX_SECTIONS_BEFORE_ORIENTATION: int = 1
+# the one-minute version and the first body section, so no body section may
+# open before it. A body section is an <h2> that is not wearing `.h-label`: the
+# learning contract's heading and the one-minute version's heading both wear
+# it, are not sections of the argument, and are stepped over here exactly as
+# `.numbered` steps over them. The word cap is the backstop for a page that
+# puts its whole essay under a single heading: the longest one-minute version
+# in the hub is 206 words, so 250 leaves a framing sentence and nothing more.
+# Three content lines is what "where this sits in the whole" costs at minimum:
+# what came before, this, what it enables.
+MAX_SECTIONS_BEFORE_ORIENTATION: int = 0
 MAX_WORDS_BEFORE_ORIENTATION: int = 250
 MIN_ORIENTATION_LINES: int = 3
 
@@ -74,13 +94,42 @@ MAX_FIG_CLAIM_WORDS: int = 15
 
 # Two floors are newer than the seven courses that predate this checker, so a
 # course opts into them by name rather than inheriting them silently and turning
-# every legacy page red. Joining this set is the last step of a retrofit under
-# `retrofit.md`, not the first.
+# every legacy page red: on a course in this set a page with no practice problem
+# or no hand-authored chart is a FAIL, and everywhere else it is a WARN that the
+# rubric in `retrofit.md` still counts. Joining this set is the last step of a
+# retrofit, not the first.
 EXTENDED_BAR_COURSES: frozenset[str] = frozenset(
     {"math-for-ml-course", "staff-ai-course", "llm-efficiency-course", "ai-engineering-course"}
 )
 MIN_PRACTICE_PER_PAGE: int = 1
 MIN_CHARTS_PER_PAGE: int = 1
+
+# The learning contract at the head of a page and the recap at its foot. One to
+# three outcomes, because a page has one idea and an outcome is one thing the
+# reader can do with it afterwards; two to four recap points, because a recap
+# longer than the one-minute version is the page again. Both bands are stated
+# in `references/pedagogy.md` and this is where they are counted.
+MIN_OUTCOMES: int = 1
+MAX_OUTCOMES: int = 3
+MIN_RECAP_POINTS: int = 2
+MAX_RECAP_POINTS: int = 4
+
+# The rung pill's text is the rung word and nothing else. `pill easy` reading
+# "labs" or "first real arithmetic" burns the only difficulty signal the page
+# carries, and the ladder in `references/pedagogy.md` names exactly these three.
+RUNG_WORDS: frozenset[str] = frozenset({"foundation", "working", "frontier"})
+
+# A paragraph the reader can hold. Measured over the 16,920 paragraphs in the
+# hub: a median of 41 words, the 95th percentile at 103 and the 99th at 141, so
+# 120 is about eight sentences and flags the two percent a reader loses their
+# place in. `.callout.warn` is capped at one because a page with three warnings
+# has no warning; the widget reference has said so since it was written and
+# nothing counted it.
+MAX_PARAGRAPH_WORDS: int = 120
+MAX_WARN_CALLOUTS: int = 1
+
+# How long `--links` waits on one server before calling the link dead.
+LINK_TIMEOUT: float = 15.0
 
 # A hand-drawn label that leaves its own frame is cut there and nothing says so,
 # so this estimates where each one ends. Every constant below is measured rather
@@ -217,11 +266,42 @@ PRACTICE_WRAPPER = block_of("practice")
 PRACTICE_OPEN = re.compile(r'<div class="practice"[^>]*>')
 PRACTICE_SOLUTION = re.compile(r'<details class="solution"[^>]*>')
 PRACTICE_CHECK = re.compile(r'class="p-check"')
+
+# The two cards that bracket a content page. Neither nests a <div> - a heading,
+# a list and a paragraph is the whole of each - which is what lets a non-greedy
+# close find the right end, and the widget reference states that as a rule.
+OUTCOMES = re.compile(r'<div class="card outcomes"[^>]*>(.*?)</div>', re.S)
+RECAP = re.compile(r'<div class="card recap"[^>]*>(.*?)</div>', re.S)
+LIST_ITEM = re.compile(r"<li\b", re.I)
+PREREQ = re.compile(r'class="prereq"')
+NEXT_STEP = re.compile(r'<p class="next-step"[^>]*>(.*?)</p>', re.S)
+ANCHOR = re.compile(r'<a\b[^>]*href="([^"]+)"', re.I)
+H1 = re.compile(r"<h1[^>]*>(.*?)</h1>", re.S)
+PARAGRAPH = re.compile(r"<p(?:\s[^>]*)?>(.*?)</p>", re.S)
+WARN_CALLOUT = re.compile(r'class="callout warn"')
+EXTERNAL_HREF = re.compile(r'href="(https?://[^"]+)"')
+OUTLINE_ASSIGNMENT = re.compile(r"window\.COURSE_OUTLINE\s*=\s*(\{.*\})\s*;", re.S)
+
+# A card on a course map or on the hub landing page, and the count line inside
+# a hub card. The count is a fact about the repository and is checked as one.
+# A parts list is the other way a map registers a page - a lecture hub's card
+# followed by its parts - and each line of it owes what a card owes.
+LCARD = re.compile(r'<a class="lcard"[^>]*href="([^"]+)"[^>]*>(.*?)</a>', re.S)
+PARTS_LIST = re.compile(r'<ul class="parts"[^>]*>(.*?)</ul>', re.S)
+PART_LINE = re.compile(r"<li\b[^>]*>(.*?)</li>", re.S)
+CARD_COUNT = re.compile(r'<div class="ln">(.*?)</div>', re.S)
+PAGE_COUNT = re.compile(r"(\d+)\s+(?:lessons|pages|chapters|labs|parts)\b", re.I)
+# A duration stated in the hero of a course map: "about 14 hours", "20 min".
+TOTAL_TIME = re.compile(
+    r"\b(?:\d+|an?|one|two|three|four|five|six|seven|eight|nine|ten|twelve|fifteen|twenty|thirty)"
+    r"\s*(?:hours?|hrs?|minutes?|min)\b",
+    re.I,
+)
 NOT_PROSE = (
     SCRIPTISH, NAV_BLOCK, FOOTER_BLOCK, PAGER_BLOCK,
     QUIZ_WRAPPER, PRACTICE_WRAPPER, FIGURE_BLOCK, PRE_BLOCK,
 )
-SECTION_HEADING = re.compile(r"<h2\b", re.I)
+SECTION_HEADING = re.compile(r"<h2\b(?![^>]*\bh-label\b)", re.I)
 SVG_TEXT = re.compile(r"<text\b", re.I)
 # The opening tag of a hand-drawn figure and one label inside it, read as
 # attributes rather than as a document: the label check needs the viewBox, the
@@ -258,8 +338,34 @@ def plain(fragment: str) -> str:
     return html.unescape(re.sub(r"<[^>]+>", "", fragment)).strip()
 
 
+# The folders a course keeps teaching pages in. `lessons/` is the house shape;
+# `problems/` is a second pool one course keeps for its problem sets, each a
+# page a learner works and pays for, and a page in it owes what a lesson owes.
+# `reference/` is not here: a sheet is read alongside a course, not through it.
+CONTENT_FOLDERS: frozenset[str] = frozenset({"lessons", "problems"})
+
+
 def is_lesson(page: Path) -> bool:
-    return page.parent.name == "lessons"
+    """A numbered teaching page, in either pool, and never a pool's own index."""
+    return page.parent.name in CONTENT_FOLDERS and page.name != "index.html"
+
+
+def is_content_page(page: Path) -> bool:
+    """A lesson that teaches, as opposed to a lecture hub that maps.
+
+    A page named ``*-start-here.html`` is the map of a lecture, a week or a
+    homework set: it carries the logistics and the parts in order, and the
+    lecture-hub contract in ``references/page-contracts.md`` owes it no quiz, no
+    practice and no recap. The quiz floor has read the file name this way since
+    it was written, and every content bar below reads it the same way rather than
+    inventing a second signal for the same fact.
+    """
+    return is_lesson(page) and "start-here" not in page.name
+
+
+def normalised(text: str) -> str:
+    """Lower-case alphanumerics only, which is how two titles are compared."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
 
 
 def is_hub_landing(page: Path) -> bool:
@@ -773,14 +879,21 @@ def check_practice(page: Path, src: str) -> list[Finding]:
     The reader attempts it before anything is revealed, so every problem owes a
     hidden worked solution and the sanity check that lets them catch their own
     arithmetic without being told the answer twice.
+
+    The floor is a FAIL on a course that has opted into the extended bar and a
+    WARN everywhere else, because a course that predates the bar has pages with
+    no problem on them for a reason its author can still state. The shape of a
+    problem that is there is checked on every course alike: a problem with no
+    solution is a defect wherever it sits, because the reader working alone has
+    nothing to check against.
     """
-    if not is_lesson(page) or not on_extended_bar(page):
+    if not is_content_page(page):
         return []
     body = reading_column(src)
     blocks = len(PRACTICE_OPEN.findall(body))
     if blocks < MIN_PRACTICE_PER_PAGE:
         return [
-            Finding(rel(page), "FAIL",
+            Finding(rel(page), "FAIL" if on_extended_bar(page) else "WARN",
                     f"{blocks} practice problem(s), the floor is {MIN_PRACTICE_PER_PAGE}; "
                     "a quiz is answered in the head and a problem is worked on paper")
         ]
@@ -827,6 +940,267 @@ def check_math(page: Path, src: str) -> list[Finding]:
     ]
 
 
+def check_worked_before_abstract(page: Path, src: str) -> list[Finding]:
+    """A worked instance before the general statement.
+
+    A reader meets the picture before the symbols and a number before the
+    formula that produces it. Two things a script can see: whether the first
+    formula on the page arrives before the first figure, and whether a page that
+    states a formula ever works one instance of it in an ``ol.worked``.
+    """
+    if not is_content_page(page):
+        return []
+    body = reading_column(src)
+    first_math = body.find('<div class="math">')
+    if first_math < 0:
+        return []
+    found: list[Finding] = []
+    first_figure = body.find("<figure")
+    if first_figure < 0 or first_math < first_figure:
+        found.append(
+            Finding(rel(page), "WARN",
+                    "the first formula arrives before the first figure; the reader gets the "
+                    "picture before the symbols")
+        )
+    if 'class="worked"' not in body:
+        formulas = len(MATH_BLOCK.findall(body))
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{formulas} formula(s) and no ol.worked; work one instance in numbers before "
+                    "or beside the general statement")
+        )
+    return found
+
+
+def check_learning_contract(page: Path, src: str) -> list[Finding]:
+    """What the reader can do afterwards, and what they need first.
+
+    A stranger decides whether a page is theirs from its outcomes and its
+    prerequisites, so the contract sits above the one-minute version, which is
+    about the idea rather than about the reader.
+    """
+    if not is_content_page(page):
+        return []
+    body = reading_column(src)
+    blocks = OUTCOMES.findall(body)
+    if not blocks:
+        return [
+            Finding(rel(page), "WARN",
+                    "no .card.outcomes; a content page states what the reader can do after it "
+                    "and which pages they need first")
+        ]
+    found: list[Finding] = []
+    if len(blocks) > 1:
+        found.append(Finding(rel(page), "WARN", f"{len(blocks)} .card.outcomes; a page has one learning contract"))
+    items = len(LIST_ITEM.findall(blocks[0]))
+    if not MIN_OUTCOMES <= items <= MAX_OUTCOMES:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{items} learning outcome(s), the band is {MIN_OUTCOMES} to {MAX_OUTCOMES}; "
+                    "each is one thing the reader can do afterwards")
+        )
+    if not PREREQ.search(blocks[0]):
+        found.append(
+            Finding(rel(page), "WARN",
+                    "the learning contract has no .prereq line; name the pages the reader needs "
+                    "first, or say that none are needed")
+        )
+    one_minute = body.find('<div class="card tldr">')
+    if one_minute >= 0 and body.find('<div class="card outcomes"') > one_minute:
+        found.append(
+            Finding(rel(page), "WARN",
+                    "the learning contract sits after the one-minute version; it comes first, so "
+                    "the reader decides before they read")
+        )
+    return found
+
+
+def check_recap(page: Path, src: str) -> list[Finding]:
+    """What to carry away, and where to go next.
+
+    The pager names the next page; the recap says why to go there, which is the
+    part a control cannot carry. A recap that points nowhere is a summary, and a
+    summary is the page again in fewer words.
+    """
+    if not is_content_page(page):
+        return []
+    body = reading_column(src)
+    blocks = RECAP.findall(body)
+    if not blocks:
+        return [
+            Finding(rel(page), "WARN",
+                    "no .card.recap; a content page closes with what to carry away and where "
+                    "to go next")
+        ]
+    found: list[Finding] = []
+    items = len(LIST_ITEM.findall(blocks[0]))
+    if not MIN_RECAP_POINTS <= items <= MAX_RECAP_POINTS:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{items} recap point(s), the band is {MIN_RECAP_POINTS} to {MAX_RECAP_POINTS}; "
+                    "a recap longer than the one-minute version is the page again")
+        )
+    steps = NEXT_STEP.findall(blocks[0])
+    if not steps:
+        found.append(
+            Finding(rel(page), "FAIL",
+                    "the recap has no .next-step; the pointer to the next page, with its reason, "
+                    "is what the pager cannot carry")
+        )
+    elif not ANCHOR.search(steps[0]):
+        found.append(Finding(rel(page), "FAIL", "the recap's .next-step links nothing; it names the next page as a link"))
+    return found
+
+
+def check_reading_load(page: Path, src: str) -> list[Finding]:
+    """What a reader has to hold at once, below the level of the page.
+
+    The word ceilings say how much a page carries; this says how it is cut. A
+    paragraph past the ceiling is two ideas, a second warning callout is a page
+    with no warning, and a course with a glossary owes every page a way to it.
+    """
+    if not is_content_page(page):
+        return []
+    column = reading_column(src)
+    prose_only = column
+    for pattern in NOT_PROSE:
+        prose_only = pattern.sub(" ", prose_only)
+    lengths = [len(plain(paragraph).split()) for paragraph in PARAGRAPH.findall(prose_only)]
+    long = [length for length in lengths if length > MAX_PARAGRAPH_WORDS]
+    found: list[Finding] = []
+    if long:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{len(long)} paragraph(s) over {MAX_PARAGRAPH_WORDS} words, the longest is "
+                    f"{max(long)}; one idea per paragraph, so split at the idea boundary")
+        )
+    warnings = len(WARN_CALLOUT.findall(column))
+    if warnings > MAX_WARN_CALLOUTS:
+        found.append(
+            Finding(rel(page), "WARN",
+                    f"{warnings} .callout.warn, the cap is {MAX_WARN_CALLOUTS}; a page with three "
+                    "warnings has no warning")
+        )
+    course = course_of(page)
+    if course is not None and (course / "reference" / "glossary.html").is_file() and "glossary.html" not in src:
+        found.append(Finding(rel(page), "WARN", "the course has a glossary and this page does not link it"))
+    return found
+
+
+def check_sources(page: Path, src: str) -> list[Finding]:
+    """Every technical claim carries a link; a page with none carries none."""
+    if not is_content_page(page):
+        return []
+    if EXTERNAL_HREF.search(reading_column(src)):
+        return []
+    return [
+        Finding(rel(page), "WARN",
+                "no linked source anywhere in the reading column; every technical claim carries "
+                "one, and a derivation of your own shows its arithmetic")
+    ]
+
+
+@functools.lru_cache(maxsize=None)
+def outline_sequence(course: Path) -> tuple[tuple[str, str], ...] | None:
+    """Every lesson the course map registers, in reading order, as (file, name).
+
+    Read from the generated ``outline.js`` rather than from ``index.html``,
+    because the outline is what the rail and the fixed chapter bar render and
+    is therefore the order the reader actually sees. A routed course derives its
+    order at load time and ``validate_site.py`` checks its pagers, so it answers
+    ``None`` here.
+    """
+    manifest = course / "outline.js"
+    if (course / "routes.js").is_file() or not manifest.is_file():
+        return None
+    match = OUTLINE_ASSIGNMENT.search(manifest.read_text(encoding="utf-8", errors="replace"))
+    if not match:
+        return None
+    try:
+        outline = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return None
+    return tuple(
+        (Path(lesson["href"]).name, plain(lesson.get("title", "")))
+        for section in outline.get("sections", [])
+        for lesson in section.get("lessons", [])
+        if "href" in lesson
+    )
+
+
+def check_navigation(page: Path, src: str) -> list[Finding]:
+    """The pager, the fixed chapter bar and the h1 tell one story.
+
+    The chapter bar is built from the outline and the pager is written by hand,
+    so the two can name different neighbours at the foot of the same page. And
+    the h1 is a claim while the card is a name; an h1 that repeats the card has
+    not made one.
+    """
+    if not is_lesson(page):
+        return []
+    course = course_of(page)
+    sequence = outline_sequence(course) if course is not None else None
+    if not sequence:
+        return []
+    names = [name for name, _ in sequence]
+    if page.name not in names:
+        # The rail and the fixed chapter bar are built from the outline, so a
+        # teaching page the outline does not name has no position on either:
+        # the reader sees no "7 of 96" and no lit entry in the rail. A page in
+        # a second pool gets here because the generator reads only `lessons/`.
+        return [
+            Finding(rel(page), "WARN",
+                    "the course outline does not name this page, so it has no rail position and no "
+                    "chapter bar; register it on the course map, or say where the reader finds their place")
+        ]
+    index = names.index(page.name)
+    found: list[Finding] = []
+    pager = PAGER_BLOCK.search(src)
+    if pager:
+        linked = {Path(href).name for href in ANCHOR.findall(pager.group(0))}
+        previous = names[index - 1] if index else None
+        following = names[index + 1] if index + 1 < len(names) else "index.html"
+        missing = [name for name in (previous, following) if name and name not in linked]
+        if missing:
+            found.append(
+                Finding(rel(page), "WARN",
+                        f"the pager does not point at {' or '.join(missing)}, which the course map "
+                        "makes a neighbour of this page; the fixed chapter bar follows the map, so "
+                        "the two disagree at the foot of the page")
+            )
+    heading = H1.search(src)
+    if heading and normalised(plain(heading.group(1))) == normalised(sequence[index][1]):
+        found.append(
+            Finding(rel(page), "WARN",
+                    "the h1 repeats the lesson's name from the course map; the h1 is the one idea, "
+                    "phrased as a claim with a verb in it")
+        )
+    return found
+
+
+def check_hub_cards(page: Path, src: str) -> list[Finding]:
+    """The page count on a hub card is a fact about a folder."""
+    if not is_hub_landing(page):
+        return []
+    found: list[Finding] = []
+    for href, card in LCARD.findall(src):
+        folder = REPO_ROOT / href.split("/")[0]
+        label = CARD_COUNT.search(card)
+        if not is_course(folder) or not label:
+            continue
+        stated = PAGE_COUNT.search(plain(label.group(1)))
+        if not stated:
+            continue
+        on_disk = len(list((folder / "lessons").glob("*.html")))
+        if int(stated.group(1)) != on_disk:
+            found.append(
+                Finding(rel(page), "FAIL",
+                        f"the card for {folder.name} says {stated.group(0)} and the folder holds "
+                        f"{on_disk}; count the files")
+            )
+    return found
+
+
 def check_quizzes(page: Path, src: str) -> tuple[list[Finding], list[int]]:
     found: list[Finding] = []
     answers: list[int] = []
@@ -871,6 +1245,18 @@ def check_signposting(page: Path, src: str) -> list[Finding]:
         found.append(Finding(rel(page), "WARN", "no rung pill in .paper-meta"))
     elif len(rungs) > 1:
         found.append(Finding(rel(page), "WARN", f"{len(rungs)} rung pills; a page sits at one rung"))
+    for _, text in rungs:
+        word = plain(text)
+        if word.lower() not in RUNG_WORDS:
+            found.append(
+                Finding(rel(page), "FAIL",
+                        f'rung pill reads "{word}"; the pill text is the rung word, one of '
+                        "foundation, working or frontier")
+            )
+    time_pill = READING_PILL.search(meta_text)
+    rung_pill = RUNG_PILL.search(meta_text)
+    if time_pill and rung_pill and time_pill.start() < rung_pill.start():
+        found.append(Finding(rel(page), "WARN", "the reading-time pill comes before the rung pill; the rung comes first"))
     if '<div class="card tldr">' not in src:
         found.append(Finding(rel(page), "WARN", "no .card.tldr one-minute version"))
     if not PAGER.search(src):
@@ -901,6 +1287,60 @@ def check_course_hue(course: Path) -> list[Finding]:
     if f'[data-course="{course.name}"]' in sheet.read_text(encoding="utf-8", errors="replace"):
         return []
     return [Finding(rel(course), "WARN", "no --course-hue line in assets/hub.css; it wears the plain palette accent")]
+
+
+def check_course_map(course: Path) -> list[Finding]:
+    """What the map tells a learner before they open a page.
+
+    Every lesson card carries a reading-time pill, the hero says how long the
+    whole course takes, and the course has a glossary to send a stalled reader
+    to. The rung pill per card is counted in ``check_course_totals``.
+    """
+    course_map = course / "index.html"
+    if not course_map.is_file():
+        return []
+    src = course_map.read_text(encoding="utf-8", errors="replace")
+    found: list[Finding] = []
+    lesson_cards = [card for href, card in LCARD.findall(src) if href.startswith("lessons/")]
+    untimed = [card for card in lesson_cards if not READING_PILL.search(card)]
+    if untimed:
+        found.append(
+            Finding(rel(course), "WARN",
+                    f"{len(untimed)} of {len(lesson_cards)} lesson cards carry no reading-time pill; "
+                    "a reader chooses a page by what it costs")
+        )
+    part_lines = [line for block in PARTS_LIST.findall(src) for line in PART_LINE.findall(block)]
+    untimed_parts = [line for line in part_lines if not READING_PILL.search(line)]
+    if untimed_parts:
+        found.append(
+            Finding(rel(course), "WARN",
+                    f"{len(untimed_parts)} of {len(part_lines)} parts-list lines carry no reading-time "
+                    "pill; a part is a page, and a reader chooses it by what it costs")
+        )
+    unrunged_parts = [line for line in part_lines if not RUNG_PILL.search(line)]
+    if unrunged_parts:
+        found.append(
+            Finding(rel(course), "WARN",
+                    f"{len(unrunged_parts)} of {len(part_lines)} parts-list lines carry no rung pill; "
+                    "the ladder is claimed page by page")
+        )
+    hero_start = src.find('<div class="hero">')
+    if hero_start >= 0:
+        hero_end = src.find("<section", hero_start)
+        hero = plain(src[hero_start:hero_end if hero_end > 0 else len(src)])
+        if not TOTAL_TIME.search(hero):
+            found.append(
+                Finding(rel(course), "WARN",
+                        "the course map's hero does not say how long the course takes; state the "
+                        "total in hours and what one page costs")
+            )
+    if not (course / "reference" / "glossary.html").is_file():
+        found.append(
+            Finding(rel(course), "WARN",
+                    "no reference/glossary.html; every term the course introduces has one "
+                    "definition somewhere a stalled reader can reach")
+        )
+    return found
 
 
 def check_course_totals(course: Path, answers: list[int], kinds: set[str], cards: int) -> list[Finding]:
@@ -960,8 +1400,72 @@ def course_of(page: Path) -> Path | None:
     return None
 
 
+def external_links(pages: list[Path]) -> dict[str, list[Path]]:
+    """Every external URL the reading columns of these pages link, and who links it."""
+    carriers: dict[str, list[Path]] = {}
+    for page in pages:
+        column = reading_column(page.read_text(encoding="utf-8", errors="replace"))
+        for url in EXTERNAL_HREF.findall(column):
+            carriers.setdefault(html.unescape(url), []).append(page)
+    return carriers
+
+
+def link_status(url: str) -> str | None:
+    """What one server says about one URL, or ``None`` when it answers well.
+
+    HEAD first, because it is cheap; GET when the server refuses HEAD, because
+    a 405 or a 403 on HEAD is a server's policy rather than a missing page.
+    """
+    headers = {"User-Agent": "Mozilla/5.0 (compatible; course-hub-check-pages/1)"}
+    for method in ("HEAD", "GET"):
+        try:
+            with urlrequest.urlopen(urlrequest.Request(url, method=method, headers=headers), timeout=LINK_TIMEOUT):
+                return None
+        except HTTPError as error:
+            if method == "HEAD" and error.code in {403, 405, 429, 500, 501, 503}:
+                continue
+            return f"HTTP {error.code}"
+        except URLError as error:
+            return f"unreachable ({error.reason})"
+        except (TimeoutError, OSError, ValueError) as error:
+            return f"unreachable ({error})"
+    return None
+
+
+def check_external_links(pages: list[Path]) -> list[Finding]:
+    """The one check that leaves the machine, and only when asked to.
+
+    Each URL is fetched once however many pages carry it, and a dead one is a
+    WARN on the first page that carries it, naming the rest by count. A WARN
+    rather than a FAIL because a server that is down for a minute is not a
+    defect in the page, and the gate is on FAILs.
+    """
+    carriers = external_links(pages)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        statuses = dict(zip(carriers, pool.map(link_status, carriers)))
+    found: list[Finding] = []
+    for url, status in sorted(statuses.items()):
+        if status is None:
+            continue
+        holders = carriers[url]
+        others = f" and {len(holders) - 1} other page(s)" if len(holders) > 1 else ""
+        # A 403, 406 or 429 to a script is usually a site refusing robots rather
+        # than a missing page - sec.gov and most vendor blogs do it - so it is
+        # reported as something to open by hand rather than as dead.
+        if status in {"HTTP 403", "HTTP 406", "HTTP 429"}:
+            verdict = f"answered {status}, which is usually a robot block; open it in a browser and say so"
+        else:
+            verdict = f"answered {status}; a dead source is a claim the reader cannot check"
+        found.append(Finding(rel(holders[0]), "WARN", f"links {url}, which {verdict}{others}"))
+    return found
+
+
 def main() -> int:
-    targets = [Path(argument).resolve() for argument in sys.argv[1:]] or [REPO_ROOT]
+    flags = {argument for argument in sys.argv[1:] if argument.startswith("--")}
+    unknown = flags - {"--links"}
+    if unknown:
+        raise SystemExit(f"unknown flag(s): {', '.join(sorted(unknown))}; the one flag is --links")
+    targets = [Path(argument).resolve() for argument in sys.argv[1:] if not argument.startswith("--")] or [REPO_ROOT]
     # A course-wide bar cannot be judged from one page: "50% of answers sit at
     # index 2" out of a single quiz pair says nothing, and the diagram-kind
     # floor is a property of the course. Checking one file reports on that file.
@@ -985,6 +1489,13 @@ def main() -> int:
         findings += check_orientation(page, src)
         findings += check_word_load(page, src)
         findings += check_math(page, src)
+        findings += check_worked_before_abstract(page, src)
+        findings += check_learning_contract(page, src)
+        findings += check_recap(page, src)
+        findings += check_reading_load(page, src)
+        findings += check_sources(page, src)
+        findings += check_navigation(page, src)
+        findings += check_hub_cards(page, src)
         findings += check_practice(page, src)
         findings += check_quantitative(page, src)
         findings += check_signposting(page, src)
@@ -1001,6 +1512,7 @@ def main() -> int:
     for course in sorted(set(per_course_answers) | set(per_course_kinds)) if whole_courses else []:
         findings += check_course_files(course)
         findings += check_course_hue(course)
+        findings += check_course_map(course)
         course_map = course / "index.html"
         cards = (
             len(RUNG_PILL.findall(course_map.read_text(encoding="utf-8", errors="replace")))
@@ -1010,6 +1522,9 @@ def main() -> int:
         findings += check_course_totals(
             course, per_course_answers.get(course, []), per_course_kinds.get(course, set()), cards
         )
+
+    if "--links" in flags:
+        findings += check_external_links(pages)
 
     fails = [finding for finding in findings if finding.severity == "FAIL"]
     warns = [finding for finding in findings if finding.severity == "WARN"]
