@@ -505,6 +505,52 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0109-choosing-a-distribution-for-a-quantity.html"
         }
       ]
+    },
+    {
+      "n": "L8",
+      "title": "Lecture 8: expectation, variance and covariance",
+      "lessons": [
+        {
+          "title": "Lecture 8: start here",
+          "href": "lessons/0110-lecture-8-start-here.html"
+        },
+        {
+          "title": "What an average has to mean",
+          "href": "lessons/0111-what-an-average-has-to-mean.html"
+        },
+        {
+          "title": "Four expectations worked in full",
+          "href": "lessons/0112-four-expectations-worked-in-full.html"
+        },
+        {
+          "title": "The mean that does not exist",
+          "href": "lessons/0113-the-mean-that-does-not-exist.html"
+        },
+        {
+          "title": "Heavy tails and an infinite mean",
+          "href": "lessons/0114-heavy-tails-and-an-infinite-mean.html"
+        },
+        {
+          "title": "Variance as a second moment",
+          "href": "lessons/0115-variance-as-a-second-moment.html"
+        },
+        {
+          "title": "LOTUS and linearity",
+          "href": "lessons/0116-lotus-and-linearity.html"
+        },
+        {
+          "title": "The indicator trick",
+          "href": "lessons/0117-the-indicator-trick.html"
+        },
+        {
+          "title": "Uncorrelated is not independent",
+          "href": "lessons/0118-uncorrelated-is-not-independent.html"
+        },
+        {
+          "title": "When the converse holds",
+          "href": "lessons/0119-when-the-converse-holds.html"
+        }
+      ]
     }
   ],
   "extras": [
@@ -539,6 +585,10 @@ window.COURSE_OUTLINE = {
     {
       "title": "Lecture 7 Formula Sheet",
       "href": "reference/lecture-7-formula-sheet.html"
+    },
+    {
+      "title": "Lecture 8 Formula Sheet",
+      "href": "reference/lecture-8-formula-sheet.html"
     }
   ]
 };
