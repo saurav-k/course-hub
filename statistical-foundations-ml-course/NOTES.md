@@ -95,6 +95,13 @@ Lecture 7 carries five more, all named on its hub page 0096:
 
 A sixth thing about Lecture 7 is not an honesty note but is worth recording: **mu, sigma and lambda arrive with no definition on purpose**. The lecturer said, when asked directly, that mu is the expected value, sigma squared the variance and the exponential's mean 1/lambda, then said the course has not reached those ideas and moved on. These pages do the same, and page 0096 says so under its own heading rather than letting a reader think it was overlooked.
 
+Lecture 8 carries four more, all named on its hub page 0110:
+
+19. **The source carries no lecture number and no date.** The nine pages are headed only Expectation and Moments of RV. Lecture 8 is this course's own next free position, not the lecturer's numbering, and `PLOT.md` row 11 says so.
+20. **Three results are left as exercises and this course works all three.** The notes write "Show" beside the geometric mean 1/p and the Poisson mean lambda, and "Prove!" beside the Gaussian variance sigma squared. Pages 0112 and 0115 work them and label each as this course's derivation.
+21. **Two margin questions are asked and never answered.** The general, measure-theoretic definition of expectation, which `MISSION.md` puts out of scope, and whether the balls-and-bins indicators are independent, which page 0117 answers under this course's own name - they are not, and linearity does not care.
+22. **The notes contain no numbers whatsoever.** Every example ends at a closed form. Every decimal on pages 0111 to 0119 is this course's arithmetic on the lecture's own formulas, and none of it is marked `.keynum`.
+
 ## Deliberate repetition, which this course had not had before
 
 Lecture 7 is the first session in this course that covers ground an earlier lecture already covered.
@@ -105,6 +112,6 @@ What the delivered session adds is what a pre-class note cannot carry - two exam
 
 ## Open threads
 
-- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6, thirteen for Lecture 7. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6, thirteen for Lecture 7, nine for Lecture 8. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lectures 1, 2, 3, 4, 5, 6 and 7. Keep one per lecture rather than growing a single sheet that nobody prints.
+- A print-friendly formula sheet exists for Lectures 1 to 8. Keep one per lecture rather than growing a single sheet that nobody prints.
