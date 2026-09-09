@@ -77,30 +77,47 @@ Lecture 5 carries three more, all named on its hub page 0058:
 7. **Two marks on the handwritten notes cannot be read.** A stray binomial coefficient beside the quality-check line, named on page 0061 with both readings and built on with neither, and the first letter of the sixth four-image configuration, which page 0065 derives from the count instead of guessing.
 8. **Two threads were parked for the next session.** A pictorial view of the complement, carried as open on page 0061, and the direct route to "both classes represented", which page 0060 shows stalling and page 0068 closes under this course's own name once the binomial has arrived.
 
-Lecture 6 carries five more, all named on its hub page 0077:
+Lecture 6 has two sources now - the lecturer's pre-class notes and the delivered session of Tuesday 1 September 2026 - and carries nine notes, all named on its hub page 0077:
 
-9. **The source's own lecture number is not this course's.** The notes are titled as the lecturer's Lecture 4 and are this course's Lecture 6, because the two numbering schemes have drifted by one topic. Nothing is renumbered; `PLOT.md` row 9 is the record.
-10. **The notes state one worked set of figures in eight pages.** Only the two-coin example carries numbers. Every decimal and every curve on pages 0078 to 0091 is this course's own arithmetic on the notes' own formulas, carried in a `.callout.key` and never marked `.keynum`.
-11. **Four results are asserted with no proof**: that the geometric is the only memoryless discrete shape, that the exponential is the only memoryless continuous one (the notes write "prove it" and move on), that a continuous variable gives any countable set probability zero, and that the Gaussian CDF has no closed form. All four are taught as stated and the absence is named on the page.
-12. **The geometric's words and its formula disagree.** "Number of coin tosses before first heads" against `p(1-p)^(k-1)`, which counts the toss the first head lands on. Page 0086 follows the formula and leaves the sentence as written.
-13. **The letter N means two different sets one paragraph apart.** The geometric needs it to start at 1 and the Poisson at 0. Page 0087 runs both sums and lets the arithmetic settle each reading.
+9. **The numbering question is closed by the delivered session.** The class board is headed "Lecture 6" in the lecturer's own hand and dated 1 September 2026, which agrees with this course. Only the **pre-class** document carries a stale title, and that document is what created the appearance of a drift in the first place.
+10. **Numbers now come from both sources.** The pre-class notes work only the two-coin example; the delivered session works the CDF from minus five thousand, three die intervals, the four Bin(3, 1/2) masses and a biased-coin PMF. Everything else on pages 0078 to 0091 is still this course's own arithmetic, carried in a `.callout.key` and never marked `.keynum`.
+11. **Pages 0088 to 0091 were never delivered in this session.** The room stopped after the Poisson and the lecturer named the continuous case as the next class's work, which is where it was delivered, as Lecture 7. Those four pages rest on the pre-class notes alone and each one says so in a callout linking its Lecture 7 counterpart.
+12. **The geometric's index was settled live.** The pre-class notes' words and formula disagreed; in the room the lecturer settled k as the toss the first head lands on, which is also Ross 4.8.1's definition. Page 0086 follows that and records where the wording came from.
+13. **Three smaller partings, each named on its page.** Memorylessness is proved in the notes and only asserted in the room; a spoken "1 in 100" contradicts the board's written 0.1 for the same email example; and the discrete uniform has one source only, because the room named four shapes rather than five. The letter N still means two different index sets one paragraph apart in the notes, and page 0087 lets the arithmetic settle each reading.
 
-Lecture 7 carries five more, all named on its hub page 0096:
+Lecture 7 rests on the class notes and the full session transcript, and carries seven notes, all named on its hub page 0096:
 
-14. **Two of the three error probabilities the session quotes belong to a different sample size than the one written beside them.** The board says `.25` at n = 21 and `.03` at n = 101; recomputed, the binomial gives 0.1744 and 0.0209, and the quoted figures are the values at n = 20 and n = 100 (0.2447 and 0.0271). A student computed 0.17 live and challenged it, and the lecturer answered that he had probably computed it for 20, was unsure of the figure, and was sure of the formula - correct on all three counts. Page 0098 quotes the board, works the recomputation, and says which sample size each number belongs to. This is the first time in this course that a source's stated number has been shown to come from a *neighbouring* parameter rather than being simply wrong, and it is worth the extra sentence on the page: the lecture's method is sound and only the substitution slipped.
+14. **Two of the three error probabilities the session quotes belong to a neighbouring sample size, and the transcript says why.** The lecture opened those two cases at n = 20 and n = 100. A student objected that an even split is a tie, so the board moved to 21 and 101 - and the prepared figures never followed the repair. Recomputed, the binomial gives 0.1744 and 0.0209 against the quoted .25 and .03, which are the n = 20 and n = 100 values. A student computed 0.17 live and challenged it. Page 0098 carries the repair and the recomputation; the n = 5 figure is sound.
 15. **One identity was written wrong on the board and corrected live.** `P(X > 4) = 1 - F_X(3)` became `1 - F_X(4)` after a student caught it, and the class notes carry the corrected form. Page 0101 names the slip rather than quietly printing the right version, because that off-by-one is the mistake a reader is about to make alone.
 16. **Three results are asserted, and one of them is only sketched**: that a continuous CDF is differentiable almost everywhere, that the Gaussian CDF has no closed form, and that every exact value carries probability zero, the last argued from a shrinking band rather than proved. All three are taught as stated.
-17. **Memorylessness is proved in one direction only.** Row 11 of Lecture 6's notes recorded that the exponential's uniqueness was asserted with "prove it" in the margin. This session proves the exponential *is* memoryless, which is the easy direction and a genuine addition; uniqueness remains unproved anywhere in the course, and page 0107 keeps the two claims apart.
+17. **Memorylessness is proved in one direction only in this course.** The session proves the exponential is memoryless and never proves it is the only such law. That uniqueness is not unproved everywhere: Ross proves it in Section 5.5, and page 0107 now says how rather than leaving the claim standing on assertion.
 18. **The Gaussian is offered for a quantity it does not fit.** A student objected that heights are never negative while a Gaussian puts weight across the whole real line. The lecturer agreed, said practitioners use it anyway when the negative tail carries almost nothing, and offered the repair - model the deviation from the sample mean. Page 0108 carries the objection and the repair together.
 
 A sixth thing about Lecture 7 is not an honesty note but is worth recording: **mu, sigma and lambda arrive with no definition on purpose**. The lecturer said, when asked directly, that mu is the expected value, sigma squared the variance and the exponential's mean 1/lambda, then said the course has not reached those ideas and moved on. These pages do the same, and page 0096 says so under its own heading rather than letting a reader think it was overlooked.
 
-Lecture 8 carries four more, all named on its hub page 0110:
+Lecture 8 was delivered on Tuesday 8 September 2026 and covers expectation only. It carries five notes, all named on its hub page 0110:
 
-19. **The source carries no lecture number and no date.** The nine pages are headed only Expectation and Moments of RV. Lecture 8 is this course's own next free position, not the lecturer's numbering, and `PLOT.md` row 11 says so.
-20. **Three results are left as exercises and this course works all three.** The notes write "Show" beside the geometric mean 1/p and the Poisson mean lambda, and "Prove!" beside the Gaussian variance sigma squared. Pages 0112 and 0115 work them and label each as this course's derivation.
-21. **Two margin questions are asked and never answered.** The general, measure-theoretic definition of expectation, which `MISSION.md` puts out of scope, and whether the balls-and-bins indicators are independent, which page 0117 answers under this course's own name - they are not, and linearity does not care.
-22. **The notes contain no numbers whatsoever.** Every example ends at a closed form. Every decimal on pages 0111 to 0119 is this course's arithmetic on the lecture's own formulas, and none of it is marked `.keynum`.
+19. **The delivered session is dated and numbered; the pre-class notes are not.** The class notes are headed Lecture 8 and dated 8 September 2026. The nine-page pre-class document carries neither, and it is the pre-class document alone that the earlier version of this note described.
+20. **Three means are handed over as exercises.** The exponential, the geometric and the binomial means are stated and left to the reader in the room. This course works them and labels each as its own derivation rather than the lecture's.
+21. **The second-derivative test was omitted on the board and supplied from the floor.** In the inventory example the lecturer set the first derivative to zero and stopped; a student asked for the second-derivative check and the lecturer conceded it should be done. Page 0160 carries both. The pre-class notes' own two unanswered margin questions - the general definition of expectation, and whether the balls-and-bins indicators are independent - belong to that document rather than to the delivered session.
+22. **The Cauchy was called infinite aloud and undefined in the notes.** Page 0113 keeps the two apart and says why undefined is the stronger verdict. Outside the inventory example the session states almost no numbers at all, so every decimal on pages 0111 to 0117 is this course's own arithmetic and none of it is marked `.keynum`.
+
+TA Session Week 3 carries four, all named on its hub page 0120:
+
+23. **The word "support" was used before the class had met it.** The tutor used it in the revision block, noticed it had not been defined in any lecture, and withdrew it mid-session. Page 0121 defines it and records that it arrived early.
+24. **The exponential series is asserted in both sittings and proved in neither.** It is what forces the normalising constant in Problem 5, and page 0126 says the identity is taken as given.
+25. **The fast sitting's working is headed "probability mass function" over a cumulative one.** A student caught it and the tutor agreed to correct it. Page 0125 carries the heading as written and the correction beside it.
+26. **The sheet has eleven problems and the week reached seven.** One more was set as homework and appears as a practice block; three were never touched in any sitting and are named on the hub without pages, rather than solved under a source that never solved them.
+
+## When pre-class notes overrun the delivered session
+
+This has now happened twice, so it is a policy rather than an incident.
+Lecture 6's pages were written from pre-class notes and the room stopped four pages short of them; Lecture 8's pages were written the same way and the room stopped at expectation, three pages short of the variance and covariance material.
+
+**Keep the numbers, relabel the page, and reconcile in place when the session lands.**
+Nothing is renamed or renumbered, because the URLs are public.
+A page the class has not reached carries a callout saying so at the top and an eyebrow naming it as the next session's pre-read; a page the class reached by a different route keeps its number and gains a section carrying what the room added.
+The course map groups the not-yet-delivered pages separately from the delivered parts so a reader never mistakes one for the other.
 
 ## Deliberate repetition, which this course had not had before
 
@@ -112,6 +129,6 @@ What the delivered session adds is what a pre-class note cannot carry - two exam
 
 ## Open threads
 
-- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fourteen for Lecture 6, thirteen for Lecture 7, nine for Lecture 8. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
+- Page count per lecture has settled at whatever the lecture needs rather than a fixed nine: six for Lecture 2, eight for Lecture 3, twelve for Lecture 4, ten for Lecture 5, seven for TA Session 2, fifteen for Lecture 6, thirteen for Lecture 7, ten for TA Session 3, seven for Lecture 8 plus three pages of the next session's pre-read. One idea per page is the constraint; the total falls out of it, and for a tutorial it falls out of the question count.
 - No learning record on the learner's own recall yet. Add one after a lecture has actually been worked through, not merely read.
-- A print-friendly formula sheet exists for Lectures 1 to 8. Keep one per lecture rather than growing a single sheet that nobody prints.
+- A print-friendly formula sheet exists for Lectures 1 to 8. **TA Session 3 has none yet** and its pages point at the Lecture 7 sheet; one sheet per session is the policy, so that gap is open work. Keep one per lecture rather than growing a single sheet that nobody prints.

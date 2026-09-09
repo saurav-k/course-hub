@@ -441,6 +441,10 @@ window.COURSE_OUTLINE = {
         {
           "title": "Light tails against heavy tails",
           "href": "lessons/0091-light-tails-against-heavy-tails.html"
+        },
+        {
+          "title": "Where the model came from",
+          "href": "lessons/0140-where-the-model-came-from.html"
         }
       ]
     },
@@ -507,8 +511,58 @@ window.COURSE_OUTLINE = {
       ]
     },
     {
+      "n": "TA3",
+      "title": "TA Session Week 3",
+      "lessons": [
+        {
+          "title": "TA Session 3: start here",
+          "href": "lessons/0120-ta-session-3-start-here.html"
+        },
+        {
+          "title": "What a random variable carries",
+          "href": "lessons/0121-what-a-random-variable-carries.html"
+        },
+        {
+          "title": "The density that must be split",
+          "href": "lessons/0122-the-density-that-must-be-split.html"
+        },
+        {
+          "title": "The highest rank a woman reaches",
+          "href": "lessons/0123-the-highest-rank-a-woman-reaches.html"
+        },
+        {
+          "title": "Heads minus tails",
+          "href": "lessons/0124-heads-minus-tails.html"
+        },
+        {
+          "title": "Reading a CDF five ways",
+          "href": "lessons/0125-reading-a-cdf-five-ways.html"
+        },
+        {
+          "title": "The constant that makes it a PMF",
+          "href": "lessons/0126-the-constant-that-makes-it-a-pmf.html"
+        },
+        {
+          "title": "Four engines against two",
+          "href": "lessons/0127-four-engines-against-two.html"
+        },
+        {
+          "title": "Two binomials back to back",
+          "href": "lessons/0128-two-binomials-back-to-back.html"
+        },
+        {
+          "title": "The salesman and the two sales",
+          "href": "lessons/0129-the-salesman-and-the-two-sales.html"
+        },
+        {
+          "title": "Two likely events both happening",
+          "href": "lessons/0130-two-likely-events-both-happening.html"
+        }
+      ]
+    },
+    {
       "n": "L8",
-      "title": "Lecture 8: expectation, variance and covariance",
+      "title": "Lecture 8: expectation",
       "lessons": [
         {
           "title": "Lecture 8: start here",
@@ -531,16 +585,26 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0114-heavy-tails-and-an-infinite-mean.html"
         },
         {
-          "title": "Variance as a second moment",
-          "href": "lessons/0115-variance-as-a-second-moment.html"
-        },
-        {
           "title": "LOTUS and linearity",
           "href": "lessons/0116-lotus-and-linearity.html"
         },
         {
           "title": "The indicator trick",
           "href": "lessons/0117-the-indicator-trick.html"
+        },
+        {
+          "title": "Stocking a shelf against uncertain demand",
+          "href": "lessons/0160-stocking-a-shelf-against-uncertain-demand.html"
+        }
+      ]
+    },
+    {
+      "n": "L9",
+      "title": "Lecture 9 pre-read: variance and covariance",
+      "lessons": [
+        {
+          "title": "Variance as a second moment",
+          "href": "lessons/0115-variance-as-a-second-moment.html"
         },
         {
           "title": "Uncorrelated is not independent",
