@@ -168,7 +168,7 @@ window.COURSE_OUTLINE = {
     },
     {
       "n": "HW1",
-      "title": "Homework 1: Practice Set 1, explained not solved",
+      "title": "Homework 1: Practice Set 1, worked in full",
       "lessons": [
         {
           "title": "Homework 1: start here",
@@ -187,7 +187,7 @@ window.COURSE_OUTLINE = {
           "href": "lessons/0036-graded-2-independence.html"
         },
         {
-          "title": "Solution: graded 2, independence four ways",
+          "title": "Solution: graded 2, independence",
           "href": "lessons/0093-solution-graded-2-independence.html"
         },
         {

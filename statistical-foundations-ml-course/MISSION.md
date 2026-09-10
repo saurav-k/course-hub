@@ -66,3 +66,12 @@ Lecture 1 is nine pages: a hub plus eight content parts.
 
 Lecture 2 is written.
 At that point check whether nine pages per lecture is the right grain, or whether a shorter lecture should collapse into fewer.
+
+## Problems are solved, once
+
+Every problem this course carries - graded, practice or tutorial - ends with a worked answer.
+It is solved **one way**: the way the question asks, or the route the session recommended.
+Where another route is worth knowing it gets a sentence naming it, never a second worked section.
+
+This replaces an earlier policy under which Practice Set 1 was explained and deliberately left unsolved.
+The captain withdrew that policy: a reader who cannot check their answer cannot tell a slip from a misunderstanding, and several routes to one verdict cost more attention than they repay.
